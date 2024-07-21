@@ -1,0 +1,655 @@
+#!/bin/bash
+
+set -euo pipefail
+# constants
+readonly DOTFILES="dotfiles/"
+CONFIG="$(dirname "$0")/config.yaml"
+SECRETS="$(dirname "$0")/secrets.yaml"
+DISTRO= # _get_distro() sets this value
+DE=     # _get_DE() sets this value
+
+# ----- PRINT FUNCTIONS -----
+
+# set text colours if supported
+_colours() {
+  if [[ "$(tput colors)" -ge 8 ]] \
+    && [[ $1 == true ]]; then
+    NC="$(tput sgr0)" # text reset (select graphic representation default)
+    BOLD="$(tput bold)"
+    RED="$(tput setaf 1)"            # red
+    GREEN="$(tput setaf 2)"          # green
+    YELLOW="$(tput setaf 3)"         # yellow
+    BLUE="$(tput setaf 4)"           # blue
+    MAGENTA="$(tput setaf 5)"        # magenta
+    CYAN="$(tput setaf 6)"           # cyan
+    B_RED="$(tput bold setaf 1)"     # bold red
+    B_GREEN="$(tput bold setaf 2)"   # bold green
+    B_YELLOW="$(tput bold setaf 3)"  # bold yellow
+    B_BLUE="$(tput bold setaf 4)"    # bold blue
+    B_MAGENTA="$(tput bold setaf 5)" # bold magenta
+    B_CYAN="$(tput bold setaf 6)"    # bold cyan
+    tides_txt="${B_RED}t${B_YELLOW}i${B_GREEN}d${B_BLUE}e${B_MAGENTA}s${NC}"
+    TIDES_TXT="${B_RED}T${B_YELLOW}I${B_GREEN}D${B_BLUE}E${B_MAGENTA}S${NC}"
+  # don't set colours if argument is false (or not given). use `_colours false` for readability
+  else
+    NC=
+    BOLD=
+    RED=
+    GREEN=
+    YELLOW=
+    BLUE=
+    MAGENTA=
+    CYAN=
+    B_RED=
+    B_GREEN=
+    B_YELLOW=
+    B_BLUE=
+    B_MAGENTA=
+    B_CYAN=
+    tides_txt="tides"
+    TIDES_TXT="TIDES"
+  fi
+}
+
+# info message text
+_info_msg() { echo "${B_BLUE}Info:${NC} $1"; }
+
+# success message text
+_success_msg() { echo "${B_GREEN}Success:${NC} $1"; }
+
+# warning message text
+_warning_msg() { echo "${B_YELLOW}Warning:${NC} $1"; }
+
+# error message text
+_error_msg() { echo "${B_RED}Error:${NC} $1"; }
+
+_usage() {
+  cat <<EOF
+${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is a ${BOLD}post-install${NC}, ${BOLD}update${NC}, ${BOLD}config${NC}, & ${BOLD}dotfile manager${NC} script for Linux-based systems
+
+${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
+
+${YELLOW}Options:${NC}
+  ${GREEN}    --no-colour${NC} Do not output any colour. Useful when redirecting output to a logfile
+  ${GREEN}-c, --config ${NC}   Set a custom config yaml file [default: ${BLUE}<tides_path>/config.yaml${NC}]
+  ${GREEN}-s, --secrets${NC}   Set a custom secrets yaml file [default: ${BLUE}<tides_path>/secrets.yaml${NC}]
+  ${GREEN}-h, --help   ${NC}   Print help information
+
+${YELLOW}Commands:${NC}
+  ${GREEN}   check    ${NC}    Installs dependencies, Python (via pyenv), Cargo (via rustup), fonts (Geist & Nerdfonts), & firmware packages
+  ${GREEN}i, install  ${NC}    Installs all apt (ppas, alternative sources), flatpak, cargo, & binary (AppImage) packages
+  ${GREEN}u, update   ${NC}    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans system (see \`${BLUE}config.yaml${NC}\` for details)
+  ${GREEN}c, configure${NC}    Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), & performs other system configs.
+  ${GREEN}h, help     ${NC}    Print help information
+
+${YELLOW}Configuration:${NC}
+  Customise each command's behaviour by modifying the \`${BLUE}config.yaml${NC}\` file.
+  The config schema of \`${BLUE}config.yaml${NC}\` is available at \`${BLUE}README.md${NC}\`.
+  Sample configs are available in ${BLUE}<tides_path>/sample/${NC} directory.
+
+${YELLOW}Example:${NC}
+  ${tides_txt} ${CYAN}configure${NC}
+
+EOF
+}
+
+# ----- SET METADATA -----
+
+_get_distro() {
+  . /etc/os-release
+  local distro="$(yq '.metadata.distro' "$CONFIG")"
+  if [[ $distro == "auto" ]]; then
+    distro="$ID"
+    _info_msg "Auto-detected & set distro to $distro"
+  else
+    if [[ "$distro" != "$ID" ]]; then
+      _warning_msg "$distro is not the current distro"
+    fi
+    _info_msg "Set distro to $distro as specified in config"
+  fi
+  DISTRO="$distro"
+}
+
+_get_DE() {
+  local de="$(yq '.metadata.DE' "$CONFIG")"
+  # auto-detect desktop environment if DE value is auto
+  if [[ $de == "auto" ]]; then
+    if [[ $XDG_CURRENT_DESKTOP == "X-Cinnamon" ]]; then
+      de="cinnamon"
+      _info_msg "Auto-detected & set desktop environment to cinnamon"
+    fi
+    # TODO: detect GNOME as well
+  else
+    if echo "$XDG_CURRENT_DESKTOP" | grep -ivq "$de"; then
+      _warning_msg "$de is not the current desktop environment"
+    fi
+    _info_msg "Set desktop environment to $de as specified in config"
+  fi
+  DE="$de"
+}
+
+# ----- OPTIONS -----
+
+set_config_file() { CONFIG=$1; }
+
+set_secrets_file() { SECRETS=$1; }
+
+# ----- COMMANDS -----
+
+check() {
+  _info_msg "Starting ${tides_txt} check..."
+
+  # SET METADATA functions
+  _get_distro
+  _get_DE
+
+  # purge system
+  if [[ $(yq '.config.check.purgeEnabled' "$CONFIG") == true ]]; then
+    # collect purge packages into array
+    local purge_pkgs
+    mapfile -t purge_pkgs < <(yq '.config.check.purge[]' "$CONFIG")
+    for pkg in "${purge_pkgs[@]}"; do
+      # shellcheck disable=SC2086
+      sudo apt-get autoremove --purge -qy $pkg
+    done
+  fi
+
+  # install deps
+  if [[ $(yq '.config.check.depsEnabled' "$CONFIG") == true ]]; then
+    sudo apt-get update -qq
+    # shellcheck disable=SC2046
+    sudo apt-get install -qy $(yq '.config.check.deps[]' "$CONFIG")
+  fi
+
+  # install pyenv & python version
+  if [[ $(yq '.config.check.python.pyenvCheck' "$CONFIG") == true ]]; then
+    # install pyenv
+    if ! command -v pyenv &>/dev/null; then
+      # installs pyenv-installer https://github.com/pyenv/pyenv-installer & the
+      # following:
+      #   - pyenv https://github.com/pyenv/pyenv
+      #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
+      #   - pyenv-update https://github.com/pyenv/pyenv-update
+      #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
+      curl https://pyenv.run | bash
+
+      # temporarily export pyenv
+      export PATH="$HOME/.pyenv/bin:$PATH"
+      eval "$(pyenv init -)"
+      eval "$(pyenv virtualenv-init -)"
+    fi
+
+    # install latest python version
+    local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
+    if ! command -v "python$(yq '.config.check.python.version' "$CONFIG")" &>/dev/null \
+      || [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
+      pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
+      pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
+    fi
+  fi
+
+  # install rustup, rustc, cargo
+  if [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]] \
+    && ! command -v rustup &>/dev/null; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -h
+  fi
+
+  # setup appimaged if appimaged service isn't running / doesn't exist
+  if [[ $(yq '.config.check.appimagedCheck' "$CONFIG") == true ]] \
+    && ! systemctl -q --user is-active appimaged; then
+    # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
+
+    # remove pre-existing similar tools
+    systemctl --user stop appimaged.service || true
+    sudo apt-get remove -qy appimagelauncher || true
+
+    # clear cache
+    rm -rf "$HOME/.local/share/applications/appimage*"
+    [ -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service ] \
+      && rm ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
+
+    # download appimaged
+    mkdir -p "$HOME/Applications"
+    # get continuous release via GitHub api
+    local browser_download_url=$(
+      curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
+        | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")'
+    )
+    curl -sSL -o "$HOME/Applications/appimaged.AppImage" \
+      "$browser_download_url"
+
+    # launch
+    chmod +x "$HOME/Applications/appimaged.AppImage"
+    "$HOME/Applications/appimaged.AppImage"
+  fi
+
+  # install Geist font
+  if [[ $(yq '.config.check.geistFontEnabled' "$CONFIG") == true ]]; then
+    if [[ ! -d "/usr/share/fonts/opentype/Geist/" ]]; then
+      local font_url=$(
+        curl -sSL https://api.github.com/repos/vercel/geist-font/releases/latest \
+          | yq -p=j '.assets[].browser_download_url | select(. =="*Geist-*")'
+      )
+      # download Geist font
+      curl -sSL -o Geist.zip "$font_url"
+      unzip -o Geist.zip
+      # install Geist opentype font
+      sudo mv Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
+    fi
+    fc-cache -vf
+
+    # cleanup remnant files
+    rm -rf Geist.zip __MACOSX/ Geist-*
+  fi
+
+  # install nerdfont
+  if [[ $(yq '.config.check.nerdfontEnabled' "$CONFIG") == true ]]; then
+    local font=$(yq '.config.check.nerdfont' "$CONFIG")
+    if [[ ! -d "/usr/share/fonts/$font" ]]; then
+      sudo mkdir -p "/usr/share/fonts/$font"
+      curl -sSL \
+        "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
+        | sudo tar -xvJ -C "/usr/share/fonts/$font"
+    fi
+    fc-cache -vf
+  fi
+}
+
+install() {
+  if [[ $(yq '.config.install.check' "$CONFIG") == true ]]; then
+    check
+  else
+    # SET METADATA functions
+    _get_distro
+    _get_DE
+  fi
+
+  # install apt packages
+  if [[ $(yq '.config.install.aptEnabled' "$CONFIG") == true ]] \
+    && [[ $(yq '.config.install.apt | length' "$CONFIG") -gt 0 ]]; then
+    _info_msg "Installing apt packages"
+    sudo apt-get update -qq
+    # shellcheck disable=SC2046
+    sudo apt-get install -qy $(yq '.config.install.apt[]' "$CONFIG")
+  fi
+
+  # install ppa packages
+  local no_of_ppa_pkgs=$(yq '.config.install.ppa | length' "$CONFIG")
+  if [[ $(yq '.config.install.ppaEnabled' "$CONFIG") == true ]] \
+    && [[ $no_of_ppa_pkgs -gt 0 ]]; then
+    _info_msg "Installing PPA packages"
+    # add ppa repos (& their gpg keys automatically)
+    for ((i = 0; i < no_of_ppa_pkgs; i++)); do
+      _info_msg "Adding PPA repo: $(yq ".config.install.ppa[$i].ppaUrl" "$CONFIG")"
+      sudo apt-add-repository -y \
+        "$(yq ".config.install.ppa[$i].ppaUrl" "$CONFIG")"
+    done
+    _success_msg "Added all PPA repos"
+    sudo apt-get update -qq
+    _info_msg "Installing PPA packages"
+    # shellcheck disable=SC2046
+    sudo apt-get install -qy $(yq '.config.install.ppa[].packages[]' "$CONFIG")
+  fi
+
+  # install from apt alternative sources
+  local no_of_alt_sources=$(yq '.config.install.aptAltSources | length' "$CONFIG")
+  if [[ $(yq '.config.install.aptAltSourcesEnabled' "$CONFIG") == true ]] \
+    && [[ $no_of_alt_sources -gt 0 ]]; then
+    _info_msg "Installing apt packages from alternative sources"
+    # setting up signing keys & repo entries
+    for ((i = 0; i < no_of_alt_sources; i++)); do
+      local alt_pkg_obj=$(yq ".config.install.aptAltSources[$i]" "$CONFIG")
+
+      # download gpg key from remote
+      if [[ $(yq '.gpgKeyPath' <<<"$alt_pkg_obj") == *.asc ]]; then
+        _info_msg "Downloading .asc key for $(yq '.sourceFile' <<<"$alt_pkg_obj")"
+        sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$alt_pkg_obj")" \
+          "$(yq '.remoteGpgKey' <<<"$alt_pkg_obj")"
+      elif [[ $(yq '.gpgKeyPath' <<<"$alt_pkg_obj") == *.gpg ]]; then
+        _info_msg "Downloading & dearmoring .gpg key for $(yq '.sourceFile' <<<"$alt_pkg_obj")"
+        # dearmor if key is required to be in gpg format
+        sudo curl -fsSL "$(yq '.remoteGpgKey' <<<"$alt_pkg_obj")" \
+          | sudo gpg --dearmor --yes -o "$(yq '.gpgKeyPath' <<<"$alt_pkg_obj")"
+      fi
+
+      # add repo entry into sources.list.d
+      local source_file_full_path="/etc/apt/sources.list.d/$(yq '.sourceFile' <<<"$alt_pkg_obj").list"
+      _info_msg "Adding repo entry into sources.list.d for $(yq '.sourceFile' <<<"$alt_pkg_obj")"
+      eval echo "$(yq '.repo' <<<"$alt_pkg_obj")" \
+        | sudo tee "$source_file_full_path" >/dev/null
+
+      # perform pinning if pinning entry exists
+      if [[ $(yq '.pinning' <<<"$alt_pkg_obj") != false ]]; then
+        # perform pinning to prioritise
+        local pref_file="/etc/apt/preferences.d/$(yq '.sourceFile' <<<"$alt_pkg_obj")"
+        _info_msg "Performing pinning to prioritise package"
+        yq '.pinning' <<<"$alt_pkg_obj" \
+          | sudo tee "$pref_file" >/dev/null
+      fi
+    done
+    # install packages
+    _info_msg "Installing apt packages from alternative sources"
+    sudo apt-get update -qq
+    # disable shellcheck to enable installing multiple packages
+    # shellcheck disable=SC2046
+    sudo apt-get install -qy \
+      $(yq '.config.install.aptAltSources[].packages[]' "$CONFIG")
+  fi
+
+  # install flatpaks
+  if [[ $(yq '.config.install.flatpakEnabled' "$CONFIG") == true ]] \
+    && [[ $(yq '.config.install.flatpak | length' "$CONFIG") -gt 0 ]] \
+    && command -v flatpak &>/dev/null; then
+    _info_msg "Installing flatpak packages"
+    # shellcheck disable=SC2046
+    flatpak install -y flathub $(yq '.config.install.flatpak[]' "$CONFIG")
+  fi
+
+  # install cargo packages
+  if [[ $(yq '.config.install.cargoEnabled' "$CONFIG") == true ]] \
+    && [[ $(yq '.config.install.cargo | length' "$CONFIG") -gt 0 ]] \
+    && command -v cargo &>/dev/null; then
+    _info_msg "Installing cargo packages"
+    local rust_pkgs
+    mapfile -t rust_pkgs < <(yq '.config.install.cargo[]' "$CONFIG")
+    for pkg in "${rust_pkgs[@]}"; do
+      # disable to enable installing with options
+      # shellcheck disable=SC2086
+      cargo install $pkg
+    done
+  fi
+
+  # install binary packages
+  local no_of_binaries=$(yq '.config.install.binaries | length' "$CONFIG")
+  if [[ $(yq '.config.install.binariesEnabled' "$CONFIG") == true ]] \
+    && [[ $no_of_binaries -gt 0 ]]; then
+    _info_msg "Installing binary packages"
+    mkdir -p "$HOME/Applications"
+    for ((i = 0; i < no_of_binaries; i++)); do
+      local binary_obj=$(yq ".config.install.binaries[$i]" "$CONFIG")
+      # skip if binary exists
+      if [[ -f "$HOME/Applications/$(yq '.name' <<<"$binary_obj")" ]]; then
+        _info_msg "$(yq '.name' <<<"$binary_obj") already exists"
+        continue
+      fi
+      # install AppImage
+      if [[ $(yq '.name' <<<"$binary_obj") == *.AppImage ]]; then
+        local download_url="$(yq '.url' <<<"$binary_obj")"
+        # execute string as subshell if subshell detected
+        if grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_obj")"; then
+          download_url="$(eval echo "$(yq '.url' <<<"$binary_obj")")"
+        fi
+        _info_msg "Installing $(yq '.name' <<<"$binary_obj")"
+        curl -fsSL -o "$HOME/Applications/$(yq '.name' <<<"$binary_obj")" \
+          "$download_url"
+        chmod +x "$HOME/Applications/$(yq '.name' <<<"$binary_obj")"
+      fi
+    done
+  fi
+
+  _success_msg "Finished installing"
+}
+
+update() {
+  _info_msg "Starting ${tides_txt} update"
+
+  if [[ $(yq '.config.update.check' "$CONFIG") == true ]]; then
+    check
+  else
+    # SET METADATA functions
+    _get_distro
+    _get_DE
+  fi
+
+  if [[ $(yq '.config.update.apt.apt' "$CONFIG") == true ]]; then
+    _info_msg "Updating & upgrading apt packages"
+    sudo apt-get -qq update
+    sudo apt-get -qy upgrade
+    # aptFull removes old archive files & unused packages with their config files
+    if [[ $(yq '.config.update.apt.aptFull' "$CONFIG") == true ]]; then
+      _info_msg "Cleaning apt cache"
+      sudo apt-get -qy dist-upgrade
+      sudo apt-get -qy autoclean
+      sudo apt-get -qy --purge autoremove
+    fi
+  fi
+
+  # update flatpak
+  if [[ $(yq '.config.update.flatpak' "$CONFIG") == true ]] \
+    && command -v flatpak &>/dev/null; then
+    _info_msg "Updating flatpaks"
+    flatpak update -y
+  fi
+
+  # update python
+  if [[ $(yq '.config.update.python' "$CONFIG") == true ]] \
+    && command -v pyenv &>/dev/null; then
+    _info_msg "Updating Pyenv"
+    pyenv update
+
+    # update python
+    local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
+    if [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
+      _info_msg "Installing Python $latest_py_ver"
+      pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
+      pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
+    else
+      _info_msg "Python version is already the latest"
+    fi
+
+    _info_msg "Upgrading pip"
+    local py_ver="python$(yq '.config.check.python.version' "$CONFIG")"
+    $py_ver -m pip install --upgrade pip
+  fi
+
+  # update cargo
+  if [[ $(yq '.config.update.cargo' "$CONFIG") == true ]] \
+    && command -v rustup &>/dev/null \
+    && command -v cargo &>/dev/null; then
+    _info_msg "Updating rustup"
+    rustup update
+    _info_msg "Updating Rust packages"
+    cargo install-update -a
+  fi
+
+  # update yq
+  if [[ $(yq '.config.update.other.yq' "$CONFIG") == true ]]; then
+    _info_msg "Updating yq"
+    # get local yq version & parse it
+    local_yq_ver=$(yq --version | cut -d ' ' -f 4)
+    # get latest yq version
+    latest_yq_ver=$(
+      curl -sSL https://api.github.com/repos/mikefarah/yq/releases/latest \
+        | yq '.tag_name'
+    )
+    if [[ $local_yq_ver != "$latest_yq_ver" ]]; then
+      _info_msg "Downloading & installing latest yq"
+      sudo curl -sSL -o /usr/bin/yq \
+        https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+      sudo chmod +x /usr/bin/yq
+    else
+      _info_msg "yq version is already the latest"
+    fi
+  fi
+
+  # zellij delete all other sessions, including exited ones
+  if [[ $(yq '.config.update.other.zellijClear' "$CONFIG") == true ]] \
+    && command -v zellij &>/dev/null; then
+    _info_msg "Deleting all other Zellij sessions"
+    zellij delete-all-sessions -y
+  fi
+
+  _success_msg "Finished ${tides_txt} update"
+}
+
+configure() {
+  if [[ $(yq '.config.configure.check' "$CONFIG") == true ]]; then
+    check
+  else
+    # SET METADATA functions
+    _get_distro
+    _get_DE
+  fi
+
+  # dotfile manager implementation via Stow
+  if [[ $(yq '.config.configure.dotfilesEnabled' "$CONFIG") == true ]] \
+    && [[ $(yq '.config.configure.dotfiles.dotfiles | length' "$CONFIG") -gt 0 ]] \
+    && command -v stow &>/dev/null; then
+    local packages
+    mapfile -t packages < <(
+      yq -r '.config.configure.dotfiles.dotfiles[]' "$CONFIG"
+    )
+    for pkg in "${packages[@]}"; do
+      # symlink between tides & actual dotfiles
+      # --no-folding stows individual files instead of directories
+      # --adopt replaces tides' dotfiles with system ones. this is needed as
+      # Stow throws an error if there are existing system dotfiles. mitigated
+      # if .config.configure.stowMode is set to "override".
+      stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
+      # override system files with tides' dotfiles
+      if [[ $(yq -r '.config.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
+        && git status --porcelain --untracked-files=no $DOTFILES \
+        | grep -q "$pkg"; then
+        # NOTE: commit any new changes made to dotfiles as they will be reset
+        # if there are any changes detected.
+        # TODO: explore a cleaner option than git restore
+        git restore "$DOTFILES/$pkg/"
+      fi
+    done
+  fi
+
+  # setup git user field in gitconfig via ~/.gitconfig.local
+  if [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
+    tee ~/.gitconfig.local <<EOF >/dev/null
+[user]
+    name = $(yq '.gitconfig.name' "$SECRETS")
+    email = $(yq '.gitconfig.email' "$SECRETS")
+EOF
+    # add signingkey if field exists
+    if [[ -n $(yq '.gitconfig.signingkey' secrets.yaml) ]]; then
+      tee -a ~/.gitconfig.local <<EOF >/dev/null
+    signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")
+EOF
+    fi
+  fi
+
+  # setup docker
+  if [[ $(yq '.config.configure.apps.docker' "$CONFIG") == true ]]; then
+    # https://docs.docker.com/engine/install/linux-postinstall/
+
+    # manage docker as non-root user
+    if ! id --name --groups "$USER" | grep docker &>/dev/null; then
+      # create docker group
+      sudo groupadd docker
+      # add user to docker group
+      sudo usermod -aG docker "$USER"
+      # change group ID to docker to activate change in current shell
+      newgrp docker
+    fi
+
+    # configure docker to start on boot (& right now) with systemd
+    if ! systemctl -q is-active docker.service; then
+      sudo systemctl enable --now docker.service
+    fi
+    if ! systemctl -q is-active containerd.service; then
+      sudo systemctl enable --now containerd.service
+    fi
+
+    # use local logging driver to prevent disk-exhaustion
+    # local logging driver performs log-rotation & compresses log files by
+    # default.
+    # https://docs.docker.com/config/containers/logging/configure/
+    # https://docs.docker.com/config/containers/logging/local/
+    if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
+      yq -p=j -n -o=j \
+        '{"log-driver":"local","log-opts":{"max-size":"10m"}}' \
+        | sudo tee /etc/docker/daemon.json >/dev/null
+    fi
+  fi
+
+  # install vscodium extensions
+  if [[ $(yq '.config.configure.apps.vscodium.extensionsEnabled' "$CONFIG") == true ]] \
+    && [[ $(yq '.config.configure.apps.vscodium.extensions | length' "$CONFIG") -gt 0 ]]; then
+    local extensions
+    mapfile -t extensions < <(
+      yq -r '.config.configure.apps.vscodium.extensions[]' "$CONFIG"
+    )
+    for ext in "${extensions[@]}"; do
+      # install vscodium extensions
+      # shellcheck disable=SC2086
+      codium --install-extension $ext
+    done
+  fi
+
+  # desktop-environment specific configurations
+  # 2nd condition checks if $DE exists within DEConf
+  if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]] \
+    && [[ $(yq ".config.configure.DEConf | keys | filter(. == \"$DE\") | length > 0" "$CONFIG") == true ]]; then
+    # cinnamon settings
+    if [[ $DE == "cinnamon" ]]; then
+      if [[ $(yq ".config.configure.DEConf.cinnamon.setDefaultTerm" "$CONFIG") == true ]]; then
+        local term=$(yq ".config.configure.DEConf.cinnamon.defaultTerm" "$CONFIG")
+        gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
+        gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
+      fi
+    fi
+
+    # gnome settings
+    if [[ "$DE" == "gnome" ]]; then
+      if [[ $(yq ".config.configure.DEConf.gnome.setDefaultTerm" "$CONFIG") == true ]]; then
+        local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
+        gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
+        gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
+      fi
+    fi
+  fi
+}
+
+# ----- MAIN -----
+
+main() {
+  # PRINT FUNCTIONS
+  _colours true
+
+  # download & install yq if not installed
+  if ! command -v yq &>/dev/null; then
+    sudo curl -sSL -o /usr/bin/yq \
+      https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    sudo chmod +x /usr/bin/yq
+  fi
+
+  [[ $# -gt 0 ]] || {
+    _usage
+    _error_msg "No argument(s)"
+    exit 1
+  }
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      # OPTIONS
+      --no-colour) _colours false ;;
+      -c | --config)
+        set_config_file "$2"
+        shift
+        ;;
+      -s | --secrets)
+        set_secrets_file "$2"
+        shift
+        ;;
+      # COMMANDS
+      check) check ;;
+      install) install ;;
+      update) update ;;
+      configure) configure ;;
+      -h | --help | h | help) _usage ;;
+      *)
+        _usage
+        _error_msg "Invalid argument(s)"
+        exit 1
+        ;;
+    esac
+    shift
+  done
+}
+
+main "$@"

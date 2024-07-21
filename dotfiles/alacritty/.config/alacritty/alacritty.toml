@@ -1,0 +1,18 @@
+# see https://github.com/alacritty/alacritty-theme
+import = [
+    "~/.config/alacritty/themes/themes/catppuccin_frappe.toml"
+]
+
+[window]
+padding = { x = 3, y = 3 }
+dynamic_padding = true
+opacity = 0.95
+
+[font]
+normal = { family = "GeistMono Nerd Font", style = "Regular" }
+bold = { family = "GeistMono Nerd Font", style = "Bold" }
+italic = { family = "GeistMono Nerd Font", style = "Italic" }
+bold_italic = { family = "GeistMono Nerd Font", style = "Bold Italic" }
+
+[cursor]
+style = { blinking = "On" }

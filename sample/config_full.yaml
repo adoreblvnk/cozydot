@@ -1,0 +1,201 @@
+version: 0.0.1
+metadata: null
+config:
+  check:
+    purgeEnabled: true # NOTE: this should be true for only the 1st run!
+    purge:
+      # firefox installed via aptAltSources
+      - firefox*
+      # docker installed via aptAltSources
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+    depsEnabled: true
+    deps:
+      # essential packages
+      - apt-transport-https
+      - bash-completion
+      - build-essential
+      - ca-certificates
+      - cmake
+      - curl
+      - ffmpeg
+      - flatpak
+      - git
+      - software-properties-common
+      - stow
+      - ttf-mscorefonts-installer
+      # pyenv dependencies
+      - libbz2-dev
+      - libffi-dev
+      - liblzma-dev
+      - libncursesw5-dev
+      - libreadline-dev
+      - libsqlite3-dev
+      - libssl-dev
+      - libxml2-dev
+      - libxmlsec1-dev
+      - tk-dev
+      - xz-utils
+      - zlib1g-dev
+      # cargo-update dependencies
+      - libgit2-dev
+      - libssh-dev
+      - libssl-dev
+      - pkgconf
+      # imagemagick dependencies
+      - libjpeg-dev
+      - libpng-dev
+      - libtiff-dev
+      # docker dependencies
+      - lsb-release
+      # alacritty dependencies
+      - libfontconfig1-dev
+      - libfreetype6-dev
+      - libxcb-xfixes0-dev
+      - libxkbcommon-dev
+      # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
+    python:
+      pyenvCheck: true
+      version: 3.12
+    rustupCheck: true
+    appimagedCheck: true
+    nerdfontEnabled: true
+    nerdfont: GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads
+    firmware: null
+  install:
+    check: true
+    aptEnabled: true
+    apt:
+      # CLI utils
+      - fzf
+      - gnupg2
+      - openssh-server
+      - trash-cli
+      - vim
+      - xclip
+      # apps
+      - nautilus
+      # multimedia
+      - imagemagick
+      - vlc
+      # productivity
+    ppaEnabled: false
+    ppa:
+      - ppaUrl: ppa:qbittorrent-team/qbittorrent-stable
+        packages:
+          - qbittorrent
+      - ppaUrl: ppa:obsproject/obs-studio
+        packages:
+          - obs-studio
+    aptAltSourcesEnabled: true
+    aptAltSources:
+      - remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
+        gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
+        repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
+        sourceFile: mozilla
+        pinning: |-
+          Package: *
+          Pin: origin packages.mozilla.org
+          Pin-Priority: 1000
+        packages:
+          - firefox
+      - remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
+        gpgKeyPath: /etc/apt/keyrings/docker.asc
+        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) stable
+        sourceFile: docker
+        pinning: false
+        packages:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+      - remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
+        gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
+        repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
+        sourceFile: vscodium
+        pinning: false
+        packages:
+          - codium
+      - remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $(. /etc/os-release && echo $UBUNTU_CODENAME) contrib
+        sourceFile: virtualbox
+        pinning: false
+        packages:
+          - virtualbox-7.0
+    flatpakEnabled: true
+    flatpak:
+      - com.discordapp.Discord
+      # - com.obsproject.Studio
+      - md.obsidian.Obsidian
+      # - org.gimp.GIMP
+      # - org.libreoffice.LibreOffice
+      # - org.telegram.desktop
+    cargoEnabled: true
+    cargo:
+      - alacritty
+      - bat --locked
+      - bottom --locked
+      - du-dust
+      - eza
+      - starship --locked
+      - zellij --locked
+      - zoxide --locked
+    binariesEnabled: true
+    binaries:
+      - name: Bitwarden.AppImage
+        url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
+  update:
+    check: true
+    apt:
+      apt: true
+      aptFull: true # NOTE: apt must be true for aptFull to take effect
+    flatpak: true
+    python: true
+    cargo: true
+    other:
+      yq: true
+      zellijClear: true
+  configure:
+    check: true
+    dotfilesEnabled: true
+    dotfiles:
+      stowMode: backup # override | backup
+      dotfiles:
+        - alacritty
+        - bash
+        - bottom
+        - codium
+        - macchina
+        - starship
+        - zellij
+    apps:
+      git:
+        userInfo: true # NOTE: set actual contents in secrets.yaml
+      docker: true
+      vscodium:
+        extensions:
+          - adpyke.codesnap
+          - catppuccin.catppuccin-vsc
+          - catppuccin.catppuccin-vsc-icons
+          - christian-kohler.path-intellisense
+          - eamodio.gitlens
+          - ecmel.vscode-html-css
+          - esbenp.prettier-vscode
+          - foxundermoon.shell-format
+          - hediet.vscode-drawio
+          - ms-python.black-formatter
+          - ms-python.debugpy
+          - ms-python.isort
+          - ms-python.python
+          - redhat.vscode-yaml
+          - streetsidesoftware.code-spell-checker
+          - timonwong.shellcheck
+          - wayou.vscode-todo-highlight
+          - yzhang.markdown-all-in-one

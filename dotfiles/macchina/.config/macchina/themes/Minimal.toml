@@ -1,0 +1,47 @@
+# Minimal
+
+spacing         = 2
+padding         = 0
+hide_ascii      = true
+prefer_small_ascii = true
+separator       = "❥"
+
+[palette]
+type            = "Light"
+glyph           = "● "
+visible         = false
+
+[box]
+border          = "rounded"
+visible         = true
+
+[box.inner_margin]
+x = 1
+y = 0
+
+[randomize]
+key_color       = true
+separator_color = true
+pool            = "base"
+
+[keys]
+host            = "👤 Host"
+kernel          = "🍿 Kernel"
+battery         = "🔋 Battery"
+os              = "OS"
+de              = "🖥️ DE"
+wm              = "🪟 WM"
+distro          = "🍨 Distro"
+terminal        = "🕸️ Terminal"
+shell           = "🐚 Shell"
+packages        = "📦 Packages"
+uptime          = "⏱️ Uptime"
+memory          = "🔳 Memory"
+machine         = "💻 Machine"
+local_ip        = "IP"
+backlight       = "🔆 Brightness"
+resolution      = "📺 Resolution"
+cpu_load        = "🏋🏻CPU Load"
+cpu             = "🔲 CPU"
+gpu             = "GPU"
+disk_space      = "Disk Space"

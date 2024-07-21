@@ -1,0 +1,234 @@
+version: 0.0.1
+metadata:
+  distro: auto # auto | ubuntu | linuxmint
+  # NOTE: highly recommended to be "auto"
+  DE: auto # auto | gnome | cinnamon
+config:
+  check:
+    purgeEnabled: false # NOTE: this should be only true for the 1st run!
+    purge:
+      # docker installed via aptAltSources
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+      # firefox installed via aptAltSources
+      - firefox*
+      # libreoffice replaced with onlyoffice
+      - libreoffice*
+    depsEnabled: false
+    deps:
+      # essential packages
+      - apt-transport-https
+      - bash-completion
+      - build-essential
+      - ca-certificates
+      - cmake
+      - curl
+      - ffmpeg
+      - flatpak
+      - git
+      - software-properties-common
+      - stow
+      - ttf-mscorefonts-installer
+      # pyenv dependencies
+      - libbz2-dev
+      - libffi-dev
+      - liblzma-dev
+      - libncursesw5-dev
+      - libreadline-dev
+      - libsqlite3-dev
+      - libssl-dev
+      - libxml2-dev
+      - libxmlsec1-dev
+      - tk-dev
+      - xz-utils
+      - zlib1g-dev
+      # cargo-update dependencies
+      - libgit2-dev
+      - libssh-dev
+      - libssl-dev
+      - pkgconf
+      # imagemagick dependencies
+      - libjpeg-dev
+      - libpng-dev
+      - libtiff-dev
+      # docker dependencies
+      - lsb-release
+      # alacritty dependencies
+      - libfontconfig1-dev
+      - libfreetype6-dev
+      - libxcb-xfixes0-dev
+      - libxkbcommon-dev
+      # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
+    python:
+      pyenvCheck: true
+      version: 3.12 # <major>.<minor>
+    rustupCheck: true
+    appimagedCheck: true
+    geistFontEnabled: false # NOTE: recommended to be disabled after successful installation to reduce time for checks
+    nerdfontEnabled: false # NOTE: recommended to be disabled after successful installation
+    nerdfont: GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads
+    firmware: null # TODO: install firmware packages dynamically if needed
+  install:
+    check: true
+    aptEnabled: false
+    apt:
+      # CLI utils
+      - fzf # fuzzy finder
+      - gnupg2
+      - openssh-server
+      - trash-cli
+      - vim
+      - xclip # terminal X11 clipboard
+      # apps
+      - flameshot # screenshot
+      - nautilus # file manager
+      # multimedia
+      - imagemagick # image manipulation & conversion
+      - vlc # multimedia player
+      # productivity
+    ppaEnabled: false
+    ppa:
+      - ppaUrl: ppa:qbittorrent-team/qbittorrent-stable
+        packages:
+          - qbittorrent
+    aptAltSourcesEnabled: false
+    aptAltSources:
+      - remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
+        gpgKeyPath: /etc/apt/keyrings/docker.asc
+        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $UBUNTU_CODENAME stable
+        sourceFile: docker
+        pinning: false
+        packages:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+      - remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
+        gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
+        repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
+        sourceFile: mozilla
+        pinning: |-
+          Package: *
+          Pin: origin packages.mozilla.org
+          Pin-Priority: 1000
+        packages:
+          - firefox
+      - remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+        gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
+        repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
+        sourceFile: onlyoffice
+        pinning: false
+        packages:
+          - onlyoffice-desktopeditors
+      - remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
+        gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
+        repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
+        sourceFile: vscodium
+        pinning: false
+        packages:
+          - codium
+      - remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $UBUNTU_CODENAME contrib
+        sourceFile: virtualbox
+        pinning: false
+        packages:
+          - virtualbox-7.0
+      - remoteGpgKey: https://repo.charm.sh/apt/gpg.key
+        gpgKeyPath: /etc/apt/keyrings/charm.gpg
+        repo: deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ \* \*
+        sourceFile: charm
+        pinning: false
+        packages:
+          - glow
+    flatpakEnabled: true
+    flatpak:
+      - com.discordapp.Discord
+      - com.obsproject.Studio
+      - org.telegram.desktop
+    cargoEnabled: true
+    cargo:
+      - alacritty
+      - bat --locked
+      - bottom --locked # OPTIONAL: process / system monitor
+      - du-dust # OPTIONAL: disk usage
+      - eza
+      - macchina
+      - starship --locked
+      - yazi-cli --locked # OPTIONAL: terminal file manager
+      - yazi-fm --locked # OPTIONAL: terminal file manager
+      - zellij --locked
+      - zoxide --locked # OPTIONAL: smarter cd command
+    binariesEnabled: true
+    binaries:
+      - name: Bitwarden.AppImage # password manager
+        url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
+      - name: drawio.AppImage # diagramming tool
+        url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
+      - name: Obsidian.AppImage # note-taking app
+        url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+      # - name: youtube-music.AppImage # NOTE: does not auto-update
+      #   url: $(curl -sSL https://api.github.com/repos/th-ch/youtube-music/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage")')
+  update:
+    check: true
+    apt:
+      apt: true
+      aptFull: false # NOTE: apt must be true for aptFull to take effect
+    flatpak: true
+    python: true
+    cargo: true
+    other:
+      yq: true
+      zellijClear: true
+  configure:
+    check: true
+    dotfilesEnabled: true
+    dotfiles:
+      stowMode: backup # backup | override
+      dotfiles:
+        - alacritty
+        # - autostart # GNOME / Cinnamon autostart
+        - bash
+        - bottom
+        - codium
+        - macchina
+        - starship
+        - zellij
+    apps:
+      git:
+        userInfo: false # NOTE: set actual contents in secrets.yaml
+      docker: true
+      vscodium:
+        extensionsEnabled: false
+        extensions:
+          - adpyke.codesnap
+          - catppuccin.catppuccin-vsc
+          - catppuccin.catppuccin-vsc-icons
+          - christian-kohler.path-intellisense
+          - eamodio.gitlens
+          - ecmel.vscode-html-css
+          - esbenp.prettier-vscode
+          - foxundermoon.shell-format
+          - ms-python.black-formatter
+          - ms-python.debugpy
+          - ms-python.isort
+          - ms-python.python
+          - redhat.vscode-yaml
+          - streetsidesoftware.code-spell-checker
+          - timonwong.shellcheck
+          - wayou.vscode-todo-highlight
+          - yzhang.markdown-all-in-one
+    DEConfEnabled: true
+    DEConf:
+      cinnamon:
+        setDefaultTerm: true
+        defaultTerm: alacritty
+      gnome:
+        setDefaultTerm: true
+        terminal: alacritty
