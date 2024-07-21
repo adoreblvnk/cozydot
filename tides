@@ -581,10 +581,28 @@ EOF
     done
   fi
 
+  # optimisations
+  if [[ $(yq ".config.configure.optimisationsEnabled" "$CONFIG") == true ]]; then
+    _info_msg "Configuring optimisations"
+    if [[ $(yq ".config.configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
+      _info_msg "Configuring auto-cpufreq"
+      if ! command -v auto-cpufreq &>/dev/null; then
+        _info_msg "Installing auto-cpufreq"
+        git clone https://github.com/AdnanHodzic/auto-cpufreq.git
+        cd auto-cpufreq && sudo ./auto-cpufreq-installer
+        cd ..
+        rm -rf auto-cpufreq
+      fi
+      if systemctl is-active --quiet auto-cpufreq; then
+        _info_msg "auto-cpufreq daemon is already running"
+      else
+        sudo auto-cpufreq --install
+      fi
+    fi
+  fi
+
   # desktop-environment specific configurations
-  # 2nd condition checks if $DE exists within DEConf
-  if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]] \
-    && [[ $(yq ".config.configure.DEConf | keys | filter(. == \"$DE\") | length > 0" "$CONFIG") == true ]]; then
+  if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]]; then
     # cinnamon settings
     if [[ $DE == "cinnamon" ]]; then
       if [[ $(yq ".config.configure.DEConf.cinnamon.setDefaultTerm" "$CONFIG") == true ]]; then
@@ -603,6 +621,7 @@ EOF
       fi
     fi
   fi
+  _success_msg "Finished configuration"
 }
 
 # ----- MAIN -----

@@ -224,6 +224,10 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
+    optimisationsEnabled: true
+    optimisations:
+      # laptops
+      auto-cpufreq: true
     DEConfEnabled: true
     DEConf:
       cinnamon:
