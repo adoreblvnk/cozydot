@@ -20,7 +20,7 @@ config:
       - firefox*
       # libreoffice replaced with onlyoffice
       - libreoffice*
-    depsEnabled: false
+    depsEnabled: true
     deps:
       # essential packages
       - apt-transport-https
@@ -69,14 +69,14 @@ config:
       pyenvCheck: true
       version: 3.12 # <major>.<minor>
     rustupCheck: true
-    appimagedCheck: true
+    appimagedCheck: false
     geistFontEnabled: false # NOTE: modified by metadata.edit
     nerdfontEnabled: false # NOTE: modified by metadata.edit
     nerdfont: GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads
     firmware: null # TODO: install firmware packages dynamically if needed
   install:
     check: true
-    aptEnabled: false
+    aptEnabled: true
     apt:
       # CLI utils
       - fzf # fuzzy finder
@@ -92,7 +92,7 @@ config:
       - imagemagick # image manipulation & conversion
       - vlc # multimedia player
       # productivity
-    aptAltSourcesEnabled: false
+    aptAltSourcesEnabled: true
     aptAltSources:
       - remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
         gpgKeyPath: /etc/apt/keyrings/docker.asc
@@ -105,37 +105,37 @@ config:
           - containerd.io
           - docker-buildx-plugin
           - docker-compose-plugin
-      - remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
-        gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
-        repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
-        sourceFile: mozilla
-        pinning: |-
-          Package: *
-          Pin: origin packages.mozilla.org
-          Pin-Priority: 1000
-        packages:
-          - firefox
-      - remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-        gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
-        repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
-        sourceFile: onlyoffice
-        pinning: false
-        packages:
-          - onlyoffice-desktopeditors
-      - remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
-        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
-        sourceFile: virtualbox
-        pinning: false
-        packages:
-          - virtualbox-7.0
-      - remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
-        gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
-        repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
-        sourceFile: vscodium
-        pinning: false
-        packages:
-          - codium
+      # - remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
+      #   gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
+      #   repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
+      #   sourceFile: mozilla
+      #   pinning: |-
+      #     Package: *
+      #     Pin: origin packages.mozilla.org
+      #     Pin-Priority: 1000
+      #   packages:
+      #     - firefox
+      # - remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+      #   gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
+      #   repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
+      #   sourceFile: onlyoffice
+      #   pinning: false
+      #   packages:
+      #     - onlyoffice-desktopeditors
+      # - remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+      #   gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+      #   repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
+      #   sourceFile: virtualbox
+      #   pinning: false
+      #   packages:
+      #     - virtualbox-7.0
+      # - remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
+      #   gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
+      #   repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
+      #   sourceFile: vscodium
+      #   pinning: false
+      #   packages:
+      #     - codium
       - remoteGpgKey: https://repo.charm.sh/apt/gpg.key
         gpgKeyPath: /etc/apt/keyrings/charm.gpg
         repo: deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ \* \*
@@ -143,7 +143,7 @@ config:
         pinning: false
         packages:
           - glow
-    flatpakEnabled: true
+    flatpakEnabled: false
     flatpak:
       - com.discordapp.Discord
       - com.obsproject.Studio
@@ -152,7 +152,7 @@ config:
       - org.telegram.desktop
     cargoEnabled: true
     cargo:
-      - alacritty
+      # - alacritty
       - bat --locked
       - bottom --locked # OPTIONAL: process / system monitor
       - du-dust # OPTIONAL: disk usage
@@ -163,7 +163,7 @@ config:
       - yazi-fm --locked # OPTIONAL: terminal file manager
       - zellij --locked
       - zoxide --locked # OPTIONAL: smarter cd command
-    binariesEnabled: true
+    binariesEnabled: false
     binaries:
       - name: Bitwarden.AppImage # password manager
         url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
@@ -175,7 +175,7 @@ config:
     check: true
     apt:
       apt: true
-      aptFull: false # NOTE: apt must be true for aptFull to take effect
+      aptFull: true # NOTE: apt must be true for aptFull to take effect
     flatpak: true
     python: true
     cargo: true
@@ -188,11 +188,11 @@ config:
     dotfiles:
       stowMode: backup # backup | override
       dotfiles:
-        - alacritty
+        # - alacritty
         # - autostart # GNOME / Cinnamon autostart
         - bash
         - bottom
-        - codium
+        # - codium
         - macchina
         - starship
         - zellij
@@ -222,11 +222,11 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
-    optimisationsEnabled: true
+    optimisationsEnabled: false
     optimisations:
       # laptop
-      auto-cpufreq: true
-    DEConfEnabled: true
+      auto-cpufreq: false
+    DEConfEnabled: false
     DEConf:
       cinnamon:
         setDefaultTerm: true

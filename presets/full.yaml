@@ -1,11 +1,13 @@
 version: 0.0.1
-metadata: null
+metadata:
+  edit: true
+  distro: auto # auto | ubuntu | linuxmint
+  # NOTE: highly recommended to be "auto"
+  DE: auto # auto | gnome | cinnamon
 config:
   check:
-    purgeEnabled: true # NOTE: this should be true for only the 1st run!
+    purgeEnabled: true # NOTE: modified by metadata.edit
     purge:
-      # firefox installed via aptAltSources
-      - firefox*
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
@@ -14,6 +16,10 @@ config:
       - podman-docker
       - containerd
       - runc
+      # firefox installed via aptAltSources
+      - firefox*
+      # libreoffice replaced with onlyoffice
+      - libreoffice*
     depsEnabled: true
     deps:
       # essential packages
@@ -61,39 +67,44 @@ config:
       # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
     python:
       pyenvCheck: true
-      version: 3.12
+      version: 3.12 # <major>.<minor>
     rustupCheck: true
     appimagedCheck: true
-    nerdfontEnabled: true
+    geistFontEnabled: true # NOTE: modified by metadata.edit
+    nerdfontEnabled: true # NOTE: modified by metadata.edit
     nerdfont: GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads
-    firmware: null
+    firmware: null # TODO: install firmware packages dynamically if needed
   install:
     check: true
     aptEnabled: true
     apt:
       # CLI utils
-      - fzf
+      - fzf # fuzzy finder
       - gnupg2
       - openssh-server
       - trash-cli
       - vim
-      - xclip
+      - xclip # terminal X11 clipboard
       # apps
-      - nautilus
+      - flameshot # screenshot
+      - nautilus # file manager
       # multimedia
-      - imagemagick
-      - vlc
+      - imagemagick # image manipulation & conversion
+      - vlc # multimedia player
       # productivity
-    ppaEnabled: false
-    ppa:
-      - ppaUrl: ppa:qbittorrent-team/qbittorrent-stable
-        packages:
-          - qbittorrent
-      - ppaUrl: ppa:obsproject/obs-studio
-        packages:
-          - obs-studio
     aptAltSourcesEnabled: true
     aptAltSources:
+      - remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
+        gpgKeyPath: /etc/apt/keyrings/docker.asc
+        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
+        sourceFile: docker
+        pinning: false
+        packages:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
       - remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
         gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
         repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
@@ -104,17 +115,20 @@ config:
           Pin-Priority: 1000
         packages:
           - firefox
-      - remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
-        gpgKeyPath: /etc/apt/keyrings/docker.asc
-        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) stable
-        sourceFile: docker
+      - remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+        gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
+        repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
+        sourceFile: onlyoffice
         pinning: false
         packages:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-buildx-plugin
-          - docker-compose-plugin
+          - onlyoffice-desktopeditors
+      - remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
+        sourceFile: virtualbox
+        pinning: false
+        packages:
+          - virtualbox-7.0
       - remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
         gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
         repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
@@ -122,35 +136,41 @@ config:
         pinning: false
         packages:
           - codium
-      - remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
-        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $(. /etc/os-release && echo $UBUNTU_CODENAME) contrib
-        sourceFile: virtualbox
+      - remoteGpgKey: https://repo.charm.sh/apt/gpg.key
+        gpgKeyPath: /etc/apt/keyrings/charm.gpg
+        repo: deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ \* \*
+        sourceFile: charm
         pinning: false
         packages:
-          - virtualbox-7.0
+          - glow
     flatpakEnabled: true
     flatpak:
       - com.discordapp.Discord
-      # - com.obsproject.Studio
-      - md.obsidian.Obsidian
-      # - org.gimp.GIMP
-      # - org.libreoffice.LibreOffice
-      # - org.telegram.desktop
+      - com.obsproject.Studio
+      - org.kde.kdenlive
+      - org.qbittorrent.qBittorrent
+      - org.telegram.desktop
     cargoEnabled: true
     cargo:
       - alacritty
       - bat --locked
-      - bottom --locked
-      - du-dust
+      - bottom --locked # OPTIONAL: process / system monitor
+      - du-dust # OPTIONAL: disk usage
       - eza
+      - macchina
       - starship --locked
+      - yazi-cli --locked # OPTIONAL: terminal file manager
+      - yazi-fm --locked # OPTIONAL: terminal file manager
       - zellij --locked
-      - zoxide --locked
+      - zoxide --locked # OPTIONAL: smarter cd command
     binariesEnabled: true
     binaries:
-      - name: Bitwarden.AppImage
+      - name: Bitwarden.AppImage # password manager
         url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
+      - name: drawio.AppImage # diagramming tool
+        url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
+      - name: Obsidian.AppImage # note-taking app
+        url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
   update:
     check: true
     apt:
@@ -166,9 +186,10 @@ config:
     check: true
     dotfilesEnabled: true
     dotfiles:
-      stowMode: backup # override | backup
+      stowMode: backup # backup | override
       dotfiles:
         - alacritty
+        # - autostart # GNOME / Cinnamon autostart
         - bash
         - bottom
         - codium
@@ -176,10 +197,13 @@ config:
         - starship
         - zellij
     apps:
+      gpg:
+        genKey: true # NOTE: modified by metadata.edit
       git:
         userInfo: true # NOTE: set actual contents in secrets.yaml
       docker: true
       vscodium:
+        extensionsEnabled: true
         extensions:
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
@@ -189,7 +213,6 @@ config:
           - ecmel.vscode-html-css
           - esbenp.prettier-vscode
           - foxundermoon.shell-format
-          - hediet.vscode-drawio
           - ms-python.black-formatter
           - ms-python.debugpy
           - ms-python.isort
@@ -199,3 +222,15 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
+    optimisationsEnabled: true
+    optimisations:
+      # laptop
+      auto-cpufreq: true
+    DEConfEnabled: true
+    DEConf:
+      cinnamon:
+        setDefaultTerm: true
+        defaultTerm: alacritty
+      gnome:
+        setDefaultTerm: true
+        terminal: alacritty

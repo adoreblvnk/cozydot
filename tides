@@ -1,12 +1,17 @@
 #!/bin/bash
 
 set -euo pipefail
+
 # constants
-readonly DOTFILES="dotfiles/"
+readonly DOTFILES="dotfiles"
 CONFIG="$(dirname "$0")/config.yaml"
 SECRETS="$(dirname "$0")/secrets.yaml"
-DISTRO= # _get_distro() sets this value
-DE=     # _get_DE() sets this value
+PRESETS_DIR="$(dirname "$0")/presets"
+
+# metadata
+EDIT= # sets whether the config yaml file can be edited by tides
+DISTRO=
+DE=
 
 # ----- PRINT FUNCTIONS -----
 
@@ -77,7 +82,7 @@ ${YELLOW}Options:${NC}
 
 ${YELLOW}Commands:${NC}
   ${GREEN}   check    ${NC}    Installs dependencies, Python (via pyenv), Cargo (via rustup), fonts (Geist & Nerdfonts), & firmware packages
-  ${GREEN}i, install  ${NC}    Installs all apt (ppas, alternative sources), flatpak, cargo, & binary (AppImage) packages
+  ${GREEN}i, install  ${NC}    Installs all apt (& alternative sources), flatpak, cargo, & binary (AppImage) packages
   ${GREEN}u, update   ${NC}    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans system (see \`${BLUE}config.yaml${NC}\` for details)
   ${GREEN}c, configure${NC}    Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), & performs other system configs.
   ${GREEN}h, help     ${NC}    Print help information
@@ -95,7 +100,7 @@ EOF
 
 # ----- SET METADATA -----
 
-_get_distro() {
+__get_distro() {
   . /etc/os-release
   local distro="$(yq '.metadata.distro' "$CONFIG")"
   if [[ $distro == "auto" ]]; then
@@ -108,9 +113,15 @@ _get_distro() {
     _info_msg "Set distro to $distro as specified in config"
   fi
   DISTRO="$distro"
+  if [[ -n $UBUNTU_CODENAME ]]; then
+    # set VERSION_CODENAME to UBUNTU_CODENAME for adding repos
+    # modifying this system-set variable has no major consequences anyways
+    # shellcheck disable=SC2034
+    VERSION_CODENAME=$UBUNTU_CODENAME
+  fi
 }
 
-_get_DE() {
+__get_DE() {
   local de="$(yq '.metadata.DE' "$CONFIG")"
   # auto-detect desktop environment if DE value is auto
   if [[ $de == "auto" ]]; then
@@ -128,7 +139,36 @@ _get_DE() {
   DE="$de"
 }
 
+_set_metadata() {
+  EDIT=$(yq '.metadata.edit' "$CONFIG")
+  __get_distro
+  __get_DE
+}
+
 # ----- OPTIONS -----
+
+list_configs() {
+  local configs
+  # find all preset files, then filter out the parent dirs & file suffixes
+  mapfile -t configs < <(
+    find "$PRESETS_DIR" -type f | awk -F '[/.]' '{print $--NF}'
+  )
+  echo "${YELLOW}Available preset configs:${NC}"
+  for config in "${configs[@]}"; do
+    echo  "  ${GREEN}$config${NC}"
+  done
+}
+
+set_config() {
+  local config_file="${PRESETS_DIR}/$1.yaml"
+  if [[ -f $config_file ]]; then
+    _info_msg "Using $1 config"
+    CONFIG=$config_file
+  else
+    _error_msg "Config selected: $1 does not exist"
+    exit 1
+  fi
+}
 
 set_config_file() { CONFIG=$1; }
 
@@ -139,9 +179,7 @@ set_secrets_file() { SECRETS=$1; }
 check() {
   _info_msg "Starting ${tides_txt} check..."
 
-  # SET METADATA functions
-  _get_distro
-  _get_DE
+  _set_metadata
 
   # purge system
   if [[ $(yq '.config.check.purgeEnabled' "$CONFIG") == true ]]; then
@@ -152,6 +190,10 @@ check() {
       # shellcheck disable=SC2086
       sudo apt-get autoremove --purge -qy $pkg
     done
+
+    if $EDIT; then
+      yq -i '.config.check.purgeEnabled = false' "$CONFIG"
+    fi
   fi
 
   # install deps
@@ -240,6 +282,10 @@ check() {
 
     # cleanup remnant files
     rm -rf Geist.zip __MACOSX/ Geist-*
+
+    if $EDIT; then
+      yq -i '.config.check.geistFontEnabled = false' "$CONFIG"
+    fi
   fi
 
   # install nerdfont
@@ -252,16 +298,21 @@ check() {
         | sudo tar -xvJ -C "/usr/share/fonts/$font"
     fi
     fc-cache -vf
+
+    if $EDIT; then
+      yq -i '.config.check.nerdfontEnabled = false' "$CONFIG"
+    fi
+
   fi
 }
 
 install() {
+  _info_msg "Starting ${tides_txt} install"
+
   if [[ $(yq '.config.install.check' "$CONFIG") == true ]]; then
     check
   else
-    # SET METADATA functions
-    _get_distro
-    _get_DE
+    _set_metadata
   fi
 
   # install apt packages
@@ -271,24 +322,6 @@ install() {
     sudo apt-get update -qq
     # shellcheck disable=SC2046
     sudo apt-get install -qy $(yq '.config.install.apt[]' "$CONFIG")
-  fi
-
-  # install ppa packages
-  local no_of_ppa_pkgs=$(yq '.config.install.ppa | length' "$CONFIG")
-  if [[ $(yq '.config.install.ppaEnabled' "$CONFIG") == true ]] \
-    && [[ $no_of_ppa_pkgs -gt 0 ]]; then
-    _info_msg "Installing PPA packages"
-    # add ppa repos (& their gpg keys automatically)
-    for ((i = 0; i < no_of_ppa_pkgs; i++)); do
-      _info_msg "Adding PPA repo: $(yq ".config.install.ppa[$i].ppaUrl" "$CONFIG")"
-      sudo apt-add-repository -y \
-        "$(yq ".config.install.ppa[$i].ppaUrl" "$CONFIG")"
-    done
-    _success_msg "Added all PPA repos"
-    sudo apt-get update -qq
-    _info_msg "Installing PPA packages"
-    # shellcheck disable=SC2046
-    sudo apt-get install -qy $(yq '.config.install.ppa[].packages[]' "$CONFIG")
   fi
 
   # install from apt alternative sources
@@ -387,7 +420,7 @@ install() {
     done
   fi
 
-  _success_msg "Finished installing"
+  _success_msg "Finished ${tides_txt} install"
 }
 
 update() {
@@ -396,9 +429,7 @@ update() {
   if [[ $(yq '.config.update.check' "$CONFIG") == true ]]; then
     check
   else
-    # SET METADATA functions
-    _get_distro
-    _get_DE
+    _set_metadata
   fi
 
   if [[ $(yq '.config.update.apt.apt' "$CONFIG") == true ]]; then
@@ -483,12 +514,12 @@ update() {
 }
 
 configure() {
+  _info_msg "Starting ${tides_txt} configuration"
+
   if [[ $(yq '.config.configure.check' "$CONFIG") == true ]]; then
     check
   else
-    # SET METADATA functions
-    _get_distro
-    _get_DE
+    _set_metadata
   fi
 
   # dotfile manager implementation via Stow
@@ -500,6 +531,7 @@ configure() {
       yq -r '.config.configure.dotfiles.dotfiles[]' "$CONFIG"
     )
     for pkg in "${packages[@]}"; do
+      _info_msg "Stowing $pkg"
       # symlink between tides & actual dotfiles
       # --no-folding stows individual files instead of directories
       # --adopt replaces tides' dotfiles with system ones. this is needed as
@@ -518,8 +550,29 @@ configure() {
     done
   fi
 
+  # generate GPG key
+  if [[ $(yq '.config.configure.apps.gpg.genKey' "$CONFIG") == true ]]; then
+    _info_msg "Generating GPG key"
+    gpg --batch --full-gen-key <<EOF
+%echo Generating a full key
+Key-Type: RSA
+Key-Length: 4096
+Expire-Date: 0
+Name-Real: $(yq '.gpg.name' "$SECRETS")
+Name-Email: $(yq '.gpg.email' "$SECRETS")
+Name-Comment: $(yq '.gpg.comment' "$SECRETS")
+Passphrase: $(yq '.gpg.passphrase' "$SECRETS")
+%commit
+EOF
+
+    if $EDIT; then
+      yq -i '.config.configure.apps.gpg.genKey = false' "$CONFIG"
+    fi
+  fi
+
   # setup git user field in gitconfig via ~/.gitconfig.local
   if [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
+    _info_msg "Setting up \`.gitconfig.local\`"
     tee ~/.gitconfig.local <<EOF >/dev/null
 [user]
     name = $(yq '.gitconfig.name' "$SECRETS")
@@ -527,6 +580,7 @@ configure() {
 EOF
     # add signingkey if field exists
     if [[ -n $(yq '.gitconfig.signingkey' secrets.yaml) ]]; then
+      _info_msg "Adding signing key"
       tee -a ~/.gitconfig.local <<EOF >/dev/null
     signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")
 EOF
@@ -535,10 +589,12 @@ EOF
 
   # setup docker
   if [[ $(yq '.config.configure.apps.docker' "$CONFIG") == true ]]; then
+    _info_msg "Setting up docker"
     # https://docs.docker.com/engine/install/linux-postinstall/
 
     # manage docker as non-root user
     if ! id --name --groups "$USER" | grep docker &>/dev/null; then
+      _info_msg "Adding user to docker group to allow user to execute docker commands"
       # create docker group
       sudo groupadd docker
       # add user to docker group
@@ -548,6 +604,7 @@ EOF
     fi
 
     # configure docker to start on boot (& right now) with systemd
+    _info_msg "Configuring docker to start on boot"
     if ! systemctl -q is-active docker.service; then
       sudo systemctl enable --now docker.service
     fi
@@ -561,6 +618,7 @@ EOF
     # https://docs.docker.com/config/containers/logging/configure/
     # https://docs.docker.com/config/containers/logging/local/
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
+      _info_msg "Using local logging driver to prevent disk-exhaustion"
       yq -p=j -n -o=j \
         '{"log-driver":"local","log-opts":{"max-size":"10m"}}' \
         | sudo tee /etc/docker/daemon.json >/dev/null
@@ -621,7 +679,8 @@ EOF
       fi
     fi
   fi
-  _success_msg "Finished configuration"
+
+  _success_msg "Finished ${tides_txt} configuration"
 }
 
 # ----- MAIN -----
@@ -647,11 +706,16 @@ main() {
     case $1 in
       # OPTIONS
       --no-colour) _colours false ;;
+      --list-configs) list_configs ;;
       -c | --config)
+        set_config "$2"
+        shift
+        ;;
+      --config-file)
         set_config_file "$2"
         shift
         ;;
-      -s | --secrets)
+      --secrets-file)
         set_secrets_file "$2"
         shift
         ;;
