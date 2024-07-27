@@ -155,7 +155,7 @@ list_configs() {
   )
   echo "${YELLOW}Available preset configs:${NC}"
   for config in "${configs[@]}"; do
-    echo  "  ${GREEN}$config${NC}"
+    echo "  ${GREEN}$config${NC}"
   done
 }
 
@@ -588,7 +588,8 @@ EOF
   fi
 
   # setup docker
-  if [[ $(yq '.config.configure.apps.docker' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.configure.apps.docker' "$CONFIG") == true ]] \
+    && command -v docker &>/dev/null; then
     _info_msg "Setting up docker"
     # https://docs.docker.com/engine/install/linux-postinstall/
 
@@ -622,6 +623,22 @@ EOF
       yq -p=j -n -o=j \
         '{"log-driver":"local","log-opts":{"max-size":"10m"}}' \
         | sudo tee /etc/docker/daemon.json >/dev/null
+    fi
+  fi
+
+  # setup virtualbox
+  if [[ $(yq '.config.configure.apps.virtualbox' "$CONFIG") == true ]] \
+    && command -v virtualbox &>/dev/null; then
+    # to allow virtualbox to access USB devices, add $USER to vboxusers group
+    # https://www.virtualbox.org/manual/ch02.html
+    if ! id --name --groups "$USER" | grep vboxusers &>/dev/null; then
+      _info_msg "Adding user to vboxusers group to allow user to execute virtualbox commands"
+      # create vboxusers group
+      sudo groupadd vboxusers
+      # add user to vboxusers group
+      sudo usermod -aG vboxusers "$USER"
+      # change group ID to vboxusers to activate change in current shell
+      newgrp vboxusers
     fi
   fi
 

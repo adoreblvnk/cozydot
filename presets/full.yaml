@@ -202,6 +202,7 @@ config:
       git:
         userInfo: true # NOTE: set actual contents in secrets.yaml
       docker: true
+      virtualbox: true
       vscodium:
         extensionsEnabled: true
         extensions:
