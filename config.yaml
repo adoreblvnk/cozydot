@@ -6,7 +6,8 @@ metadata:
   DE: auto # auto | gnome | cinnamon
 config:
   check:
-    purgeEnabled: true # NOTE: modified by metadata.edit
+    snapDisabled: true # TODO: add functionality
+    purgeEnabled: false # NOTE: modified by metadata.edit
     purge:
       # docker installed via aptAltSources
       - docker.io
@@ -88,6 +89,7 @@ config:
       # apps
       - flameshot # screenshot
       - nautilus # file manager
+      - plank
       # multimedia
       - imagemagick # image manipulation & conversion
       - vlc # multimedia player
@@ -147,7 +149,6 @@ config:
     flatpak:
       - com.discordapp.Discord
       - com.obsproject.Studio
-      - org.kde.kdenlive
       - org.qbittorrent.qBittorrent
       - org.telegram.desktop
     cargoEnabled: true
@@ -155,6 +156,7 @@ config:
       - alacritty
       - bat --locked
       - bottom --locked # OPTIONAL: process / system monitor
+      - cargo-update
       - du-dust # OPTIONAL: disk usage
       - eza
       - macchina
@@ -186,7 +188,7 @@ config:
     check: true
     dotfilesEnabled: true
     dotfiles:
-      stowMode: backup # backup | override
+      stowMode: override # backup | override
       dotfiles:
         - alacritty
         # - autostart # GNOME / Cinnamon autostart
@@ -201,6 +203,7 @@ config:
         genKey: false # NOTE: modified by metadata.edit
       git:
         userInfo: false # NOTE: set actual contents in secrets.yaml
+      alacritty: true
       docker: true
       virtualbox: true
       vscodium:
@@ -234,4 +237,4 @@ config:
         defaultTerm: alacritty
       gnome:
         setDefaultTerm: true
-        terminal: alacritty
+        defaultTerm: alacritty
