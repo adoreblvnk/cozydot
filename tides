@@ -129,7 +129,10 @@ __get_DE() {
       de="cinnamon"
       _info_msg "Auto-detected & set desktop environment to cinnamon"
     fi
-    # TODO: detect GNOME as well
+    if echo "$XDG_CURRENT_DESKTOP" | grep -iq "GNOME"; then
+      de="gnome"
+      _info_msg "Auto-detected & set desktop environment to gnome"
+    fi
   else
     if echo "$XDG_CURRENT_DESKTOP" | grep -ivq "$de"; then
       _warning_msg "$de is not the current desktop environment"
@@ -233,7 +236,7 @@ check() {
   # install rustup, rustc, cargo
   if [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]] \
     && ! command -v rustup &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -h
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
 
   # setup appimaged if appimaged service isn't running / doesn't exist
@@ -374,6 +377,7 @@ install() {
     && [[ $(yq '.config.install.flatpak | length' "$CONFIG") -gt 0 ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Installing flatpak packages"
+    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
     # shellcheck disable=SC2046
     flatpak install -y flathub $(yq '.config.install.flatpak[]' "$CONFIG")
   fi
@@ -526,6 +530,7 @@ configure() {
   if [[ $(yq '.config.configure.dotfilesEnabled' "$CONFIG") == true ]] \
     && [[ $(yq '.config.configure.dotfiles.dotfiles | length' "$CONFIG") -gt 0 ]] \
     && command -v stow &>/dev/null; then
+    _info_msg "Configuring dotfiles via Stow"
     local packages
     mapfile -t packages < <(
       yq -r '.config.configure.dotfiles.dotfiles[]' "$CONFIG"
@@ -535,13 +540,15 @@ configure() {
       # symlink between tides & actual dotfiles
       # --no-folding stows individual files instead of directories
       # --adopt replaces tides' dotfiles with system ones. this is needed as
-      # Stow throws an error if there are existing system dotfiles. mitigated
-      # if .config.configure.stowMode is set to "override".
+      # Stow throws an error if there are existing system dotfiles. 
+      # however, tides' dotfiles will be lost, & this is mitigated if 
+      # .config.configure.stowMode is set to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
       # override system files with tides' dotfiles
       if [[ $(yq -r '.config.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
         && git status --porcelain --untracked-files=no $DOTFILES \
         | grep -q "$pkg"; then
+        _info_msg "Overriding system config files with ${tides_txt}' dotfiles"
         # NOTE: commit any new changes made to dotfiles as they will be reset
         # if there are any changes detected.
         # TODO: explore a cleaner option than git restore
@@ -584,6 +591,27 @@ EOF
       tee -a ~/.gitconfig.local <<EOF >/dev/null
     signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")
 EOF
+    fi
+  fi
+
+  # setup Alacritty
+  if [[ $(yq '.config.configure.apps.alacritty' "$CONFIG") == true ]] \
+    && command -v alacritty &>/dev/null; then
+    _info_msg "Configuring Alacritty"
+
+    # add desktop icon
+    if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
+      _info_msg "Adding Alacritty icon"
+      sudo curl -fsLS --create-dirs -o /usr/share/pixmaps/Alacritty.svg \
+        https://github.com/alacritty/alacritty/raw/master/extra/logo/alacritty-term.svg
+    fi
+
+    # add desktop entry
+    if [[ ! -f /usr/share/applications/Alacritty.desktop ]]; then
+      _info_msg "Adding desktop entry"
+      sudo curl -fsLS --create-dirs -o /usr/share/applications/Alacritty.desktop \
+        https://github.com/alacritty/alacritty/raw/master/extra/linux/Alacritty.desktop
+      sudo update-desktop-database
     fi
   fi
 
@@ -678,10 +706,12 @@ EOF
 
   # desktop-environment specific configurations
   if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]]; then
+    _info_msg "Configuring desktop environment"
     # cinnamon settings
     if [[ $DE == "cinnamon" ]]; then
       if [[ $(yq ".config.configure.DEConf.cinnamon.setDefaultTerm" "$CONFIG") == true ]]; then
         local term=$(yq ".config.configure.DEConf.cinnamon.defaultTerm" "$CONFIG")
+        _info_msg "Setting default terminal to $term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
       fi
@@ -691,6 +721,7 @@ EOF
     if [[ "$DE" == "gnome" ]]; then
       if [[ $(yq ".config.configure.DEConf.gnome.setDefaultTerm" "$CONFIG") == true ]]; then
         local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
+        _info_msg "Setting default terminal to $term"
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
         gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
       fi
@@ -706,8 +737,15 @@ main() {
   # PRINT FUNCTIONS
   _colours true
 
+  # install curl if not installed
+  if ! command -v curl &>/dev/null; then
+    _info_msg "Installing curl"
+    sudo apt-get install -qq curl
+  fi
+
   # download & install yq if not installed
   if ! command -v yq &>/dev/null; then
+    _info_msg "Installing yq"
     sudo curl -sSL -o /usr/bin/yq \
       https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     sudo chmod +x /usr/bin/yq
