@@ -184,6 +184,46 @@ check() {
 
   _set_metadata
 
+  if [[ $(yq '.config.check.snapDisabled' "$CONFIG") == true ]]; then
+    _info_msg "Disabling snap"
+    if command -v snap &>/dev/null; then
+      _info_msg "Removing snap packages"
+      mapfile -t snap_pkgs < <(snap list | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' | awk '{print $1}')
+      for pkg in "${snap_pkgs[@]}"; do
+        # shellcheck disable=SC2086
+        snap remove --purge $pkg
+      done
+      snap remove --purge "$(snap list | grep -o '^core[0-9][0-9]')"
+      snap remove --purge bare
+      snap remove --purge snapd
+    fi
+
+    if systemctl -q is-active snapd; then
+      _info_msg "Stop & disable snap services"
+      sudo systemctl stop snapd
+      sudo systemctl disable snapd
+    fi
+
+    _info_msg "Removing snapd package from apt"
+    sudo apt-get remove --purge -qq snapd
+
+    _info_msg "Removing snap package directories"
+    rm -rf ~/snap
+    _info_msg "Removing leftover snap directories"
+    sudo rm -rf /snap
+    sudo rm -rf /var/snap
+    sudo rm -rf /var/lib/snapd
+
+    if [[ ! -f /etc/apt/preferences.d/nosnap.pref ]]; then
+      _info_msg "Preventing snap from being reinstalled"
+      sudo tee /etc/apt/preferences.d/nosnap.pref <<EOF >/dev/null
+Package: snapd
+Pin: release a=*
+Pin-Priority: -10
+EOF
+    fi
+  fi
+
   # purge system
   if [[ $(yq '.config.check.purgeEnabled' "$CONFIG") == true ]]; then
     # collect purge packages into array
@@ -540,8 +580,8 @@ configure() {
       # symlink between tides & actual dotfiles
       # --no-folding stows individual files instead of directories
       # --adopt replaces tides' dotfiles with system ones. this is needed as
-      # Stow throws an error if there are existing system dotfiles. 
-      # however, tides' dotfiles will be lost, & this is mitigated if 
+      # Stow throws an error if there are existing system dotfiles.
+      # however, tides' dotfiles will be lost, & this is mitigated if
       # .config.configure.stowMode is set to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
       # override system files with tides' dotfiles
