@@ -70,7 +70,7 @@ _error_msg() { echo "${B_RED}Error:${NC} $1"; }
 
 _usage() {
   cat <<EOF
-${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is a ${BOLD}post-install${NC}, ${BOLD}update${NC}, ${BOLD}config${NC}, & ${BOLD}dotfile manager${NC} script for Linux-based systems
+${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is a ${BOLD}post-install${NC}, ${BOLD}update${NC}, ${BOLD}config${NC}, & ${BOLD}dotfile manager${NC} script for Linux systems
 
 ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
@@ -196,16 +196,16 @@ check() {
       snap remove --purge "$(snap list | grep -o '^core[0-9][0-9]')"
       snap remove --purge bare
       snap remove --purge snapd
-    fi
 
-    if systemctl -q is-active snapd; then
-      _info_msg "Stop & disable snap services"
-      sudo systemctl stop snapd
-      sudo systemctl disable snapd
-    fi
+      if systemctl -q is-active snapd; then
+        _info_msg "Stop & disable snap services"
+        sudo systemctl stop snapd
+        sudo systemctl disable snapd
+      fi
 
-    _info_msg "Removing snapd package from apt"
-    sudo apt-get remove --purge -qq snapd
+      _info_msg "Removing snapd package from apt"
+      sudo apt-get remove --purge -qq snapd
+    fi
 
     _info_msg "Removing snap package directories"
     rm -rf ~/snap

@@ -193,10 +193,12 @@ config:
         - alacritty
         # - autostart # GNOME / Cinnamon autostart
         - bash
+        - bat
         - bottom
         - codium
         - macchina
         - starship
+        - yazi
         - zellij
     apps:
       gpg:
