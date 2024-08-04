@@ -145,6 +145,7 @@ fi
 if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
 
 if command -v yazi &>/dev/null; then
+  # https://yazi-rs.github.io/docs/quick-start#shell-wrapper
   function yy() {
     local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
     yazi "$@" --cwd-file="$tmp"
