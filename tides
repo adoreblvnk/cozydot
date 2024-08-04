@@ -186,9 +186,13 @@ check() {
 
   if [[ $(yq '.config.check.snapDisabled' "$CONFIG") == true ]]; then
     _info_msg "Disabling snap"
+
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
-      mapfile -t snap_pkgs < <(snap list | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' | awk '{print $1}')
+      mapfile -t snap_pkgs < <(
+        snap list | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' \
+          | awk '{print $1}'
+      )
       for pkg in "${snap_pkgs[@]}"; do
         # shellcheck disable=SC2086
         snap remove --purge $pkg
@@ -196,26 +200,31 @@ check() {
       snap remove --purge "$(snap list | grep -o '^core[0-9][0-9]')"
       snap remove --purge bare
       snap remove --purge snapd
+    fi
 
-      if systemctl -q is-active snapd; then
-        _info_msg "Stop & disable snap services"
-        sudo systemctl stop snapd
-        sudo systemctl disable snapd
-      fi
+    if systemctl -q is-active snapd; then
+      _info_msg "Stop & disable snap services"
+      sudo systemctl stop snapd
+      sudo systemctl disable snapd
+    fi
 
+    if command -v snapd &>/dev/null; then
       _info_msg "Removing snapd package from apt"
       sudo apt-get remove --purge -qq snapd
     fi
 
-    _info_msg "Removing snap package directories"
-    rm -rf ~/snap
-    _info_msg "Removing leftover snap directories"
-    sudo rm -rf /snap
-    sudo rm -rf /var/snap
-    sudo rm -rf /var/lib/snapd
+    if [[ -d ~/snap ]]; then
+      _info_msg "Removing snap package directories"
+      rm -rf ~/snap
+    fi
+
+    if [[ -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
+      _info_msg "Removing leftover snap directories"
+      sudo rm -rf /snap /var/snap /var/lib/snapd
+    fi
 
     if [[ ! -f /etc/apt/preferences.d/nosnap.pref ]]; then
-      _info_msg "Preventing snap from being reinstalled"
+      _info_msg "Creating nosnap.pref to prevent snap from being reinstalled"
       sudo tee /etc/apt/preferences.d/nosnap.pref <<EOF >/dev/null
 Package: snapd
 Pin: release a=*
@@ -241,34 +250,40 @@ EOF
 
   # install deps
   if [[ $(yq '.config.check.depsEnabled' "$CONFIG") == true ]]; then
+    _info_msg "Installing dependencies"
     sudo apt-get update -qq
     # shellcheck disable=SC2046
     sudo apt-get install -qy $(yq '.config.check.deps[]' "$CONFIG")
   fi
 
-  # install pyenv & python version
   if [[ $(yq '.config.check.python.pyenvCheck' "$CONFIG") == true ]]; then
-    # install pyenv
+    _info_msg "Running pyenv check"
     if ! command -v pyenv &>/dev/null; then
-      # installs pyenv-installer https://github.com/pyenv/pyenv-installer & the
-      # following:
-      #   - pyenv https://github.com/pyenv/pyenv
-      #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
-      #   - pyenv-update https://github.com/pyenv/pyenv-update
-      #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
-      curl https://pyenv.run | bash
+      _info_msg "Installing pyenv"
+      if [[ ! -d ~/.pyenv ]]; then
+        # NOTE: if pyenv dir exists but pyenv command fails, this means that pyenv isn't in PATH
+        # install pyenv-installer https://github.com/pyenv/pyenv-installer &:
+        #   - pyenv https://github.com/pyenv/pyenv
+        #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
+        #   - pyenv-update https://github.com/pyenv/pyenv-update
+        #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
+        curl https://pyenv.run | bash
+      fi
 
-      # temporarily export pyenv
+      _info_msg "Temporarily exporting pyenv into PATH"
       export PATH="$HOME/.pyenv/bin:$PATH"
       eval "$(pyenv init -)"
       eval "$(pyenv virtualenv-init -)"
     fi
 
-    # install latest python version
     local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
-    if ! command -v "python$(yq '.config.check.python.version' "$CONFIG")" &>/dev/null \
-      || [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
-      pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
+    # install latest python version if pyenv python version is not latest.
+    # covers test case where pyenv version-name is nonexistent
+    if [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
+      # check if python version exists but is not set to global
+      if ! pyenv versions | grep "$latest_py_ver"; then
+        pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
+      fi
       pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
     fi
   fi
@@ -276,12 +291,14 @@ EOF
   # install rustup, rustc, cargo
   if [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]] \
     && ! command -v rustup &>/dev/null; then
+    _info_msg "Installing rustup"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
 
   # setup appimaged if appimaged service isn't running / doesn't exist
   if [[ $(yq '.config.check.appimagedCheck' "$CONFIG") == true ]] \
     && ! systemctl -q --user is-active appimaged; then
+    _info_msg "Running appimaged check"
     # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
 
     # remove pre-existing similar tools
@@ -310,7 +327,9 @@ EOF
 
   # install Geist font
   if [[ $(yq '.config.check.geistFontEnabled' "$CONFIG") == true ]]; then
+    _info_msg "Geist font check"
     if [[ ! -d "/usr/share/fonts/opentype/Geist/" ]]; then
+      _info_msg "Downloading & installing Geist font"
       local font_url=$(
         curl -sSL https://api.github.com/repos/vercel/geist-font/releases/latest \
           | yq -p=j '.assets[].browser_download_url | select(. =="*Geist-*")'
@@ -321,8 +340,8 @@ EOF
       # install Geist opentype font
       sudo mv Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
     fi
-    fc-cache -vf
-
+    _info_msg "Reloading fc-cache"
+    fc-cache -f
     # cleanup remnant files
     rm -rf Geist.zip __MACOSX/ Geist-*
 
@@ -334,6 +353,7 @@ EOF
   # install nerdfont
   if [[ $(yq '.config.check.nerdfontEnabled' "$CONFIG") == true ]]; then
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
+    _info_msg "Installing nerdfont $font"
     if [[ ! -d "/usr/share/fonts/$font" ]]; then
       sudo mkdir -p "/usr/share/fonts/$font"
       curl -sSL \
@@ -345,7 +365,6 @@ EOF
     if $EDIT; then
       yq -i '.config.check.nerdfontEnabled = false' "$CONFIG"
     fi
-
   fi
 }
 
