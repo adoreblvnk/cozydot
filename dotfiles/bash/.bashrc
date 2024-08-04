@@ -137,7 +137,23 @@ if command -v alacritty &>/dev/null; then
   source ~/.bash_completion/alacritty
 fi
 
+if command -v macchina &>/dev/null; then
+  macchina -t Minimal -o host -o kernel -o distribution -o uptime \
+    -o processor-load -o memory
+fi
+
 if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
+
+if command -v yazi &>/dev/null; then
+  function yy() {
+    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+    yazi "$@" --cwd-file="$tmp"
+    if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+      builtin cd -- "$cwd"
+    fi
+    rm -f -- "$tmp"
+  }
+fi
 
 if command -v zellij &>/dev/null; then
   export ZELLIJ_AUTO_EXIT=true
@@ -150,8 +166,3 @@ fi
 
 # https://github.com/ajeetdsouza/zoxide?tab=readme-ov-file#installation
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
-
-if command -v macchina &>/dev/null; then
-  macchina -t Minimal -o host -o kernel -o distribution -o uptime \
-    -o processor-load -o memory
-fi

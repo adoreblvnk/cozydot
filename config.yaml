@@ -159,7 +159,9 @@ config:
       - cargo-update
       - du-dust # OPTIONAL: disk usage
       - eza
+      - fd-find
       - macchina
+      - ripgrep
       - starship --locked
       - yazi-cli --locked # OPTIONAL: terminal file manager
       - yazi-fm --locked # OPTIONAL: terminal file manager
