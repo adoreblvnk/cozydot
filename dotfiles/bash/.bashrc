@@ -137,6 +137,11 @@ if command -v alacritty &>/dev/null; then
   source ~/.bash_completion/alacritty
 fi
 
+if command -v fzf &>/dev/null; then
+  # Set up fzf key bindings and fuzzy completion
+  eval "$(fzf --bash)"
+fi
+
 if command -v macchina &>/dev/null; then
   macchina -t Minimal -o host -o kernel -o distribution -o uptime \
     -o processor-load -o memory
