@@ -66,7 +66,10 @@ _success_msg() { echo "${B_GREEN}Success:${NC} $1"; }
 _warning_msg() { echo "${B_YELLOW}Warning:${NC} $1"; }
 
 # error message text
-_error_msg() { echo "${B_RED}Error:${NC} $1"; }
+_error_msg() {
+  echo "${B_RED}Error:${NC} $1"
+  exit 1
+}
 
 _usage() {
   cat <<EOF
