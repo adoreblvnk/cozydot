@@ -7,9 +7,7 @@ readonly DOTFILES="dotfiles"
 CONFIG="$(dirname "$0")/config.yaml"
 SECRETS="$(dirname "$0")/secrets.yaml"
 PRESETS_DIR="$(dirname "$0")/presets"
-
-# metadata
-EDIT= # sets whether the config yaml file can be edited by tides
+# set in _set_constants
 DISTRO=
 DE=
 
@@ -56,16 +54,12 @@ _colours() {
   fi
 }
 
-# info message text
 _info_msg() { echo "${B_BLUE}Info:${NC} $1"; }
 
-# success message text
 _success_msg() { echo "${B_GREEN}Success:${NC} $1"; }
 
-# warning message text
 _warning_msg() { echo "${B_YELLOW}Warning:${NC} $1"; }
 
-# error message text
 _error_msg() {
   echo "${B_RED}Error:${NC} $1"
   exit 1
@@ -97,56 +91,51 @@ ${YELLOW}Configuration:${NC}
 
 ${YELLOW}Example:${NC}
   ${tides_txt} ${CYAN}configure${NC}
-
 EOF
 }
 
-# ----- SET METADATA -----
+# ----- SET CONSTANTS -----
 
 __get_distro() {
-  . /etc/os-release
+  . /etc/os-release # contains operating system identification data
   local distro="$(yq '.metadata.distro' "$CONFIG")"
   if [[ $distro == "auto" ]]; then
     distro="$ID"
     _info_msg "Auto-detected & set distro to $distro"
   else
-    if [[ "$distro" != "$ID" ]]; then
-      _warning_msg "$distro is not the current distro"
-    fi
     _info_msg "Set distro to $distro as specified in config"
   fi
   DISTRO="$distro"
+
   if [[ -n $UBUNTU_CODENAME ]]; then
-    # set VERSION_CODENAME to UBUNTU_CODENAME for adding repos
-    # modifying this system-set variable has no major consequences anyways
+    # overwrite $VERSION_CODENAME in Ubuntu-based distros for adding repos which use $VERSION_CODENAME. Modifying this
+    # system variable has no major consequences anyways
     # shellcheck disable=SC2034
     VERSION_CODENAME=$UBUNTU_CODENAME
   fi
 }
 
+# get desktop environment
 __get_DE() {
   local de="$(yq '.metadata.DE' "$CONFIG")"
-  # auto-detect desktop environment if DE value is auto
+  # detect DE modified from https://cgit.freedesktop.org/xdg/xdg-utils/tree/scripts/xdg-utils-common.in#n296
   if [[ $de == "auto" ]]; then
-    if [[ $XDG_CURRENT_DESKTOP == "X-Cinnamon" ]]; then
-      de="cinnamon"
-      _info_msg "Auto-detected & set desktop environment to cinnamon"
-    fi
-    if echo "$XDG_CURRENT_DESKTOP" | grep -iq "GNOME"; then
-      de="gnome"
-      _info_msg "Auto-detected & set desktop environment to gnome"
+    case "$XDG_CURRENT_DESKTOP" in
+      Cinnamon | X-Cinnamon) DE=cinnamon ;;
+      *GNOME*) DE=gnome ;;
+      *) _warning_msg "Unknown desktop environment" ;;
+    esac
+    if [[ $de != "auto" ]]; then
+      _info_msg "Auto-detected & set desktop environment to $de"
     fi
   else
-    if echo "$XDG_CURRENT_DESKTOP" | grep -ivq "$de"; then
-      _warning_msg "$de is not the current desktop environment"
-    fi
     _info_msg "Set desktop environment to $de as specified in config"
   fi
   DE="$de"
 }
 
-_set_metadata() {
-  EDIT=$(yq '.metadata.edit' "$CONFIG")
+_set_constants() {
+  EDIT=$(yq '.metadata.edit' "$CONFIG") # editing config file
   __get_distro
   __get_DE
 }
@@ -172,7 +161,6 @@ set_config() {
     CONFIG=$config_file
   else
     _error_msg "Config selected: $1 does not exist"
-    exit 1
   fi
 }
 
@@ -184,8 +172,6 @@ set_secrets_file() { SECRETS=$1; }
 
 check() {
   _info_msg "Starting ${tides_txt} check..."
-
-  _set_metadata
 
   if [[ $(yq '.config.check.snapDisabled' "$CONFIG") == true ]]; then
     _info_msg "Disabling snap"
@@ -374,11 +360,8 @@ EOF
 install() {
   _info_msg "Starting ${tides_txt} install"
 
-  if [[ $(yq '.config.install.check' "$CONFIG") == true ]]; then
-    check
-  else
-    _set_metadata
-  fi
+  _set_constants
+  [[ $(yq '.config.install.check' "$CONFIG") == true ]] && check
 
   # install apt packages
   if [[ $(yq '.config.install.aptEnabled' "$CONFIG") == true ]] \
@@ -492,11 +475,8 @@ install() {
 update() {
   _info_msg "Starting ${tides_txt} update"
 
-  if [[ $(yq '.config.update.check' "$CONFIG") == true ]]; then
-    check
-  else
-    _set_metadata
-  fi
+  _set_constants
+  [[ $(yq '.config.update.check' "$CONFIG") == true ]] && check
 
   if [[ $(yq '.config.update.apt.apt' "$CONFIG") == true ]]; then
     _info_msg "Updating & upgrading apt packages"
@@ -565,7 +545,7 @@ update() {
         https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
       sudo chmod +x /usr/bin/yq
     else
-      _info_msg "yq version is already the latest"
+      _info_msg "yq $local_yq_ver is already the latest"
     fi
   fi
 
@@ -582,11 +562,8 @@ update() {
 configure() {
   _info_msg "Starting ${tides_txt} configuration"
 
-  if [[ $(yq '.config.configure.check' "$CONFIG") == true ]]; then
-    check
-  else
-    _set_metadata
-  fi
+  _set_constants
+  [[ $(yq '.config.configure.check' "$CONFIG") == true ]] && check
 
   # dotfile manager implementation via Stow
   if [[ $(yq '.config.configure.dotfilesEnabled' "$CONFIG") == true ]] \
@@ -687,7 +664,7 @@ EOF
     if ! id --name --groups "$USER" | grep docker &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
       # create docker group
-      sudo groupadd docker
+      sudo groupadd -f docker
       # add user to docker group
       sudo usermod -aG docker "$USER"
       # change group ID to docker to activate change in current shell
@@ -816,7 +793,6 @@ main() {
   [[ $# -gt 0 ]] || {
     _usage
     _error_msg "No argument(s)"
-    exit 1
   }
 
   while [[ $# -gt 0 ]]; do
@@ -845,7 +821,6 @@ main() {
       *)
         _usage
         _error_msg "Invalid argument(s)"
-        exit 1
         ;;
     esac
     shift
