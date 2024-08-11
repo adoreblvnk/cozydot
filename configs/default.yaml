@@ -49,17 +49,17 @@ config:
       - tk-dev
       - xz-utils
       - zlib1g-dev
-      # cargo-update dependencies
-      - libgit2-dev
-      - libssh-dev
-      - libssl-dev
-      - pkgconf
       # imagemagick dependencies
       - libjpeg-dev
       - libpng-dev
       - libtiff-dev
       # docker dependencies
       - lsb-release
+      # cargo-update dependencies
+      - libgit2-dev
+      - libssh-dev
+      - libssl-dev
+      - pkgconf
       # alacritty dependencies
       - libfontconfig1-dev
       - libfreetype6-dev

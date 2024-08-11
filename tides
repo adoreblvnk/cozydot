@@ -4,16 +4,18 @@ set -euo pipefail
 
 # constants
 readonly DOTFILES="dotfiles"
-CONFIG="$(dirname "$0")/config.yaml"
+CONFIG="$(dirname "$0")/configs/default.yaml"
 SECRETS="$(dirname "$0")/secrets.yaml"
-PRESETS_DIR="$(dirname "$0")/presets"
+CONFIG_DIR="$(dirname "$0")/configs"
 # set in _set_constants
 DISTRO=
-DE=
+DESKTOP_ENVIRONMENT=
 
 # ----- PRINT FUNCTIONS -----
 
-# set text colours if supported
+# Set text colours if supported.
+# Arguments:
+#   colours enabled, a boolean
 _colours() {
   if [[ "$(tput colors)" -ge 8 ]] \
     && [[ $1 == true ]]; then
@@ -96,7 +98,16 @@ EOF
 
 # ----- SET CONSTANTS -----
 
-__get_distro() {
+# Set complex constants that require commands to be set.
+# Globals:
+#   EDIT
+#   DISTRO
+#   DESKTOP_ENVIRONMENT
+#   VERSION_CODENAME: only if $UBUNTU_CODENAME exists
+_set_constants() {
+  EDIT=$(yq '.metadata.edit' "$CONFIG") # enables config file editing
+
+  # get distro & set $DISTRO
   . /etc/os-release # contains operating system identification data
   local distro="$(yq '.metadata.distro' "$CONFIG")"
   if [[ $distro == "auto" ]]; then
@@ -107,22 +118,13 @@ __get_distro() {
   fi
   DISTRO="$distro"
 
-  if [[ -n $UBUNTU_CODENAME ]]; then
-    # overwrite $VERSION_CODENAME in Ubuntu-based distros for adding repos which use $VERSION_CODENAME. Modifying this
-    # system variable has no major consequences anyways
-    # shellcheck disable=SC2034
-    VERSION_CODENAME=$UBUNTU_CODENAME
-  fi
-}
-
-# get desktop environment
-__get_DE() {
-  local de="$(yq '.metadata.DE' "$CONFIG")"
+  # get desktop environment & set $DESKTOP_ENVIRONMENT
+  local de="$(yq '.metadata.desktop_environment' "$CONFIG")"
   # detect DE modified from https://cgit.freedesktop.org/xdg/xdg-utils/tree/scripts/xdg-utils-common.in#n296
   if [[ $de == "auto" ]]; then
     case "$XDG_CURRENT_DESKTOP" in
-      Cinnamon | X-Cinnamon) DE=cinnamon ;;
-      *GNOME*) DE=gnome ;;
+      Cinnamon | X-Cinnamon) de=cinnamon ;;
+      *GNOME*) de=gnome ;;
       *) _warning_msg "Unknown desktop environment" ;;
     esac
     if [[ $de != "auto" ]]; then
@@ -131,13 +133,14 @@ __get_DE() {
   else
     _info_msg "Set desktop environment to $de as specified in config"
   fi
-  DE="$de"
-}
+  DESKTOP_ENVIRONMENT="$de"
 
-_set_constants() {
-  EDIT=$(yq '.metadata.edit' "$CONFIG") # editing config file
-  __get_distro
-  __get_DE
+  if [[ -n $UBUNTU_CODENAME ]]; then
+    # overwrite $VERSION_CODENAME in Ubuntu-based distros for adding repos which use $VERSION_CODENAME. Modifying this
+    # system variable has no major consequences anyways
+    # shellcheck disable=SC2034
+    VERSION_CODENAME=$UBUNTU_CODENAME
+  fi
 }
 
 # ----- OPTIONS -----
@@ -146,27 +149,38 @@ list_configs() {
   local configs
   # find all preset files, then filter out the parent dirs & file suffixes
   mapfile -t configs < <(
-    find "$PRESETS_DIR" -type f | awk -F '[/.]' '{print $--NF}'
+    find "$CONFIG_DIR" -type f | awk -F '[/.]' '{print $--NF}'
   )
-  echo "${YELLOW}Available preset configs:${NC}"
+  echo "${YELLOW}Available configs:${NC}"
   for config in "${configs[@]}"; do
     echo "  ${GREEN}$config${NC}"
   done
 }
 
+# Use config specified in config directory.
+# Arguments:
+#   config that exists in $CONFIG_DIR
 set_config() {
-  local config_file="${PRESETS_DIR}/$1.yaml"
+  local config_file="${CONFIG_DIR}/$1.yaml"
   if [[ -f $config_file ]]; then
-    _info_msg "Using $1 config"
+    _info_msg "Using $1 config (${config_file})"
     CONFIG=$config_file
   else
-    _error_msg "Config selected: $1 does not exist"
+    _error_msg "Config selected \"$1\" does not exist"
   fi
 }
 
-set_config_file() { CONFIG=$1; }
-
-set_secrets_file() { SECRETS=$1; }
+# Use secrets file specified by user.
+# Arguments:
+#   secrets file as a path
+set_secrets_file() {
+  SECRETS="$(realpath "$1")"
+  if [[ -f "$SECRETS" ]]; then
+    yq '.gitconfig.name' "$SECRETS"
+  else
+    _error_msg "Secrets file selected \"$1\" does not exist"
+  fi
+}
 
 # ----- COMMANDS -----
 
@@ -222,10 +236,10 @@ EOF
     fi
   fi
 
-  # purge system
   if [[ $(yq '.config.check.purgeEnabled' "$CONFIG") == true ]]; then
-    # collect purge packages into array
-    local purge_pkgs
+    _info_msg "Purging apt packages"
+
+    local purge_pkgs # collect purge packages into array
     mapfile -t purge_pkgs < <(yq '.config.check.purge[]' "$CONFIG")
     for pkg in "${purge_pkgs[@]}"; do
       # shellcheck disable=SC2086
@@ -233,20 +247,23 @@ EOF
     done
 
     if $EDIT; then
+      _info_msg "Setting purgeEnabled to false"
       yq -i '.config.check.purgeEnabled = false' "$CONFIG"
     fi
   fi
 
-  # install deps
   if [[ $(yq '.config.check.depsEnabled' "$CONFIG") == true ]]; then
     _info_msg "Installing dependencies"
+
     sudo apt-get update -qq
     # shellcheck disable=SC2046
     sudo apt-get install -qy $(yq '.config.check.deps[]' "$CONFIG")
   fi
 
+  # installs pyenv, installs python according to version specified in $CONFIG
   if [[ $(yq '.config.check.python.pyenvCheck' "$CONFIG") == true ]]; then
     _info_msg "Running pyenv check"
+
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
       if [[ ! -d ~/.pyenv ]]; then
@@ -269,18 +286,19 @@ EOF
     # install latest python version if pyenv python version is not latest.
     # covers test case where pyenv version-name is nonexistent
     if [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
-      # check if python version exists but is not set to global
+      # only install if python version exists but is not set to global
       if ! pyenv versions | grep "$latest_py_ver"; then
+        _info_msg "Installing latest Python version $latest_py_ver"
         pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
       fi
+      _info_msg "Setting global Python version to $latest_py_ver"
       pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
     fi
   fi
 
-  # install rustup, rustc, cargo
   if [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]] \
     && ! command -v rustup &>/dev/null; then
-    _info_msg "Installing rustup"
+    _info_msg "Installing rustup, rustc,  cargo"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
 
@@ -328,13 +346,16 @@ EOF
       unzip -o Geist.zip
       # install Geist opentype font
       sudo mv Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
+      _info_msg "Cleanup remnant files"
+      rm -rf Geist.zip __MACOSX/ Geist-*
+    else
+      _info_msg "Geist font already exists"
     fi
     _info_msg "Reloading fc-cache"
     fc-cache -f
-    # cleanup remnant files
-    rm -rf Geist.zip __MACOSX/ Geist-*
 
     if $EDIT; then
+      _info_msg "Setting geistFontEnabled to false"
       yq -i '.config.check.geistFontEnabled = false' "$CONFIG"
     fi
   fi
@@ -344,14 +365,17 @@ EOF
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
     _info_msg "Installing nerdfont $font"
     if [[ ! -d "/usr/share/fonts/$font" ]]; then
+      _info_msg "Downloading $font"
       sudo mkdir -p "/usr/share/fonts/$font"
       curl -sSL \
         "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
         | sudo tar -xvJ -C "/usr/share/fonts/$font"
     fi
-    fc-cache -vf
+    _info_msg "Reloading fc-cache"
+    fc-cache -f
 
     if $EDIT; then
+      _info_msg "Setting nerdfontEnabled to false"
       yq -i '.config.check.nerdfontEnabled = false' "$CONFIG"
     fi
   fi
@@ -363,51 +387,55 @@ install() {
   _set_constants
   [[ $(yq '.config.install.check' "$CONFIG") == true ]] && check
 
-  # install apt packages
+  # install apt packages if apt list has > 1 value
   if [[ $(yq '.config.install.aptEnabled' "$CONFIG") == true ]] \
     && [[ $(yq '.config.install.apt | length' "$CONFIG") -gt 0 ]]; then
     _info_msg "Installing apt packages"
+
     sudo apt-get update -qq
     # shellcheck disable=SC2046
     sudo apt-get install -qy $(yq '.config.install.apt[]' "$CONFIG")
   fi
 
-  # install from apt alternative sources
+  # install from apt alternative sources if aptAltSources list has > 1 value & flatpak is installed
   local no_of_alt_sources=$(yq '.config.install.aptAltSources | length' "$CONFIG")
   if [[ $(yq '.config.install.aptAltSourcesEnabled' "$CONFIG") == true ]] \
     && [[ $no_of_alt_sources -gt 0 ]]; then
     _info_msg "Installing apt packages from alternative sources"
-    # setting up signing keys & repo entries
+
+    # setting up signing keys & repo entries for each source
     for ((i = 0; i < no_of_alt_sources; i++)); do
       local alt_pkg_obj=$(yq ".config.install.aptAltSources[$i]" "$CONFIG")
+      local source_file_name=$(yq '.sourceFile' <<<"$alt_pkg_obj")
 
       # download gpg key from remote
       if [[ $(yq '.gpgKeyPath' <<<"$alt_pkg_obj") == *.asc ]]; then
-        _info_msg "Downloading .asc key for $(yq '.sourceFile' <<<"$alt_pkg_obj")"
+        _info_msg "Downloading .asc key for $source_file_name"
         sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$alt_pkg_obj")" \
           "$(yq '.remoteGpgKey' <<<"$alt_pkg_obj")"
       elif [[ $(yq '.gpgKeyPath' <<<"$alt_pkg_obj") == *.gpg ]]; then
-        _info_msg "Downloading & dearmoring .gpg key for $(yq '.sourceFile' <<<"$alt_pkg_obj")"
+        _info_msg "Downloading & dearmoring .gpg key for $source_file_name"
         # dearmor if key is required to be in gpg format
         sudo curl -fsSL "$(yq '.remoteGpgKey' <<<"$alt_pkg_obj")" \
           | sudo gpg --dearmor --yes -o "$(yq '.gpgKeyPath' <<<"$alt_pkg_obj")"
       fi
 
       # add repo entry into sources.list.d
-      local source_file_full_path="/etc/apt/sources.list.d/$(yq '.sourceFile' <<<"$alt_pkg_obj").list"
-      _info_msg "Adding repo entry into sources.list.d for $(yq '.sourceFile' <<<"$alt_pkg_obj")"
+      local source_file_full_path="/etc/apt/sources.list.d/$source_file_name.list"
+      _info_msg "Adding repo entry into sources.list.d for $source_file_name"
       eval echo "$(yq '.repo' <<<"$alt_pkg_obj")" \
         | sudo tee "$source_file_full_path" >/dev/null
 
       # perform pinning if pinning entry exists
       if [[ $(yq '.pinning' <<<"$alt_pkg_obj") != false ]]; then
+        _info_msg "Performing pinning to prioritise $source_file_name"
         # perform pinning to prioritise
-        local pref_file="/etc/apt/preferences.d/$(yq '.sourceFile' <<<"$alt_pkg_obj")"
-        _info_msg "Performing pinning to prioritise package"
+        local pref_file="/etc/apt/preferences.d/$source_file_name"
         yq '.pinning' <<<"$alt_pkg_obj" \
           | sudo tee "$pref_file" >/dev/null
       fi
     done
+
     # install packages
     _info_msg "Installing apt packages from alternative sources"
     sudo apt-get update -qq
@@ -417,17 +445,21 @@ install() {
       $(yq '.config.install.aptAltSources[].packages[]' "$CONFIG")
   fi
 
-  # install flatpaks
+  # install flatpaks if flatpak list has > 1 value
   if [[ $(yq '.config.install.flatpakEnabled' "$CONFIG") == true ]] \
     && [[ $(yq '.config.install.flatpak | length' "$CONFIG") -gt 0 ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Installing flatpak packages"
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    if ! flatpak remotes | grep -iq "^flathub"; then
+      _info_msg "Adding flathub repository"
+      flatpak remote-add \
+        --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    fi
     # shellcheck disable=SC2046
     flatpak install -y flathub $(yq '.config.install.flatpak[]' "$CONFIG")
   fi
 
-  # install cargo packages
+  # install cargo packages if cargo list has > 1 value & cargo is installed
   if [[ $(yq '.config.install.cargoEnabled' "$CONFIG") == true ]] \
     && [[ $(yq '.config.install.cargo | length' "$CONFIG") -gt 0 ]] \
     && command -v cargo &>/dev/null; then
@@ -435,13 +467,13 @@ install() {
     local rust_pkgs
     mapfile -t rust_pkgs < <(yq '.config.install.cargo[]' "$CONFIG")
     for pkg in "${rust_pkgs[@]}"; do
-      # disable to enable installing with options
+      # disable SC2086 to enable installing with options
       # shellcheck disable=SC2086
       cargo install $pkg
     done
   fi
 
-  # install binary packages
+  # install binary packages if binaries list has > 1 value
   local no_of_binaries=$(yq '.config.install.binaries | length' "$CONFIG")
   if [[ $(yq '.config.install.binariesEnabled' "$CONFIG") == true ]] \
     && [[ $no_of_binaries -gt 0 ]]; then
@@ -449,22 +481,23 @@ install() {
     mkdir -p "$HOME/Applications"
     for ((i = 0; i < no_of_binaries; i++)); do
       local binary_obj=$(yq ".config.install.binaries[$i]" "$CONFIG")
+      local binary_name=$(yq '.name' <<<"$binary_obj")
       # skip if binary exists
-      if [[ -f "$HOME/Applications/$(yq '.name' <<<"$binary_obj")" ]]; then
-        _info_msg "$(yq '.name' <<<"$binary_obj") already exists"
+      if [[ -f "$HOME/Applications/$binary_name" ]]; then
+        _info_msg "$binary_name already exists"
         continue
       fi
       # install AppImage
-      if [[ $(yq '.name' <<<"$binary_obj") == *.AppImage ]]; then
+      if [[ $binary_name == *.AppImage ]]; then
+        _info_msg "$binary_name is an AppImage"
         local download_url="$(yq '.url' <<<"$binary_obj")"
         # execute string as subshell if subshell detected
         if grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_obj")"; then
           download_url="$(eval echo "$(yq '.url' <<<"$binary_obj")")"
         fi
-        _info_msg "Installing $(yq '.name' <<<"$binary_obj")"
-        curl -fsSL -o "$HOME/Applications/$(yq '.name' <<<"$binary_obj")" \
-          "$download_url"
-        chmod +x "$HOME/Applications/$(yq '.name' <<<"$binary_obj")"
+        _info_msg "Installing $binary_name"
+        curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
+        chmod +x "$HOME/Applications/$binary_name"
       fi
     done
   fi
@@ -747,7 +780,7 @@ EOF
   if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]]; then
     _info_msg "Configuring desktop environment"
     # cinnamon settings
-    if [[ $DE == "cinnamon" ]]; then
+    if [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
       if [[ $(yq ".config.configure.DEConf.cinnamon.setDefaultTerm" "$CONFIG") == true ]]; then
         local term=$(yq ".config.configure.DEConf.cinnamon.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
@@ -757,7 +790,7 @@ EOF
     fi
 
     # gnome settings
-    if [[ "$DE" == "gnome" ]]; then
+    if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
       if [[ $(yq ".config.configure.DEConf.gnome.setDefaultTerm" "$CONFIG") == true ]]; then
         local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
@@ -812,6 +845,7 @@ main() {
         set_secrets_file "$2"
         shift
         ;;
+      -v | --version) echo "tides $(yq '.version' "$CONFIG")" ;;
       # COMMANDS
       check) check ;;
       install) install ;;
