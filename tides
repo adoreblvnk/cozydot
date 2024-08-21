@@ -734,7 +734,7 @@ EOF
     if ! id --name --groups "$USER" | grep vboxusers &>/dev/null; then
       _info_msg "Adding user to vboxusers group to allow user to execute virtualbox commands"
       # create vboxusers group
-      sudo groupadd vboxusers
+      sudo groupadd -f vboxusers
       # add user to vboxusers group
       sudo usermod -aG vboxusers "$USER"
       # change group ID to vboxusers to activate change in current shell

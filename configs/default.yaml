@@ -147,9 +147,10 @@ config:
           - glow
     flatpakEnabled: true
     flatpak:
-      - com.discordapp.Discord
-      - com.obsproject.Studio
+      - com.obsproject.Studio # video recorder & live streaming
+      - dev.vencord.Vesktop # Discord client
       - org.qbittorrent.qBittorrent
+      - org.shotcut.Shotcut # video editor
       - org.telegram.desktop
     cargoEnabled: true
     cargo:
@@ -175,6 +176,8 @@ config:
         url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
       - name: Obsidian.AppImage # note-taking app
         url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+      - name: Vesktop.AppImage # Discord 3rd-party client
+        url: $(curl -sSL https://api.github.com/repos/Vencord/Vesktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage")')
   update:
     check: true
     apt:
