@@ -84,8 +84,8 @@ ${YELLOW}Options:${NC}
 
 ${YELLOW}Commands:${NC}
 
-  ${GREEN}   check    ${NC} Installs dependencies, Python (via pyenv), Cargo (via rustup), fonts (Geist & 
-               Nerdfonts), & firmware packages
+  ${GREEN}   check    ${NC} Purges bloat (default) & installs dependencies. Installs Python (via pyenv), Cargo
+               (via rustup), fonts (Geist & Nerdfonts), & firmware packages
   ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, & binary (AppImage) 
                packages
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans
@@ -103,7 +103,7 @@ ${YELLOW}Configuration:${NC}
 ${YELLOW}Example:${NC}
   ${tides_txt} ${CYAN}--config virtual_machine configure${NC}
 
-${YELLOW}Project Homepage:${NC} https://github.com/adoreblvnk/tides
+${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/tides${NC}
 
 EOF
 }
