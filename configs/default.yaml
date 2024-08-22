@@ -3,7 +3,7 @@ metadata:
   edit: true
   distro: auto # auto | ubuntu | linuxmint
   # NOTE: highly recommended to be "auto"
-  DE: auto # auto | gnome | cinnamon
+  desktopEnvironment: auto # auto | gnome | cinnamon
 config:
   check:
     snapDisabled: true # TODO: add functionality

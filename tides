@@ -34,8 +34,8 @@ _colours() {
     B_CYAN="$(tput bold setaf 6)"    # bold cyan
     tides_txt="${B_RED}t${B_YELLOW}i${B_GREEN}d${B_BLUE}e${B_MAGENTA}s${NC}"
     TIDES_TXT="${B_RED}T${B_YELLOW}I${B_GREEN}D${B_BLUE}E${B_MAGENTA}S${NC}"
-  # don't set colours if argument is false (or not given). use `_colours false` for readability
   else
+    # don't set colours if argument is false (or not given). use `_colours false` for readability
     NC=
     BOLD=
     RED=
@@ -80,6 +80,7 @@ ${YELLOW}Options:${NC}
                          directory
   ${GREEN}    --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
   ${GREEN}-h, --help            ${NC} Print help information
+  ${GREEN}-V, --version         ${NC} Print version information
 
 ${YELLOW}Commands:${NC}
 
@@ -94,12 +95,15 @@ ${YELLOW}Commands:${NC}
   ${GREEN}h, help     ${NC} Print help information
 
 ${YELLOW}Configuration:${NC}
-  Customise each command's behaviour by modifying the \`${BLUE}config.yaml${NC}\` file.
-  The config schema of \`${BLUE}config.yaml${NC}\` is available at \`${BLUE}README.md${NC}\`.
-  Sample configs are available in ${BLUE}<tides_path>/sample/${NC} directory.
+  Customise the actions each command by modifying the ${BLUE}configs/default.yaml${NC} file.
+  The full config schema of ${tides_txt} is available at ${BLUE}README.md${NC}.
+  Preset configs are available in ${BLUE}<tides_path>/configs/${NC} directory. Add new configs in \$CONFIG_DIR
+   (default: ${BLUE}<tides_path>/configs/${NC}) & list them with ${tides_txt} ${CYAN}--list-configs${NC}
 
 ${YELLOW}Example:${NC}
   ${tides_txt} ${CYAN}--config virtual_machine configure${NC}
+
+${YELLOW}Project Homepage:${NC} https://github.com/adoreblvnk/tides
 
 EOF
 }
@@ -117,35 +121,40 @@ _set_constants() {
 
   # get distro & set $DISTRO
   . /etc/os-release # contains operating system identification data
-  local distro="$(yq '.metadata.distro' "$CONFIG")"
-  if [[ $distro == "auto" ]]; then
-    distro="$ID"
-    _info_msg "Auto-detected & set distro to $distro"
+  DISTRO="$(yq '.metadata.distro' "$CONFIG")"
+  if [[ $DISTRO == "auto" ]]; then
+    DISTRO="$ID" # TODO: create var to store upstream distro?
+    case "$DISTRO" in
+      # https://github.com/which-distro/os-release
+      ubuntu | linuxmint | pop | zorin | Deepin) _info_msg "Ubuntu-like distro detected" ;;
+      debian | kali | tails) _info_msg "Debian-like distro detected" ;;
+      *) _error_msg "Unsupported distro detected" ;;
+    esac
+    _info_msg "Auto-detected & set distro to $DISTRO"
   else
-    _info_msg "Set distro to $distro as specified in config"
+    _info_msg "Set distro to $DISTRO as specified in config"
   fi
-  DISTRO="$distro"
 
   # get desktop environment & set $DESKTOP_ENVIRONMENT
-  local de="$(yq '.metadata.desktop_environment' "$CONFIG")"
+  DESKTOP_ENVIRONMENT="$(yq '.metadata.desktopEnvironment' "$CONFIG")"
   # detect DE modified from https://cgit.freedesktop.org/xdg/xdg-utils/tree/scripts/xdg-utils-common.in#n296
-  if [[ $de == "auto" ]]; then
+  if [[ $DESKTOP_ENVIRONMENT == "auto" ]]; then
     case "$XDG_CURRENT_DESKTOP" in
-      Cinnamon | X-Cinnamon) de=cinnamon ;;
-      *GNOME*) de=gnome ;;
+      Cinnamon | X-Cinnamon) DESKTOP_ENVIRONMENT=cinnamon ;;
+      *GNOME*) DESKTOP_ENVIRONMENT=gnome ;;
       *) _warning_msg "Unknown desktop environment" ;;
     esac
-    if [[ $de != "auto" ]]; then
-      _info_msg "Auto-detected & set desktop environment to $de"
+    if [[ $DESKTOP_ENVIRONMENT != "auto" ]]; then
+      _info_msg "Auto-detected & set desktop environment to $DESKTOP_ENVIRONMENT"
     fi
   else
-    _info_msg "Set desktop environment to $de as specified in config"
+    _info_msg "Set desktop environment to $DESKTOP_ENVIRONMENT as specified in config"
   fi
-  DESKTOP_ENVIRONMENT="$de"
 
   if [[ -n $UBUNTU_CODENAME ]]; then
-    # overwrite $VERSION_CODENAME in Ubuntu-based distros for adding repos which use $VERSION_CODENAME. Modifying this
-    # system variable has no major consequences anyways
+    _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
+    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying 
+    # this system variable has no major consequences anyways
     # shellcheck disable=SC2034
     VERSION_CODENAME=$UBUNTU_CODENAME
   fi
@@ -190,10 +199,14 @@ set_secrets_file() {
   fi
 }
 
+get_version() { echo "${tides_txt} $(yq '.version' "$CONFIG")"; }
+
 # ----- COMMANDS -----
 
 check() {
   _info_msg "Starting ${tides_txt} check..."
+
+  _set_constants
 
   if [[ $(yq '.config.check.snapDisabled' "$CONFIG") == true ]]; then
     _info_msg "Disabling snap"
@@ -837,7 +850,7 @@ main() {
   # install curl if not installed
   if ! command -v curl &>/dev/null; then
     _info_msg "Installing curl"
-    sudo apt-get install -qq curl
+    sudo apt-get install -qq curl # NOTE: do not update to save time
   fi
 
   # download & install yq if not installed
@@ -870,7 +883,7 @@ main() {
         set_secrets_file "$2"
         shift
         ;;
-      -v | --version) echo "tides $(yq '.version' "$CONFIG")" ;;
+      -V | --version) get_version ;;
       # COMMANDS
       check) check ;;
       install) install ;;
