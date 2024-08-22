@@ -82,11 +82,16 @@ ${YELLOW}Options:${NC}
   ${GREEN}-h, --help            ${NC} Print help information
 
 ${YELLOW}Commands:${NC}
-  ${GREEN}   check    ${NC}    Installs dependencies, Python (via pyenv), Cargo (via rustup), fonts (Geist & Nerdfonts), & firmware packages
-  ${GREEN}i, install  ${NC}    Installs all apt (& alternative sources), flatpak, cargo, & binary (AppImage) packages
-  ${GREEN}u, update   ${NC}    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans system (see \`${BLUE}config.yaml${NC}\` for details)
-  ${GREEN}c, configure${NC}    Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), & performs other system configs.
-  ${GREEN}h, help     ${NC}    Print help information
+
+  ${GREEN}   check    ${NC} Installs dependencies, Python (via pyenv), Cargo (via rustup), fonts (Geist & 
+               Nerdfonts), & firmware packages
+  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, & binary (AppImage) 
+               packages
+  ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans
+               system (see \`${BLUE}config.yaml${NC}\` for details)
+  ${GREEN}c, configure${NC} Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), & 
+               performs other system configs.
+  ${GREEN}h, help     ${NC} Print help information
 
 ${YELLOW}Configuration:${NC}
   Customise each command's behaviour by modifying the \`${BLUE}config.yaml${NC}\` file.
