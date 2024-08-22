@@ -17,8 +17,7 @@ DESKTOP_ENVIRONMENT=
 # Arguments:
 #   colours enabled, a boolean
 _colours() {
-  if [[ "$(tput colors)" -ge 8 ]] \
-    && [[ $1 == true ]]; then
+  if [[ "$(tput colors)" -ge 8 ]] && [[ $1 == true ]]; then
     NC="$(tput sgr0)" # text reset (select graphic representation default)
     BOLD="$(tput bold)"
     RED="$(tput setaf 1)"            # red
@@ -74,10 +73,13 @@ ${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B
 ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
-  ${GREEN}    --no-colour${NC} Do not output any colour. Useful when redirecting output to a logfile
-  ${GREEN}-c, --config ${NC}   Set a custom config yaml file [default: ${BLUE}<tides_path>/config.yaml${NC}]
-  ${GREEN}-s, --secrets${NC}   Set a custom secrets yaml file [default: ${BLUE}<tides_path>/secrets.yaml${NC}]
-  ${GREEN}-h, --help   ${NC}   Print help information
+  ${GREEN}    --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
+  ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
+                         directory
+  ${GREEN}-c, --config <CONFIG> ${NC} Set a config file that exists in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
+                         directory
+  ${GREEN}    --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
+  ${GREEN}-h, --help            ${NC} Print help information
 
 ${YELLOW}Commands:${NC}
   ${GREEN}   check    ${NC}    Installs dependencies, Python (via pyenv), Cargo (via rustup), fonts (Geist & Nerdfonts), & firmware packages
@@ -92,7 +94,8 @@ ${YELLOW}Configuration:${NC}
   Sample configs are available in ${BLUE}<tides_path>/sample/${NC} directory.
 
 ${YELLOW}Example:${NC}
-  ${tides_txt} ${CYAN}configure${NC}
+  ${tides_txt} ${CYAN}--config virtual_machine configure${NC}
+
 EOF
 }
 
@@ -236,7 +239,7 @@ EOF
     fi
   fi
 
-  if [[ $(yq '.config.check.purgeEnabled' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!!seq" ]]; then
     _info_msg "Purging apt packages"
 
     local purge_pkgs # collect purge packages into array
@@ -247,12 +250,12 @@ EOF
     done
 
     if $EDIT; then
-      _info_msg "Setting purgeEnabled to false"
-      yq -i '.config.check.purgeEnabled = false' "$CONFIG"
+      _info_msg "Disabling purge"
+      yq -i '.config.check.purge tag = "!disabled"' "$CONFIG"
     fi
   fi
 
-  if [[ $(yq '.config.check.depsEnabled' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!!seq" ]]; then
     _info_msg "Installing dependencies"
 
     sudo apt-get update -qq
@@ -355,13 +358,13 @@ EOF
     fc-cache -f
 
     if $EDIT; then
-      _info_msg "Setting geistFontEnabled to false"
-      yq -i '.config.check.geistFontEnabled = false' "$CONFIG"
+      _info_msg "Disabling geistFont"
+      yq -i '.config.check.geistFont tag = "!disabled"' "$CONFIG"
     fi
   fi
 
   # install nerdfont
-  if [[ $(yq '.config.check.nerdfontEnabled' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!!str" ]]; then
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
     _info_msg "Installing nerdfont $font"
     if [[ ! -d "/usr/share/fonts/$font" ]]; then
@@ -375,8 +378,8 @@ EOF
     fc-cache -f
 
     if $EDIT; then
-      _info_msg "Setting nerdfontEnabled to false"
-      yq -i '.config.check.nerdfontEnabled = false' "$CONFIG"
+      _info_msg "Disabling nerdfont"
+      yq -i '.config.check.nerdfont tag = "!disabled"' "$CONFIG"
     fi
   fi
 }
@@ -388,7 +391,7 @@ install() {
   [[ $(yq '.config.install.check' "$CONFIG") == true ]] && check
 
   # install apt packages if apt list has > 1 value
-  if [[ $(yq '.config.install.aptEnabled' "$CONFIG") == true ]] \
+  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!!seq" ]] \
     && [[ $(yq '.config.install.apt | length' "$CONFIG") -gt 0 ]]; then
     _info_msg "Installing apt packages"
 
@@ -397,14 +400,12 @@ install() {
     sudo apt-get install -qy $(yq '.config.install.apt[]' "$CONFIG")
   fi
 
-  # install from apt alternative sources if aptAltSources list has > 1 value & flatpak is installed
-  local no_of_alt_sources=$(yq '.config.install.aptAltSources | length' "$CONFIG")
-  if [[ $(yq '.config.install.aptAltSourcesEnabled' "$CONFIG") == true ]] \
-    && [[ $no_of_alt_sources -gt 0 ]]; then
+  # install from apt alternative sources
+  if [[ $(yq '.config.install.aptAltSources | tag' "$CONFIG") == "!!seq" ]]; then
     _info_msg "Installing apt packages from alternative sources"
 
     # setting up signing keys & repo entries for each source
-    for ((i = 0; i < no_of_alt_sources; i++)); do
+    for ((i = 0; i < $(yq '.config.install.aptAltSources | length' "$CONFIG"); i++)); do
       local alt_pkg_obj=$(yq ".config.install.aptAltSources[$i]" "$CONFIG")
       local source_file_name=$(yq '.sourceFile' <<<"$alt_pkg_obj")
 
@@ -445,9 +446,8 @@ install() {
       $(yq '.config.install.aptAltSources[].packages[]' "$CONFIG")
   fi
 
-  # install flatpaks if flatpak list has > 1 value
-  if [[ $(yq '.config.install.flatpakEnabled' "$CONFIG") == true ]] \
-    && [[ $(yq '.config.install.flatpak | length' "$CONFIG") -gt 0 ]] \
+  # install flatpaks if flatpak is installed
+  if [[ $(yq '.config.install.flatpak | tag' "$CONFIG") == "!!seq" ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Installing flatpak packages"
     if ! flatpak remotes | grep -iq "^flathub"; then
@@ -459,9 +459,8 @@ install() {
     flatpak install -y flathub $(yq '.config.install.flatpak[]' "$CONFIG")
   fi
 
-  # install cargo packages if cargo list has > 1 value & cargo is installed
-  if [[ $(yq '.config.install.cargoEnabled' "$CONFIG") == true ]] \
-    && [[ $(yq '.config.install.cargo | length' "$CONFIG") -gt 0 ]] \
+  # install cargo packages if cargo is installed
+  if [[ $(yq '.config.install.cargo | tag' "$CONFIG") == "!!seq" ]] \
     && command -v cargo &>/dev/null; then
     _info_msg "Installing cargo packages"
     local rust_pkgs
@@ -473,13 +472,11 @@ install() {
     done
   fi
 
-  # install binary packages if binaries list has > 1 value
-  local no_of_binaries=$(yq '.config.install.binaries | length' "$CONFIG")
-  if [[ $(yq '.config.install.binariesEnabled' "$CONFIG") == true ]] \
-    && [[ $no_of_binaries -gt 0 ]]; then
+  # install binary packages
+  if [[ $(yq '.config.install.binaries | tag' "$CONFIG") == "!!seq" ]]; then
     _info_msg "Installing binary packages"
     mkdir -p "$HOME/Applications"
-    for ((i = 0; i < no_of_binaries; i++)); do
+    for ((i = 0; i < "$(yq '.config.install.binaries | length' "$CONFIG")"; i++)); do
       local binary_obj=$(yq ".config.install.binaries[$i]" "$CONFIG")
       local binary_name=$(yq '.name' <<<"$binary_obj")
       # skip if binary exists
@@ -489,13 +486,12 @@ install() {
       fi
       # install AppImage
       if [[ $binary_name == *.AppImage ]]; then
-        _info_msg "$binary_name is an AppImage"
+        _info_msg "Getting download url for $binary_name"
         local download_url="$(yq '.url' <<<"$binary_obj")"
         # execute string as subshell if subshell detected
-        if grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_obj")"; then
-          download_url="$(eval echo "$(yq '.url' <<<"$binary_obj")")"
-        fi
-        _info_msg "Installing $binary_name"
+        grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_obj")" \
+          && download_url="$(eval echo "$(yq '.url' <<<"$binary_obj")")"
+        _info_msg "Downloading ${binary_name}"
         curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
         chmod +x "$HOME/Applications/$binary_name"
       fi
@@ -599,8 +595,7 @@ configure() {
   [[ $(yq '.config.configure.check' "$CONFIG") == true ]] && check
 
   # dotfile manager implementation via Stow
-  if [[ $(yq '.config.configure.dotfilesEnabled' "$CONFIG") == true ]] \
-    && [[ $(yq '.config.configure.dotfiles.dotfiles | length' "$CONFIG") -gt 0 ]] \
+  if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!!seq" ]] \
     && command -v stow &>/dev/null; then
     _info_msg "Configuring dotfiles via Stow"
     local packages
@@ -645,6 +640,7 @@ Passphrase: $(yq '.gpg.passphrase' "$SECRETS")
 EOF
 
     if $EDIT; then
+      _info_msg "Disabling gpg.genKey"
       yq -i '.config.configure.apps.gpg.genKey = false' "$CONFIG"
     fi
   fi
@@ -743,8 +739,8 @@ EOF
   fi
 
   # install vscodium extensions
-  if [[ $(yq '.config.configure.apps.vscodium.extensionsEnabled' "$CONFIG") == true ]] \
-    && [[ $(yq '.config.configure.apps.vscodium.extensions | length' "$CONFIG") -gt 0 ]]; then
+  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!!seq" ]]; then
+    _info_msg "Installing vscodium extensions"
     local extensions
     mapfile -t extensions < <(
       yq -r '.config.configure.apps.vscodium.extensions[]' "$CONFIG"
@@ -757,7 +753,7 @@ EOF
   fi
 
   # optimisations
-  if [[ $(yq ".config.configure.optimisationsEnabled" "$CONFIG") == true ]]; then
+  if [[ $(yq ".config.configure.optimisations" "$CONFIG") == "!!map" ]]; then
     _info_msg "Configuring optimisations"
     if [[ $(yq ".config.configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
       _info_msg "Configuring auto-cpufreq"
@@ -779,9 +775,10 @@ EOF
   # desktop-environment specific configurations
   if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]]; then
     _info_msg "Configuring desktop environment"
+
     # cinnamon settings
     if [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
-      if [[ $(yq ".config.configure.DEConf.cinnamon.setDefaultTerm" "$CONFIG") == true ]]; then
+      if [[ $(yq ".config.configure.DEConf.cinnamon.defaultTerm | tag" "$CONFIG") == "!!str" ]]; then
         local term=$(yq ".config.configure.DEConf.cinnamon.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
@@ -790,7 +787,19 @@ EOF
       if [[ $(yq ".config.configure.DEConf.cinnamon.panelToMenuBar" "$CONFIG") == true ]]; then
         _info_msg "Converting panel to menu bar"
         # panel applets in order
-        gsettings set org.cinnamon enabled-applets "['panel1:left:0:Cinnamenu@json:1', 'panel1:right:1:xapp-status@cinnamon.org:2', 'panel1:right:2:notifications@cinnamon.org:3', 'panel1:right:3:printers@cinnamon.org:4', 'panel1:right:4:removable-drives@cinnamon.org:5', 'panel1:right:5:keyboard@cinnamon.org:6', 'panel1:right:6:network@cinnamon.org:7', 'panel1:right:7:sound@cinnamon.org:8', 'panel1:right:8:power@cinnamon.org:9', 'panel1:right:9:calendar@cinnamon.org:10', 'panel1:right:10:cornerbar@cinnamon.org:11']"
+        gsettings set org.cinnamon enabled-applets "[ \
+          'panel1:left:0:Cinnamenu@json:1', \
+          'panel1:right:1:xapp-status@cinnamon.org:2', \
+          'panel1:right:2:notifications@cinnamon.org:3', \
+          'panel1:right:3:printers@cinnamon.org:4', \
+          'panel1:right:4:removable-drives@cinnamon.org:5', \
+          'panel1:right:5:keyboard@cinnamon.org:6', \
+          'panel1:right:6:network@cinnamon.org:7', \
+          'panel1:right:7:sound@cinnamon.org:8', \
+          'panel1:right:8:power@cinnamon.org:9', \
+          'panel1:right:9:calendar@cinnamon.org:10', \
+          'panel1:right:10:cornerbar@cinnamon.org:11' \
+        ]"
         # panel icon sizes
         gsettings set org.cinnamon panel-zone-symbolic-icon-sizes '[{"left": 25, "center": 25, "right": 20, "panelId": 1}]'
         # shift panel position to top
@@ -799,9 +808,10 @@ EOF
         gsettings set org.cinnamon panels-height "['1:25']"
       fi
     fi
+
     # gnome settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-      if [[ $(yq ".config.configure.DEConf.gnome.setDefaultTerm" "$CONFIG") == true ]]; then
+      if [[ $(yq ".config.configure.DEConf.gnome.defaultTerm | tag" "$CONFIG") == "!!str" ]]; then
         local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
@@ -840,15 +850,15 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case $1 in
+      -h | --help | h | help)
+        _usage
+        exit 0
+        ;;
       # OPTIONS
       --no-colour) _colours false ;;
       --list-configs) list_configs ;;
       -c | --config)
         set_config "$2"
-        shift
-        ;;
-      --config-file)
-        set_config_file "$2"
         shift
         ;;
       --secrets-file)
@@ -861,7 +871,6 @@ main() {
       install) install ;;
       update) update ;;
       configure) configure ;;
-      -h | --help | h | help) _usage ;;
       *)
         _usage
         _error_msg "Invalid argument(s)"

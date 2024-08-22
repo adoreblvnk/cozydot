@@ -7,8 +7,7 @@ metadata:
 config:
   check:
     snapDisabled: true # TODO: add functionality
-    purgeEnabled: false # NOTE: modified by metadata.edit
-    purge:
+    purge: !disabled # NOTE: modified by metadata.edit
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
@@ -21,8 +20,7 @@ config:
       - firefox*
       # libreoffice replaced with onlyoffice
       - libreoffice*
-    depsEnabled: false
-    deps:
+    deps: !disabled
       # essential packages
       - apt-transport-https
       - bash-completion
@@ -72,13 +70,11 @@ config:
     rustupCheck: true
     appimagedCheck: true
     geistFontEnabled: false # NOTE: modified by metadata.edit
-    nerdfontEnabled: false # NOTE: modified by metadata.edit
-    nerdfont: GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads
+    nerdfont: !disabled GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads NOTE: modified by metadata.edit
     firmware: null # TODO: install firmware packages dynamically if needed
   install:
     check: true
-    aptEnabled: false
-    apt:
+    apt: !disabled
       # CLI utils
       - fzf # fuzzy finder
       - gnupg2
@@ -94,8 +90,7 @@ config:
       - imagemagick # image manipulation & conversion
       - vlc # multimedia player
       # productivity
-    aptAltSourcesEnabled: false
-    aptAltSources:
+    aptAltSources: !disabled
       - remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
         gpgKeyPath: /etc/apt/keyrings/docker.asc
         repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
@@ -145,13 +140,11 @@ config:
         pinning: false
         packages:
           - glow
-    flatpakEnabled: true
     flatpak:
       - com.obsproject.Studio # video recorder & live streaming
       - org.qbittorrent.qBittorrent
       - org.shotcut.Shotcut # video editor
       - org.telegram.desktop
-    cargoEnabled: true
     cargo:
       - alacritty
       - bat --locked
@@ -167,7 +160,6 @@ config:
       - yazi-fm --locked # OPTIONAL: terminal file manager
       - zellij --locked
       - zoxide --locked # OPTIONAL: smarter cd command
-    binariesEnabled: true
     binaries:
       - name: Bitwarden.AppImage # password manager
         url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
@@ -190,7 +182,6 @@ config:
       zellijClear: true
   configure:
     check: true
-    dotfilesEnabled: true
     dotfiles:
       stowMode: override # backup | override
       dotfiles:
@@ -213,8 +204,7 @@ config:
       docker: true
       virtualbox: true
       vscodium:
-        extensionsEnabled: false
-        extensions:
+        extensions: !disabled 
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
           - catppuccin.catppuccin-vsc-icons
@@ -232,16 +222,13 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
-    optimisationsEnabled: true
     optimisations:
       # laptop
       auto-cpufreq: true
     DEConfEnabled: true
     DEConf:
       cinnamon:
-        setDefaultTerm: true
         defaultTerm: alacritty
         panelToMenuBar: true
       gnome:
-        setDefaultTerm: true
         defaultTerm: alacritty
