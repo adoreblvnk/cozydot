@@ -3,16 +3,16 @@
 [user]
     # set in ~/.gitconfig.local
 [credential]
-	credentialStore = gpg
-	helper = 
-	helper = /usr/local/bin/git-credential-manager
+    credentialStore = gpg
+    helper = 
+    helper = /usr/local/bin/git-credential-manager
 [credential "https://dev.azure.com"]
-	useHttpPath = true
+    useHttpPath = true
 [commit]
-	gpgsign = true
+    gpgsign = true
 [tag]
-	gpgsign = true
+    gpgsign = true
 [alias]
-	logline = log --graph --pretty=format:'%C(yellow)%h %C(magenta)%ch%C(auto)%d %C(reset)%s %C(blue)<%an>'
-	ll = log --pretty=format:'%C(yellow)%h%C(auto)%d %Creset%s %C(magenta)%cr'
-	lm = log --graph --pretty=format:'%C(yellow)%h %C(magenta)%ch%C(auto)%d %C(reset)%s %C(blue)<%an>'
+    logline = log --graph --pretty=format:'%C(yellow)%h %C(magenta)%ch%C(auto)%d %C(reset)%s %C(blue)<%an>'
+    ll = log --pretty=format:'%C(yellow)%h%C(auto)%d %Creset%s %C(magenta)%cr'
+    lm = log --graph --pretty=format:'%C(yellow)%h %C(magenta)%ch%C(auto)%d %C(reset)%s %C(blue)<%an>'
