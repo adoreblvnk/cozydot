@@ -127,9 +127,8 @@ _set_constants() {
     DISTRO="$ID" # TODO: create var to store upstream distro?
     case "$DISTRO" in
       # https://github.com/which-distro/os-release
-      ubuntu | linuxmint | pop | zorin | Deepin) _info_msg "Ubuntu-like distro detected" ;;
+      ubuntu | linuxmint | pop | zorin | Deepin) ;;
       debian | kali | tails)
-        _info_msg "Debian-like distro detected"
         # TODO: add debian support
         _warning_msg "Debian distros not supported yet"
         ;;
@@ -138,6 +137,14 @@ _set_constants() {
     _info_msg "Auto-detected & set distro to $DISTRO"
   else
     _info_msg "Set distro to $DISTRO as manually specified in config"
+  fi
+
+  if [[ -n $UBUNTU_CODENAME ]]; then
+    _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
+    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
+    # this system variable has no major consequences anyways
+    # shellcheck disable=SC2034
+    VERSION_CODENAME=$UBUNTU_CODENAME
   fi
 
   # get desktop environment & set $DESKTOP_ENVIRONMENT
@@ -164,20 +171,13 @@ _set_constants() {
       wayland) DISPLAY_SERVER=wayland ;;
       *) _warning_msg "Unknown display server" ;;
     esac
-    if [[ $DISPLAY_SERVER == "auto" ]]; then
+    if [[ $DISPLAY_SERVER != "auto" ]]; then
       _info_msg "Auto-detected & set display server to $DISPLAY_SERVER"
     fi
   else
     _info_msg "Set display server to $DISPLAY_SERVER as manually specified in config"
   fi
 
-  if [[ -n $UBUNTU_CODENAME ]]; then
-    _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
-    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
-    # this system variable has no major consequences anyways
-    # shellcheck disable=SC2034
-    VERSION_CODENAME=$UBUNTU_CODENAME
-  fi
 }
 
 # ----- OPTIONS -----
@@ -334,19 +334,24 @@ EOF
       fi
       _info_msg "Setting global Python version to $latest_py_ver"
       pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
+    else
+      _info_msg "Python $(pyenv version-name) is already the latest version"
     fi
   fi
 
   if [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]] \
     && ! command -v rustup &>/dev/null; then
-    _info_msg "Installing rustup, rustc,  cargo"
+    _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  elif [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]]; then
+    _info_msg "Rustup toolchain already installed"
   fi
 
-  # setup appimaged if appimaged service isn't running / doesn't exist
-  if [[ $(yq '.config.check.appimagedCheck' "$CONFIG") == true ]] \
-    && ! systemctl -q --user is-active appimaged; then
-    _info_msg "Running appimaged check"
+  # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
+  if [[ $(yq '.config.check.appimaged.check' "$CONFIG") == true ]] \
+    && (! systemctl -q --user is-active appimaged \
+      || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]); then
+    _info_msg "Installing appimaged"
     # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
 
     # remove pre-existing similar tools
@@ -371,6 +376,8 @@ EOF
     # launch
     chmod +x "$HOME/Applications/appimaged.AppImage"
     "$HOME/Applications/appimaged.AppImage"
+  elif [[ $(yq '.config.check.appimaged.check' "$CONFIG") == true ]]; then
+    _info_msg "Appimaged service already running"
   fi
 
   # install Geist font
@@ -425,8 +432,11 @@ EOF
 install() {
   _info_msg "Starting ${tides_txt} install"
 
-  _set_constants
-  [[ $(yq '.config.install.check' "$CONFIG") == true ]] && check
+  if [[ $(yq '.config.install.check' "$CONFIG") == true ]]; then
+    check
+  else
+    _set_constants
+  fi
 
   # install apt packages if apt list has > 1 value
   if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!!seq" ]] \
@@ -542,8 +552,11 @@ install() {
 update() {
   _info_msg "Starting ${tides_txt} update"
 
-  _set_constants
-  [[ $(yq '.config.update.check' "$CONFIG") == true ]] && check
+  if [[ $(yq '.config.update.check' "$CONFIG") == true ]]; then
+    check
+  else
+    _set_constants
+  fi
 
   if [[ $(yq '.config.update.apt.apt' "$CONFIG") == true ]]; then
     _info_msg "Updating & upgrading apt packages"
@@ -629,8 +642,11 @@ update() {
 configure() {
   _info_msg "Starting ${tides_txt} configuration"
 
-  _set_constants
-  [[ $(yq '.config.configure.check' "$CONFIG") == true ]] && check
+  if [[ $(yq '.config.configure.check' "$CONFIG") == true ]]; then
+    check
+  else
+    _set_constants
+  fi
 
   # dotfile manager implementation via Stow
   if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!!seq" ]] \

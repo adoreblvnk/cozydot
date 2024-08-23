@@ -7,7 +7,7 @@ metadata:
   displayServer: auto # auto | x11 | wayland
 config:
   check:
-    snapDisabled: true # TODO: add functionality
+    snapDisabled: true
     purge: !disabled # NOTE: modified by metadata.edit
       # docker installed via aptAltSources
       - docker.io
@@ -17,10 +17,8 @@ config:
       - podman-docker
       - containerd
       - runc
-      # firefox installed via aptAltSources
-      - firefox*
-      # libreoffice replaced with onlyoffice
-      - libreoffice*
+      - firefox* # firefox installed via aptAltSources
+      - libreoffice* # libreoffice replaced with onlyoffice
     deps: !disabled
       # essential packages
       - apt-transport-https
@@ -69,10 +67,12 @@ config:
       pyenvCheck: true
       version: 3.12 # <major>.<minor>
     rustupCheck: true
-    appimagedCheck: true
+    appimaged:
+      check: true
+      cleanInstall: true
     geistFontEnabled: false # NOTE: modified by metadata.edit
-    nerdfont: !disabled GeistMono # list of fonts: https://www.nerdfonts.com/font-downloads NOTE: modified by metadata.edit
-    firmware: null # TODO: install firmware packages dynamically if needed
+    # list of nerdfonts: https://www.nerdfonts.com/font-downloads 
+    nerdfont: !disabled GeistMono # NOTE: modified by metadata.edit 
   install:
     check: true
     apt: !disabled
@@ -205,7 +205,7 @@ config:
       docker: true
       virtualbox: true
       vscodium:
-        extensions: !disabled 
+        extensions: !disabled
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
           - catppuccin.catppuccin-vsc-icons
