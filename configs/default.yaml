@@ -1,9 +1,10 @@
 version: 0.0.1
 metadata:
   edit: true
+  # NOTE: the following values are highly recommended to be set to "auto"
   distro: auto # auto | ubuntu | linuxmint
-  # NOTE: highly recommended to be "auto"
   desktopEnvironment: auto # auto | gnome | cinnamon
+  displayServer: auto # auto | x11 | wayland
 config:
   check:
     snapDisabled: true # TODO: add functionality

@@ -10,6 +10,7 @@ CONFIG_DIR="$(dirname "$0")/configs"
 # set in _set_constants
 DISTRO=
 DESKTOP_ENVIRONMENT=
+DISPLAY_SERVER=
 
 # ----- PRINT FUNCTIONS -----
 
@@ -127,12 +128,16 @@ _set_constants() {
     case "$DISTRO" in
       # https://github.com/which-distro/os-release
       ubuntu | linuxmint | pop | zorin | Deepin) _info_msg "Ubuntu-like distro detected" ;;
-      debian | kali | tails) _info_msg "Debian-like distro detected" ;;
+      debian | kali | tails)
+        _info_msg "Debian-like distro detected"
+        # TODO: add debian support
+        _warning_msg "Debian distros not supported yet"
+        ;;
       *) _error_msg "Unsupported distro detected" ;;
     esac
     _info_msg "Auto-detected & set distro to $DISTRO"
   else
-    _info_msg "Set distro to $DISTRO as specified in config"
+    _info_msg "Set distro to $DISTRO as manually specified in config"
   fi
 
   # get desktop environment & set $DESKTOP_ENVIRONMENT
@@ -148,12 +153,27 @@ _set_constants() {
       _info_msg "Auto-detected & set desktop environment to $DESKTOP_ENVIRONMENT"
     fi
   else
-    _info_msg "Set desktop environment to $DESKTOP_ENVIRONMENT as specified in config"
+    _info_msg "Set desktop environment to $DESKTOP_ENVIRONMENT as manually specified in config"
+  fi
+
+  # get & set $DISPLAY_SERVER
+  DISPLAY_SERVER="$(yq '.metadata.displayServer' "$CONFIG")"
+  if [[ $DISPLAY_SERVER == "auto" ]]; then
+    case "$XDG_SESSION_TYPE" in
+      x11) DISPLAY_SERVER=x11 ;;
+      wayland) DISPLAY_SERVER=wayland ;;
+      *) _warning_msg "Unknown display server" ;;
+    esac
+    if [[ $DISPLAY_SERVER == "auto" ]]; then
+      _info_msg "Auto-detected & set display server to $DISPLAY_SERVER"
+    fi
+  else
+    _info_msg "Set display server to $DISPLAY_SERVER as manually specified in config"
   fi
 
   if [[ -n $UBUNTU_CODENAME ]]; then
     _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
-    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying 
+    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
     # this system variable has no major consequences anyways
     # shellcheck disable=SC2034
     VERSION_CODENAME=$UBUNTU_CODENAME
