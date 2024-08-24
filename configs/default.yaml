@@ -69,7 +69,7 @@ config:
     rustupCheck: true
     appimaged:
       check: true
-      cleanInstall: true
+      cleanInstall: false
     geistFontEnabled: false # NOTE: modified by metadata.edit
     # list of nerdfonts: https://www.nerdfonts.com/font-downloads 
     nerdfont: !disabled GeistMono # NOTE: modified by metadata.edit 
