@@ -293,12 +293,20 @@ EOF
     fi
   fi
 
+  # install dependency packages
   if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!!seq" ]]; then
-    _info_msg "Installing dependencies"
-
+    local apt_pkgs
+    mapfile -t apt_pkgs < <(yq '.config.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
-    # shellcheck disable=SC2046
-    sudo apt-get install -qy $(yq '.config.check.deps[]' "$CONFIG")
+    for pkg in "${apt_pkgs[@]}"; do
+      _info_msg "Installing dependency $pkg"
+      sudo apt-get install -qq "$pkg"
+    done
+
+    if $EDIT; then
+      _info_msg "Disabling dependency installation"
+      yq -i '.config.check.deps tag = "!disabled"' "$CONFIG"
+    fi
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
@@ -344,7 +352,7 @@ EOF
     _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   elif [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]]; then
-    _info_msg "Rustup toolchain already installed"
+    _info_msg "Rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) toolchain already installed"
   fi
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
@@ -418,6 +426,8 @@ EOF
       curl -sSL \
         "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
         | sudo tar -xvJ -C "/usr/share/fonts/$font"
+    else
+      _info_msg "$font already exists"
     fi
     _info_msg "Reloading fc-cache"
     fc-cache -f
@@ -438,60 +448,64 @@ install() {
     _set_constants
   fi
 
-  # install apt packages if apt list has > 1 value
-  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!!seq" ]] \
-    && [[ $(yq '.config.install.apt | length' "$CONFIG") -gt 0 ]]; then
-    _info_msg "Installing apt packages"
-
+  # install apt packages
+  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!!seq" ]]; then
+    local apt_pkgs
+    mapfile -t apt_pkgs < <(yq '.config.install.apt[]' "$CONFIG")
     sudo apt-get update -qq
-    # shellcheck disable=SC2046
-    sudo apt-get install -qy $(yq '.config.install.apt[]' "$CONFIG")
+    for pkg in "${apt_pkgs[@]}"; do
+      _info_msg "Installing $pkg"
+      sudo apt-get install -qq "$pkg"
+    done
   fi
 
-  # install from apt alternative sources
-  if [[ $(yq '.config.install.aptAltSources | tag' "$CONFIG") == "!!seq" ]]; then
-    _info_msg "Installing apt packages from alternative sources"
+  # install from 3rd-party repos
+  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!!seq" ]]; then
+    _info_msg "Installing apt packages from third party repositories"
 
-    # setting up signing keys & repo entries for each source
-    for ((i = 0; i < $(yq '.config.install.aptAltSources | length' "$CONFIG"); i++)); do
-      local alt_pkg_obj=$(yq ".config.install.aptAltSources[$i]" "$CONFIG")
-      local source_file_name=$(yq '.sourceFile' <<<"$alt_pkg_obj")
+    # setting up signing keys & repo entries for source (repo)
+    for ((i = 0; i < $(yq '.config.install.addRepos | length' "$CONFIG"); i++)); do
+      local pkg_map=$(yq ".config.install.addRepos[$i]" "$CONFIG")
+      local source_name=$(yq '.sourceName' <<<"$pkg_map")
 
-      # download gpg key from remote
-      if [[ $(yq '.gpgKeyPath' <<<"$alt_pkg_obj") == *.asc ]]; then
-        _info_msg "Downloading .asc key for $source_file_name"
-        sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$alt_pkg_obj")" \
-          "$(yq '.remoteGpgKey' <<<"$alt_pkg_obj")"
-      elif [[ $(yq '.gpgKeyPath' <<<"$alt_pkg_obj") == *.gpg ]]; then
-        _info_msg "Downloading & dearmoring .gpg key for $source_file_name"
-        # dearmor if key is required to be in gpg format
-        sudo curl -fsSL "$(yq '.remoteGpgKey' <<<"$alt_pkg_obj")" \
-          | sudo gpg --dearmor --yes -o "$(yq '.gpgKeyPath' <<<"$alt_pkg_obj")"
+      # download asc key from remote
+      if [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.asc ]]; then
+        _info_msg "Downloading .asc key for $source_name"
+        sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$pkg_map")" \
+          "$(yq '.remoteGpgKey' <<<"$pkg_map")"
+      # if key is in gpg format, then dearmor after downloading the key
+      elif [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.gpg ]]; then
+        _info_msg "Downloading & dearmoring .gpg key for $source_name"
+        sudo curl -fsSL "$(yq '.remoteGpgKey' <<<"$pkg_map")" \
+          | sudo gpg --dearmor --yes -o "$(yq '.gpgKeyPath' <<<"$pkg_map")"
+      else
+        _error_msg "Unsupported apt key format ($(yq '.gpgKeyPath' <<<"$pkg_map")) for $source_name source"
       fi
 
       # add repo entry into sources.list.d
-      local source_file_full_path="/etc/apt/sources.list.d/$source_file_name.list"
-      _info_msg "Adding repo entry into sources.list.d for $source_file_name"
-      eval echo "$(yq '.repo' <<<"$alt_pkg_obj")" \
-        | sudo tee "$source_file_full_path" >/dev/null
+      local source_file_path="/etc/apt/sources.list.d/$source_name.list"
+      _info_msg "Adding repo entry for $source_name into sources.list.d"
+      eval echo "$(yq '.repo' <<<"$pkg_map")" \
+        | sudo tee "$source_file_path" >/dev/null
 
       # perform pinning if pinning entry exists
-      if [[ $(yq '.pinning' <<<"$alt_pkg_obj") != false ]]; then
-        _info_msg "Performing pinning to prioritise $source_file_name"
+      if [[ $(yq '.pinning' <<<"$pkg_map") != false ]]; then
+        _info_msg "Performing pinning to prioritise $source_name"
         # perform pinning to prioritise
-        local pref_file="/etc/apt/preferences.d/$source_file_name"
-        yq '.pinning' <<<"$alt_pkg_obj" \
+        local pref_file="/etc/apt/preferences.d/$source_name"
+        yq '.pinning' <<<"$pkg_map" \
           | sudo tee "$pref_file" >/dev/null
       fi
     done
 
     # install packages
-    _info_msg "Installing apt packages from alternative sources"
+    local apt_pkgs
+    mapfile -t apt_pkgs < <(yq '.config.install.addRepos[].packages[]' "$CONFIG")
     sudo apt-get update -qq
-    # disable shellcheck to enable installing multiple packages
-    # shellcheck disable=SC2046
-    sudo apt-get install -qy \
-      $(yq '.config.install.aptAltSources[].packages[]' "$CONFIG")
+    for pkg in "${apt_pkgs[@]}"; do
+      _info_msg "Installing third party package $pkg"
+      sudo apt-get install -qq "$pkg"
+    done
   fi
 
   # install flatpaks if flatpak is installed
@@ -525,8 +539,8 @@ install() {
     _info_msg "Installing binary packages"
     mkdir -p "$HOME/Applications"
     for ((i = 0; i < "$(yq '.config.install.binaries | length' "$CONFIG")"; i++)); do
-      local binary_obj=$(yq ".config.install.binaries[$i]" "$CONFIG")
-      local binary_name=$(yq '.name' <<<"$binary_obj")
+      local binary_map=$(yq ".config.install.binaries[$i]" "$CONFIG")
+      local binary_name=$(yq '.name' <<<"$binary_map")
       # skip if binary exists
       if [[ -f "$HOME/Applications/$binary_name" ]]; then
         _info_msg "$binary_name already exists"
@@ -535,13 +549,16 @@ install() {
       # install AppImage
       if [[ $binary_name == *.AppImage ]]; then
         _info_msg "Getting download url for $binary_name"
-        local download_url="$(yq '.url' <<<"$binary_obj")"
-        # execute string as subshell if subshell detected
-        grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_obj")" \
-          && download_url="$(eval echo "$(yq '.url' <<<"$binary_obj")")"
+        local download_url="$(yq '.url' <<<"$binary_map")"
+        # execute download_url string as subshell if subshell detected
+        grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_map")" \
+          && download_url="$(eval echo "$(yq '.url' <<<"$binary_map")")"
         _info_msg "Downloading ${binary_name}"
         curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
         chmod +x "$HOME/Applications/$binary_name"
+      else
+        _warning_msg "Unsupported package: $binary_name"
+        _error_msg "${tides_txt} currently supports AppImage only"
       fi
     done
   fi
