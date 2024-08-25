@@ -652,27 +652,27 @@ configure() {
   fi
 
   # dotfile manager implementation via Stow
-  if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!!seq" ]] \
+  if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!!map" ]] \
     && command -v stow &>/dev/null; then
     _info_msg "Configuring dotfiles via Stow"
     local packages
     mapfile -t packages < <(
-      yq -r '.config.configure.dotfiles.dotfiles[]' "$CONFIG"
+      yq -r '.config.configure.dotfiles.packages[]' "$CONFIG"
     )
     for pkg in "${packages[@]}"; do
-      _info_msg "Stowing $pkg"
+      _info_msg "Stowing dotfiles for $pkg"
       # symlink between tides & actual dotfiles
-      # --no-folding stows individual files instead of directories
-      # --adopt replaces tides' dotfiles with system ones. this is needed as
-      # Stow throws an error if there are existing system dotfiles.
-      # however, tides' dotfiles will be lost, & this is mitigated if
-      # .config.configure.stowMode is set to "override".
+      #   --no-folding stows individual files instead of directories
+      #   --adopt replaces tides' dotfiles with original system ones
+      #    this is needed as Stow throws an error if there are existing system dotfiles
+      #    this results in tides' dotfiles being lost, but this is mitigated by setting
+      #    .config.configure.stowMode to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
-      # override system files with tides' dotfiles
+      # override option overrides system files with tides' dotfiles pre-replacement
+      # conversely, if not set, system files will be used as the source of truth
       if [[ $(yq -r '.config.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
-        && git status --porcelain --untracked-files=no $DOTFILES \
-        | grep -q "$pkg"; then
-        _info_msg "Overriding system config files with ${tides_txt}' dotfiles"
+        && [[ -n $(git status --porcelain --untracked-files=no "$DOTFILES/$pkg/") ]]; then
+        _info_msg "Overriding system original dotfiles with ${tides_txt}' dotfiles"
         # NOTE: commit any new changes made to dotfiles as they will be reset
         # if there are any changes detected.
         # TODO: explore a cleaner option than git restore
@@ -711,8 +711,9 @@ EOF
     email = $(yq '.gitconfig.email' "$SECRETS")
 EOF
     # add signingkey if field exists
-    if [[ -n $(yq '.gitconfig.signingkey' secrets.yaml) ]]; then
+    if [[ -n $(yq '.gitconfig.signingkey' "$SECRETS") ]]; then
       _info_msg "Adding signing key"
+      # TODO: remove signingkey field if alr exists prior to append operation
       tee -a ~/.gitconfig.local <<EOF >/dev/null
     signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")
 EOF
@@ -722,8 +723,6 @@ EOF
   # setup Alacritty
   if [[ $(yq '.config.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
-    _info_msg "Configuring Alacritty"
-
     # add desktop icon
     if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
       _info_msg "Adding Alacritty icon"
@@ -812,6 +811,7 @@ EOF
   # optimisations
   if [[ $(yq ".config.configure.optimisations" "$CONFIG") == "!!map" ]]; then
     _info_msg "Configuring optimisations"
+
     if [[ $(yq ".config.configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
       _info_msg "Configuring auto-cpufreq"
       if ! command -v auto-cpufreq &>/dev/null; then
@@ -841,6 +841,8 @@ EOF
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
       fi
+
+      # convert cinnamon panel to MacOS-like menu bar
       if [[ $(yq ".config.configure.DEConf.cinnamon.panelToMenuBar" "$CONFIG") == true ]]; then
         _info_msg "Converting panel to menu bar"
         # panel applets in order

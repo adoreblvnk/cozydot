@@ -184,7 +184,7 @@ config:
     check: true
     dotfiles:
       stowMode: override # backup | override
-      dotfiles:
+      packages:
         - alacritty
         # - autostart # GNOME / Cinnamon autostart
         - bash
