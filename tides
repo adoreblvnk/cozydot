@@ -331,9 +331,8 @@ EOF
       eval "$(pyenv virtualenv-init -)"
     fi
 
-    local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
     # install latest python version if pyenv python version is not latest.
-    # covers test case where pyenv version-name is nonexistent
+    local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
     if [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
       # only install if python version exists but is not set to global
       if ! pyenv versions | grep "$latest_py_ver"; then
@@ -344,6 +343,13 @@ EOF
       pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
     else
       _info_msg "Python $(pyenv version-name) is already the latest version"
+    fi
+
+    if [[ $(yq '.config.check.python.pip' "$CONFIG") == true ]]; then
+      local py_ver="python$(yq '.config.check.python.version' "$CONFIG")"
+      _info_msg "Installing / upgrading pip"
+      $py_ver -m pip install --upgrade pip
+      _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
     fi
   fi
 
@@ -579,9 +585,10 @@ update() {
     _info_msg "Updating & upgrading apt packages"
     sudo apt-get -qq update
     sudo apt-get -qy upgrade
-    # aptFull removes old archive files & unused packages with their config files
+    # aptFull upgrades the entire system, installing new packages if necessary, & removes old
+    # archive files & unused packages with their config files
     if [[ $(yq '.config.update.apt.aptFull' "$CONFIG") == true ]]; then
-      _info_msg "Cleaning apt cache"
+      _info_msg "Performing a full upgrade & removing uneeded packages & apt cache"
       sudo apt-get -qy dist-upgrade
       sudo apt-get -qy autoclean
       sudo apt-get -qy --purge autoremove
@@ -595,54 +602,33 @@ update() {
     flatpak update -y
   fi
 
-  # update python
-  if [[ $(yq '.config.update.python' "$CONFIG") == true ]] \
-    && command -v pyenv &>/dev/null; then
-    _info_msg "Updating Pyenv"
-    pyenv update
-
-    # update python
-    local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
-    if [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
-      _info_msg "Installing Python $latest_py_ver"
-      pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
-      pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
-    else
-      _info_msg "Python version is already the latest"
-    fi
-
-    _info_msg "Upgrading pip"
-    local py_ver="python$(yq '.config.check.python.version' "$CONFIG")"
-    $py_ver -m pip install --upgrade pip
-  fi
-
-  # update cargo
+  # update rustup & cargo
   if [[ $(yq '.config.update.cargo' "$CONFIG") == true ]] \
     && command -v rustup &>/dev/null \
     && command -v cargo &>/dev/null; then
-    _info_msg "Updating rustup"
-    rustup update
-    _info_msg "Updating Rust packages"
+    _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
+    rustup update 2>/dev/null
+    # install cargo-update package if not installed
+    cargo install --list | grep -q "^cargo-update" \
+      || cargo install cargo-update
     cargo install-update -a
   fi
 
   # update yq
   if [[ $(yq '.config.update.other.yq' "$CONFIG") == true ]]; then
-    _info_msg "Updating yq"
-    # get local yq version & parse it
-    local_yq_ver=$(yq --version | cut -d ' ' -f 4)
+    local_yq_ver=$(yq -V | cut -d ' ' -f 4)
     # get latest yq version
     latest_yq_ver=$(
       curl -sSL https://api.github.com/repos/mikefarah/yq/releases/latest \
         | yq '.tag_name'
     )
     if [[ $local_yq_ver != "$latest_yq_ver" ]]; then
-      _info_msg "Downloading & installing latest yq"
+      _info_msg "Downloading & installing latest yq (version $latest_yq_ver)"
       sudo curl -sSL -o /usr/bin/yq \
         https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
       sudo chmod +x /usr/bin/yq
     else
-      _info_msg "yq $local_yq_ver is already the latest"
+      _info_msg "yq $local_yq_ver is already the latest version"
     fi
   fi
 

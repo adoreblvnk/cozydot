@@ -66,6 +66,7 @@ config:
     python:
       pyenvCheck: true
       version: 3.12 # <major>.<minor>
+      pip: false
     rustupCheck: true
     appimaged:
       check: true
@@ -175,7 +176,6 @@ config:
       apt: true
       aptFull: false # NOTE: apt must be true for aptFull to take effect
     flatpak: true
-    python: true
     cargo: true
     other:
       yq: true
