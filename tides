@@ -363,7 +363,7 @@ EOF
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
   if [[ $(yq '.config.check.appimaged.check' "$CONFIG") == true ]] \
-    && (! systemctl -q --user is-active appimaged \
+    && (! systemctl --user -q is-active appimaged \
       || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]); then
     _info_msg "Installing appimaged"
     # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
@@ -547,24 +547,31 @@ install() {
     for ((i = 0; i < "$(yq '.config.install.binaries | length' "$CONFIG")"; i++)); do
       local binary_map=$(yq ".config.install.binaries[$i]" "$CONFIG")
       local binary_name=$(yq '.name' <<<"$binary_map")
-      # skip if binary exists
-      if [[ -f "$HOME/Applications/$binary_name" ]]; then
+      # skip if binary / command (for .deb) exists
+      if [[ -f "$HOME/Applications/$binary_name" ]] \
+        || command -v "$(head -c '-5' <<<"$binary_name")" &>/dev/null; then
         _info_msg "$binary_name already exists"
         continue
       fi
-      # install AppImage
+
+      # downloading binary from url
+      _info_msg "Downloading $binary_name"
+      local download_url="$(yq '.url' <<<"$binary_map")"
+      # execute download_url string as subshell if subshell detected
+      grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_map")" \
+        && download_url="$(eval echo "$(yq '.url' <<<"$binary_map")")"
+      curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
+
+      # install binary (AppImage / deb package)
+      _info_msg "Installing $binary_name"
       if [[ $binary_name == *.AppImage ]]; then
-        _info_msg "Getting download url for $binary_name"
-        local download_url="$(yq '.url' <<<"$binary_map")"
-        # execute download_url string as subshell if subshell detected
-        grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_map")" \
-          && download_url="$(eval echo "$(yq '.url' <<<"$binary_map")")"
-        _info_msg "Downloading ${binary_name}"
-        curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
         chmod +x "$HOME/Applications/$binary_name"
+      elif [[ $binary_name == *.deb ]]; then
+        sudo apt-get install -qq "$HOME/Applications/$binary_name"
+        rm -f "$HOME/Applications/$binary_name"
       else
         _warning_msg "Unsupported package: $binary_name"
-        _error_msg "${tides_txt} currently supports AppImage only"
+        _error_msg "${tides_txt} currently supports AppImage / deb packages only"
       fi
     done
   fi
@@ -776,6 +783,14 @@ EOF
         '{"log-driver":"local","log-opts":{"max-size":"10m"}}' \
         | sudo tee /etc/docker/daemon.json >/dev/null
     fi
+  fi
+
+  # launches ulauncher
+  if [[ $(yq '.config.configure.apps.ulauncher' "$CONFIG") == true ]] \
+    && command -v ulauncher &>/dev/null \
+    && systemctl --user -q is-active ulauncher; then
+    _info_msg "Run ulauncher on startup"
+    systemctl --user enable --now ulauncher
   fi
 
   # setup virtualbox

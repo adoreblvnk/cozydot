@@ -170,6 +170,8 @@ config:
         url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
       - name: Obsidian.AppImage # note-taking app
         url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+      - name: ulauncher.deb
+        url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
   update:
     check: true
     apt:
@@ -193,6 +195,7 @@ config:
         - codium
         - macchina
         - starship
+        - ulauncher
         - yazi
         - zellij
     apps:
@@ -202,6 +205,7 @@ config:
         userInfo: false # NOTE: set actual contents in secrets.yaml
       alacritty: true
       docker: true
+      ulauncher: true
       virtualbox: true
       vscodium:
         extensions: !disabled
