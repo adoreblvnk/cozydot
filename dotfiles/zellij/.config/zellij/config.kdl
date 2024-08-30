@@ -276,10 +276,28 @@ pane_frames false
 //     }
 // }
 
+themes {
+    // modified from https://github.com/zellij-org/zellij/blob/main/zellij-utils/assets/themes/catppuccin.kdl
+    // merges terminal background with status bar background
+    catppuccin-mocha-lighter {
+        bg "#585b70" // Surface2
+        fg "#cdd6f4"
+        red "#f38ba8"
+        green "#a6e3a1"
+        blue "#89b4fa"
+        yellow "#f9e2af"
+        magenta "#f5c2e7" // Pink
+        orange "#fab387" // Peach
+        cyan "#89dceb" // Sky
+        black "#1e1e2e" // NOTE: change from Mantle to Base
+        white "#cdd6f4"
+    }
+}
+
 // Choose the theme that is specified in the themes section.
 // Default: default
 //
-theme "catppuccin-frappe"
+theme "catppuccin-mocha-lighter"
 
 // The name of the default layout to load on startup
 // Default: "default"

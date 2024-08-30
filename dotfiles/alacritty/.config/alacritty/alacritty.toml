@@ -1,12 +1,12 @@
 # see https://github.com/alacritty/alacritty-theme
 import = [
-    "~/.config/alacritty/themes/themes/catppuccin_frappe.toml"
+    "~/.config/alacritty/themes/themes/catppuccin_mocha.toml"
 ]
 
 [window]
 padding = { x = 3, y = 3 }
 dynamic_padding = true
-opacity = 0.95
+opacity = 0.90
 
 [font]
 normal = { family = "GeistMono Nerd Font", style = "Regular" }
