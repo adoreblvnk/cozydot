@@ -69,7 +69,7 @@ _error_msg() {
 
 _usage() {
   cat <<EOF
-${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is a ${BOLD}post-install${NC}, ${BOLD}update${NC}, ${BOLD}config${NC}, & ${BOLD}dotfile manager${NC} script for Linux systems
+${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is an automated ${BOLD}post-installer${NC}, ${BOLD}updater${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux systems
 
 ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
@@ -794,6 +794,7 @@ EOF
     && command -v ulauncher &>/dev/null \
     && ! systemctl --user -q is-active ulauncher; then
     _info_msg "Run ulauncher on startup"
+    # FIXME: ulauncher possibly not being startup
     systemctl --user enable --now ulauncher
   fi
 

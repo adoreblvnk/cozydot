@@ -93,6 +93,13 @@ config:
       - vlc # multimedia player
       # productivity
     addRepos: !disabled
+      - sourceName: brave-browser-release
+        remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+        gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
+        repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
+        pinning: false
+        packages:
+          - brave-browser
       - sourceName: charm
         remoteGpgKey: https://repo.charm.sh/apt/gpg.key
         gpgKeyPath: /etc/apt/keyrings/charm.gpg
@@ -172,6 +179,8 @@ config:
         url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
       - name: ulauncher.deb
         url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+      # - name: zen.AppImage
+      #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   update:
     check: true
     apt:
