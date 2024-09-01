@@ -64,7 +64,7 @@ config:
       - libxkbcommon-dev
       # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
     python:
-      pyenvCheck: true
+      pyenvUpdate: false
       version: 3.12 # <major>.<minor>
       pip: false
     rustupCheck: true

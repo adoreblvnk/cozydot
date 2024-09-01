@@ -102,7 +102,7 @@ ${YELLOW}Configuration:${NC}
    (default: ${BLUE}<tides_path>/configs/${NC}) & list them with ${tides_txt} ${CYAN}--list-configs${NC}
 
 ${YELLOW}Example:${NC}
-  ${tides_txt} ${CYAN}--config virtual_machine configure${NC}
+  ${tides_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
 
 ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/tides${NC}
 
@@ -310,8 +310,7 @@ EOF
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
-  if [[ $(yq '.config.check.python.pyenvCheck' "$CONFIG") == true ]]; then
-    _info_msg "Running pyenv check"
+  if [[ $(yq '.config.check.python | tag' "$CONFIG") == "!!map" ]]; then
 
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
@@ -329,6 +328,11 @@ EOF
       export PATH="$HOME/.pyenv/bin:$PATH"
       eval "$(pyenv init -)"
       eval "$(pyenv virtualenv-init -)"
+    else
+      if [[ $(yq '.config.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
+        pyenv update 2>/dev/null
+      fi
+      _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
     fi
 
     # install latest python version if pyenv python version is not latest.
