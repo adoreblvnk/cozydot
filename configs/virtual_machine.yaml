@@ -63,20 +63,19 @@ config:
       - libxcb-xfixes0-dev
       - libxkbcommon-dev
       # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-    python:
-      pyenvCheck: true
+    python: !enabled
+      pyenvUpdate: false
       version: 3.12 # <major>.<minor>
       pip: false
     rustupCheck: true
-    appimaged:
-      check: true
+    appimaged: !enabled
       cleanInstall: false
     geistFontEnabled: false # NOTE: modified by metadata.edit
     # list of nerdfonts: https://www.nerdfonts.com/font-downloads 
     nerdfont: !disabled GeistMono # NOTE: modified by metadata.edit 
   install:
     check: true
-    apt: !disabled
+    apt: !enabled
       # CLI utils
       - fzf # fuzzy finder
       - gnupg2
@@ -85,14 +84,20 @@ config:
       - vim
       - xclip # terminal X11 clipboard
       # apps
-      - flameshot # screenshot
-      - nautilus # file manager
-      - plank
+      # - flameshot # screenshot
+      # - nautilus # file manager
       # multimedia
       - imagemagick # image manipulation & conversion
       - vlc # multimedia player
       # productivity
     addRepos: !disabled
+      # - sourceName: brave-browser-release
+      #   remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+      #   gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
+      #   repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
+      #   pinning: false
+      #   packages:
+      #     - brave-browser
       - sourceName: charm
         remoteGpgKey: https://repo.charm.sh/apt/gpg.key
         gpgKeyPath: /etc/apt/keyrings/charm.gpg
@@ -100,17 +105,17 @@ config:
         pinning: false
         packages:
           - glow # terminal based markdown reader
-      - sourceName: docker
-        remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
-        gpgKeyPath: /etc/apt/keyrings/docker.asc
-        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
-        pinning: false
-        packages:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-buildx-plugin
-          - docker-compose-plugin
+      # - sourceName: docker
+      #   remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
+      #   gpgKeyPath: /etc/apt/keyrings/docker.asc
+      #   repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
+      #   pinning: false
+      #   packages:
+      #     - docker-ce
+      #     - docker-ce-cli
+      #     - containerd.io
+      #     - docker-buildx-plugin
+      #     - docker-compose-plugin
       - sourceName: mozilla
         remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
         gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
@@ -121,20 +126,20 @@ config:
           Pin-Priority: 1000
         packages:
           - firefox
-      - sourceName: onlyoffice
-        remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-        gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
-        repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
-        pinning: false
-        packages:
-          - onlyoffice-desktopeditors
-      - sourceName: virtualbox
-        remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
-        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
-        pinning: false
-        packages:
-          - virtualbox-7.0
+      # - sourceName: onlyoffice
+      #   remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+      #   gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
+      #   repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
+      #   pinning: false
+      #   packages:
+      #     - onlyoffice-desktopeditors
+      # - sourceName: virtualbox
+      #   remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+      #   gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+      #   repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
+      #   pinning: false
+      #   packages:
+      #     - virtualbox-7.0
       - sourceName: vscodium
         remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
         gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
@@ -142,13 +147,13 @@ config:
         pinning: false
         packages:
           - codium
-    flatpak:
+    flatpak: !disabled
       - com.discordapp.Discord
       - com.obsproject.Studio # video recorder & live streaming software
       - org.qbittorrent.qBittorrent
       - org.shotcut.Shotcut # video editor
       - org.telegram.desktop
-    cargo:
+    cargo: !enabled
       - alacritty
       - bat --locked
       - bottom --locked # process / system monitor
@@ -163,17 +168,20 @@ config:
       - yazi-fm --locked # terminal file manager
       - zellij --locked
       - zoxide --locked # smarter cd command
-    binaries:
-      - name: Bitwarden.AppImage # password manager
-        url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
-      - name: drawio.AppImage # diagramming tool
-        url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
-      - name: Obsidian.AppImage # note-taking app
-        url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+    binaries: !enabled
+      # - name: Bitwarden.AppImage # password manager
+      #   url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
+      # - name: drawio.AppImage # diagramming tool
+      #   url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
+      # - name: Obsidian.AppImage # note-taking app
+      #   url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+      - name: ulauncher.deb
+        url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+      # - name: zen.AppImage
+      #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   update:
     check: true
-    apt:
-      apt: true
+    apt: !enabled
       aptFull: false # NOTE: apt must be true for aptFull to take effect
     flatpak: true
     cargo: true
@@ -182,17 +190,17 @@ config:
       zellijClear: true
   configure:
     check: true
-    dotfiles:
+    dotfiles: !enabled
       stowMode: override # backup | override
-      dotfiles:
+      packages:
         - alacritty
-        # - autostart # GNOME / Cinnamon autostart
         - bash
         - bat
         - bottom
         - codium
         - macchina
         - starship
+        - ulauncher
         - yazi
         - zellij
     apps:
@@ -202,6 +210,7 @@ config:
         userInfo: false # NOTE: set actual contents in secrets.yaml
       alacritty: true
       docker: true
+      ulauncher: true
       virtualbox: true
       vscodium:
         extensions: !disabled
@@ -222,13 +231,13 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
-    optimisations:
+    optimisations: !disabled
       # laptop
       auto-cpufreq: true
-    DEConfEnabled: true
-    DEConf:
+    DEConf: !enabled
       cinnamon:
-        defaultTerm: alacritty
+        defaultTerm: !enabled alacritty
+        plankDock: true
         panelToMenuBar: true
       gnome:
-        defaultTerm: alacritty
+        defaultTerm: !enabled alacritty
