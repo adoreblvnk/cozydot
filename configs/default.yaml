@@ -87,7 +87,6 @@ config:
       # apps
       - flameshot # screenshot
       - nautilus # file manager
-      - plank
       # multimedia
       - imagemagick # image manipulation & conversion
       - vlc # multimedia player
@@ -197,7 +196,6 @@ config:
       stowMode: override # backup | override
       packages:
         - alacritty
-        # - autostart # GNOME / Cinnamon autostart
         - bash
         - bat
         - bottom
@@ -238,10 +236,10 @@ config:
     optimisations:
       # laptop
       auto-cpufreq: true
-    DEConfEnabled: true
-    DEConf:
+    DEConf: !enabled
       cinnamon:
         defaultTerm: alacritty
+        plankDock: true
         panelToMenuBar: true
       gnome:
         defaultTerm: alacritty

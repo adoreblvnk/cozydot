@@ -1,6 +1,5 @@
 ```
-TIDES (The Idempotent Dev Environment Setup) is a post-install, update, config, & dotfile manager script f
-or Linux systems
+TIDES (The Idempotent Dev Environment Setup) is an automated post-install, update, & config (dotfile) manager for Linux
 
 Usage: tides [Options] [Command]
 

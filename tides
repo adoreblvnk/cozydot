@@ -69,7 +69,7 @@ _error_msg() {
 
 _usage() {
   cat <<EOF
-${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is an automated ${BOLD}post-installer${NC}, ${BOLD}updater${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux systems
+${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is an automated ${BOLD}post-install${NC}, ${BOLD}update${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux
 
 ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
@@ -791,11 +791,24 @@ EOF
 
   # launches ulauncher
   if [[ $(yq '.config.configure.apps.ulauncher' "$CONFIG") == true ]] \
-    && command -v ulauncher &>/dev/null \
-    && ! systemctl --user -q is-active ulauncher; then
-    _info_msg "Run ulauncher on startup"
-    # FIXME: ulauncher possibly not being startup
-    systemctl --user enable --now ulauncher
+    && command -v ulauncher &>/dev/null; then
+    if [[ ! -f "$HOME/.config/autostart/ulauncher.desktop" ]]; then
+      _info_msg "Adding ulauncher to startup"
+      cat <<EOF >"$HOME/.config/autostart/ulauncher.desktop"
+[Desktop Entry]
+Name=Ulauncher
+Comment=Application launcher for Linux
+GenericName=Launcher
+Categories=GNOME;GTK;Utility;
+TryExec=/usr/bin/ulauncher
+Exec=env GDK_BACKEND=x11 /usr/bin/ulauncher --hide-window
+Icon=ulauncher
+Terminal=false
+Type=Application
+EOF
+    else
+      _info_msg "ulauncher already in startup apps"
+    fi
   fi
 
   # setup virtualbox
@@ -850,7 +863,7 @@ EOF
   fi
 
   # desktop-environment specific configurations
-  if [[ $(yq ".config.configure.DEConfEnabled" "$CONFIG") == true ]]; then
+  if [[ $(yq ".config.configure.DEConf | tag" "$CONFIG") == "!enabled" ]]; then
     _info_msg "Configuring desktop environment"
 
     # cinnamon settings
@@ -860,6 +873,32 @@ EOF
         _info_msg "Setting default terminal to $term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
+      fi
+
+      # install & autostart plank dock
+      if [[ $(yq ".config.configure.DEConf.cinnamon.plankDock" "$CONFIG") == true ]]; then
+        if ! command -v plank &>/dev/null; then
+          _info_msg "Installing plank"
+          sudo apt-get update -qq && sudo apt-get install -qq plank
+        fi
+        if [[ ! -f "$HOME/.config/autostart/plank.desktop" ]]; then
+          _info_msg "Adding plank to startup"
+          # sleep for 2s to let apps load before adding to plank
+          cat <<EOF >"$HOME/.config/autostart/plank.desktop"
+[Desktop Entry]
+Name=Plank
+GenericName=Dock
+Comment=Stupidly simple.
+Categories=Utility;
+Type=Application
+Exec=bash -c "sleep 2 && plank"
+Icon=plank
+Terminal=false
+NoDisplay=false
+EOF
+        else
+          _info_msg "Plank already added to startup"
+        fi
       fi
 
       # convert cinnamon panel to MacOS-like menu bar
