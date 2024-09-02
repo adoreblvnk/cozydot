@@ -63,13 +63,12 @@ config:
       - libxcb-xfixes0-dev
       - libxkbcommon-dev
       # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-    python:
+    python: !enabled
       pyenvUpdate: false
       version: 3.12 # <major>.<minor>
       pip: false
     rustupCheck: true
-    appimaged:
-      check: true
+    appimaged: !enabled
       cleanInstall: false
     geistFontEnabled: false # NOTE: modified by metadata.edit
     # list of nerdfonts: https://www.nerdfonts.com/font-downloads 
@@ -148,13 +147,13 @@ config:
         pinning: false
         packages:
           - codium
-    flatpak:
+    flatpak: !enabled
       - com.discordapp.Discord
       - com.obsproject.Studio # video recorder & live streaming software
       - org.qbittorrent.qBittorrent
       - org.shotcut.Shotcut # video editor
       - org.telegram.desktop
-    cargo:
+    cargo: !enabled
       - alacritty
       - bat --locked
       - bottom --locked # process / system monitor
@@ -169,7 +168,7 @@ config:
       - yazi-fm --locked # terminal file manager
       - zellij --locked
       - zoxide --locked # smarter cd command
-    binaries:
+    binaries: !enabled
       - name: Bitwarden.AppImage # password manager
         url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
       - name: drawio.AppImage # diagramming tool
@@ -182,8 +181,7 @@ config:
       #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   update:
     check: true
-    apt:
-      apt: true
+    apt: !enabled
       aptFull: false # NOTE: apt must be true for aptFull to take effect
     flatpak: true
     cargo: true
@@ -192,7 +190,7 @@ config:
       zellijClear: true
   configure:
     check: true
-    dotfiles:
+    dotfiles: !enabled
       stowMode: override # backup | override
       packages:
         - alacritty
@@ -233,13 +231,13 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
-    optimisations:
+    optimisations: !enabled
       # laptop
       auto-cpufreq: true
     DEConf: !enabled
       cinnamon:
-        defaultTerm: alacritty
+        defaultTerm: !enabled alacritty
         plankDock: true
         panelToMenuBar: true
       gnome:
-        defaultTerm: alacritty
+        defaultTerm: !enabled alacritty

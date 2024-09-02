@@ -1,5 +1,8 @@
 {
   "yaml.customTags": [
+    "!enabled scalar",
+    "!enabled sequence",
+    "!enabled mapping",
     "!disabled scalar",
     "!disabled sequence",
     "!disabled mapping"

@@ -277,7 +277,7 @@ EOF
     fi
   fi
 
-  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!!seq" ]]; then
+  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Purging apt packages"
 
     local purge_pkgs # collect purge packages into array
@@ -294,7 +294,7 @@ EOF
   fi
 
   # install dependency packages
-  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!!seq" ]]; then
+  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
@@ -310,8 +310,7 @@ EOF
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
-  if [[ $(yq '.config.check.python | tag' "$CONFIG") == "!!map" ]]; then
-
+  if [[ $(yq '.config.check.python | tag' "$CONFIG") == "!enabled" ]]; then
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
       if [[ ! -d ~/.pyenv ]]; then
@@ -366,7 +365,7 @@ EOF
   fi
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
-  if [[ $(yq '.config.check.appimaged.check' "$CONFIG") == true ]] \
+  if [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]] \
     && (! systemctl --user -q is-active appimaged \
       || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]); then
     _info_msg "Installing appimaged"
@@ -394,7 +393,7 @@ EOF
     # launch
     chmod +x "$HOME/Applications/appimaged.AppImage"
     "$HOME/Applications/appimaged.AppImage"
-  elif [[ $(yq '.config.check.appimaged.check' "$CONFIG") == true ]]; then
+  elif [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Appimaged service already running"
   fi
 
@@ -427,7 +426,7 @@ EOF
   fi
 
   # install nerdfont
-  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!!str" ]]; then
+  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!enabled" ]]; then
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
     _info_msg "Installing nerdfont $font"
     if [[ ! -d "/usr/share/fonts/$font" ]]; then
@@ -459,7 +458,7 @@ install() {
   fi
 
   # install apt packages
-  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!!seq" ]]; then
+  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]]; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.install.apt[]' "$CONFIG")
     sudo apt-get update -qq
@@ -470,7 +469,7 @@ install() {
   fi
 
   # install from 3rd-party repos
-  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!!seq" ]]; then
+  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing apt packages from third party repositories"
 
     # setting up signing keys & repo entries for source (repo)
@@ -519,7 +518,7 @@ install() {
   fi
 
   # install flatpaks if flatpak is installed
-  if [[ $(yq '.config.install.flatpak | tag' "$CONFIG") == "!!seq" ]] \
+  if [[ $(yq '.config.install.flatpak | tag' "$CONFIG") == "!enabled" ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Installing flatpak packages"
     if ! flatpak remotes | grep -iq "^flathub"; then
@@ -532,7 +531,7 @@ install() {
   fi
 
   # install cargo packages if cargo is installed
-  if [[ $(yq '.config.install.cargo | tag' "$CONFIG") == "!!seq" ]] \
+  if [[ $(yq '.config.install.cargo | tag' "$CONFIG") == "!enabled" ]] \
     && command -v cargo &>/dev/null; then
     _info_msg "Installing cargo packages"
     local rust_pkgs
@@ -545,7 +544,7 @@ install() {
   fi
 
   # install binary packages
-  if [[ $(yq '.config.install.binaries | tag' "$CONFIG") == "!!seq" ]]; then
+  if [[ $(yq '.config.install.binaries | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing binary packages"
     mkdir -p "$HOME/Applications"
     for ((i = 0; i < "$(yq '.config.install.binaries | length' "$CONFIG")"; i++)); do
@@ -592,7 +591,7 @@ update() {
     _set_constants
   fi
 
-  if [[ $(yq '.config.update.apt.apt' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Updating & upgrading apt packages"
     sudo apt-get -qq update
     sudo apt-get -qy upgrade
@@ -663,7 +662,7 @@ configure() {
   fi
 
   # dotfile manager implementation via Stow
-  if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!!map" ]] \
+  if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!enabled" ]] \
     && command -v stow &>/dev/null; then
     _info_msg "Configuring dotfiles via Stow"
     local packages
@@ -828,7 +827,7 @@ EOF
   fi
 
   # install vscodium extensions
-  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!!seq" ]]; then
+  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing vscodium extensions"
     local extensions
     mapfile -t extensions < <(
@@ -842,7 +841,7 @@ EOF
   fi
 
   # optimisations
-  if [[ $(yq ".config.configure.optimisations" "$CONFIG") == "!!map" ]]; then
+  if [[ $(yq ".config.configure.optimisations" "$CONFIG") == "!enabled" ]]; then
     _info_msg "Configuring optimisations"
 
     if [[ $(yq ".config.configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
@@ -868,7 +867,7 @@ EOF
 
     # cinnamon settings
     if [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
-      if [[ $(yq ".config.configure.DEConf.cinnamon.defaultTerm | tag" "$CONFIG") == "!!str" ]]; then
+      if [[ $(yq ".config.configure.DEConf.cinnamon.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".config.configure.DEConf.cinnamon.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
@@ -930,7 +929,7 @@ EOF
 
     # gnome settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-      if [[ $(yq ".config.configure.DEConf.gnome.defaultTerm | tag" "$CONFIG") == "!!str" ]]; then
+      if [[ $(yq ".config.configure.DEConf.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
