@@ -240,4 +240,6 @@ config:
         plankDock: true
         panelToMenuBar: true
       gnome:
+        tweaksAndExtensions: true
         defaultTerm: !enabled alacritty
+        MacOSDock: true

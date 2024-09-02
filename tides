@@ -366,8 +366,8 @@ EOF
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
   if [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]] \
-    && (! systemctl --user -q is-active appimaged \
-      || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]); then
+    && { ! systemctl --user -q is-active appimaged \
+      || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]; }; then
     _info_msg "Installing appimaged"
     # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
 
@@ -929,11 +929,37 @@ EOF
 
     # gnome settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
+      # install gnome-tweaks & gnome-shell-extensions
+      if [[ $(yq ".config.configure.DEConf.gnome.tweaksAndExtensions" "$CONFIG") == true ]] \
+        && { ! command -v gnome-tweaks || ! command -v gnome-extensions; }; then
+        _info_msg "Installing gnome-tweaks and/or gnome-shell-extensions"
+        sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
+      elif [[ $(yq ".config.configure.DEConf.gnome.tweaksAndExtensions" "$CONFIG") == true ]]; then
+        _info_msg "gnome-tweaks & gnome-shell-extensions are already installed"
+      fi
+
       if [[ $(yq ".config.configure.DEConf.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
         gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
+      fi
+
+      # make Dash to Dock mimic MacOS dock behaviour
+      if [[ $(yq ".config.configure.DEConf.gnome.MacOSDock" "$CONFIG") == true ]]; then
+        _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
+        gsettings set org.gnome.shell.extensions.dash-to-dock dash-max-icon-size 32
+        gsettings set org.gnome.shell.extensions.dash-to-dock dock-position 'BOTTOM'
+        # disable panel mode
+        gsettings set org.gnome.shell.extensions.dash-to-dock extend-height false
+        # allow dock to be hidden
+        gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed false
+        # hide dock when focused application overlaps dock
+        gsettings set org.gnome.shell.extensions.dash-to-dock intellihide true
+        gsettings set org.gnome.shell.extensions.dash-to-dock intellihide-mode 'FOCUS_APPLICATION_WINDOWS'
+        # show dock on mouse/cursor hover
+        gsettings set org.gnome.shell.extensions.dash-to-dock autohide true
+        gsettings set org.gnome.shell.extensions.dash-to-dock require-pressure-to-show false
       fi
     fi
   fi
