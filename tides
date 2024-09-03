@@ -407,12 +407,10 @@ EOF
           | yq -p=j '.assets[].browser_download_url | select(. =="*Geist-*")'
       )
       # download Geist font
-      curl -sSL -o Geist.zip "$font_url"
-      unzip -o Geist.zip
+      curl -sSL -o /tmp/Geist.zip "$font_url"
+      unzip -o /tmp/Geist.zip
       # install Geist opentype font
-      sudo mv Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
-      _info_msg "Cleanup remnant files"
-      rm -rf Geist.zip __MACOSX/ Geist-*
+      sudo mv /tmp/Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
     else
       _info_msg "Geist font already exists"
     fi
@@ -882,7 +880,7 @@ EOF
         fi
         if [[ ! -f "$HOME/.config/autostart/plank.desktop" ]]; then
           _info_msg "Adding plank to startup"
-          # sleep for 2s to let apps load before adding to plank
+          # sleep to let apps load before adding to plank
           cat <<EOF >"$HOME/.config/autostart/plank.desktop"
 [Desktop Entry]
 Name=Plank
@@ -890,13 +888,38 @@ GenericName=Dock
 Comment=Stupidly simple.
 Categories=Utility;
 Type=Application
-Exec=bash -c "sleep 2 && plank"
+Exec=bash -c "sleep 5 && plank"
 Icon=plank
 Terminal=false
 NoDisplay=false
 EOF
         else
           _info_msg "Plank already added to startup"
+        fi
+      fi
+
+      # install gTile tiling assistant
+      if [[ $(yq ".config.configure.DEConf.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
+        if [[ ! -d "$HOME/.local/share/cinnamon/extensions/gTile@shuairan" ]]; then
+          _info_msg "Downloading gTile extension"
+          curl -sSL -o /tmp/gTile@shuairan.zip \
+            https://cinnamon-spices.linuxmint.com/files/extensions/gTile@shuairan.zip
+          unzip /tmp/gTile@shuairan.zip \
+            -d "$HOME/.local/share/cinnamon/extensions" >/dev/null
+        fi
+        if ! gsettings get org.cinnamon enabled-extensions | grep -q "gTile"; then
+          _warning_msg "Enabling gTile will disable other extensions"
+          gsettings set org.cinnamon enabled-extensions "['gTile@shuairan']"
+        else
+          _info_msg "gTile already enabled"
+        fi
+
+        # opinionated tiling layout
+        if [[ $(yq ".config.configure.DEConf.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
+          _info_msg "Configuring opinionated tiling layout for gTile"
+          mkdir -p "$HOME/.local/share/cinnamon/extensions/gTile@shuairan"
+          mv "$(dirname "$0")/extras/gTile@shuairan.json" \
+            "$HOME/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json"
         fi
       fi
 
@@ -948,6 +971,8 @@ EOF
       # make Dash to Dock mimic MacOS dock behaviour
       if [[ $(yq ".config.configure.DEConf.gnome.MacOSDock" "$CONFIG") == true ]]; then
         _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
+        # minimize on click when application is opened
+        gsettings set org.gnome.shell.extensions.dash-to-dock click-action 'minimize-or-previews'
         gsettings set org.gnome.shell.extensions.dash-to-dock dash-max-icon-size 32
         gsettings set org.gnome.shell.extensions.dash-to-dock dock-position 'BOTTOM'
         # disable panel mode

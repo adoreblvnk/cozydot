@@ -238,6 +238,8 @@ config:
       cinnamon:
         defaultTerm: !enabled alacritty
         plankDock: true
+        gTile: !enabled
+          tilingLayout: true
         panelToMenuBar: true
       gnome:
         tweaksAndExtensions: true
