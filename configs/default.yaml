@@ -65,7 +65,7 @@ config:
       # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
     python: !enabled
       pyenvUpdate: false
-      version: 3.12 # <major>.<minor>
+      version: 3.12 # <major>[.<minor>]
       pip: false
     rustupCheck: true
     appimaged: !enabled
@@ -179,6 +179,10 @@ config:
         url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
       # - name: zen.AppImage
       #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
+    languages:
+      goVersion: !enabled latest # latest | <major>.<minor>.<patch>
+      nvm: !enabled
+        nodeVersion: 20 # <major>[.<minor>]
   update:
     check: true
     apt: !enabled
@@ -186,6 +190,7 @@ config:
     flatpak: true
     cargo: true
     other:
+      go: false
       yq: true
       zellijClear: true
   configure:

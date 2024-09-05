@@ -110,8 +110,8 @@
     "description": "Columns",
     "tooltip": "Each row represents a column. Span is how much space a column should take up compared to the other columns. Default is 1.",
     "columns": [{ "id": "span", "title": "Span", "type": "float", "min": 0, "max": 1000 }],
-    "default": [{ "span": 1 }, { "span": 1 }, { "span": 1 }],
-    "value": [{ "span": 1 }, { "span": 1 }, { "span": 1 }]
+    "default": [{ "span": 1 }, { "span": 2 }, { "span": 1 }],
+    "value": [{ "span": 1 }, { "span": 2 }, { "span": 1 }]
   },
   "grid3y": {
     "type": "list",

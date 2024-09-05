@@ -73,17 +73,26 @@ fi
 # window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
-# swap caps lock & escape key
-setxkbmap -option caps:swapescape
+# ----- Load Languages -----
 
-if [ -d "$HOME/.pyenv" ]; then
+if [ -f ~/.cargo/env ]; then . "$HOME/.cargo/env"; fi
+
+if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
+
+if [ -d ~/.pyenv ]; then
   # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#installation--update--uninstallation
   export PATH="$HOME/.pyenv/bin:$PATH"
   eval "$(pyenv init -)"
   eval "$(pyenv virtualenv-init -)"
 fi
 
-if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi
+if [ -d ~/.nvm ]; then
+  export NVM_DIR="$HOME/.nvm"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+fi
+
+# ----- Apps -----
 
 if command -v alacritty &>/dev/null; then
   if [ ! -f ~/.bash_completion/alacritty ]; then
@@ -91,11 +100,6 @@ if command -v alacritty &>/dev/null; then
       https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
   fi
   . ~/.bash_completion/alacritty
-fi
-
-if command -v macchina &>/dev/null; then
-  macchina -t Minimal -o host -o kernel -o distribution -o uptime \
-    -o processor-load -o memory
 fi
 
 if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
@@ -124,3 +128,12 @@ fi
 
 # https://github.com/ajeetdsouza/zoxide?tab=readme-ov-file#installation
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
+
+# ----- Extras -----
+
+# swap caps lock & escape key
+setxkbmap -option caps:swapescape
+
+if command -v macchina &>/dev/null; then
+  macchina -t Minimal -o host -o kernel -o distribution -o uptime -o processor-load -o memory
+fi

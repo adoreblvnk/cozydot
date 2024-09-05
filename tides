@@ -221,6 +221,28 @@ set_secrets_file() {
 
 get_version() { echo "${tides_txt} $(yq '.version' "$CONFIG")"; }
 
+# ----- HELPERS -----
+
+# Downloads golang.
+# Arguments:
+#   go version. must be either "latest" or <major>.<minor>.<patch> form
+_download_golang() {
+  if [[ $1 == "latest" ]]; then
+    _info_msg "Downloading $(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version')"
+    local latest_go=$(
+      curl -sSL "https://go.dev/dl/?mode=json" \
+        | yq '.[0].files[].filename | select(. == "*linux-amd64*")'
+    )
+    local download_url="https://go.dev/dl/${latest_go}"
+  else
+    _info_msg "Downloading go$1"
+    local download_url="https://go.dev/dl/$1.linux-amd64.tar.gz"
+  fi
+  curl -sSL -o "/tmp/go.linux-amd64.tar.gz" "$download_url"
+  sudo rm -rf /usr/local/go
+  sudo tar -C /usr/local -xzf /tmp/go.linux-amd64.tar.gz
+}
+
 # ----- COMMANDS -----
 
 check() {
@@ -577,6 +599,29 @@ install() {
     done
   fi
 
+  # install golang
+  if [[ $(yq '.config.install.languages.goVersion | tag' "$CONFIG") == "!enabled" ]]; then
+    if ! command -v go &>/dev/null; then
+      _download_golang "$(yq '.config.install.languages.goVersion' "$CONFIG")"
+    else
+      _info_msg "Golang (go $(go version | cut -d ' ' -f 3 | cut -c 3-)) already installed"
+    fi
+  fi
+
+  # install nvm, node (& npm)
+  if [[ $(yq '.config.install.languages.nvm | tag' "$CONFIG") == "!enabled" ]]; then
+    if [[ ! -f "$HOME/.nvm/nvm.sh" ]]; then
+      _info_msg "Installing nvm"
+      curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
+      local node_ver="$(yq '.config.install.languages.nvm.nodeVersion' "$CONFIG")"
+      nvm install "$node_ver"
+      nvm use "$node_ver"
+    else
+      . "$HOME/.nvm/nvm.sh"
+      _info_msg "NVM (nvm $(nvm -v), node $(node -v), npm $(npm -v)) already installed"
+    fi
+  fi
+
   _success_msg "Finished ${tides_txt} install"
 }
 
@@ -620,6 +665,16 @@ update() {
     cargo install --list | grep -q "^cargo-update" \
       || cargo install cargo-update
     cargo install-update -a
+  fi
+
+  # update golang
+  if [[ $(yq '.config.update.other.go' "$CONFIG") == true ]]; then
+    local remote_go_ver=$(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version')
+    if [[ $(go version | cut -d ' ' -f 3) != "$remote_go_ver" ]]; then
+      _download_golang "latest"
+    else
+      _info_msg "go $(go version | cut -d ' ' -f 3) is already the latest"
+    fi
   fi
 
   # update yq
@@ -878,10 +933,10 @@ EOF
           _info_msg "Installing plank"
           sudo apt-get update -qq && sudo apt-get install -qq plank
         fi
-        if [[ ! -f "$HOME/.config/autostart/plank.desktop" ]]; then
-          _info_msg "Adding plank to startup"
-          # sleep to let apps load before adding to plank
-          cat <<EOF >"$HOME/.config/autostart/plank.desktop"
+
+        _info_msg "Adding plank to startup"
+        # sleep to let apps load before adding to plank
+        cat <<EOF >"$HOME/.config/autostart/plank.desktop"
 [Desktop Entry]
 Name=Plank
 GenericName=Dock
@@ -893,9 +948,6 @@ Icon=plank
 Terminal=false
 NoDisplay=false
 EOF
-        else
-          _info_msg "Plank already added to startup"
-        fi
       fi
 
       # install gTile tiling assistant
