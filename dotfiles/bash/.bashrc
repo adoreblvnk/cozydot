@@ -90,8 +90,4 @@ fi
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
 # ----- Extras -----
-setxkbmap -option caps:swapescape # swap caps lock & escape key
-
-if command -v macchina &>/dev/null; then
-  macchina -t Minimal -o host -o kernel -o distribution -o uptime -o processor-load -o memory
-fi
+if [ -f ~/.bash_extras ]; then . ~/.bash_extras; fi

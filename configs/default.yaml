@@ -203,6 +203,7 @@ config:
         - bat
         - bottom
         - codium
+        # - extras
         - macchina
         - starship
         - ulauncher

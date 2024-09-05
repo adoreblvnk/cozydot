@@ -976,7 +976,7 @@ EOF
         if [[ $(yq ".config.configure.DEConf.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
           _info_msg "Configuring opinionated tiling layout for gTile"
           mkdir -p "$HOME/.local/share/cinnamon/extensions/gTile@shuairan"
-          mv "$(dirname "$0")/extras/gTile@shuairan.json" \
+          cp "$(dirname "$0")/extras/gTile@shuairan.json" \
             "$HOME/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json"
         fi
       fi
