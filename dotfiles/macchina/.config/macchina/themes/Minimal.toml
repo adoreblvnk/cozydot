@@ -1,10 +1,10 @@
 # Minimal
 
-spacing         = 2
+spacing         = 1
 padding         = 0
 hide_ascii      = true
 prefer_small_ascii = true
-separator       = "❥"
+separator       = ":"
 
 [palette]
 type            = "Light"

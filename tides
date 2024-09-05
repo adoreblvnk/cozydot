@@ -786,6 +786,12 @@ EOF
   # setup Alacritty
   if [[ $(yq '.config.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
+    if [ ! -f ~/.bash_completion/alacritty ]; then
+      _info_msg "Adding bash completion for Alacritty"
+      curl -fsLS --create-dirs -o ~/.bash_completion/alacritty \
+        https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
+    fi
+
     # add desktop icon
     if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
       _info_msg "Adding Alacritty icon"
