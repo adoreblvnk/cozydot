@@ -5,9 +5,10 @@ set -euo pipefail
 # constants
 readonly DOTFILES="dotfiles"
 CONFIG="$(dirname "$0")/configs/default.yaml"
-SECRETS="$(dirname "$0")/secrets.yaml"
 CONFIG_DIR="$(dirname "$0")/configs"
-# set in _set_constants
+SECRETS="$(dirname "$0")/secrets.yaml"
+# set in _set_constants()
+SKIP_SLOW=false # modified in skip_slow()
 DISTRO=
 DESKTOP_ENVIRONMENT=
 DISPLAY_SERVER=
@@ -75,31 +76,33 @@ ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
   ${GREEN}    --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
-  ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
                          directory
   ${GREEN}-c, --config <CONFIG> ${NC} Set a config file that exists in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
-                         directory
   ${GREEN}    --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
+  ${GREEN}-s, --skip-slow       ${NC} Allow tides to skip slow running actions. Will ${RED}break${NC} your system if set on
+                         ${tides_txt}' first run
+  ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
+                         directory
   ${GREEN}-h, --help            ${NC} Print help information
   ${GREEN}-V, --version         ${NC} Print version information
 
 ${YELLOW}Commands:${NC}
 
   ${GREEN}   check    ${NC} Purges bloat (default) & installs dependencies. Installs Python (via pyenv), Cargo
-               (via rustup), fonts (Geist & Nerdfonts), & firmware packages
-  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, & binary (AppImage) 
-               packages
+               (via rustup), appimaged, & fonts (Geist & Nerdfonts)
+  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage) 
+               packages, & coding languages (node & golang)
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans
-               system (see \`${BLUE}config.yaml${NC}\` for details)
-  ${GREEN}c, configure${NC} Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), & 
-               performs other system configs.
+               system (see ${BLUE}configs/default.yaml${NC} for details)
+  ${GREEN}c, configure${NC} Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), 
+               customise desktop environment (Cinnamon / GNOME), & performs other system configs
   ${GREEN}h, help     ${NC} Print help information
 
 ${YELLOW}Configuration:${NC}
   Customise the actions each command by modifying the ${BLUE}configs/default.yaml${NC} file.
   The full config schema of ${tides_txt} is available at ${BLUE}README.md${NC}.
   Preset configs are available in ${BLUE}<tides_path>/configs/${NC} directory. Add new configs in \$CONFIG_DIR
-   (default: ${BLUE}<tides_path>/configs/${NC}) & list them with ${tides_txt} ${CYAN}--list-configs${NC}
+   (default: ${BLUE}<tides_path>/configs/${NC}) or list them with ${tides_txt} ${CYAN}--list-configs${NC}
 
 ${YELLOW}Example:${NC}
   ${tides_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
@@ -109,16 +112,71 @@ ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/tides${N
 EOF
 }
 
+# ----- OPTIONS -----
+
+# Use config specified in config directory.
+# Arguments:
+#   config that exists in $CONFIG_DIR
+set_config() {
+  local config_file="${CONFIG_DIR}/$1.yaml"
+  if [[ -f $config_file ]]; then
+    CONFIG=$config_file
+  else
+    _error_msg "Config selected \"$1\" does not exist"
+  fi
+}
+
+# Use secrets file specified by user.
+# Arguments:
+#   secrets file as a path
+set_secrets_file() {
+  SECRETS="$(realpath "$1")"
+  if [[ -f "$SECRETS" ]]; then
+    yq '.gitconfig.name' "$SECRETS"
+  else
+    _error_msg "Secrets file selected \"$1\" does not exist"
+  fi
+}
+
+# Allow tides to skip slow running actions. Defaults to false, but can be set
+# to true in config or as a CLI option.
+# Arguments:
+#   (optional) true to skip slow running actions. used by CLI option
+# shellcheck disable=SC2120
+skip_slow() {
+  local skip_slow_opt=${1:-false}
+  local skip_slow_cfg=$(yq '.metadata.skipSlow' "$CONFIG")
+  if ! { [[ $skip_slow_cfg == true ]] || [[ $skip_slow_cfg == false ]]; }; then
+    _error_msg ".metadata.skipSlow in config must be set to ${GREEN}true${NC} or ${RED}false${NC}"
+  fi
+  if [[ $skip_slow_opt == true ]] || [[ $skip_slow_cfg == true ]]; then
+    SKIP_SLOW=true
+    _info_msg "Setting SKIP_SLOW to true"
+  fi
+}
+
+list_configs() {
+  local configs
+  # find all preset files, then filter out the parent dirs & file suffixes
+  mapfile -t configs < <(
+    find "$CONFIG_DIR" -type f | awk -F '[/.]' '{print $--NF}'
+  )
+  echo "${YELLOW}Available configs:${NC}"
+  for config in "${configs[@]}"; do echo "  ${GREEN}$config${NC}"; done
+}
+
+get_version() { echo "${tides_txt} $(yq '.version' "$CONFIG")"; }
+
 # ----- SET CONSTANTS -----
 
 # Set complex constants that require commands to be set.
 # Globals:
-#   EDIT
+#   SKIP_SLOW
 #   DISTRO
 #   DESKTOP_ENVIRONMENT
 #   VERSION_CODENAME: only if $UBUNTU_CODENAME exists
 _set_constants() {
-  EDIT=$(yq '.metadata.edit' "$CONFIG") # enables config file editing
+  skip_slow # modify $SKIP_SLOW
 
   # get distro & set $DISTRO
   . /etc/os-release # contains operating system identification data
@@ -177,49 +235,7 @@ _set_constants() {
   else
     _info_msg "Set display server to $DISPLAY_SERVER as manually specified in config"
   fi
-
 }
-
-# ----- OPTIONS -----
-
-list_configs() {
-  local configs
-  # find all preset files, then filter out the parent dirs & file suffixes
-  mapfile -t configs < <(
-    find "$CONFIG_DIR" -type f | awk -F '[/.]' '{print $--NF}'
-  )
-  echo "${YELLOW}Available configs:${NC}"
-  for config in "${configs[@]}"; do
-    echo "  ${GREEN}$config${NC}"
-  done
-}
-
-# Use config specified in config directory.
-# Arguments:
-#   config that exists in $CONFIG_DIR
-set_config() {
-  local config_file="${CONFIG_DIR}/$1.yaml"
-  if [[ -f $config_file ]]; then
-    _info_msg "Using $1 config (${config_file})"
-    CONFIG=$config_file
-  else
-    _error_msg "Config selected \"$1\" does not exist"
-  fi
-}
-
-# Use secrets file specified by user.
-# Arguments:
-#   secrets file as a path
-set_secrets_file() {
-  SECRETS="$(realpath "$1")"
-  if [[ -f "$SECRETS" ]]; then
-    yq '.gitconfig.name' "$SECRETS"
-  else
-    _error_msg "Secrets file selected \"$1\" does not exist"
-  fi
-}
-
-get_version() { echo "${tides_txt} $(yq '.version' "$CONFIG")"; }
 
 # ----- HELPERS -----
 
@@ -238,9 +254,8 @@ _download_golang() {
     _info_msg "Downloading go$1"
     local download_url="https://go.dev/dl/$1.linux-amd64.tar.gz"
   fi
-  curl -sSL -o "/tmp/go.linux-amd64.tar.gz" "$download_url"
-  sudo rm -rf /usr/local/go
-  sudo tar -C /usr/local -xzf /tmp/go.linux-amd64.tar.gz
+  curl -sSL -o "/tmp/go.tar.gz" "$download_url"
+  sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
 }
 
 # ----- COMMANDS -----
@@ -251,8 +266,6 @@ check() {
   _set_constants
 
   if [[ $(yq '.config.check.snapDisabled' "$CONFIG") == true ]]; then
-    _info_msg "Disabling snap"
-
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
       mapfile -t snap_pkgs < <(
@@ -299,7 +312,8 @@ EOF
     fi
   fi
 
-  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     _info_msg "Purging apt packages"
 
     local purge_pkgs # collect purge packages into array
@@ -308,15 +322,11 @@ EOF
       # shellcheck disable=SC2086
       sudo apt-get autoremove --purge -qy $pkg
     done
-
-    if $EDIT; then
-      _info_msg "Disabling purge"
-      yq -i '.config.check.purge tag = "!disabled"' "$CONFIG"
-    fi
   fi
 
   # install dependency packages
-  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!enabled" ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
@@ -324,11 +334,6 @@ EOF
       _info_msg "Installing dependency $pkg"
       sudo apt-get install -qq "$pkg"
     done
-
-    if $EDIT; then
-      _info_msg "Disabling dependency installation"
-      yq -i '.config.check.deps tag = "!disabled"' "$CONFIG"
-    fi
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
@@ -345,7 +350,7 @@ EOF
         curl https://pyenv.run | bash
       fi
 
-      _info_msg "Temporarily exporting pyenv into PATH"
+      _warning_msg "Temporarily exporting pyenv to PATH. Export to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
       export PATH="$HOME/.pyenv/bin:$PATH"
       eval "$(pyenv init -)"
       eval "$(pyenv virtualenv-init -)"
@@ -382,6 +387,8 @@ EOF
     && ! command -v rustup &>/dev/null; then
     _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    _warning_msg "Temporarily adding cargo to PATH. Add to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
+    . "$HOME/.bashrc"
   elif [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]]; then
     _info_msg "Rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) toolchain already installed"
   fi
@@ -420,7 +427,8 @@ EOF
   fi
 
   # install Geist font
-  if [[ $(yq '.config.check.geistFontEnabled' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.check.geistFontEnabled' "$CONFIG") == true ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     _info_msg "Geist font check"
     if [[ ! -d "/usr/share/fonts/opentype/Geist/" ]]; then
       _info_msg "Downloading & installing Geist font"
@@ -438,15 +446,11 @@ EOF
     fi
     _info_msg "Reloading fc-cache"
     fc-cache -f
-
-    if $EDIT; then
-      _info_msg "Disabling geistFont"
-      yq -i '.config.check.geistFont tag = "!disabled"' "$CONFIG"
-    fi
   fi
 
   # install nerdfont
-  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!enabled" ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
     _info_msg "Installing nerdfont $font"
     if [[ ! -d "/usr/share/fonts/$font" ]]; then
@@ -460,11 +464,6 @@ EOF
     fi
     _info_msg "Reloading fc-cache"
     fc-cache -f
-
-    if $EDIT; then
-      _info_msg "Disabling nerdfont"
-      yq -i '.config.check.nerdfont tag = "!disabled"' "$CONFIG"
-    fi
   fi
 }
 
@@ -478,7 +477,8 @@ install() {
   fi
 
   # install apt packages
-  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.install.apt[]' "$CONFIG")
     sudo apt-get update -qq
@@ -603,6 +603,8 @@ install() {
   if [[ $(yq '.config.install.languages.goVersion | tag' "$CONFIG") == "!enabled" ]]; then
     if ! command -v go &>/dev/null; then
       _download_golang "$(yq '.config.install.languages.goVersion' "$CONFIG")"
+      _warning_msg "Temporarily exporting go to PATH. Export to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
+      export PATH=$PATH:/usr/local/go/bin
     else
       _info_msg "Golang (go $(go version | cut -d ' ' -f 3 | cut -c 3-)) already installed"
     fi
@@ -612,6 +614,7 @@ install() {
   if [[ $(yq '.config.install.languages.nvm | tag' "$CONFIG") == "!enabled" ]]; then
     if [[ ! -f "$HOME/.nvm/nvm.sh" ]]; then
       _info_msg "Installing nvm"
+      # nvm install script auto adds to PATH if needed
       curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
       local node_ver="$(yq '.config.install.languages.nvm.nodeVersion' "$CONFIG")"
       nvm install "$node_ver"
@@ -622,7 +625,7 @@ install() {
     fi
   fi
 
-  _success_msg "Finished ${tides_txt} install"
+  _success_msg "Finished ${tides_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
 }
 
 update() {
@@ -657,6 +660,7 @@ update() {
 
   # update rustup & cargo
   if [[ $(yq '.config.update.cargo' "$CONFIG") == true ]] \
+    && [[ $SKIP_SLOW == false ]] \
     && command -v rustup &>/dev/null \
     && command -v cargo &>/dev/null; then
     _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
@@ -668,7 +672,8 @@ update() {
   fi
 
   # update golang
-  if [[ $(yq '.config.update.other.go' "$CONFIG") == true ]]; then
+  if [[ $(yq '.config.update.other.go' "$CONFIG") == true ]] \
+    && command -v go &>/dev/null; then
     local remote_go_ver=$(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version')
     if [[ $(go version | cut -d ' ' -f 3) != "$remote_go_ver" ]]; then
       _download_golang "latest"
@@ -742,27 +747,6 @@ configure() {
         git restore "$DOTFILES/$pkg/"
       fi
     done
-  fi
-
-  # generate GPG key
-  if [[ $(yq '.config.configure.apps.gpg.genKey' "$CONFIG") == true ]]; then
-    _info_msg "Generating GPG key"
-    gpg --batch --full-gen-key <<EOF
-%echo Generating a full key
-Key-Type: RSA
-Key-Length: 4096
-Expire-Date: 0
-Name-Real: $(yq '.gpg.name' "$SECRETS")
-Name-Email: $(yq '.gpg.email' "$SECRETS")
-Name-Comment: $(yq '.gpg.comment' "$SECRETS")
-Passphrase: $(yq '.gpg.passphrase' "$SECRETS")
-%commit
-EOF
-
-    if $EDIT; then
-      _info_msg "Disabling gpg.genKey"
-      yq -i '.config.configure.apps.gpg.genKey = false' "$CONFIG"
-    fi
   fi
 
   # setup git user field in gitconfig via ~/.gitconfig.local
@@ -1047,7 +1031,7 @@ EOF
     fi
   fi
 
-  _success_msg "Finished ${tides_txt} configuration"
+  _success_msg "Finished ${tides_txt} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognised"
 }
 
 # ----- MAIN -----
@@ -1083,7 +1067,6 @@ main() {
         ;;
       # OPTIONS
       --no-colour) _colours false ;;
-      --list-configs) list_configs ;;
       -c | --config)
         set_config "$2"
         shift
@@ -1092,6 +1075,8 @@ main() {
         set_secrets_file "$2"
         shift
         ;;
+      -s | --skip-slow) skip_slow true ;;
+      --list-configs) list_configs ;;
       -V | --version) get_version ;;
       # COMMANDS
       check) check ;;

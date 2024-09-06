@@ -1,6 +1,6 @@
 version: 0.0.1
 metadata:
-  edit: true
+  skipSlow: false
   # NOTE: the following values are highly recommended to be set to "auto"
   distro: auto # auto | ubuntu | linuxmint
   desktopEnvironment: auto # auto | gnome | cinnamon
@@ -8,7 +8,7 @@ metadata:
 config:
   check:
     snapDisabled: true
-    purge: !disabled # NOTE: modified by metadata.edit
+    purge: !enabled # NOTE: also disabled by metadata.skipSlow
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
@@ -19,7 +19,7 @@ config:
       - runc
       - firefox* # firefox installed via aptAltSources
       - libreoffice* # libreoffice replaced with onlyoffice
-    deps: !disabled # NOTE: modified by metadata.edit 
+    deps: !disabled # NOTE: also disabled by metadata.skipSlow
       # essential packages
       - apt-transport-https
       - bash-completion
@@ -70,12 +70,12 @@ config:
     rustupCheck: true
     appimaged: !enabled
       cleanInstall: false
-    geistFontEnabled: false # NOTE: modified by metadata.edit
-    # list of nerdfonts: https://www.nerdfonts.com/font-downloads 
-    nerdfont: !disabled GeistMono # NOTE: modified by metadata.edit 
+    geistFontEnabled: false # NOTE: also disabled by metadata.skipSlow
+    # list of nerdfonts: https://www.nerdfonts.com/font-downloads
+    nerdfont: !disabled GeistMono # NOTE: also disabled by metadata.skipSlow
   install:
     check: true
-    apt: !disabled
+    apt: !enabled # NOTE: also disabled by metadata.skipSlow
       # CLI utils
       - fzf # fuzzy finder
       - gnupg2
@@ -88,8 +88,7 @@ config:
       - nautilus # file manager
       # multimedia
       - imagemagick # image manipulation & conversion
-      - vlc # multimedia player
-      # productivity
+      - vlc
     addRepos: !disabled
       - sourceName: brave-browser-release
         remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
@@ -188,7 +187,7 @@ config:
     apt: !enabled
       aptFull: false # NOTE: apt must be true for aptFull to take effect
     flatpak: true
-    cargo: true
+    cargo: true # NOTE: also disabled by metadata.skipSlow
     other:
       go: false
       yq: true
@@ -210,8 +209,6 @@ config:
         - yazi
         - zellij
     apps:
-      gpg:
-        genKey: false # NOTE: modified by metadata.edit
       git:
         userInfo: false # NOTE: set actual contents in secrets.yaml
       alacritty: true
@@ -238,8 +235,7 @@ config:
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
     optimisations: !enabled
-      # laptop
-      auto-cpufreq: true
+      auto-cpufreq: true # laptop
     DEConf: !enabled
       cinnamon:
         defaultTerm: !enabled alacritty
