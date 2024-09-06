@@ -2,6 +2,6 @@
 setxkbmap -option caps:swapescape # swap caps lock & escape key
 
 if command -v macchina &>/dev/null; then
-  macchina -t Minimal -o host -o kernel -o distribution -o uptime \
-    -o processor-load -o memory
+  macchina -o host -o kernel -o distribution -o uptime -o processor-load \
+    -o memory
 fi
