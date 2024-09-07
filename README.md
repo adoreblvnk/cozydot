@@ -4,10 +4,10 @@ TIDES (The Idempotent Dev Environment Setup) is an automated post-install, updat
 Usage: tides [Options] [Command]
 
 Options:
-      --no-colour        Do not output any colour. Useful when redirecting output to a logfile
+  -n, --no-colour        Do not output any colour. Useful when redirecting output to a logfile
                          directory
   -c, --config <CONFIG>  Set a config file that exists in $CONFIG_DIR (default: <tides_path>/configs/)
-      --secrets <SECRET> Set a secrets file. Add to .gitignore if secrets file is in tides directory
+  -S, --secrets <SECRET> Set a secrets file. Add to .gitignore if secrets file is in tides directory
   -s, --skip-slow        Allow tides to skip slow running actions. Will break your system if set on
                          tides' first run
       --list-configs     List all available configs in $CONFIG_DIR (default: <tides_path>/configs/)

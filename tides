@@ -11,14 +11,13 @@ SECRETS="$(dirname "$0")/secrets.yaml"
 SKIP_SLOW=false # modified in skip_slow()
 DISTRO=
 DESKTOP_ENVIRONMENT=
-DISPLAY_SERVER=
 
 # ----- PRINT FUNCTIONS -----
 
 # Set text colours if supported.
 # Arguments:
 #   colours enabled, a boolean
-_colours() {
+colours() {
   if [[ "$(tput colors)" -ge 8 ]] && [[ $1 == true ]]; then
     NC="$(tput sgr0)" # text reset (select graphic representation default)
     BOLD="$(tput bold)"
@@ -37,7 +36,7 @@ _colours() {
     tides_txt="${B_RED}t${B_YELLOW}i${B_GREEN}d${B_BLUE}e${B_MAGENTA}s${NC}"
     TIDES_TXT="${B_RED}T${B_YELLOW}I${B_GREEN}D${B_BLUE}E${B_MAGENTA}S${NC}"
   else
-    # don't set colours if argument is false (or not given). use `_colours false` for readability
+    # don't set colours if argument is false (or not given). use `colours false` for readability
     NC=
     BOLD=
     RED=
@@ -75,10 +74,10 @@ ${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B
 ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
-  ${GREEN}    --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
+  ${GREEN}-n, --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
                          directory
   ${GREEN}-c, --config <CONFIG> ${NC} Set a config file that exists in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
-  ${GREEN}    --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
+  ${GREEN}-S, --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
   ${GREEN}-s, --skip-slow       ${NC} Allow tides to skip slow running actions. Will ${RED}break${NC} your system if set on
                          ${tides_txt}' first run
   ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
@@ -118,10 +117,8 @@ EOF
 # Arguments:
 #   config that exists in $CONFIG_DIR
 set_config() {
-  local config_file="${CONFIG_DIR}/$1.yaml"
-  if [[ -f $config_file ]]; then
-    CONFIG=$config_file
-  else
+  CONFIG="${CONFIG_DIR}/$1.yaml"
+  if [[ ! -f $CONFIG ]]; then
     _error_msg "Config selected \"$1\" does not exist"
   fi
 }
@@ -131,9 +128,7 @@ set_config() {
 #   secrets file as a path
 set_secrets_file() {
   SECRETS="$(realpath "$1")"
-  if [[ -f "$SECRETS" ]]; then
-    yq '.gitconfig.name' "$SECRETS"
-  else
+  if [[ ! -f $SECRETS ]]; then
     _error_msg "Secrets file selected \"$1\" does not exist"
   fi
 }
@@ -141,17 +136,16 @@ set_secrets_file() {
 # Allow tides to skip slow running actions. Defaults to false, but can be set
 # to true in config or as a CLI option.
 # Arguments:
-#   (optional) true to skip slow running actions. used by CLI option
+#   optional true to skip slow running actions. used by CLI option
 # shellcheck disable=SC2120
 skip_slow() {
   local skip_slow_opt=${1:-false}
   local skip_slow_cfg=$(yq '.metadata.skipSlow' "$CONFIG")
   if ! { [[ $skip_slow_cfg == true ]] || [[ $skip_slow_cfg == false ]]; }; then
-    _error_msg ".metadata.skipSlow in config must be set to ${GREEN}true${NC} or ${RED}false${NC}"
+    _error_msg "${CYAN}.metadata.skipSlow${NC} in config must be set to ${GREEN}true${NC} or ${RED}false${NC}"
   fi
   if [[ $skip_slow_opt == true ]] || [[ $skip_slow_cfg == true ]]; then
     SKIP_SLOW=true
-    _info_msg "Setting SKIP_SLOW to true"
   fi
 }
 
@@ -165,7 +159,10 @@ list_configs() {
   for config in "${configs[@]}"; do echo "  ${GREEN}$config${NC}"; done
 }
 
-get_version() { echo "${tides_txt} $(yq '.version' "$CONFIG")"; }
+get_version() {
+  echo "${tides_txt} $(yq '.version' "$CONFIG")"
+  exit
+}
 
 # ----- SET CONSTANTS -----
 
@@ -183,27 +180,17 @@ _set_constants() {
   DISTRO="$(yq '.metadata.distro' "$CONFIG")"
   if [[ $DISTRO == "auto" ]]; then
     DISTRO="$ID" # TODO: create var to store upstream distro?
-    case "$DISTRO" in
-      # https://github.com/which-distro/os-release
-      ubuntu | linuxmint | pop | zorin | Deepin) ;;
-      debian | kali | tails)
-        # TODO: add debian support
-        _warning_msg "Debian distros not supported yet"
-        ;;
-      *) _error_msg "Unsupported distro detected" ;;
-    esac
-    _info_msg "Auto-detected & set distro to $DISTRO"
-  else
-    _info_msg "Set distro to $DISTRO as manually specified in config"
+    local distro_auto=" (auto)"
   fi
-
-  if [[ -n $UBUNTU_CODENAME ]]; then
-    _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
-    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
-    # this system variable has no major consequences anyways
-    # shellcheck disable=SC2034
-    VERSION_CODENAME=$UBUNTU_CODENAME
-  fi
+  case "$DISTRO" in
+    # https://github.com/which-distro/os-release
+    ubuntu | linuxmint | pop | zorin | Deepin) ;;
+    debian | kali | tails)
+      # TODO: add debian support
+      _warning_msg "Debian distros not officially supported yet"
+      ;;
+    *) _error_msg "Unsupported distro detected or in config" ;;
+  esac
 
   # get desktop environment & set $DESKTOP_ENVIRONMENT
   DESKTOP_ENVIRONMENT="$(yq '.metadata.desktopEnvironment' "$CONFIG")"
@@ -212,28 +199,24 @@ _set_constants() {
     case "$XDG_CURRENT_DESKTOP" in
       Cinnamon | X-Cinnamon) DESKTOP_ENVIRONMENT=cinnamon ;;
       *GNOME*) DESKTOP_ENVIRONMENT=gnome ;;
-      *) _warning_msg "Unknown desktop environment" ;;
     esac
-    if [[ $DESKTOP_ENVIRONMENT != "auto" ]]; then
-      _info_msg "Auto-detected & set desktop environment to $DESKTOP_ENVIRONMENT"
-    fi
-  else
-    _info_msg "Set desktop environment to $DESKTOP_ENVIRONMENT as manually specified in config"
+    local de_auto=" (auto)"
   fi
+  case $DESKTOP_ENVIRONMENT in
+    cinnamon | gnome) ;;
+    '') _error_msg "${CYAN}.metadata.desktopEnvironment${NC} not set in config" ;;
+    *) _warning_msg "${tides_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment" ;;
+  esac
 
-  # get & set $DISPLAY_SERVER
-  DISPLAY_SERVER="$(yq '.metadata.displayServer' "$CONFIG")"
-  if [[ $DISPLAY_SERVER == "auto" ]]; then
-    case "$XDG_SESSION_TYPE" in
-      x11) DISPLAY_SERVER=x11 ;;
-      wayland) DISPLAY_SERVER=wayland ;;
-      *) _warning_msg "Unknown display server" ;;
-    esac
-    if [[ $DISPLAY_SERVER != "auto" ]]; then
-      _info_msg "Auto-detected & set display server to $DISPLAY_SERVER"
-    fi
-  else
-    _info_msg "Set display server to $DISPLAY_SERVER as manually specified in config"
+  # substitute nothing if auto unset
+  _info_msg "Distro: ${DISTRO}${distro_auto:-}, Desktop Environment: ${DESKTOP_ENVIRONMENT}${de_auto:-}"
+
+  if [[ -n $UBUNTU_CODENAME ]]; then
+    _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
+    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
+    # this system variable has no major consequences anyways
+    # shellcheck disable=SC2034
+    VERSION_CODENAME=$UBUNTU_CODENAME
   fi
 }
 
@@ -489,7 +472,8 @@ install() {
   fi
 
   # install from 3rd-party repos
-  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!enabled" ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     _info_msg "Installing apt packages from third party repositories"
 
     # setting up signing keys & repo entries for source (repo)
@@ -750,8 +734,10 @@ configure() {
   fi
 
   # setup git user field in gitconfig via ~/.gitconfig.local
-  if [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
-    _info_msg "Setting up \`.gitconfig.local\`"
+  if [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]] \
+    && [[ -n $(yq '.gitconfig.name' "$SECRETS") ]] \
+    && [[ -n $(yq '.gitconfig.email' "$SECRETS") ]]; then
+    _info_msg "Adding name & email to ${BLUE}~/.gitconfig.local${NC}"
     tee ~/.gitconfig.local <<EOF >/dev/null
 [user]
     name = $(yq '.gitconfig.name' "$SECRETS")
@@ -760,11 +746,11 @@ EOF
     # add signingkey if field exists
     if [[ -n $(yq '.gitconfig.signingkey' "$SECRETS") ]]; then
       _info_msg "Adding signing key"
-      # TODO: remove signingkey field if alr exists prior to append operation
-      tee -a ~/.gitconfig.local <<EOF >/dev/null
-    signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")
-EOF
+      echo "    signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")" \
+        | tee -a ~/.gitconfig.local >/dev/null
     fi
+  elif [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
+    _error_msg ".gitconfig.name or .gitconfig.email not set in $SECRETS"
   fi
 
   # setup Alacritty
@@ -870,7 +856,8 @@ EOF
   fi
 
   # install vscodium extensions
-  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!enabled" ]] \
+    && [[ $SKIP_SLOW == false ]]; then
     _info_msg "Installing vscodium extensions"
     local extensions
     mapfile -t extensions < <(
@@ -1038,7 +1025,7 @@ EOF
 
 main() {
   # PRINT FUNCTIONS
-  _colours true
+  colours true
 
   # install curl if not installed
   if ! command -v curl &>/dev/null; then
@@ -1066,12 +1053,12 @@ main() {
         exit 0
         ;;
       # OPTIONS
-      --no-colour) _colours false ;;
+      -n | --no-colour) colours false ;;
       -c | --config)
         set_config "$2"
         shift
         ;;
-      --secrets-file)
+      -S | --secrets)
         set_secrets_file "$2"
         shift
         ;;

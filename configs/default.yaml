@@ -1,10 +1,10 @@
 version: 0.0.1
 metadata:
+  description: Sensible defaults for tides.
   skipSlow: false
   # NOTE: the following values are highly recommended to be set to "auto"
   distro: auto # auto | ubuntu | linuxmint
   desktopEnvironment: auto # auto | gnome | cinnamon
-  displayServer: auto # auto | x11 | wayland
 config:
   check:
     snapDisabled: true
@@ -19,7 +19,7 @@ config:
       - runc
       - firefox* # firefox installed via aptAltSources
       - libreoffice* # libreoffice replaced with onlyoffice
-    deps: !disabled # NOTE: also disabled by metadata.skipSlow
+    deps: !enabled # NOTE: also disabled by metadata.skipSlow
       # essential packages
       - apt-transport-https
       - bash-completion
@@ -70,9 +70,9 @@ config:
     rustupCheck: true
     appimaged: !enabled
       cleanInstall: false
-    geistFontEnabled: false # NOTE: also disabled by metadata.skipSlow
+    geistFontEnabled: true # NOTE: also disabled by metadata.skipSlow
     # list of nerdfonts: https://www.nerdfonts.com/font-downloads
-    nerdfont: !disabled GeistMono # NOTE: also disabled by metadata.skipSlow
+    nerdfont: !enabled GeistMono # NOTE: also disabled by metadata.skipSlow
   install:
     check: true
     apt: !enabled # NOTE: also disabled by metadata.skipSlow
@@ -87,9 +87,10 @@ config:
       - flameshot # screenshot
       - nautilus # file manager
       # multimedia
-      - imagemagick # image manipulation & conversion
+      - imagemagick # image converter
+      - pandoc # document converter
       - vlc
-    addRepos: !disabled
+    addRepos: !enabled # NOTE: also disabled by metadata.skipSlow
       - sourceName: brave-browser-release
         remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
         gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
@@ -97,13 +98,6 @@ config:
         pinning: false
         packages:
           - brave-browser
-      - sourceName: charm
-        remoteGpgKey: https://repo.charm.sh/apt/gpg.key
-        gpgKeyPath: /etc/apt/keyrings/charm.gpg
-        repo: deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ \* \*
-        pinning: false
-        packages:
-          - glow # terminal based markdown reader
       - sourceName: docker
         remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
         gpgKeyPath: /etc/apt/keyrings/docker.asc
@@ -154,13 +148,12 @@ config:
       - org.telegram.desktop
     cargo: !enabled
       - alacritty
-      - bat --locked
+      - bat --locked # cat replacement
       - bottom --locked # process / system monitor
-      - cargo-update
-      - du-dust # disk usage
-      - eza
+      - du-dust
+      - eza # ls replacement
       - fd-find
-      - macchina
+      - macchina # system info
       - ripgrep
       - starship --locked
       - yazi-cli --locked # terminal file manager
@@ -210,13 +203,13 @@ config:
         - zellij
     apps:
       git:
-        userInfo: false # NOTE: set actual contents in secrets.yaml
+        userInfo: true # NOTE: set actual contents in secrets.yaml
       alacritty: true
       docker: true
       ulauncher: true
       virtualbox: true
       vscodium:
-        extensions: !disabled
+        extensions: !enabled # NOTE: also disabled by metadata.skipSlow
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
           - catppuccin.catppuccin-vsc-icons

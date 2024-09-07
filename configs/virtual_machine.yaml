@@ -1,14 +1,14 @@
 version: 0.0.1
 metadata:
-  edit: true
+  description: Virtual machine config, notably removes virtualisation & messager apps.
+  skipSlow: false
   # NOTE: the following values are highly recommended to be set to "auto"
   distro: auto # auto | ubuntu | linuxmint
   desktopEnvironment: auto # auto | gnome | cinnamon
-  displayServer: auto # auto | x11 | wayland
 config:
   check:
     snapDisabled: true
-    purge: !disabled # NOTE: modified by metadata.edit
+    purge: !enabled # NOTE: also disabled by metadata.skipSlow
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
@@ -19,7 +19,7 @@ config:
       - runc
       - firefox* # firefox installed via aptAltSources
       - libreoffice* # libreoffice replaced with onlyoffice
-    deps: !disabled # NOTE: modified by metadata.edit 
+    deps: !enabled # NOTE: also disabled by metadata.skipSlow
       # essential packages
       - apt-transport-https
       - bash-completion
@@ -50,8 +50,8 @@ config:
       - libjpeg-dev
       - libpng-dev
       - libtiff-dev
-      # docker dependencies
-      - lsb-release
+      # # docker dependencies
+      # - lsb-release
       # cargo-update dependencies
       - libgit2-dev
       - libssh-dev
@@ -65,17 +65,17 @@ config:
       # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
     python: !enabled
       pyenvUpdate: false
-      version: 3.12 # <major>.<minor>
+      version: 3.12 # <major>[.<minor>]
       pip: false
     rustupCheck: true
     appimaged: !enabled
       cleanInstall: false
-    geistFontEnabled: false # NOTE: modified by metadata.edit
-    # list of nerdfonts: https://www.nerdfonts.com/font-downloads 
-    nerdfont: !disabled GeistMono # NOTE: modified by metadata.edit 
+    geistFontEnabled: false # NOTE: also disabled by metadata.skipSlow
+    # list of nerdfonts: https://www.nerdfonts.com/font-downloads
+    nerdfont: !enabled GeistMono # NOTE: also disabled by metadata.skipSlow
   install:
     check: true
-    apt: !enabled
+    apt: !enabled # NOTE: also disabled by metadata.skipSlow
       # CLI utils
       - fzf # fuzzy finder
       - gnupg2
@@ -83,14 +83,14 @@ config:
       - trash-cli
       - vim
       - xclip # terminal X11 clipboard
-      # apps
+      # # apps
       # - flameshot # screenshot
       # - nautilus # file manager
       # multimedia
-      - imagemagick # image manipulation & conversion
-      - vlc # multimedia player
-      # productivity
-    addRepos: !disabled
+      - imagemagick # image converter
+      - pandoc # document converter
+      - vlc
+    addRepos: !enabled # NOTE: also disabled by metadata.skipSlow
       # - sourceName: brave-browser-release
       #   remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
       #   gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
@@ -98,13 +98,6 @@ config:
       #   pinning: false
       #   packages:
       #     - brave-browser
-      - sourceName: charm
-        remoteGpgKey: https://repo.charm.sh/apt/gpg.key
-        gpgKeyPath: /etc/apt/keyrings/charm.gpg
-        repo: deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ \* \*
-        pinning: false
-        packages:
-          - glow # terminal based markdown reader
       # - sourceName: docker
       #   remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
       #   gpgKeyPath: /etc/apt/keyrings/docker.asc
@@ -155,13 +148,12 @@ config:
       - org.telegram.desktop
     cargo: !enabled
       - alacritty
-      - bat --locked
+      - bat --locked # cat replacement
       - bottom --locked # process / system monitor
-      - cargo-update
-      - du-dust # disk usage
-      - eza
+      - du-dust
+      - eza # ls replacement
       - fd-find
-      - macchina
+      - macchina # system info
       - ripgrep
       - starship --locked
       - yazi-cli --locked # terminal file manager
@@ -179,13 +171,18 @@ config:
         url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
       # - name: zen.AppImage
       #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
+    languages:
+      goVersion: !enabled latest # latest | <major>.<minor>.<patch>
+      nvm: !enabled
+        nodeVersion: 20 # <major>[.<minor>]
   update:
     check: true
     apt: !enabled
       aptFull: false # NOTE: apt must be true for aptFull to take effect
-    flatpak: true
-    cargo: true
+    flatpak: false
+    cargo: true # NOTE: also disabled by metadata.skipSlow
     other:
+      go: false
       yq: true
       zellijClear: true
   configure:
@@ -198,22 +195,21 @@ config:
         - bat
         - bottom
         - codium
+        # - extras
         - macchina
         - starship
         - ulauncher
         - yazi
         - zellij
     apps:
-      gpg:
-        genKey: false # NOTE: modified by metadata.edit
       git:
-        userInfo: false # NOTE: set actual contents in secrets.yaml
+        userInfo: true # NOTE: set actual contents in secrets.yaml
       alacritty: true
       docker: true
       ulauncher: true
       virtualbox: true
       vscodium:
-        extensions: !disabled
+        extensions: !disabled # NOTE: also disabled by metadata.skipSlow
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
           - catppuccin.catppuccin-vsc-icons
@@ -231,13 +227,14 @@ config:
           - timonwong.shellcheck
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
-    optimisations: !disabled
-      # laptop
-      auto-cpufreq: true
+    optimisations: !enabled
+      auto-cpufreq: true # laptop
     DEConf: !enabled
       cinnamon:
         defaultTerm: !enabled alacritty
         plankDock: true
+        gTile: !enabled
+          tilingLayout: true
         panelToMenuBar: true
       gnome:
         tweaksAndExtensions: true
