@@ -255,10 +255,7 @@ check() {
         snap list | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' \
           | awk '{print $1}'
       )
-      for pkg in "${snap_pkgs[@]}"; do
-        # shellcheck disable=SC2086
-        snap remove --purge $pkg
-      done
+      for pkg in "${snap_pkgs[@]}"; do snap remove --purge "$pkg"; done
       snap remove --purge "$(snap list | grep -o '^core[0-9][0-9]')"
       snap remove --purge bare
       snap remove --purge snapd
@@ -302,8 +299,7 @@ EOF
     local purge_pkgs # collect purge packages into array
     mapfile -t purge_pkgs < <(yq '.config.check.purge[]' "$CONFIG")
     for pkg in "${purge_pkgs[@]}"; do
-      # shellcheck disable=SC2086
-      sudo apt-get autoremove --purge -qy $pkg
+      sudo apt-get autoremove --purge -qy "$pkg"
     done
   fi
 
@@ -541,7 +537,6 @@ install() {
     local rust_pkgs
     mapfile -t rust_pkgs < <(yq '.config.install.cargo[]' "$CONFIG")
     for pkg in "${rust_pkgs[@]}"; do
-      # disable SC2086 to enable installing with options
       # shellcheck disable=SC2086
       cargo install $pkg
     done
@@ -865,8 +860,7 @@ EOF
     )
     for ext in "${extensions[@]}"; do
       # install vscodium extensions
-      # shellcheck disable=SC2086
-      codium --install-extension $ext
+      codium --install-extension "$ext"
     done
   fi
 

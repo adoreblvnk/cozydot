@@ -1,6 +1,6 @@
 version: 0.0.1
 metadata:
-  description: Virtual machine config, notably removes virtualisation, flatpaks & storage-heavy apps.
+  description: Configs for CLI-only apps. Note that Docker may not work on WSL
   skipSlow: false
   # NOTE: the following values are highly recommended to be set to "auto"
   distro: auto # auto | ubuntu | linuxmint
@@ -50,19 +50,19 @@ config:
       - libjpeg-dev
       - libpng-dev
       - libtiff-dev
-      # # docker dependencies
-      # - lsb-release
+      # docker dependencies
+      - lsb-release
       # cargo-update dependencies
       - libgit2-dev
       - libssh-dev
       - libssl-dev
       - pkgconf
-      # alacritty dependencies
-      - libfontconfig1-dev
-      - libfreetype6-dev
-      - libxcb-xfixes0-dev
-      - libxkbcommon-dev
-      # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
+      # # alacritty dependencies
+      # - libfontconfig1-dev
+      # - libfreetype6-dev
+      # - libxcb-xfixes0-dev
+      # - libxkbcommon-dev
+      # # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
     python: !enabled
       pyenvUpdate: false
       version: 3.12 # <major>[.<minor>]
@@ -70,7 +70,7 @@ config:
     rustupCheck: true
     appimaged: !enabled
       cleanInstall: false
-    geistFontEnabled: false # NOTE: also disabled by metadata.skipSlow
+    geistFontEnabled: true # NOTE: also disabled by metadata.skipSlow
     # list of nerdfonts: https://www.nerdfonts.com/font-downloads
     nerdfont: !enabled GeistMono # NOTE: also disabled by metadata.skipSlow
   install:
@@ -90,25 +90,25 @@ config:
       - imagemagick # image converter
       - pandoc # document converter
       - vlc
-    addRepos: !enabled # NOTE: also disabled by metadata.skipSlow
-      # - sourceName: brave-browser-release
-      #   remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-      #   gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
-      #   repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
-      #   pinning: false
-      #   packages:
-      #     - brave-browser
-      # - sourceName: docker
-      #   remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
-      #   gpgKeyPath: /etc/apt/keyrings/docker.asc
-      #   repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
-      #   pinning: false
-      #   packages:
-      #     - docker-ce
-      #     - docker-ce-cli
-      #     - containerd.io
-      #     - docker-buildx-plugin
-      #     - docker-compose-plugin
+    addRepos: !disabled # NOTE: also disabled by metadata.skipSlow
+      - sourceName: brave-browser-release
+        remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+        gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
+        repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
+        pinning: false
+        packages:
+          - brave-browser
+      - sourceName: docker
+        remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
+        gpgKeyPath: /etc/apt/keyrings/docker.asc
+        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
+        pinning: false
+        packages:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
       - sourceName: mozilla
         remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
         gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
@@ -119,20 +119,20 @@ config:
           Pin-Priority: 1000
         packages:
           - firefox
-      # - sourceName: onlyoffice
-      #   remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-      #   gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
-      #   repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
-      #   pinning: false
-      #   packages:
-      #     - onlyoffice-desktopeditors
-      # - sourceName: virtualbox
-      #   remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-      #   gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
-      #   repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
-      #   pinning: false
-      #   packages:
-      #     - virtualbox-7.0
+      - sourceName: onlyoffice
+        remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+        gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
+        repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
+        pinning: false
+        packages:
+          - onlyoffice-desktopeditors
+      - sourceName: virtualbox
+        remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
+        pinning: false
+        packages:
+          - virtualbox-7.0
       - sourceName: vscodium
         remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
         gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
@@ -147,7 +147,7 @@ config:
       - org.shotcut.Shotcut # video editor
       - org.telegram.desktop
     cargo: !enabled
-      - alacritty
+      # - alacritty
       - bat --locked # cat replacement
       - bottom --locked # process / system monitor
       - du-dust
@@ -160,9 +160,9 @@ config:
       - yazi-fm --locked # terminal file manager
       - zellij --locked
       - zoxide --locked # smarter cd command
-    binaries: !enabled
-      # - name: Bitwarden.AppImage # password manager
-      #   url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
+    binaries: !disabled
+      - name: Bitwarden.AppImage # password manager
+        url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
       - name: drawio.AppImage # diagramming tool
         url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
       - name: Obsidian.AppImage # note-taking app
@@ -190,11 +190,11 @@ config:
     dotfiles: !enabled
       stowMode: override # backup | override
       packages:
-        - alacritty
+        # - alacritty
         - bash
         - bat
         - bottom
-        - codium
+        # - codium
         # - extras
         - macchina
         - starship
@@ -204,10 +204,10 @@ config:
     apps:
       git:
         userInfo: true # NOTE: set actual contents in secrets.yaml
-      alacritty: true
-      docker: false
-      ulauncher: true
-      virtualbox: false
+      # alacritty: true
+      docker: true
+      # ulauncher: true
+      # virtualbox: true
       vscodium:
         extensions: !disabled # NOTE: also disabled by metadata.skipSlow
           - adpyke.codesnap
@@ -229,7 +229,7 @@ config:
           - yzhang.markdown-all-in-one
     optimisations: !enabled
       auto-cpufreq: true # laptop
-    DEConf: !enabled
+    DEConf: !disabled
       cinnamon:
         defaultTerm: !enabled alacritty
         plankDock: true
