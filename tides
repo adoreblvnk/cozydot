@@ -248,7 +248,9 @@ check() {
 
   _set_constants
 
-  if [[ $(yq '.config.check.snapDisabled' "$CONFIG") == true ]]; then
+  # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
+  if [[ $(yq '.config.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
+    && [[ $DISTRO == "ubuntu" ]]; then
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
       mapfile -t snap_pkgs < <(
@@ -260,28 +262,23 @@ check() {
       snap remove --purge bare
       snap remove --purge snapd
     fi
-
     if systemctl -q is-active snapd; then
       _info_msg "Stop & disable snap services"
       sudo systemctl stop snapd
       sudo systemctl disable snapd
     fi
-
     if command -v snapd &>/dev/null; then
       _info_msg "Removing snapd package from apt"
       sudo apt-get remove --purge -qq snapd
     fi
-
     if [[ -d ~/snap ]]; then
       _info_msg "Removing snap package directories"
       rm -rf ~/snap
     fi
-
     if [[ -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
       _info_msg "Removing leftover snap directories"
       sudo rm -rf /snap /var/snap /var/lib/snapd
     fi
-
     if [[ ! -f /etc/apt/preferences.d/nosnap.pref ]]; then
       _info_msg "Creating nosnap.pref to prevent snap from being reinstalled"
       sudo tee /etc/apt/preferences.d/nosnap.pref <<EOF >/dev/null
@@ -289,6 +286,26 @@ Package: snapd
 Pin: release a=*
 Pin-Priority: -10
 EOF
+    fi
+
+    if ! dpkg -s ubuntu-restricted-extras; then
+      _info_msg "Installing ubuntu-restricted-extras"
+      sudo apt-get update -qq && sudo apt-get install -qq ubuntu-restricted-extras
+    fi
+
+    # disabling auto upgrades
+    cat <<EOF >/etc/apt/apt.conf.d/20auto-upgrades
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";
+EOF
+  fi
+
+  # setup mint: install multimedia codecs
+  if [[ $(yq '.config.check.distroCfg.linuxmint' "$CONFIG") == true ]] \
+    && [[ $DISTRO == "linuxmint" ]]; then
+    if ! dpkg -s mint-meta-codecs &>/dev/null; then
+      _info_msg "Installing mint-meta-codecs"
+      sudo apt-get update -qq && sudo apt-get install -qq mint-meta-codecs
     fi
   fi
 
@@ -304,14 +321,15 @@ EOF
   fi
 
   # install dependency packages
-  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $SKIP_SLOW == false ]]; then
+  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
-      _info_msg "Installing dependency $pkg"
-      sudo apt-get install -qq "$pkg"
+      if ! dpkg -s "$pkg" &>/dev/null; then
+        _info_msg "Installing dependency package $pkg"
+        sudo apt-get install -qq "$pkg"
+      fi
     done
   fi
 
@@ -373,36 +391,46 @@ EOF
   fi
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
-  if [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]] \
-    && { ! systemctl --user -q is-active appimaged \
-      || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]; }; then
-    _info_msg "Installing appimaged"
-    # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
+  if [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]]; then
+    if ! systemctl --user -q is-active appimaged \
+      || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]; then
+      _info_msg "Installing appimaged"
+      # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
 
-    # remove pre-existing similar tools
-    systemctl --user stop appimaged.service || true
-    sudo apt-get remove -qy appimagelauncher || true
+      # remove pre-existing similar tools
+      systemctl --user stop appimaged.service || true
+      sudo apt-get remove -qy appimagelauncher || true
 
-    # clear cache
-    rm -rf "$HOME/.local/share/applications/appimage*"
-    [ -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service ] \
-      && rm ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
+      # clear cache
+      rm -rf "$HOME/.local/share/applications/appimage*"
+      [ -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service ] \
+        && rm ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
 
-    # download appimaged
-    mkdir -p "$HOME/Applications"
-    # get continuous release via GitHub api
-    local browser_download_url=$(
-      curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
-        | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")'
-    )
-    curl -sSL -o "$HOME/Applications/appimaged.AppImage" \
-      "$browser_download_url"
+      # download appimaged
+      mkdir -p "$HOME/Applications"
+      # get continuous release via GitHub api
+      local browser_download_url=$(
+        curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
+          | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")'
+      )
+      curl -sSL -o "$HOME/Applications/appimaged.AppImage" \
+        "$browser_download_url"
 
-    # launch
-    chmod +x "$HOME/Applications/appimaged.AppImage"
-    "$HOME/Applications/appimaged.AppImage"
-  elif [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]]; then
-    _info_msg "Appimaged service already running"
+      # launch
+      chmod +x "$HOME/Applications/appimaged.AppImage"
+      "$HOME/Applications/appimaged.AppImage"
+    else
+      _info_msg "Appimaged service already running"
+    fi
+    # install libfuse2t64 (named libfuse2 on older systems) for legacy AppImages
+    # https://github.com/AppImage/AppImageKit/wiki/FUSE
+    local fuse2_lib=$(apt-cache search --names-only "^libfuse2" | cut -d ' ' -f 1)
+    if ! dpkg -s "$fuse2_lib" &>/dev/null; then
+      _info_msg "Installing $fuse2_lib"
+      sudo apt-get update -qq && sudo apt-get install -qq "$fuse2_lib"
+    else
+      _info_msg "$fuse2_lib already installed"
+    fi
   fi
 
   # install Geist font
@@ -456,14 +484,17 @@ install() {
   fi
 
   # install apt packages
-  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $SKIP_SLOW == false ]]; then
+  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]]; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.install.apt[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
-      _info_msg "Installing $pkg"
-      sudo apt-get install -qq "$pkg"
+      if ! dpkg -s "$pkg" &>/dev/null; then
+        _info_msg "Installing $pkg"
+        sudo apt-get install -qq "$pkg"
+      else
+        _info_msg "$pkg already installed"
+      fi
     done
   fi
 

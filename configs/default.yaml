@@ -7,7 +7,9 @@ metadata:
   desktopEnvironment: auto # auto | gnome | cinnamon
 config:
   check:
-    snapDisabled: true
+    distroCfg:
+      ubuntu: true
+      linuxmint: true
     purge: !enabled # NOTE: also disabled by metadata.skipSlow
       # docker installed via aptAltSources
       - docker.io
@@ -19,7 +21,7 @@ config:
       - runc
       - firefox* # firefox installed via aptAltSources
       - libreoffice* # libreoffice replaced with onlyoffice
-    deps: !enabled # NOTE: also disabled by metadata.skipSlow
+    deps: !enabled
       # essential packages
       - apt-transport-https
       - bash-completion
@@ -75,7 +77,7 @@ config:
     nerdfont: !enabled GeistMono # NOTE: also disabled by metadata.skipSlow
   install:
     check: true
-    apt: !enabled # NOTE: also disabled by metadata.skipSlow
+    apt: !enabled
       # CLI utils
       - fzf # fuzzy finder
       - gnupg2
