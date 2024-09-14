@@ -309,6 +309,15 @@ EOF
     fi
   fi
 
+  # setup debian: enable sudo for user
+  if [[ $(yq '.config.check.distroCfg.debian' "$CONFIG") == true ]] \
+    && [[ $DISTRO == "debian" ]]; then
+    if ! getent group sudo | grep -q "$(whoami)"; then
+      _warning_msg "Adding $(whoami) to sudo group. Restart to use sudo"
+      usermod -aG sudo "$(whoami)"
+    fi
+  fi
+
   if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]] \
     && [[ $SKIP_SLOW == false ]]; then
     _info_msg "Purging apt packages"
@@ -428,8 +437,6 @@ EOF
     if ! dpkg -s "$fuse2_lib" &>/dev/null; then
       _info_msg "Installing $fuse2_lib"
       sudo apt-get update -qq && sudo apt-get install -qq "$fuse2_lib"
-    else
-      _info_msg "$fuse2_lib already installed"
     fi
   fi
 
@@ -952,31 +959,6 @@ NoDisplay=false
 EOF
       fi
 
-      # install gTile tiling assistant
-      if [[ $(yq ".config.configure.DEConf.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
-        if [[ ! -d "$HOME/.local/share/cinnamon/extensions/gTile@shuairan" ]]; then
-          _info_msg "Downloading gTile extension"
-          curl -sSL -o /tmp/gTile@shuairan.zip \
-            https://cinnamon-spices.linuxmint.com/files/extensions/gTile@shuairan.zip
-          unzip /tmp/gTile@shuairan.zip \
-            -d "$HOME/.local/share/cinnamon/extensions" >/dev/null
-        fi
-        if ! gsettings get org.cinnamon enabled-extensions | grep -q "gTile"; then
-          _warning_msg "Enabling gTile will disable other extensions"
-          gsettings set org.cinnamon enabled-extensions "['gTile@shuairan']"
-        else
-          _info_msg "gTile already enabled"
-        fi
-
-        # opinionated tiling layout
-        if [[ $(yq ".config.configure.DEConf.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
-          _info_msg "Configuring opinionated tiling layout for gTile"
-          mkdir -p "$HOME/.local/share/cinnamon/extensions/gTile@shuairan"
-          cp "$(dirname "$0")/extras/gTile@shuairan.json" \
-            "$HOME/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json"
-        fi
-      fi
-
       # convert cinnamon panel to MacOS-like menu bar
       if [[ $(yq ".config.configure.DEConf.cinnamon.panelToMenuBar" "$CONFIG") == true ]]; then
         _info_msg "Converting panel to menu bar"
@@ -1001,6 +983,38 @@ EOF
         gsettings set org.cinnamon panels-enabled "['1:0:top']"
         # smaller panel height
         gsettings set org.cinnamon panels-height "['1:25']"
+      fi
+
+      if [[ $(yq ".config.configure.DEConf.cinnamon.flameshot" "$CONFIG") == true ]]; then
+        _info_msg "Configuring flameshot shortcut to Print (PrtSc) key"
+        dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/name "'flameshot'"
+        dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/command "'/usr/bin/flameshot gui'"
+        dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/binding "['Print']"
+      fi
+
+      # install gTile tiling assistant
+      if [[ $(yq ".config.configure.DEConf.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
+        if [[ ! -d "$HOME/.local/share/cinnamon/extensions/gTile@shuairan" ]]; then
+          _info_msg "Downloading gTile extension"
+          curl -sSL -o /tmp/gTile@shuairan.zip \
+            https://cinnamon-spices.linuxmint.com/files/extensions/gTile@shuairan.zip
+          unzip /tmp/gTile@shuairan.zip \
+            -d "$HOME/.local/share/cinnamon/extensions" >/dev/null
+        fi
+        if ! gsettings get org.cinnamon enabled-extensions | grep -q "gTile"; then
+          _warning_msg "Enabling gTile will disable other extensions"
+          gsettings set org.cinnamon enabled-extensions "['gTile@shuairan']"
+        else
+          _info_msg "gTile already enabled"
+        fi
+
+        # opinionated tiling layout
+        if [[ $(yq ".config.configure.DEConf.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
+          _info_msg "Configuring opinionated tiling layout for gTile"
+          mkdir -p "$HOME/.local/share/cinnamon/extensions/gTile@shuairan"
+          cp "$(dirname "$0")/extras/gTile@shuairan.json" \
+            "$HOME/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json"
+        fi
       fi
     fi
 
@@ -1039,6 +1053,16 @@ EOF
         # show dock on mouse/cursor hover
         gsettings set org.gnome.shell.extensions.dash-to-dock autohide true
         gsettings set org.gnome.shell.extensions.dash-to-dock require-pressure-to-show false
+      fi
+
+      if [[ $(yq ".config.configure.DEConf.gnome.flameshot" "$CONFIG") == true ]]; then
+        _info_msg "Configuring flameshot shortcut to Print (PrtSc) key"
+        gsettings set org.gnome.shell.keybindings show-screenshot-ui '[]'
+        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
+          "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
+        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'flameshot'"
+        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'/usr/bin/flameshot gui'"
+        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'Print'"
       fi
     fi
   fi

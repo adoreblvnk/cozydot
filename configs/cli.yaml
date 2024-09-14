@@ -3,13 +3,14 @@ metadata:
   description: Configs for CLI-only apps. Note that Docker may not work on WSL
   skipSlow: false
   # NOTE: the following values are highly recommended to be set to "auto"
-  distro: auto # auto | ubuntu | linuxmint
+  distro: auto # auto | ubuntu | linuxmint | debian
   desktopEnvironment: auto # auto | gnome | cinnamon
 config:
   check:
     distroCfg:
       ubuntu: true
       linuxmint: true
+      debian: true
     purge: !enabled # NOTE: also disabled by metadata.skipSlow
       # docker installed via aptAltSources
       - docker.io
@@ -235,10 +236,12 @@ config:
       cinnamon:
         defaultTerm: !enabled alacritty
         plankDock: true
+        panelToMenuBar: true
+        flameshot: true
         gTile: !enabled
           tilingLayout: true
-        panelToMenuBar: true
       gnome:
         tweaksAndExtensions: true
         defaultTerm: !enabled alacritty
         MacOSDock: true
+        flameshot: true
