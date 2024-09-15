@@ -317,7 +317,7 @@ EOF
       usermod -aG sudo "$(whoami)"
     fi
 
-    cat <<EOF | sudo tee /etc/apt/sources.list
+    cat <<EOF | sudo tee /etc/apt/sources.list >/dev/null
 deb http://deb.debian.org/debian $VERSION_CODENAME main contrib non-free non-free-firmware
 deb-src http://deb.debian.org/debian $VERSION_CODENAME main contrib non-free non-free-firmware
 
@@ -465,7 +465,7 @@ EOF
       )
       # download Geist font
       curl -sSL -o /tmp/Geist.zip "$font_url"
-      unzip -o /tmp/Geist.zip
+      unzip -o -d /tmp /tmp/Geist.zip
       # install Geist opentype font
       sudo mv /tmp/Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
     else
