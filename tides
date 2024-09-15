@@ -309,13 +309,26 @@ EOF
     fi
   fi
 
-  # setup debian: enable sudo for user
+  # setup debian: enable sudo for user, add contrib + non-free sources
   if [[ $(yq '.config.check.distroCfg.debian' "$CONFIG") == true ]] \
     && [[ $DISTRO == "debian" ]]; then
     if ! getent group sudo | grep -q "$(whoami)"; then
       _warning_msg "Adding $(whoami) to sudo group. Restart to use sudo"
       usermod -aG sudo "$(whoami)"
     fi
+
+    cat <<EOF | sudo tee /etc/apt/sources.list
+deb http://deb.debian.org/debian $VERSION_CODENAME main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian $VERSION_CODENAME main contrib non-free non-free-firmware
+
+deb http://deb.debian.org/debian-security ${VERSION_CODENAME}-security main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian-security ${VERSION_CODENAME}-security main contrib non-free non-free-firmware
+
+# $VERSION_CODENAME updates, to get updates before a point release is made;
+# see https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports
+deb http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib non-free non-free-firmware
+EOF
   fi
 
   if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]] \
