@@ -211,7 +211,7 @@ _set_constants() {
   # substitute nothing if auto unset
   _info_msg "Distro: ${DISTRO}${distro_auto:-}, Desktop Environment: ${DESKTOP_ENVIRONMENT}${de_auto:-}"
 
-  if [[ -n $UBUNTU_CODENAME ]]; then
+  if [[ -n ${UBUNTU_CODENAME:-} ]]; then
     _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
     # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
     # this system variable has no major consequences anyways
