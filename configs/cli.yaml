@@ -15,8 +15,7 @@ config:
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
-      - docker-compose
-      - docker-compose-v2
+      - docker-compose*
       - podman-docker
       - containerd
       - runc
