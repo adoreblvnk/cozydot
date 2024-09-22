@@ -8,8 +8,8 @@ CONFIG="$(dirname "$0")/configs/default.yaml"
 CONFIG_DIR="$(dirname "$0")/configs"
 SECRETS="$(dirname "$0")/secrets.yaml"
 # set in _set_constants()
-SKIP_SLOW=false # modified in skip_slow()
 DISTRO=
+UPSTREAM_DISTRO=ubuntu
 DESKTOP_ENVIRONMENT=
 
 # ----- PRINT FUNCTIONS -----
@@ -78,8 +78,6 @@ ${YELLOW}Options:${NC}
                          directory
   ${GREEN}-c, --config <CONFIG> ${NC} Set a config file that exists in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
   ${GREEN}-S, --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
-  ${GREEN}-s, --skip-slow       ${NC} Allow tides to skip slow running actions. Will ${RED}break${NC} your system if set on
-                         ${tides_txt}' first run
   ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
                          directory
   ${GREEN}-h, --help            ${NC} Print help information
@@ -133,22 +131,6 @@ set_secrets_file() {
   fi
 }
 
-# Allow tides to skip slow running actions. Defaults to false, but can be set
-# to true in config or as a CLI option.
-# Arguments:
-#   optional true to skip slow running actions. used by CLI option
-# shellcheck disable=SC2120
-skip_slow() {
-  local skip_slow_opt=${1:-false}
-  local skip_slow_cfg=$(yq '.metadata.skipSlow' "$CONFIG")
-  if ! { [[ $skip_slow_cfg == true ]] || [[ $skip_slow_cfg == false ]]; }; then
-    _error_msg "${CYAN}.metadata.skipSlow${NC} in config must be set to ${GREEN}true${NC} or ${RED}false${NC}"
-  fi
-  if [[ $skip_slow_opt == true ]] || [[ $skip_slow_cfg == true ]]; then
-    SKIP_SLOW=true
-  fi
-}
-
 list_configs() {
   local configs
   # find all preset files, then filter out the parent dirs & file suffixes
@@ -168,13 +150,11 @@ get_version() {
 
 # Set complex constants that require commands to be set.
 # Globals:
-#   SKIP_SLOW
 #   DISTRO
+#   UPSTREAM_DISTRO: parent distro (eg Ubuntu is the upstream of Mint)
 #   DESKTOP_ENVIRONMENT
 #   VERSION_CODENAME: only if $UBUNTU_CODENAME exists
 _set_constants() {
-  skip_slow # modify $SKIP_SLOW
-
   # get distro & set $DISTRO
   . /etc/os-release # contains operating system identification data
   DISTRO="$(yq '.metadata.distro' "$CONFIG")"
@@ -185,10 +165,7 @@ _set_constants() {
   case "$DISTRO" in
     # https://github.com/which-distro/os-release
     ubuntu | linuxmint | pop | zorin | Deepin) ;;
-    debian | kali | tails)
-      # TODO: add debian support
-      _warning_msg "Debian distros not officially supported yet"
-      ;;
+    debian | kali | tails) UPSTREAM_DISTRO=debian ;;
     *) _error_msg "Unsupported distro detected or in config" ;;
   esac
 
@@ -222,23 +199,53 @@ _set_constants() {
 
 # ----- HELPERS -----
 
-# Downloads golang.
+# Downloads / updates golang.
 # Arguments:
 #   go version. must be either "latest" or <major>.<minor>.<patch> form
-_download_golang() {
+_dl_golang() {
+  if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
+  local latest_go=$1
   if [[ $1 == "latest" ]]; then
-    _info_msg "Downloading $(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version')"
-    local latest_go=$(
-      curl -sSL "https://go.dev/dl/?mode=json" \
-        | yq '.[0].files[].filename | select(. == "*linux-amd64*")'
-    )
-    local download_url="https://go.dev/dl/${latest_go}"
-  else
-    _info_msg "Downloading go$1"
-    local download_url="https://go.dev/dl/$1.linux-amd64.tar.gz"
+    latest_go="$(
+      curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-
+    )"
   fi
-  curl -sSL -o "/tmp/go.tar.gz" "$download_url"
-  sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+  # add go to PATH
+  if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
+  if ! command -v go &>/dev/null \
+    || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
+    _info_msg "Downloading golang $latest_go"
+    curl -sSL -o "/tmp/go.tar.gz" "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
+    sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+    _warning_msg "Temporarily exporting go to PATH. Export to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
+    export PATH=$PATH:/usr/local/go/bin
+  fi
+  _info_msg "Golang (go $(go version | cut -d ' ' -f 3 | cut -c 3-)) installed"
+}
+
+# Downloads / updates Node via nvm. Requires nvm to be installed.
+# Arguments:
+#   node version. format must either be "latest" | <major>[.<minor>[.<patch>]]
+_dl_node() {
+  if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_node"; fi
+  if ! command -v nvm &>/dev/null; then
+    if [[ ! -f "$HOME/.nvm/nvm.sh" ]]; then
+      _info_msg "Installing nvm"
+      # nvm install script auto adds to PATH if needed
+      curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
+    fi
+    . "$HOME/.nvm/nvm.sh" # source to activate nvm
+  fi
+  local node_ver="$1"
+  # set node_ver to "--lts" if value is "latest"
+  [[ $1 == "latest" ]] && node_ver="--lts"
+  # get latest node ver specified from nvm. NOTE: potentially flaky, investigate stability
+  latest_node_ver=$(nvm version-remote "$node_ver")
+  if [[ "$(nvm current)" != "$latest_node_ver" ]]; then
+    _info_msg "Installing node $latest_node_ver"
+    nvm install "$node_ver"
+  fi
+  _info_msg "NVM (nvm $(nvm -v), node $(node -v), npm $(npm -v)) installed"
 }
 
 # ----- COMMANDS -----
@@ -271,13 +278,9 @@ check() {
       _info_msg "Removing snapd package from apt"
       sudo apt-get remove --purge -qq snapd
     fi
-    if [[ -d ~/snap ]]; then
-      _info_msg "Removing snap package directories"
-      rm -rf ~/snap
-    fi
-    if [[ -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
-      _info_msg "Removing leftover snap directories"
-      sudo rm -rf /snap /var/snap /var/lib/snapd
+    if [[ -d ~/snap || -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
+      _info_msg "Removing snap package directories / leftover snap directories"
+      sudo rm -rf ~/snap /snap /var/snap /var/lib/snapd
     fi
     if [[ ! -f /etc/apt/preferences.d/nosnap.pref ]]; then
       _info_msg "Creating nosnap.pref to prevent snap from being reinstalled"
@@ -331,15 +334,17 @@ deb-src http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib no
 EOF
   fi
 
-  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $SKIP_SLOW == false ]]; then
-    _info_msg "Purging apt packages"
-
+  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
     local purge_pkgs # collect purge packages into array
     mapfile -t purge_pkgs < <(yq '.config.check.purge[]' "$CONFIG")
     for pkg in "${purge_pkgs[@]}"; do
-      sudo apt-get autoremove --purge -qy "$pkg"
+      if dpkg-query -W "$pkg" &>/dev/null; then
+        _info_msg "Purging $pkg"
+        sudo apt-get remove --purge -qq "$pkg" >/dev/null
+      fi
     done
+    # disable purge after 1st run to prevent purging properly installed packages
+    yq -i '.config.check.purge tag = "!disabled"' "$CONFIG"
   fi
 
   # install dependency packages
@@ -381,14 +386,18 @@ EOF
     fi
 
     # install latest python version if pyenv python version is not latest.
-    local latest_py_ver=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
-    if [[ $(pyenv version-name) != "$latest_py_ver" ]]; then
+    if [[ $(yq '.config.check.python.version' "$CONFIG") == "latest" ]]; then
+      local latest_py=$(pyenv latest -k 3)
+    else
+      local latest_py=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
+    fi
+    if [[ $(pyenv version-name) != "$latest_py" ]]; then
       # only install if python version exists but is not set to global
-      if ! pyenv versions | grep "$latest_py_ver"; then
-        _info_msg "Installing latest Python version $latest_py_ver"
+      if ! pyenv versions | grep "$latest_py"; then
+        _info_msg "Installing latest Python version $latest_py"
         pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
       fi
-      _info_msg "Setting global Python version to $latest_py_ver"
+      _info_msg "Setting global Python version to $latest_py"
       pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
     else
       _info_msg "Python $(pyenv version-name) is already the latest version"
@@ -396,7 +405,6 @@ EOF
 
     if [[ $(yq '.config.check.python.pip' "$CONFIG") == true ]]; then
       local py_ver="python$(yq '.config.check.python.version' "$CONFIG")"
-      _info_msg "Installing / upgrading pip"
       $py_ver -m pip install --upgrade pip
       _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
     fi
@@ -431,12 +439,9 @@ EOF
       # download appimaged
       mkdir -p "$HOME/Applications"
       # get continuous release via GitHub api
-      local browser_download_url=$(
-        curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
-          | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")'
-      )
       curl -sSL -o "$HOME/Applications/appimaged.AppImage" \
-        "$browser_download_url"
+        "$(curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
+          | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")')"
 
       # launch
       chmod +x "$HOME/Applications/appimaged.AppImage"
@@ -453,44 +458,22 @@ EOF
     fi
   fi
 
-  # install Geist font
-  if [[ $(yq '.config.check.geistFontEnabled' "$CONFIG") == true ]] \
-    && [[ $SKIP_SLOW == false ]]; then
-    _info_msg "Geist font check"
-    if [[ ! -d "/usr/share/fonts/opentype/Geist/" ]]; then
-      _info_msg "Downloading & installing Geist font"
-      local font_url=$(
-        curl -sSL https://api.github.com/repos/vercel/geist-font/releases/latest \
-          | yq -p=j '.assets[].browser_download_url | select(. =="*Geist-*")'
-      )
-      # download Geist font
-      curl -sSL -o /tmp/Geist.zip "$font_url"
-      unzip -o -d /tmp /tmp/Geist.zip
-      # install Geist opentype font
-      sudo mv /tmp/Geist-*/statics-otf/ /usr/share/fonts/opentype/Geist/
-    else
-      _info_msg "Geist font already exists"
-    fi
-    _info_msg "Reloading fc-cache"
-    fc-cache -f
-  fi
-
   # install nerdfont
-  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $SKIP_SLOW == false ]]; then
+  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!enabled" ]]; then
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
-    _info_msg "Installing nerdfont $font"
-    if [[ ! -d "/usr/share/fonts/$font" ]]; then
-      _info_msg "Downloading $font"
-      sudo mkdir -p "/usr/share/fonts/$font"
-      curl -sSL \
-        "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
-        | sudo tar -xvJ -C "/usr/share/fonts/$font"
+    if [[ -z $(fc-list :family="$font NF") ]]; then
+      if [[ ! -d "/usr/share/fonts/$font" ]]; then
+        _info_msg "Downloading $font"
+        sudo mkdir -p "/usr/share/fonts/$font"
+        curl -sSL \
+          "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
+          | sudo tar -xvJ -C "/usr/share/fonts/$font"
+      fi
+      _info_msg "Reloading fc-cache"
+      fc-cache -f
     else
-      _info_msg "$font already exists"
+      _info_msg "$font already installed"
     fi
-    _info_msg "Reloading fc-cache"
-    fc-cache -f
   fi
 }
 
@@ -512,15 +495,12 @@ install() {
       if ! dpkg -s "$pkg" &>/dev/null; then
         _info_msg "Installing $pkg"
         sudo apt-get install -qq "$pkg"
-      else
-        _info_msg "$pkg already installed"
       fi
     done
   fi
 
   # install from 3rd-party repos
-  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $SKIP_SLOW == false ]]; then
+  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing apt packages from third party repositories"
 
     # setting up signing keys & repo entries for source (repo)
@@ -531,8 +511,11 @@ install() {
       # download asc key from remote
       if [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.asc ]]; then
         _info_msg "Downloading .asc key for $source_name"
-        sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$pkg_map")" \
-          "$(yq '.remoteGpgKey' <<<"$pkg_map")"
+        local download_url="$(yq '.remoteGpgKey' <<<"$pkg_map")"
+        # eval string if subshell / variable detected
+        grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url" \
+          && download_url="$(eval echo "$(yq '.remoteGpgKey' <<<"$pkg_map")")"
+        sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$pkg_map")" "$download_url"
       # if key is in gpg format, then dearmor after downloading the key
       elif [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
@@ -563,8 +546,10 @@ install() {
     mapfile -t apt_pkgs < <(yq '.config.install.addRepos[].packages[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
-      _info_msg "Installing third party package $pkg"
-      sudo apt-get install -qq "$pkg"
+      if ! dpkg -s "$pkg" &>/dev/null; then
+        _info_msg "Installing third party package $pkg"
+        sudo apt-get install -qq "$pkg"
+      fi
     done
   fi
 
@@ -588,8 +573,10 @@ install() {
     local rust_pkgs
     mapfile -t rust_pkgs < <(yq '.config.install.cargo[]' "$CONFIG")
     for pkg in "${rust_pkgs[@]}"; do
-      # shellcheck disable=SC2086
-      cargo install $pkg
+      if ! cargo install --list | grep "$(cut -d ' ' -f 1 <<<"$pkg")" >/dev/null; then
+        # shellcheck disable=SC2086
+        cargo install $pkg
+      fi
     done
   fi
 
@@ -610,8 +597,8 @@ install() {
       # downloading binary from url
       _info_msg "Downloading $binary_name"
       local download_url="$(yq '.url' <<<"$binary_map")"
-      # execute download_url string as subshell if subshell detected
-      grep -Eq '\$\(.*\)' <<<"$(yq '.url' <<<"$binary_map")" \
+      # eval string if subshell / variable detected
+      grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url" \
         && download_url="$(eval echo "$(yq '.url' <<<"$binary_map")")"
       curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
 
@@ -631,28 +618,12 @@ install() {
 
   # install golang
   if [[ $(yq '.config.install.languages.goVersion | tag' "$CONFIG") == "!enabled" ]]; then
-    if ! command -v go &>/dev/null; then
-      _download_golang "$(yq '.config.install.languages.goVersion' "$CONFIG")"
-      _warning_msg "Temporarily exporting go to PATH. Export to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
-      export PATH=$PATH:/usr/local/go/bin
-    else
-      _info_msg "Golang (go $(go version | cut -d ' ' -f 3 | cut -c 3-)) already installed"
-    fi
+    _dl_golang "$(yq '.config.install.languages.goVersion' "$CONFIG")"
   fi
 
   # install nvm, node (& npm)
-  if [[ $(yq '.config.install.languages.nvm | tag' "$CONFIG") == "!enabled" ]]; then
-    if [[ ! -f "$HOME/.nvm/nvm.sh" ]]; then
-      _info_msg "Installing nvm"
-      # nvm install script auto adds to PATH if needed
-      curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
-      local node_ver="$(yq '.config.install.languages.nvm.nodeVersion' "$CONFIG")"
-      nvm install "$node_ver"
-      nvm use "$node_ver"
-    else
-      . "$HOME/.nvm/nvm.sh"
-      _info_msg "NVM (nvm $(nvm -v), node $(node -v), npm $(npm -v)) already installed"
-    fi
+  if [[ $(yq '.config.install.languages.nodeVersion | tag' "$CONFIG") == "!enabled" ]]; then
+    _dl_node "$(yq '.config.install.languages.nodeVersion' "$CONFIG")"
   fi
 
   _success_msg "Finished ${tides_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
@@ -690,7 +661,6 @@ update() {
 
   # update rustup & cargo
   if [[ $(yq '.config.update.cargo' "$CONFIG") == true ]] \
-    && [[ $SKIP_SLOW == false ]] \
     && command -v rustup &>/dev/null \
     && command -v cargo &>/dev/null; then
     _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
@@ -699,17 +669,6 @@ update() {
     cargo install --list | grep -q "^cargo-update" \
       || cargo install cargo-update
     cargo install-update -a
-  fi
-
-  # update golang
-  if [[ $(yq '.config.update.other.go' "$CONFIG") == true ]] \
-    && command -v go &>/dev/null; then
-    local remote_go_ver=$(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version')
-    if [[ $(go version | cut -d ' ' -f 3) != "$remote_go_ver" ]]; then
-      _download_golang "latest"
-    else
-      _info_msg "go $(go version | cut -d ' ' -f 3) is already the latest"
-    fi
   fi
 
   # update yq
@@ -728,6 +687,18 @@ update() {
     else
       _info_msg "yq $local_yq_ver is already the latest version"
     fi
+  fi
+
+  # update golang
+  if [[ $(yq '.config.update.other.go' "$CONFIG") == true ]] \
+    && command -v go &>/dev/null; then
+    _dl_golang latest
+  fi
+
+  # update node if exists
+  if [[ $(yq '.config.update.other.node' "$CONFIG") == true ]] \
+    && [[ -f "$HOME/.nvm/nvm.sh" ]]; then
+    _dl_node latest
   fi
 
   # zellij delete all other sessions, including exited ones
@@ -902,8 +873,7 @@ EOF
   fi
 
   # install vscodium extensions
-  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $SKIP_SLOW == false ]]; then
+  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing vscodium extensions"
     local extensions
     mapfile -t extensions < <(
@@ -1124,7 +1094,6 @@ main() {
         set_secrets_file "$2"
         shift
         ;;
-      -s | --skip-slow) skip_slow true ;;
       --list-configs) list_configs ;;
       -V | --version) get_version ;;
       # COMMANDS

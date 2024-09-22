@@ -3,13 +3,15 @@ alias c=clear
 alias py=python
 alias pip="python -m pip"
 
-alias cat="bat -pp"
+if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
 
 # eza aliases
-alias ls="eza --group-directories-first --icons=auto"
-alias la="eza --group-directories-first --icons=auto -a"
-alias ll="eza --group-directories-first --icons=auto -al"
-alias tree="eza --group-directories-first --icons=auto -T"
+if command -v eza &>/dev/null; then
+  alias ls="eza --group-directories-first --icons=auto"
+  alias la="eza --group-directories-first --icons=auto -a"
+  alias ll="eza --group-directories-first --icons=auto -al"
+  alias tree="eza --group-directories-first --icons=auto -T"
+fi
 
 # Create alias if flatpak exists. Disable if .bashrc takes too long to load.
 # Arguments:
@@ -39,7 +41,7 @@ appimage_alias() {
     local app_with_ext=$(basename "$app")
     # remove file extension & convert to lowercase
     local app_name=$(echo "${app_with_ext::-9}" | awk '{print tolower($0)}')
-    alias "$app_name"="$app"
+    alias $app_name="$app"
   done
 }
 appimage_alias

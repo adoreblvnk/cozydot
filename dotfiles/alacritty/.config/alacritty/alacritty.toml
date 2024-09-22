@@ -9,10 +9,10 @@ dynamic_padding = true
 opacity = 0.90
 
 [font]
-normal = { family = "GeistMono Nerd Font", style = "Regular" }
-bold = { family = "GeistMono Nerd Font", style = "Bold" }
-italic = { family = "GeistMono Nerd Font", style = "Italic" }
-bold_italic = { family = "GeistMono Nerd Font", style = "Bold Italic" }
+normal = { family = "GeistMono NF", style = "Regular" }
+bold = { family = "GeistMono NF", style = "Bold" }
+italic = { family = "GeistMono NF", style = "Italic" }
+bold_italic = { family = "GeistMono NF", style = "Bold Italic" }
 
 [cursor]
 style = { blinking = "On" }

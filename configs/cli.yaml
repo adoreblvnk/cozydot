@@ -1,7 +1,6 @@
 version: 0.0.1
 metadata:
   description: Configs for CLI-only apps. Note that Docker may not work on WSL
-  skipSlow: false
   # NOTE: the following values are highly recommended to be set to "auto"
   distro: auto # auto | ubuntu | linuxmint | debian
   desktopEnvironment: auto # auto | gnome | cinnamon
@@ -11,16 +10,17 @@ config:
       ubuntu: true
       linuxmint: true
       debian: true
-    purge: !enabled # NOTE: also disabled by metadata.skipSlow
+    purge: !enabled
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
-      - docker-compose*
+      - docker-compose
+      - docker-compose-v2
       - podman-docker
       - containerd
       - runc
-      - firefox* # firefox installed via aptAltSources
-      - libreoffice* # libreoffice replaced with onlyoffice
+      - "*firefox*" # firefox installed via aptAltSources
+      - "*libreoffice*" # libreoffice replaced with onlyoffice
     deps: !enabled
       # essential packages
       - apt-transport-https
@@ -65,16 +65,14 @@ config:
       # - libxcb-xfixes0-dev
       # - libxkbcommon-dev
       # # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-    python: !enabled
+    python: !disabled
       pyenvUpdate: false
-      version: 3.12 # <major>[.<minor>]
+      version: latest # latest | <major>[.<minor>]
       pip: false
     rustupCheck: true
     appimaged: !enabled
       cleanInstall: false
-    geistFontEnabled: true # NOTE: also disabled by metadata.skipSlow
-    # list of nerdfonts: https://www.nerdfonts.com/font-downloads
-    nerdfont: !enabled GeistMono # NOTE: also disabled by metadata.skipSlow
+    nerdfont: !enabled GeistMono # list of nerdfonts: https://www.nerdfonts.com/font-downloads
   install:
     check: true
     apt: !enabled
@@ -92,7 +90,7 @@ config:
       - imagemagick # image converter
       - pandoc # document converter
       - vlc
-    addRepos: !disabled # NOTE: also disabled by metadata.skipSlow
+    addRepos: !disabled
       - sourceName: brave-browser-release
         remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
         gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
@@ -101,9 +99,9 @@ config:
         packages:
           - brave-browser
       - sourceName: docker
-        remoteGpgKey: https://download.docker.com/linux/ubuntu/gpg
+        remoteGpgKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
         gpgKeyPath: /etc/apt/keyrings/docker.asc
-        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable
+        repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${UPSTREAM_DISTRO} $VERSION_CODENAME stable
         pinning: false
         packages:
           - docker-ce
@@ -175,17 +173,17 @@ config:
       #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
     languages:
       goVersion: !enabled latest # latest | <major>.<minor>.<patch>
-      nvm: !enabled
-        nodeVersion: 20 # <major>[.<minor>]
+      nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
   update:
     check: true
     apt: !enabled
       aptFull: false # NOTE: apt must be true for aptFull to take effect
     flatpak: false
-    cargo: true # NOTE: also disabled by metadata.skipSlow
+    cargo: true
     other:
-      go: false
       yq: true
+      go: false
+      node: false
       zellijClear: true
   configure:
     check: true
@@ -211,7 +209,7 @@ config:
       # ulauncher: true
       # virtualbox: true
       vscodium:
-        extensions: !disabled # NOTE: also disabled by metadata.skipSlow
+        extensions: !disabled
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
           - catppuccin.catppuccin-vsc-icons
