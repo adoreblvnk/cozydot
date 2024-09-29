@@ -1,7 +1,5 @@
 # see https://github.com/alacritty/alacritty-theme
-import = [
-    "~/.config/alacritty/themes/themes/catppuccin_mocha.toml"
-]
+import = ["~/.config/alacritty/themes/themes/catppuccin_mocha.toml"]
 
 [window]
 padding = { x = 3, y = 3 }

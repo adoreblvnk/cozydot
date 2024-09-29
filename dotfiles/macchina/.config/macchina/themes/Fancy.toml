@@ -19,10 +19,8 @@ visible         = true
 [box]
 border          = "rounded"
 visible         = true
-
-[box.inner_margin]
-x = 2
-y = 0
+inner_margin.x  = 10
+inner_margin.y  = 0
 
 [randomize]
 key_color       = true

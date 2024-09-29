@@ -133,16 +133,17 @@ config:
       #   pinning: false
       #   packages:
       #     - virtualbox-7.0
-      - sourceName: vscodium
-        remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
-        gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
-        repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
+      - sourceName: vscode
+        remoteGpgKey: https://packages.microsoft.com/keys/microsoft.asc
+        gpgKeyPath: /etc/apt/keyrings/packages.microsoft.gpg
+        repo: deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main
         pinning: false
         packages:
-          - codium
+          - code
     flatpak: !disabled
       - com.discordapp.Discord
       - com.obsproject.Studio # video recorder & live streaming software
+      - io.bassi.Amberol # music player
       - org.qbittorrent.qBittorrent
       - org.shotcut.Shotcut # video editor
       - org.telegram.desktop

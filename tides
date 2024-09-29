@@ -507,19 +507,19 @@ install() {
     for ((i = 0; i < $(yq '.config.install.addRepos | length' "$CONFIG"); i++)); do
       local pkg_map=$(yq ".config.install.addRepos[$i]" "$CONFIG")
       local source_name=$(yq '.sourceName' <<<"$pkg_map")
+      local download_url="$(yq '.remoteGpgKey' <<<"$pkg_map")"
+      # eval string if subshell / variable detected
+      grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url" \
+        && download_url="$(eval echo "$(yq '.remoteGpgKey' <<<"$pkg_map")")"
 
       # download asc key from remote
       if [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.asc ]]; then
         _info_msg "Downloading .asc key for $source_name"
-        local download_url="$(yq '.remoteGpgKey' <<<"$pkg_map")"
-        # eval string if subshell / variable detected
-        grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url" \
-          && download_url="$(eval echo "$(yq '.remoteGpgKey' <<<"$pkg_map")")"
         sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$pkg_map")" "$download_url"
       # if key is in gpg format, then dearmor after downloading the key
       elif [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
-        sudo curl -fsSL "$(yq '.remoteGpgKey' <<<"$pkg_map")" \
+        sudo curl -fsSL "$download_url" \
           | sudo gpg --dearmor --yes -o "$(yq '.gpgKeyPath' <<<"$pkg_map")"
       else
         _error_msg "Unsupported apt key format ($(yq '.gpgKeyPath' <<<"$pkg_map")) for $source_name source"
@@ -872,16 +872,20 @@ EOF
     fi
   fi
 
-  # install vscodium extensions
-  if [[ $(yq '.config.configure.apps.vscodium.extensions | tag' "$CONFIG") == "!enabled" ]]; then
-    _info_msg "Installing vscodium extensions"
+  # install vscode extensions
+  if [[ $(yq '.config.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]] \
+    && command -v code &>/dev/null; then
+    _info_msg "Installing vscode extensions"
     local extensions
     mapfile -t extensions < <(
-      yq -r '.config.configure.apps.vscodium.extensions[]' "$CONFIG"
+      yq -r '.config.configure.apps.vscode.extensions[]' "$CONFIG"
     )
+    local installed_ext=$(code --list-extensions)
     for ext in "${extensions[@]}"; do
-      # install vscodium extensions
-      codium --install-extension "$ext"
+      if ! grep -iq "$ext" <<<"$installed_ext"; then
+        # install vscode extensions
+        code --install-extension "$ext"
+      fi
     done
   fi
 

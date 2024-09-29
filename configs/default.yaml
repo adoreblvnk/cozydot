@@ -10,7 +10,7 @@ config:
       ubuntu: true
       linuxmint: true
       debian: true
-    purge: !enabled
+    purge: !disabled
       # docker installed via aptAltSources
       - docker.io
       - docker-doc
@@ -133,16 +133,17 @@ config:
         pinning: false
         packages:
           - virtualbox-7.0
-      - sourceName: vscodium
-        remoteGpgKey: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
-        gpgKeyPath: /usr/share/keyrings/vscodium-archive-keyring.gpg
-        repo: deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main
+      - sourceName: vscode
+        remoteGpgKey: https://packages.microsoft.com/keys/microsoft.asc
+        gpgKeyPath: /etc/apt/keyrings/packages.microsoft.gpg
+        repo: deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main
         pinning: false
         packages:
-          - codium
+          - code
     flatpak: !enabled
       - com.discordapp.Discord
       - com.obsproject.Studio # video recorder & live streaming software
+      - io.bassi.Amberol # music player
       - org.qbittorrent.qBittorrent
       - org.shotcut.Shotcut # video editor
       - org.telegram.desktop
@@ -194,11 +195,11 @@ config:
         - bash
         - bat
         - bottom
-        - codium
         # - extras
         - macchina
         - starship
         - ulauncher
+        - vscode
         - yazi
         - zellij
     apps:
@@ -208,23 +209,26 @@ config:
       docker: true
       ulauncher: true
       virtualbox: true
-      vscodium:
+      vscode:
         extensions: !enabled
           - adpyke.codesnap
           - catppuccin.catppuccin-vsc
-          - catppuccin.catppuccin-vsc-icons
           - christian-kohler.path-intellisense
           - eamodio.gitlens
           - ecmel.vscode-html-css
           - esbenp.prettier-vscode
           - foxundermoon.shell-format
+          - golang.go
           - ms-python.black-formatter
           - ms-python.debugpy
           - ms-python.isort
           - ms-python.python
+          - ms-python.vscode-pylance
           - redhat.vscode-yaml
           - streetsidesoftware.code-spell-checker
           - timonwong.shellcheck
+          - visualstudioexptteam.intellicode-api-usage-examples
+          - visualstudioexptteam.vscodeintellicode
           - wayou.vscode-todo-highlight
           - yzhang.markdown-all-in-one
     optimisations: !enabled

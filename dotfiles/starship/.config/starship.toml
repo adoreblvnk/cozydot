@@ -8,7 +8,7 @@ palette = "catppuccin_mocha" # https://github.com/catppuccin/starship
 # NOTE: replaced peach with sky to better discern success & error
 success_symbol = "[[󰄛](green) ❯](sky)"
 error_symbol = "[[󰄛](red) ❯](peach)"
-vimcmd_symbol = "[󰄛 ❮](subtext1)" # For use with zsh-vi-mode
+vimcmd_symbol = "[󰄛 ❮](subtext1)"      # For use with zsh-vi-mode
 
 [git_branch]
 style = "bold mauve"
