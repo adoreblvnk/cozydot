@@ -800,7 +800,6 @@ EOF
     && command -v docker &>/dev/null; then
     _info_msg "Setting up docker"
     # https://docs.docker.com/engine/install/linux-postinstall/
-
     # manage docker as non-root user
     if ! id --name --groups "$USER" | grep docker &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
@@ -826,6 +825,7 @@ EOF
     # default.
     # https://docs.docker.com/config/containers/logging/configure/
     # https://docs.docker.com/config/containers/logging/local/
+    sudo touch /etc/docker/daemon.json
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
       _info_msg "Using local logging driver to prevent disk-exhaustion"
       yq -p=j -n -o=j \
@@ -1009,7 +1009,7 @@ EOF
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
       # install gnome-tweaks & gnome-shell-extensions
       if [[ $(yq ".config.configure.DEConf.gnome.tweaksAndExtensions" "$CONFIG") == true ]] \
-        && { ! command -v gnome-tweaks || ! command -v gnome-extensions; }; then
+        && { ! command -v gnome-tweaks &>/dev/null || ! command -v gnome-extensions &>/dev/null; }; then
         _info_msg "Installing gnome-tweaks and/or gnome-shell-extensions"
         sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
       elif [[ $(yq ".config.configure.DEConf.gnome.tweaksAndExtensions" "$CONFIG") == true ]]; then
@@ -1026,6 +1026,13 @@ EOF
       # make Dash to Dock mimic MacOS dock behaviour
       if [[ $(yq ".config.configure.DEConf.gnome.MacOSDock" "$CONFIG") == true ]]; then
         _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
+        if gnome-extensions list | grep -q 'dash-to-dock'; then
+          curl -sSL -o /tmp/dash-to-dock@micxgx.gmail.com.zip \
+            "$(curl -fsSL https://api.github.com/repos/micheleg/dash-to-dock/releases/latest \
+              | yq '.assets[].browser_download_url')"
+          gnome-extensions install /tmp/dash-to-dock@micxgx.gmail.com.zip
+          _error_msg "Relogin for GNOME to load dash-to-dock@micxgx.gmail.com"
+        fi
         # minimize on click when application is opened
         gsettings set org.gnome.shell.extensions.dash-to-dock click-action 'minimize-or-previews'
         gsettings set org.gnome.shell.extensions.dash-to-dock dash-max-icon-size 32
