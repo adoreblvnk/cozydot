@@ -2,15 +2,13 @@
 
 set -euo pipefail
 
-# constants
+# global variables
 readonly DOTFILES="dotfiles"
 CONFIG="$(dirname "$0")/configs/default.yaml"
 CONFIG_DIR="$(dirname "$0")/configs"
 SECRETS="$(dirname "$0")/secrets.yaml"
-# set in _set_constants()
-DISTRO=
-UPSTREAM_DISTRO=ubuntu
-DESKTOP_ENVIRONMENT=
+# set in _set_global_var()
+DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 
 # ----- PRINT FUNCTIONS -----
 
@@ -18,6 +16,8 @@ DESKTOP_ENVIRONMENT=
 # Arguments:
 #   colours enabled, a boolean
 colours() {
+  NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN="" B_RED="" B_GREEN="" B_YELLOW="" B_BLUE="" B_MAGENTA="" B_CYAN=""
+  tides_txt="tides" TIDES_TXT="TIDES"
   if [[ "$(tput colors)" -ge 8 ]] && [[ $1 == true ]]; then
     NC="$(tput sgr0)" # text reset (select graphic representation default)
     BOLD="$(tput bold)"
@@ -35,24 +35,6 @@ colours() {
     B_CYAN="$(tput bold setaf 6)"    # bold cyan
     tides_txt="${B_RED}t${B_YELLOW}i${B_GREEN}d${B_BLUE}e${B_MAGENTA}s${NC}"
     TIDES_TXT="${B_RED}T${B_YELLOW}I${B_GREEN}D${B_BLUE}E${B_MAGENTA}S${NC}"
-  else
-    # don't set colours if argument is false (or not given). use `colours false` for readability
-    NC=
-    BOLD=
-    RED=
-    GREEN=
-    YELLOW=
-    BLUE=
-    MAGENTA=
-    CYAN=
-    B_RED=
-    B_GREEN=
-    B_YELLOW=
-    B_BLUE=
-    B_MAGENTA=
-    B_CYAN=
-    tides_txt="tides"
-    TIDES_TXT="TIDES"
   fi
 }
 
@@ -146,25 +128,25 @@ get_version() {
   exit
 }
 
-# ----- SET CONSTANTS -----
+# ----- SET GLOBAL VARIABLES -----
 
-# Set complex constants that require commands to be set.
+# Set complex global variables that require commands to be set.
 # Globals:
 #   DISTRO
 #   UPSTREAM_DISTRO: parent distro (eg Ubuntu is the upstream of Mint)
 #   DESKTOP_ENVIRONMENT
 #   VERSION_CODENAME: only if $UBUNTU_CODENAME exists
-_set_constants() {
+_set_global_var() {
   # get distro & set $DISTRO
   . /etc/os-release # contains operating system identification data
   DISTRO="$(yq '.metadata.distro' "$CONFIG")"
   if [[ $DISTRO == "auto" ]]; then
-    DISTRO="$ID" # TODO: create var to store upstream distro?
+    DISTRO="$ID"
     local distro_auto=" (auto)"
   fi
   case "$DISTRO" in
     # https://github.com/which-distro/os-release
-    ubuntu | linuxmint | pop | zorin | Deepin) ;;
+    ubuntu | linuxmint | pop | zorin | Deepin) UPSTREAM_DISTRO=ubuntu ;;
     debian | kali | tails) UPSTREAM_DISTRO=debian ;;
     *) _error_msg "Unsupported distro detected or in config" ;;
   esac
@@ -185,7 +167,7 @@ _set_constants() {
     *) _warning_msg "${tides_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment" ;;
   esac
 
-  # substitute nothing if auto unset
+  # substitute nothing if auto is unset
   _info_msg "Distro: ${DISTRO}${distro_auto:-}, Desktop Environment: ${DESKTOP_ENVIRONMENT}${de_auto:-}"
 
   if [[ -n ${UBUNTU_CODENAME:-} ]]; then
@@ -201,7 +183,7 @@ _set_constants() {
 
 # Downloads / updates golang.
 # Arguments:
-#   go version. must be either "latest" or <major>.<minor>.<patch> form
+#   go version. must be either "latest" or <major>.<minor>.<patch>
 _dl_golang() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
@@ -230,8 +212,7 @@ _dl_node() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_node"; fi
   if ! command -v nvm &>/dev/null; then
     if [[ ! -f "$HOME/.nvm/nvm.sh" ]]; then
-      _info_msg "Installing nvm"
-      # nvm install script auto adds to PATH if needed
+      _info_msg "Installing nvm" # nvm install script auto adds to PATH if needed
       curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
     fi
     . "$HOME/.nvm/nvm.sh" # source to activate nvm
@@ -252,8 +233,6 @@ _dl_node() {
 
 check() {
   _info_msg "Starting ${tides_txt} check..."
-
-  _set_constants
 
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
   if [[ $(yq '.config.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
@@ -480,10 +459,9 @@ EOF
 install() {
   _info_msg "Starting ${tides_txt} install"
 
+  _set_global_var
   if [[ $(yq '.config.install.check' "$CONFIG") == true ]]; then
     check
-  else
-    _set_constants
   fi
 
   # install apt packages
@@ -632,10 +610,9 @@ install() {
 update() {
   _info_msg "Starting ${tides_txt} update"
 
+  _set_global_var
   if [[ $(yq '.config.update.check' "$CONFIG") == true ]]; then
     check
-  else
-    _set_constants
   fi
 
   if [[ $(yq '.config.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
@@ -714,10 +691,9 @@ update() {
 configure() {
   _info_msg "Starting ${tides_txt} configuration"
 
+  _set_global_var
   if [[ $(yq '.config.configure.check' "$CONFIG") == true ]]; then
     check
-  else
-    _set_constants
   fi
 
   # dotfile manager implementation via Stow
