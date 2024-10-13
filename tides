@@ -181,6 +181,15 @@ _set_global_var() {
 
 # ----- HELPERS -----
 
+# Test if value from expression output in '.config' in $CONFIG is equal to value passed
+# Arguments:
+#   expression (eg .install.check is evaluated as '.config.install.check')
+#   value
+_assert_cfg() {
+  if [[ $(yq ".config$1" "$CONFIG") == "$2" ]]; then return 0; fi
+  return 1
+}
+
 # Downloads / updates golang.
 # Arguments:
 #   go version. must be either "latest" or <major>.<minor>.<patch>
@@ -235,7 +244,7 @@ check() {
   _info_msg "Starting ${tides_txt} check..."
 
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
-  if [[ $(yq '.config.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
+  if _assert_cfg '.check.distroCfg.ubuntu' true \
     && [[ $DISTRO == "ubuntu" ]]; then
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
@@ -283,7 +292,7 @@ EOF
   fi
 
   # setup mint: install multimedia codecs
-  if [[ $(yq '.config.check.distroCfg.linuxmint' "$CONFIG") == true ]] \
+  if _assert_cfg '.check.distroCfg.linuxmint' true \
     && [[ $DISTRO == "linuxmint" ]]; then
     if ! dpkg -s mint-meta-codecs &>/dev/null; then
       _info_msg "Installing mint-meta-codecs"
@@ -292,7 +301,7 @@ EOF
   fi
 
   # setup debian: enable sudo for user, add contrib + non-free sources
-  if [[ $(yq '.config.check.distroCfg.debian' "$CONFIG") == true ]] \
+  if _assert_cfg '.check.distroCfg.debian' true \
     && [[ $DISTRO == "debian" ]]; then
     if ! getent group sudo | grep -q "$(whoami)"; then
       _warning_msg "Adding $(whoami) to sudo group. Restart to use sudo"
@@ -313,7 +322,7 @@ deb-src http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib no
 EOF
   fi
 
-  if [[ $(yq '.config.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
+  if _assert_cfg '.check.purge | tag' "!enabled"; then
     local purge_pkgs # collect purge packages into array
     mapfile -t purge_pkgs < <(yq '.config.check.purge[]' "$CONFIG")
     for pkg in "${purge_pkgs[@]}"; do
@@ -327,7 +336,7 @@ EOF
   fi
 
   # install dependency packages
-  if [[ $(yq '.config.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
+  if _assert_cfg '.check.deps | tag' "!enabled"; then
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.config.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
@@ -340,7 +349,7 @@ EOF
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
-  if [[ $(yq '.config.check.python | tag' "$CONFIG") == "!enabled" ]]; then
+  if _assert_cfg '.check.python | tag' "!enabled"; then
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
       if [[ ! -d ~/.pyenv ]]; then
@@ -358,14 +367,14 @@ EOF
       eval "$(pyenv init -)"
       eval "$(pyenv virtualenv-init -)"
     else
-      if [[ $(yq '.config.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
+      if _assert_cfg '.check.python.pyenvUpdate' true; then
         pyenv update 2>/dev/null
       fi
       _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
     fi
 
     # install latest python version if pyenv python version is not latest.
-    if [[ $(yq '.config.check.python.version' "$CONFIG") == "latest" ]]; then
+    if _assert_cfg '.check.python.version' "latest"; then
       local latest_py=$(pyenv latest -k 3)
     else
       local latest_py=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
@@ -382,25 +391,25 @@ EOF
       _info_msg "Python $(pyenv version-name) is already the latest version"
     fi
 
-    if [[ $(yq '.config.check.python.pip' "$CONFIG") == true ]]; then
+    if _assert_cfg '.check.python.pip' true; then
       local py_ver="python$(yq '.config.check.python.version' "$CONFIG")"
       $py_ver -m pip install --upgrade pip
       _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
     fi
   fi
 
-  if [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]] \
-    && ! command -v rustup &>/dev/null; then
-    _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    _warning_msg "Temporarily adding cargo to PATH. Add to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
-    . "$HOME/.bashrc"
-  elif [[ $(yq '.config.check.rustupCheck' "$CONFIG") == true ]]; then
+  if _assert_cfg '.check.rustupCheck' true; then
+    if ! command -v rustup &>/dev/null; then
+      _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      _warning_msg "Temporarily adding cargo to PATH. Add to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
+      . "$HOME/.bashrc"
+    fi
     _info_msg "Rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) toolchain already installed"
   fi
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
-  if [[ $(yq '.config.check.appimaged | tag' "$CONFIG") == "!enabled" ]]; then
+  if _assert_cfg '.check.appimaged | tag' "!enabled"; then
     if ! systemctl --user -q is-active appimaged \
       || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]; then
       _info_msg "Installing appimaged"
@@ -438,7 +447,7 @@ EOF
   fi
 
   # install nerdfont
-  if [[ $(yq '.config.check.nerdfont | tag' "$CONFIG") == "!enabled" ]]; then
+  if _assert_cfg '.check.nerdfont | tag' "!enabled"; then
     local font=$(yq '.config.check.nerdfont' "$CONFIG")
     if [[ -z $(fc-list :family="$font NF") ]]; then
       if [[ ! -d "/usr/share/fonts/$font" ]]; then
@@ -460,9 +469,7 @@ install() {
   _info_msg "Starting ${tides_txt} install"
 
   _set_global_var
-  if [[ $(yq '.config.install.check' "$CONFIG") == true ]]; then
-    check
-  fi
+  if _assert_cfg '.install.check' true; then check; fi
 
   # install apt packages
   if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]]; then
