@@ -794,15 +794,6 @@ EOF
       newgrp docker
     fi
 
-    # configure docker to start on boot (& right now) with systemd
-    _info_msg "Configuring docker to start on boot"
-    if ! systemctl -q is-active docker.service; then
-      sudo systemctl enable --now docker.service
-    fi
-    if ! systemctl -q is-active containerd.service; then
-      sudo systemctl enable --now containerd.service
-    fi
-
     # use local logging driver to prevent disk-exhaustion
     # local logging driver performs log-rotation & compresses log files by
     # default.
