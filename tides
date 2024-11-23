@@ -784,7 +784,7 @@ EOF
     _info_msg "Setting up docker"
     # https://docs.docker.com/engine/install/linux-postinstall/
     # manage docker as non-root user
-    if ! id --name --groups "$USER" | grep docker &>/dev/null; then
+    if getent group docker | grep $USER &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
       # create docker group
       sudo groupadd -f docker
@@ -844,7 +844,7 @@ EOF
     && command -v virtualbox &>/dev/null; then
     # to allow virtualbox to access USB devices, add $USER to vboxusers group
     # https://www.virtualbox.org/manual/ch02.html
-    if ! id --name --groups "$USER" | grep vboxusers &>/dev/null; then
+    if getent group vboxusers | grep "$USER" &>/dev/null; then
       _info_msg "Adding user to vboxusers group to allow user to execute virtualbox commands"
       # create vboxusers group
       sudo groupadd -f vboxusers
