@@ -148,11 +148,11 @@ _set_global_var() {
     # https://github.com/which-distro/os-release
     ubuntu | linuxmint | pop | zorin | Deepin) UPSTREAM_DISTRO=ubuntu ;;
     debian | kali | tails) UPSTREAM_DISTRO=debian ;;
-    *) _error_msg "Unsupported distro detected or in config" ;;
+    *) _error_msg "Unsupported distro detected / in config ($DISTRO)" ;;
   esac
 
   # get desktop environment & set $DESKTOP_ENVIRONMENT
-  DESKTOP_ENVIRONMENT="$(yq '.metadata.desktopEnvironment' "$CONFIG")"
+  DESKTOP_ENVIRONMENT="$(yq '.metadata.DE' "$CONFIG")"
   # detect DE modified from https://cgit.freedesktop.org/xdg/xdg-utils/tree/scripts/xdg-utils-common.in#n296
   if [[ $DESKTOP_ENVIRONMENT == "auto" ]]; then
     case "$XDG_CURRENT_DESKTOP" in
@@ -163,8 +163,7 @@ _set_global_var() {
   fi
   case $DESKTOP_ENVIRONMENT in
     cinnamon | gnome) ;;
-    '') _error_msg "${CYAN}.metadata.desktopEnvironment${NC} not set in config" ;;
-    *) _warning_msg "${tides_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment" ;;
+    *) _warning_msg "${tides_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment ($DESKTOP_ENVIRONMENT)" ;;
   esac
 
   # substitute nothing if auto is unset
@@ -181,15 +180,6 @@ _set_global_var() {
 
 # ----- HELPERS -----
 
-# Test if value from expression output in '.config' in $CONFIG is equal to value passed
-# Arguments:
-#   expression (eg .install.check is evaluated as '.config.install.check')
-#   value
-_assert_cfg() {
-  if [[ $(yq ".config$1" "$CONFIG") == "$2" ]]; then return 0; fi
-  return 1
-}
-
 # Downloads / updates golang.
 # Arguments:
 #   go version. must be either "latest" or <major>.<minor>.<patch>
@@ -197,9 +187,8 @@ _dl_golang() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
   if [[ $1 == "latest" ]]; then
-    latest_go="$(
-      curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-
-    )"
+    latest_go="$(curl -sSL "https://go.dev/dl/?mode=json" \
+      | yq '.[0].version' | cut -c 3-)"
   fi
   # add go to PATH
   if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
@@ -235,7 +224,7 @@ _dl_node() {
     _info_msg "Installing node $latest_node_ver"
     nvm install "$node_ver"
   fi
-  _info_msg "NVM (nvm $(nvm -v), node $(node -v), npm $(npm -v)) installed"
+  _info_msg "nvm $(nvm -v), node $(node -v), npm $(npm -v) installed"
 }
 
 # ----- COMMANDS -----
@@ -244,7 +233,7 @@ check() {
   _info_msg "Starting ${tides_txt} check..."
 
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
-  if _assert_cfg '.check.distroCfg.ubuntu' true \
+  if [[ $(yq '.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
     && [[ $DISTRO == "ubuntu" ]]; then
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
@@ -292,7 +281,7 @@ EOF
   fi
 
   # setup mint: install multimedia codecs
-  if _assert_cfg '.check.distroCfg.linuxmint' true \
+  if [[ $(yq '.check.distroCfg.linuxmint' "$CONFIG") == true ]] \
     && [[ $DISTRO == "linuxmint" ]]; then
     if ! dpkg -s mint-meta-codecs &>/dev/null; then
       _info_msg "Installing mint-meta-codecs"
@@ -301,7 +290,7 @@ EOF
   fi
 
   # setup debian: enable sudo for user, add contrib + non-free sources
-  if _assert_cfg '.check.distroCfg.debian' true \
+  if [[ $(yq '.check.distroCfg.debian' "$CONFIG") == true ]] \
     && [[ $DISTRO == "debian" ]]; then
     if ! getent group sudo | grep -q "$(whoami)"; then
       _warning_msg "Adding $(whoami) to sudo group. Restart to use sudo"
@@ -322,9 +311,9 @@ deb-src http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib no
 EOF
   fi
 
-  if _assert_cfg '.check.purge | tag' "!enabled"; then
+  if [[ $(yq '.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
     local purge_pkgs # collect purge packages into array
-    mapfile -t purge_pkgs < <(yq '.config.check.purge[]' "$CONFIG")
+    mapfile -t purge_pkgs < <(yq '.check.purge[]' "$CONFIG")
     for pkg in "${purge_pkgs[@]}"; do
       if dpkg-query -W "$pkg" &>/dev/null; then
         _info_msg "Purging $pkg"
@@ -332,13 +321,13 @@ EOF
       fi
     done
     # disable purge after 1st run to prevent purging properly installed packages
-    yq -i '.config.check.purge tag = "!disabled"' "$CONFIG"
+    yq -i '.check.purge tag = "!disabled"' "$CONFIG"
   fi
 
   # install dependency packages
-  if _assert_cfg '.check.deps | tag' "!enabled"; then
+  if [[ $(yq '.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
     local apt_pkgs
-    mapfile -t apt_pkgs < <(yq '.config.check.deps[]' "$CONFIG")
+    mapfile -t apt_pkgs < <(yq '.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
       if ! dpkg -s "$pkg" &>/dev/null; then
@@ -349,7 +338,7 @@ EOF
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
-  if _assert_cfg '.check.python | tag' "!enabled"; then
+  if [[ $(yq '.check.python | tag' "$CONFIG") == "!enabled" ]]; then
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
       if [[ ! -d ~/.pyenv ]]; then
@@ -367,38 +356,38 @@ EOF
       eval "$(pyenv init -)"
       eval "$(pyenv virtualenv-init -)"
     else
-      if _assert_cfg '.check.python.pyenvUpdate' true; then
+      if [[ $(yq '.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
         pyenv update 2>/dev/null
       fi
       _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
     fi
 
     # install latest python version if pyenv python version is not latest.
-    if _assert_cfg '.check.python.version' "latest"; then
+    if [[ $(yq '.check.python.version' "$CONFIG") == "latest" ]]; then
       local latest_py=$(pyenv latest -k 3)
     else
-      local latest_py=$(pyenv latest -k "$(yq '.config.check.python.version' "$CONFIG")")
+      local latest_py=$(pyenv latest -k "$(yq '.check.python.version' "$CONFIG")")
     fi
     if [[ $(pyenv version-name) != "$latest_py" ]]; then
       # only install if python version exists but is not set to global
       if ! pyenv versions | grep "$latest_py"; then
         _info_msg "Installing latest Python version $latest_py"
-        pyenv install "$(yq '.config.check.python.version' "$CONFIG")"
+        pyenv install "$(yq '.check.python.version' "$CONFIG")"
       fi
       _info_msg "Setting global Python version to $latest_py"
-      pyenv global "$(yq '.config.check.python.version' "$CONFIG")"
+      pyenv global "$(yq '.check.python.version' "$CONFIG")"
     else
       _info_msg "Python $(pyenv version-name) is already the latest version"
     fi
 
-    if _assert_cfg '.check.python.pip' true; then
-      local py_ver="python$(yq '.config.check.python.version' "$CONFIG")"
+    if [[ $(yq '.check.python.pip' "$CONFIG") == true ]]; then
+      local py_ver="python$(yq '.check.python.version' "$CONFIG")"
       $py_ver -m pip install --upgrade pip
       _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
     fi
   fi
 
-  if _assert_cfg '.check.rustupCheck' true; then
+  if [[ $(yq '.check.rustupCheck' "$CONFIG") == true ]]; then
     if ! command -v rustup &>/dev/null; then
       _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -409,9 +398,9 @@ EOF
   fi
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
-  if _assert_cfg '.check.appimaged | tag' "!enabled"; then
+  if [[ $(yq '.check.appimaged | tag' "$CONFIG") == "!enabled" ]]; then
     if ! systemctl --user -q is-active appimaged \
-      || [[ $(yq '.config.check.appimaged.cleanInstall' "$CONFIG") == true ]]; then
+      || [[ $(yq '.check.appimaged.cleanInstall' "$CONFIG") == true ]]; then
       _info_msg "Installing appimaged"
       # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
 
@@ -447,8 +436,8 @@ EOF
   fi
 
   # install nerdfont
-  if _assert_cfg '.check.nerdfont | tag' "!enabled"; then
-    local font=$(yq '.config.check.nerdfont' "$CONFIG")
+  if [[ $(yq '.check.nerdfont | tag' "$CONFIG") == "!enabled" ]]; then
+    local font=$(yq '.check.nerdfont' "$CONFIG")
     if [[ -z $(fc-list :family="$font NF") ]]; then
       if [[ ! -d "/usr/share/fonts/$font" ]]; then
         _info_msg "Downloading $font"
@@ -469,12 +458,12 @@ install() {
   _info_msg "Starting ${tides_txt} install"
 
   _set_global_var
-  if _assert_cfg '.install.check' true; then check; fi
+  if [[ $(yq '.install.check' "$CONFIG") == true ]]; then check; fi
 
   # install apt packages
-  if [[ $(yq '.config.install.apt | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.install.apt | tag' "$CONFIG") == "!enabled" ]]; then
     local apt_pkgs
-    mapfile -t apt_pkgs < <(yq '.config.install.apt[]' "$CONFIG")
+    mapfile -t apt_pkgs < <(yq '.install.apt[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
       if ! dpkg -s "$pkg" &>/dev/null; then
@@ -485,12 +474,12 @@ install() {
   fi
 
   # install from 3rd-party repos
-  if [[ $(yq '.config.install.addRepos | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.install.addRepos | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing apt packages from third party repositories"
 
     # setting up signing keys & repo entries for source (repo)
-    for ((i = 0; i < $(yq '.config.install.addRepos | length' "$CONFIG"); i++)); do
-      local pkg_map=$(yq ".config.install.addRepos[$i]" "$CONFIG")
+    for ((i = 0; i < $(yq '.install.addRepos | length' "$CONFIG"); i++)); do
+      local pkg_map=$(yq ".install.addRepos[$i]" "$CONFIG")
       local source_name=$(yq '.sourceName' <<<"$pkg_map")
       local download_url="$(yq '.remoteGpgKey' <<<"$pkg_map")"
       # eval string if subshell / variable detected
@@ -528,7 +517,7 @@ install() {
 
     # install packages
     local apt_pkgs
-    mapfile -t apt_pkgs < <(yq '.config.install.addRepos[].packages[]' "$CONFIG")
+    mapfile -t apt_pkgs < <(yq '.install.addRepos[].packages[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
       if ! dpkg -s "$pkg" &>/dev/null; then
@@ -539,7 +528,7 @@ install() {
   fi
 
   # install flatpaks if flatpak is installed
-  if [[ $(yq '.config.install.flatpak | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.install.flatpak | tag' "$CONFIG") == "!enabled" ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Installing flatpak packages"
     if ! flatpak remotes | grep -iq "^flathub"; then
@@ -548,15 +537,15 @@ install() {
         --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
     fi
     # shellcheck disable=SC2046
-    flatpak install -y flathub $(yq '.config.install.flatpak[]' "$CONFIG")
+    flatpak install -y flathub $(yq '.install.flatpak[]' "$CONFIG")
   fi
 
   # install cargo packages if cargo is installed
-  if [[ $(yq '.config.install.cargo | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.install.cargo | tag' "$CONFIG") == "!enabled" ]] \
     && command -v cargo &>/dev/null; then
     _info_msg "Installing cargo packages"
     local rust_pkgs
-    mapfile -t rust_pkgs < <(yq '.config.install.cargo[]' "$CONFIG")
+    mapfile -t rust_pkgs < <(yq '.install.cargo[]' "$CONFIG")
     for pkg in "${rust_pkgs[@]}"; do
       if ! cargo install --list | grep "$(cut -d ' ' -f 1 <<<"$pkg")" >/dev/null; then
         # shellcheck disable=SC2086
@@ -566,11 +555,11 @@ install() {
   fi
 
   # install binary packages
-  if [[ $(yq '.config.install.binaries | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.install.binaries | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing binary packages"
     mkdir -p "$HOME/Applications"
-    for ((i = 0; i < "$(yq '.config.install.binaries | length' "$CONFIG")"; i++)); do
-      local binary_map=$(yq ".config.install.binaries[$i]" "$CONFIG")
+    for ((i = 0; i < "$(yq '.install.binaries | length' "$CONFIG")"; i++)); do
+      local binary_map=$(yq ".install.binaries[$i]" "$CONFIG")
       local binary_name=$(yq '.name' <<<"$binary_map")
       # skip if binary / command (for .deb) exists
       if [[ -f "$HOME/Applications/$binary_name" ]] \
@@ -602,13 +591,13 @@ install() {
   fi
 
   # install golang
-  if [[ $(yq '.config.install.languages.goVersion | tag' "$CONFIG") == "!enabled" ]]; then
-    _dl_golang "$(yq '.config.install.languages.goVersion' "$CONFIG")"
+  if [[ $(yq '.install.languages.goVersion | tag' "$CONFIG") == "!enabled" ]]; then
+    _dl_golang "$(yq '.install.languages.goVersion' "$CONFIG")"
   fi
 
   # install nvm, node (& npm)
-  if [[ $(yq '.config.install.languages.nodeVersion | tag' "$CONFIG") == "!enabled" ]]; then
-    _dl_node "$(yq '.config.install.languages.nodeVersion' "$CONFIG")"
+  if [[ $(yq '.install.languages.nodeVersion | tag' "$CONFIG") == "!enabled" ]]; then
+    _dl_node "$(yq '.install.languages.nodeVersion' "$CONFIG")"
   fi
 
   _success_msg "Finished ${tides_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
@@ -618,17 +607,17 @@ update() {
   _info_msg "Starting ${tides_txt} update"
 
   _set_global_var
-  if [[ $(yq '.config.update.check' "$CONFIG") == true ]]; then
+  if [[ $(yq '.update.check' "$CONFIG") == true ]]; then
     check
   fi
 
-  if [[ $(yq '.config.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Updating & upgrading apt packages"
     sudo apt-get -qq update
     sudo apt-get -qy upgrade
     # aptFull upgrades the entire system, installing new packages if necessary, & removes old
     # archive files & unused packages with their config files
-    if [[ $(yq '.config.update.apt.aptFull' "$CONFIG") == true ]]; then
+    if [[ $(yq '.update.apt.aptFull' "$CONFIG") == true ]]; then
       _info_msg "Performing a full upgrade & removing uneeded packages & apt cache"
       sudo apt-get -qy dist-upgrade
       sudo apt-get -qy autoclean
@@ -637,14 +626,14 @@ update() {
   fi
 
   # update flatpak
-  if [[ $(yq '.config.update.flatpak' "$CONFIG") == true ]] \
+  if [[ $(yq '.update.flatpak' "$CONFIG") == true ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Updating flatpaks"
     flatpak update -y
   fi
 
   # update rustup & cargo
-  if [[ $(yq '.config.update.cargo' "$CONFIG") == true ]] \
+  if [[ $(yq '.update.cargo' "$CONFIG") == true ]] \
     && command -v rustup &>/dev/null \
     && command -v cargo &>/dev/null; then
     _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
@@ -656,7 +645,7 @@ update() {
   fi
 
   # update yq
-  if [[ $(yq '.config.update.other.yq' "$CONFIG") == true ]]; then
+  if [[ $(yq '.update.other.yq' "$CONFIG") == true ]]; then
     local_yq_ver=$(yq -V | cut -d ' ' -f 4)
     # get latest yq version
     latest_yq_ver=$(
@@ -674,19 +663,19 @@ update() {
   fi
 
   # update golang
-  if [[ $(yq '.config.update.other.go' "$CONFIG") == true ]] \
+  if [[ $(yq '.update.other.go' "$CONFIG") == true ]] \
     && command -v go &>/dev/null; then
     _dl_golang latest
   fi
 
   # update node if exists
-  if [[ $(yq '.config.update.other.node' "$CONFIG") == true ]] \
+  if [[ $(yq '.update.other.node' "$CONFIG") == true ]] \
     && [[ -f "$HOME/.nvm/nvm.sh" ]]; then
     _dl_node latest
   fi
 
   # zellij delete all other sessions, including exited ones
-  if [[ $(yq '.config.update.other.zellijClear' "$CONFIG") == true ]] \
+  if [[ $(yq '.update.other.zellijClear' "$CONFIG") == true ]] \
     && command -v zellij &>/dev/null; then
     _info_msg "Deleting all other Zellij sessions"
     zellij delete-all-sessions -y
@@ -699,17 +688,17 @@ configure() {
   _info_msg "Starting ${tides_txt} configuration"
 
   _set_global_var
-  if [[ $(yq '.config.configure.check' "$CONFIG") == true ]]; then
+  if [[ $(yq '.configure.check' "$CONFIG") == true ]]; then
     check
   fi
 
   # dotfile manager implementation via Stow
-  if [[ $(yq '.config.configure.dotfiles | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.configure.dotfiles | tag' "$CONFIG") == "!enabled" ]] \
     && command -v stow &>/dev/null; then
     _info_msg "Configuring dotfiles via Stow"
     local packages
     mapfile -t packages < <(
-      yq -r '.config.configure.dotfiles.packages[]' "$CONFIG"
+      yq -r '.configure.dotfiles.packages[]' "$CONFIG"
     )
     for pkg in "${packages[@]}"; do
       _info_msg "Stowing dotfiles for $pkg"
@@ -718,11 +707,11 @@ configure() {
       #   --adopt replaces tides' dotfiles with original system ones
       #    this is needed as Stow throws an error if there are existing system dotfiles
       #    this results in tides' dotfiles being lost, but this is mitigated by setting
-      #    .config.configure.stowMode to "override".
+      #    .configure.stowMode to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
       # override option overrides system files with tides' dotfiles pre-replacement
       # conversely, if not set, system files will be used as the source of truth
-      if [[ $(yq -r '.config.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
+      if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
         && [[ -n $(git status --porcelain --untracked-files=no "$DOTFILES/$pkg/") ]]; then
         _info_msg "Overriding system original dotfiles with ${tides_txt}' dotfiles"
         # NOTE: commit any new changes made to dotfiles as they will be reset
@@ -734,7 +723,7 @@ configure() {
   fi
 
   # setup git user field in gitconfig via ~/.gitconfig.local
-  if [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]] \
+  if [[ $(yq '.configure.apps.git.userInfo' "$CONFIG") == true ]] \
     && [[ -n $(yq '.gitconfig.name' "$SECRETS") ]] \
     && [[ -n $(yq '.gitconfig.email' "$SECRETS") ]]; then
     _info_msg "Adding name & email to ${BLUE}~/.gitconfig.local${NC}"
@@ -749,12 +738,12 @@ EOF
       echo "    signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")" \
         | tee -a ~/.gitconfig.local >/dev/null
     fi
-  elif [[ $(yq '.config.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
+  elif [[ $(yq '.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
     _error_msg ".gitconfig.name or .gitconfig.email not set in $SECRETS"
   fi
 
   # setup Alacritty
-  if [[ $(yq '.config.configure.apps.alacritty' "$CONFIG") == true ]] \
+  if [[ $(yq '.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
     if [ ! -f ~/.bash_completion/alacritty ]; then
       _info_msg "Adding bash completion for Alacritty"
@@ -779,7 +768,7 @@ EOF
   fi
 
   # setup docker
-  if [[ $(yq '.config.configure.apps.docker' "$CONFIG") == true ]] \
+  if [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]] \
     && command -v docker &>/dev/null; then
     _info_msg "Setting up docker"
     # https://docs.docker.com/engine/install/linux-postinstall/
@@ -802,14 +791,14 @@ EOF
     sudo touch /etc/docker/daemon.json
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
       _info_msg "Using local logging driver to prevent disk-exhaustion"
-      yq -p=j -n -o=j \
-        '{"log-driver":"local","log-opts":{"max-size":"10m"}}' \
+      yq -n -o=j \
+        '{"log-driver": "local", "log-opts": {"max-size": "10m"}}' \
         | sudo tee /etc/docker/daemon.json >/dev/null
     fi
   fi
 
   # launches ulauncher
-  if [[ $(yq '.config.configure.apps.ulauncher' "$CONFIG") == true ]] \
+  if [[ $(yq '.configure.apps.ulauncher' "$CONFIG") == true ]] \
     && command -v ulauncher &>/dev/null; then
     if [[ ! -f "$HOME/.config/autostart/ulauncher.desktop" ]]; then
       _info_msg "Adding ulauncher to startup"
@@ -831,7 +820,7 @@ EOF
   fi
 
   # setup virtualbox
-  if [[ $(yq '.config.configure.apps.virtualbox' "$CONFIG") == true ]] \
+  if [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]] \
     && command -v virtualbox &>/dev/null; then
     # to allow virtualbox to access USB devices, add $USER to vboxusers group
     # https://www.virtualbox.org/manual/ch02.html
@@ -847,12 +836,12 @@ EOF
   fi
 
   # install vscode extensions
-  if [[ $(yq '.config.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]] \
     && command -v code &>/dev/null; then
     _info_msg "Installing vscode extensions"
     local extensions
     mapfile -t extensions < <(
-      yq -r '.config.configure.apps.vscode.extensions[]' "$CONFIG"
+      yq -r '.configure.apps.vscode.extensions[]' "$CONFIG"
     )
     local installed_ext=$(code --list-extensions)
     for ext in "${extensions[@]}"; do
@@ -864,10 +853,10 @@ EOF
   fi
 
   # optimisations
-  if [[ $(yq ".config.configure.optimisations" "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq ".configure.optimisations" "$CONFIG") == "!enabled" ]]; then
     _info_msg "Configuring optimisations"
 
-    if [[ $(yq ".config.configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
+    if [[ $(yq ".configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
       _info_msg "Configuring auto-cpufreq"
       if ! command -v auto-cpufreq &>/dev/null; then
         _info_msg "Installing auto-cpufreq"
@@ -885,20 +874,20 @@ EOF
   fi
 
   # desktop-environment specific configurations
-  if [[ $(yq ".config.configure.DEConf | tag" "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq ".configure.DE | tag" "$CONFIG") == "!enabled" ]]; then
     _info_msg "Configuring desktop environment"
 
     # cinnamon settings
     if [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
-      if [[ $(yq ".config.configure.DEConf.cinnamon.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
-        local term=$(yq ".config.configure.DEConf.cinnamon.defaultTerm" "$CONFIG")
+      if [[ $(yq ".configure.DE.cinnamon.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
+        local term=$(yq ".configure.DE.cinnamon.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
       fi
 
       # install & autostart plank dock
-      if [[ $(yq ".config.configure.DEConf.cinnamon.plankDock" "$CONFIG") == true ]]; then
+      if [[ $(yq ".configure.DE.cinnamon.plankDock" "$CONFIG") == true ]]; then
         if ! command -v plank &>/dev/null; then
           _info_msg "Installing plank"
           sudo apt-get update -qq && sudo apt-get install -qq plank
@@ -921,7 +910,7 @@ EOF
       fi
 
       # convert cinnamon panel to MacOS-like menu bar
-      if [[ $(yq ".config.configure.DEConf.cinnamon.panelToMenuBar" "$CONFIG") == true ]]; then
+      if [[ $(yq ".configure.DE.cinnamon.panelToMenuBar" "$CONFIG") == true ]]; then
         _info_msg "Converting panel to menu bar"
         # panel applets in order
         # https://support.apple.com/en-al/guide/mac-help/mchlp1446
@@ -946,7 +935,7 @@ EOF
         gsettings set org.cinnamon panels-height "['1:25']"
       fi
 
-      if [[ $(yq ".config.configure.DEConf.cinnamon.flameshot" "$CONFIG") == true ]]; then
+      if [[ $(yq ".configure.DE.cinnamon.flameshot" "$CONFIG") == true ]]; then
         _info_msg "Configuring flameshot shortcut to Print (PrtSc) key"
         dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/name "'flameshot'"
         dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/command "'/usr/bin/flameshot gui'"
@@ -954,7 +943,7 @@ EOF
       fi
 
       # install gTile tiling assistant
-      if [[ $(yq ".config.configure.DEConf.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
+      if [[ $(yq ".configure.DE.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
         if [[ ! -d "$HOME/.local/share/cinnamon/extensions/gTile@shuairan" ]]; then
           _info_msg "Downloading gTile extension"
           curl -sSL -o /tmp/gTile@shuairan.zip \
@@ -970,7 +959,7 @@ EOF
         fi
 
         # opinionated tiling layout
-        if [[ $(yq ".config.configure.DEConf.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
+        if [[ $(yq ".configure.DE.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
           _info_msg "Configuring opinionated tiling layout for gTile"
           mkdir -p "$HOME/.local/share/cinnamon/extensions/gTile@shuairan"
           cp "$(dirname "$0")/extras/gTile@shuairan.json" \
@@ -981,32 +970,39 @@ EOF
 
     # gnome settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-      # install gnome-tweaks & gnome-shell-extensions
-      if [[ $(yq ".config.configure.DEConf.gnome.tweaksAndExtensions" "$CONFIG") == true ]] \
-        && { ! command -v gnome-tweaks &>/dev/null || ! command -v gnome-extensions &>/dev/null; }; then
-        _info_msg "Installing gnome-tweaks and/or gnome-shell-extensions"
-        sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
-      elif [[ $(yq ".config.configure.DEConf.gnome.tweaksAndExtensions" "$CONFIG") == true ]]; then
-        _info_msg "gnome-tweaks & gnome-shell-extensions are already installed"
+      # install gnome extensions
+      if [[ $(yq '.configure.DE.gnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
+        # install gnome-tweaks & gnome-shell-extensions
+        if ! command -v gnome-tweaks &>/dev/null \
+          || ! command -v gnome-extensions &>/dev/null; then
+          _info_msg "Installing gnome-tweaks and/or gnome-shell-extensions"
+          sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
+        fi
+
+        # download gnome extensions
+        local exts ver
+        mapfile -t exts < <(yq '.configure.DE.gnome.extensions[]' "$CONFIG")
+        for ext in "${exts[@]}"; do
+          _info_msg "Downloading gnome extension $(cut -d "@" -f 1 <<<"$ext")"
+          ver=$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
+            | yq '[.shell_version_map[].version] | max')
+          curl -fsSL -o "/tmp/$ext.zip" \
+            "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
+          gnome-extensions install "/tmp/$ext.zip"
+        done
       fi
 
-      if [[ $(yq ".config.configure.DEConf.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
-        local term=$(yq ".config.configure.DEConf.gnome.defaultTerm" "$CONFIG")
+      # default terminal
+      if [[ $(yq ".configure.DE.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
+        local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
         gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
       fi
 
       # make Dash to Dock mimic MacOS dock behaviour
-      if [[ $(yq ".config.configure.DEConf.gnome.MacOSDock" "$CONFIG") == true ]]; then
+      if [[ $(yq ".configure.DE.gnome.MacOSDock" "$CONFIG") == true ]]; then
         _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
-        if gnome-extensions list | grep -q 'dash-to-dock'; then
-          curl -sSL -o /tmp/dash-to-dock@micxgx.gmail.com.zip \
-            "$(curl -fsSL https://api.github.com/repos/micheleg/dash-to-dock/releases/latest \
-              | yq '.assets[].browser_download_url')"
-          gnome-extensions install /tmp/dash-to-dock@micxgx.gmail.com.zip
-          _error_msg "Relogin for GNOME to load dash-to-dock@micxgx.gmail.com"
-        fi
         # minimize on click when application is opened
         gsettings set org.gnome.shell.extensions.dash-to-dock click-action 'minimize-or-previews'
         gsettings set org.gnome.shell.extensions.dash-to-dock dash-max-icon-size 32
@@ -1023,8 +1019,9 @@ EOF
         gsettings set org.gnome.shell.extensions.dash-to-dock require-pressure-to-show false
       fi
 
-      if [[ $(yq ".config.configure.DEConf.gnome.flameshot" "$CONFIG") == true ]]; then
-        _info_msg "Configuring flameshot shortcut to Print (PrtSc) key"
+      # set Flameshot as default screenshot app
+      if [[ $(yq ".configure.DE.gnome.flameshot" "$CONFIG") == true ]]; then
+        _info_msg "Setting Flameshot as default screenshot app (PrtSc)"
         gsettings set org.gnome.shell.keybindings show-screenshot-ui '[]'
         dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
           "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
