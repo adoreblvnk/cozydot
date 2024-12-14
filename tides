@@ -983,12 +983,17 @@ EOF
         local exts ver
         mapfile -t exts < <(yq '.configure.DE.gnome.extensions[]' "$CONFIG")
         for ext in "${exts[@]}"; do
-          _info_msg "Downloading gnome extension $(cut -d "@" -f 1 <<<"$ext")"
-          ver=$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
-            | yq '[.shell_version_map[].version] | max')
-          curl -fsSL -o "/tmp/$ext.zip" \
-            "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
-          gnome-extensions install "/tmp/$ext.zip"
+          if ! gnome-extensions list | grep -q "$ext"; then
+            _info_msg "Downloading GNOME extension $(cut -d "@" -f 1 <<<"$ext")"
+            ver=$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
+              | yq '[.shell_version_map[].version] | max')
+            curl -fsSL -o "/tmp/$ext.zip" \
+              "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
+            gnome-extensions install --force "/tmp/$ext.zip"
+            _warning_msg "Please relogin in a new session for GNOME to enable the extension"
+          else
+            gnome-extensions enable "$ext"
+          fi
         done
       fi
 

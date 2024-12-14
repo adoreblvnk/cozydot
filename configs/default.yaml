@@ -240,7 +240,7 @@ configure:
         tilingLayout: true
     gnome:
       extensions: !enabled
-        - dash-to-dock@micxgx.gmail.com
+        # - dash-to-dock@micxgx.gmail.com
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
         - panel-corners@aunetx
