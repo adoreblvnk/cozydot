@@ -83,7 +83,6 @@ install:
     - vim
     - xclip # terminal X11 clipboard
     # apps
-    - flameshot # screenshot
     - nautilus # file manager
     # multimedia
     - imagemagick # image converter
@@ -235,7 +234,6 @@ configure:
       defaultTerm: !enabled alacritty
       plankDock: true
       panelToMenuBar: true
-      flameshot: true
       gTile: !enabled
         tilingLayout: true
     gnome:
@@ -243,7 +241,7 @@ configure:
         # - dash-to-dock@micxgx.gmail.com
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
-        - panel-corners@aunetx
+        - rounded-window-corners@fxgn
       defaultTerm: !enabled alacritty
       MacOSDock: true
-      flameshot: true
+      smoothRoundedCorners: true

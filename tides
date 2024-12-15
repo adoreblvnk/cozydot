@@ -935,13 +935,6 @@ EOF
         gsettings set org.cinnamon panels-height "['1:25']"
       fi
 
-      if [[ $(yq ".configure.DE.cinnamon.flameshot" "$CONFIG") == true ]]; then
-        _info_msg "Configuring flameshot shortcut to Print (PrtSc) key"
-        dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/name "'flameshot'"
-        dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/command "'/usr/bin/flameshot gui'"
-        dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom0/binding "['Print']"
-      fi
-
       # install gTile tiling assistant
       if [[ $(yq ".configure.DE.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
         if [[ ! -d "$HOME/.local/share/cinnamon/extensions/gTile@shuairan" ]]; then
@@ -968,18 +961,18 @@ EOF
       fi
     fi
 
-    # gnome settings
+    # GNOME settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-      # install gnome extensions
-      if [[ $(yq '.configure.DE.gnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
-        # install gnome-tweaks & gnome-shell-extensions
-        if ! command -v gnome-tweaks &>/dev/null \
-          || ! command -v gnome-extensions &>/dev/null; then
-          _info_msg "Installing gnome-tweaks and/or gnome-shell-extensions"
-          sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
-        fi
+      # install gnome-tweaks & gnome-shell-extensions
+      if ! command -v gnome-tweaks &>/dev/null \
+        || ! command -v gnome-extensions &>/dev/null; then
+        _info_msg "Installing gnome-tweaks & gnome-shell-extensions"
+        sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
+      fi
 
-        # download gnome extensions
+      # install GNOME extensions
+      if [[ $(yq '.configure.DE.gnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
+        # download & install GNOME extensions
         local exts ver
         mapfile -t exts < <(yq '.configure.DE.gnome.extensions[]' "$CONFIG")
         for ext in "${exts[@]}"; do
@@ -1001,6 +994,14 @@ EOF
       if [[ $(yq ".configure.DE.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
+        # add keyboard shortcut for terminal. Ubuntu already has a keyboard shortcut, hence the if statement to check
+        if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal; then
+          dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
+            "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
+          dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'Terminal'"
+          dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'$term'"
+          dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'<Primary><Alt>T'"
+        fi
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
         gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
       fi
@@ -1008,31 +1009,30 @@ EOF
       # make Dash to Dock mimic MacOS dock behaviour
       if [[ $(yq ".configure.DE.gnome.MacOSDock" "$CONFIG") == true ]]; then
         _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
-        # minimize on click when application is opened
-        gsettings set org.gnome.shell.extensions.dash-to-dock click-action 'minimize-or-previews'
-        gsettings set org.gnome.shell.extensions.dash-to-dock dash-max-icon-size 32
-        gsettings set org.gnome.shell.extensions.dash-to-dock dock-position 'BOTTOM'
+        # modify position & size
+        dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position "'BOTTOM'"
+        dconf write /org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size 32
+        # hide dock
+        dconf write /org/gnome/shell/extensions/dash-to-dock/dock-fixed false
+        # show dock on mouse hover
+        dconf write /org/gnome/shell/extensions/dash-to-dock/autohide true
+        dconf write /org/gnome/shell/extensions/dash-to-dock/require-pressure-to-show false
+        # show dock when it doesn't obstruct focused application
+        dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide true
+        dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide-mode "'FOCUS_APPLICATION_WINDOWS'"
         # disable panel mode
-        gsettings set org.gnome.shell.extensions.dash-to-dock extend-height false
-        # allow dock to be hidden
-        gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed false
-        # hide dock when focused application overlaps dock
-        gsettings set org.gnome.shell.extensions.dash-to-dock intellihide true
-        gsettings set org.gnome.shell.extensions.dash-to-dock intellihide-mode 'FOCUS_APPLICATION_WINDOWS'
-        # show dock on mouse/cursor hover
-        gsettings set org.gnome.shell.extensions.dash-to-dock autohide true
-        gsettings set org.gnome.shell.extensions.dash-to-dock require-pressure-to-show false
+        dconf write /org/gnome/shell/extensions/dash-to-dock/extend-height false
+        # minimize on click when application is opened
+        dconf write /org/gnome/shell/extensions/dash-to-dock/click-action "'minimize-or-previews'"
       fi
 
-      # set Flameshot as default screenshot app
-      if [[ $(yq ".configure.DE.gnome.flameshot" "$CONFIG") == true ]]; then
-        _info_msg "Setting Flameshot as default screenshot app (PrtSc)"
-        gsettings set org.gnome.shell.keybindings show-screenshot-ui '[]'
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
-          "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'flameshot'"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'/usr/bin/flameshot gui'"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'Print'"
+      # configure Rounded Window Corners Reborn
+      if [[ $(yq ".configure.DE.gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
+        _info_msg "Smoothen Rounded Corners extension"
+        dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
+          "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
+          'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
+          'borderRadius': <uint32 12>, 'smoothing': <1.0>, 'enabled': <true>}"
       fi
     fi
   fi
