@@ -57,8 +57,8 @@ ${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
   ${GREEN}-n, --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
-                         directory
-  ${GREEN}-c, --config <CONFIG> ${NC} Set a config file that exists in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
+  ${GREEN}-c, --config <CONFIG> ${NC} Specify a yaml config file that exists in \$CONFIG_DIR (default:
+                         ${BLUE}<tides_path>/configs/${NC})
   ${GREEN}-S, --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
   ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
                          directory
@@ -66,19 +66,18 @@ ${YELLOW}Options:${NC}
   ${GREEN}-V, --version         ${NC} Print version information
 
 ${YELLOW}Commands:${NC}
-
   ${GREEN}   check    ${NC} Purges bloat (default) & installs dependencies. Installs Python (via pyenv), Cargo
-               (via rustup), appimaged, & fonts (Geist & Nerdfonts)
+               (via rustup), appimaged (daemon that integrates AppImages into the system), & Nerdfonts
   ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage) 
                packages, & coding languages (node & golang)
-  ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans
-               system (see ${BLUE}configs/default.yaml${NC} for details)
-  ${GREEN}c, configure${NC} Configures apps installed, restore / backup dotfiles via Stow (dotfile manager), 
-               customise desktop environment (Cinnamon / GNOME), & performs other system configs
+  ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
+               Zellij cache (see ${BLUE}configs/default.yaml${NC} for details)
+  ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed, 
+               customise desktop environment (Cinnamon / GNOME)
   ${GREEN}h, help     ${NC} Print help information
 
 ${YELLOW}Configuration:${NC}
-  Customise the actions each command by modifying the ${BLUE}configs/default.yaml${NC} file.
+  Customise each command action by modifying the config (default: ${BLUE}configs/default.yaml${NC}).
   The full config schema of ${tides_txt} is available at ${BLUE}README.md${NC}.
   Preset configs are available in ${BLUE}<tides_path>/configs/${NC} directory. Add new configs in \$CONFIG_DIR
    (default: ${BLUE}<tides_path>/configs/${NC}) or list them with ${tides_txt} ${CYAN}--list-configs${NC}

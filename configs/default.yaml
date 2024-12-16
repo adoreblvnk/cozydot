@@ -92,7 +92,7 @@ install:
     - sourceName: brave-browser-release
       remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
       gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
-      repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
+      repo: deb [arch=amd64 signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
       pinning: false
       packages:
         - brave-browser
