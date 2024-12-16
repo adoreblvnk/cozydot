@@ -330,7 +330,7 @@ EOF
     mapfile -t apt_pkgs < <(yq '.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
     for pkg in "${apt_pkgs[@]}"; do
-      if ! dpkg -s "$pkg" &>/dev/null; then
+      if ! dpkg-query -W "$pkg" &>/dev/null; then
         _info_msg "Installing dependency package $pkg"
         sudo apt-get install -qq "$pkg"
       fi
@@ -770,10 +770,9 @@ EOF
   # setup docker
   if [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]] \
     && command -v docker &>/dev/null; then
-    _info_msg "Setting up docker"
     # https://docs.docker.com/engine/install/linux-postinstall/
     # manage docker as non-root user
-    if getent group docker | grep $USER &>/dev/null; then
+    if ! getent group docker | grep $USER &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
       # create docker group
       sudo groupadd -f docker
@@ -824,7 +823,7 @@ EOF
     && command -v virtualbox &>/dev/null; then
     # to allow virtualbox to access USB devices, add $USER to vboxusers group
     # https://www.virtualbox.org/manual/ch02.html
-    if getent group vboxusers | grep "$USER" &>/dev/null; then
+    if ! getent group vboxusers | grep "$USER" &>/dev/null; then
       _info_msg "Adding user to vboxusers group to allow user to execute virtualbox commands"
       # create vboxusers group
       sudo groupadd -f vboxusers
@@ -867,9 +866,7 @@ EOF
       fi
       if systemctl is-active --quiet auto-cpufreq; then
         _info_msg "auto-cpufreq daemon is already running"
-      else
-        sudo auto-cpufreq --install
-      fi
+      else sudo auto-cpufreq --install; fi
     fi
   fi
 
@@ -928,7 +925,8 @@ EOF
           'panel1:right:9:calendar@cinnamon.org:10' \
         ]"
         # panel icon sizes
-        gsettings set org.cinnamon panel-zone-symbolic-icon-sizes '[{"left": 25, "center": 25, "right": 20, "panelId": 1}]'
+        gsettings set org.cinnamon panel-zone-symbolic-icon-sizes \
+          '[{"left": 25, "center": 25, "right": 20, "panelId": 1}]'
         # shift panel position to top
         gsettings set org.cinnamon panels-enabled "['1:0:top']"
         # smaller panel height
@@ -1003,7 +1001,6 @@ EOF
           dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'<Primary><Alt>T'"
         fi
         gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
-        gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
       fi
 
       # make Dash to Dock mimic MacOS dock behaviour

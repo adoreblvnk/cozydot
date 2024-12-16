@@ -38,7 +38,7 @@ check:
     - libbz2-dev
     - libffi-dev
     - liblzma-dev
-    - libncursesw5-dev
+    - libncurses-dev # libncursesw5-dev is a transitional pkg
     - libreadline-dev
     - libsqlite3-dev
     - libssl-dev
@@ -60,7 +60,7 @@ check:
     - pkgconf
     # alacritty dependencies
     - libfontconfig1-dev
-    - libfreetype6-dev
+    - libfreetype-dev # libfreetype6-dev is a transitional pkg
     - libxcb-xfixes0-dev
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
@@ -189,8 +189,8 @@ configure:
   dotfiles: !enabled
     stowMode: override # backup | override
     packages:
-      - alacritty
       - bash
+      - alacritty
       - bat
       - bottom
       # - extras
