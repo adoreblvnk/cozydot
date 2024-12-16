@@ -296,17 +296,22 @@ EOF
       adduser "$USER" sudo
     fi
 
+    DISTRIBUTION=$VERSION_CODENAME
+    # add support for testing / unstable
+    if lsb_release -rs 2>/dev/null | grep -Eq 'testing|unstable'; then
+      DISTRIBUTION=$(lsb_release -rs 2>/dev/null)
+    fi
     cat <<EOF | sudo tee /etc/apt/sources.list >/dev/null
-deb http://deb.debian.org/debian $VERSION_CODENAME main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian $VERSION_CODENAME main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian $DISTRIBUTION main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian $DISTRIBUTION main contrib non-free non-free-firmware
 
-deb http://deb.debian.org/debian-security ${VERSION_CODENAME}-security main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian-security ${VERSION_CODENAME}-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian-security ${DISTRIBUTION}-security main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian-security ${DISTRIBUTION}-security main contrib non-free non-free-firmware
 
-# $VERSION_CODENAME updates, to get updates before a point release is made;
+# $DISTRIBUTION updates, to get updates before a point release is made;
 # see https://www.debian.org/doc/manuals/debian-reference/ch02.en.html#_updates_and_backports
-deb http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian ${VERSION_CODENAME}-updates main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian ${DISTRIBUTION}-updates main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${DISTRIBUTION}-updates main contrib non-free non-free-firmware
 EOF
   fi
 
