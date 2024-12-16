@@ -156,7 +156,7 @@ install:
     - ripgrep
     - starship --locked
     - yazi-cli --locked # terminal file manager
-    - yazi-fm --locked # terminal file manager
+    - yazi-fm --locked
     - zellij --locked
     - zoxide --locked # smarter cd command
   binaries: !enabled
@@ -238,7 +238,7 @@ configure:
         tilingLayout: true
     gnome:
       extensions: !enabled
-        # - dash-to-dock@micxgx.gmail.com
+        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
         - rounded-window-corners@fxgn

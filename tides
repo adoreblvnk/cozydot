@@ -291,9 +291,9 @@ EOF
   # setup debian: enable sudo for user, add contrib + non-free sources
   if [[ $(yq '.check.distroCfg.debian' "$CONFIG") == true ]] \
     && [[ $DISTRO == "debian" ]]; then
-    if ! getent group sudo | grep -q "$(whoami)"; then
-      _warning_msg "Adding $(whoami) to sudo group. Restart to use sudo"
-      usermod -aG sudo "$(whoami)"
+    if ! getent group sudo | grep -q "$USER"; then
+      _warning_msg "Adding $USER to sudo group. Restart to use sudo"
+      adduser "$USER" sudo
     fi
 
     cat <<EOF | sudo tee /etc/apt/sources.list >/dev/null
@@ -530,7 +530,7 @@ install() {
   if [[ $(yq '.install.flatpak | tag' "$CONFIG") == "!enabled" ]] \
     && command -v flatpak &>/dev/null; then
     _info_msg "Installing flatpak packages"
-    if ! flatpak remotes | grep -iq "^flathub"; then
+    if ! flatpak remotes | grep -q ^flathub; then
       _info_msg "Adding flathub repository"
       flatpak remote-add \
         --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -991,7 +991,7 @@ EOF
       if [[ $(yq ".configure.DE.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
-        # add keyboard shortcut for terminal. Ubuntu already has a keyboard shortcut, hence the if statement to check
+        # add terminal keyboard shortcut. if statement to check for dedicated terminal key in Ubuntu
         if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal; then
           dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
             "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
@@ -1003,7 +1003,8 @@ EOF
       fi
 
       # make Dash to Dock mimic MacOS dock behaviour
-      if [[ $(yq ".configure.DE.gnome.MacOSDock" "$CONFIG") == true ]]; then
+      if [[ $(yq ".configure.DE.gnome.MacOSDock" "$CONFIG") == true ]] \
+        && gnome-extensions list | grep -Eq "dash-to-dock|ubuntu-dock"; then
         _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
         # modify position & size
         dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position "'BOTTOM'"
@@ -1023,7 +1024,8 @@ EOF
       fi
 
       # configure Rounded Window Corners Reborn
-      if [[ $(yq ".configure.DE.gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
+      if [[ $(yq ".configure.DE.gnome.smoothRoundedCorners" "$CONFIG") == true ]] \
+        && gnome-extensions list | grep -q rounded-window-corners; then
         _info_msg "Smoothen Rounded Corners extension"
         dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
           "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
