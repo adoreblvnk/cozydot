@@ -47,16 +47,16 @@ fi
 export GPG_TTY=$(tty)
 
 # ----- Load Languages -----
-if [ -f ~/.cargo/env ]; then . "$HOME/.cargo/env"; fi
-
-if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
-
 if [ -d ~/.pyenv ]; then
   # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
   export PATH="$HOME/.pyenv/bin:$PATH"
   eval "$(pyenv init -)"
   eval "$(pyenv virtualenv-init -)"
 fi
+
+if [ -f ~/.cargo/env ]; then . "$HOME/.cargo/env"; fi
+
+if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
 
 if [ -s ~/.nvm/nvm.sh ]; then
   export NVM_DIR="$HOME/.nvm"

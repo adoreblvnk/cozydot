@@ -3,7 +3,6 @@
 set -euo pipefail
 
 # global variables
-readonly DOTFILES="dotfiles"
 CONFIG="$(dirname "$0")/configs/default.yaml"
 CONFIG_DIR="$(dirname "$0")/configs"
 SECRETS="$(dirname "$0")/secrets.yaml"
@@ -189,15 +188,12 @@ _dl_golang() {
     latest_go="$(curl -sSL "https://go.dev/dl/?mode=json" \
       | yq '.[0].version' | cut -c 3-)"
   fi
-  # add go to PATH
-  if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
   if ! command -v go &>/dev/null \
     || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
     _info_msg "Downloading golang $latest_go"
     curl -sSL -o "/tmp/go.tar.gz" "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-    _warning_msg "Temporarily exporting go to PATH. Export to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
-    export PATH=$PATH:/usr/local/go/bin
+    . ~/.bashrc
   fi
   _info_msg "Golang (go $(go version | cut -d ' ' -f 3 | cut -c 3-)) installed"
 }
@@ -230,6 +226,11 @@ _dl_node() {
 
 check() {
   _info_msg "Starting ${tides_txt} check..."
+
+  if [[ ! -L ~/.bashrc ]]; then
+    _info_msg "Copying $tides_txt .bashrc"
+    rm -f ~/.bashrc && cp dotfiles/bash/.bashrc ~
+  fi
 
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
   if [[ $(yq '.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
@@ -353,12 +354,8 @@ EOF
         #   - pyenv-update https://github.com/pyenv/pyenv-update
         #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
         curl https://pyenv.run | bash
+        . ~/.bashrc
       fi
-
-      _warning_msg "Temporarily exporting pyenv to PATH. Export to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
-      export PATH="$HOME/.pyenv/bin:$PATH"
-      eval "$(pyenv init -)"
-      eval "$(pyenv virtualenv-init -)"
     else
       if [[ $(yq '.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
         pyenv update 2>/dev/null
@@ -395,8 +392,7 @@ EOF
     if ! command -v rustup &>/dev/null; then
       _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      _warning_msg "Temporarily adding cargo to PATH. Add to ~/.bashrc with ${tides_txt} ${BLUE}configure${NC}"
-      . "$HOME/.bashrc"
+      . ~/.bashrc
     fi
     _info_msg "Rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) toolchain already installed"
   fi
@@ -716,12 +712,12 @@ configure() {
       # override option overrides system files with tides' dotfiles pre-replacement
       # conversely, if not set, system files will be used as the source of truth
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
-        && [[ -n $(git status --porcelain --untracked-files=no "$DOTFILES/$pkg/") ]]; then
-        _info_msg "Overriding system original dotfiles with ${tides_txt}' dotfiles"
+        && [[ -n $(git status --porcelain --untracked-files=no "dotfiles/$pkg/") ]]; then
+        _info_msg "Overriding $pkg original dotfiles with ${tides_txt}' dotfiles"
         # NOTE: commit any new changes made to dotfiles as they will be reset
         # if there are any changes detected.
         # TODO: explore a cleaner option than git restore
-        git restore "$DOTFILES/$pkg/"
+        git restore "dotfiles/$pkg/"
       fi
     done
   fi
@@ -749,7 +745,7 @@ EOF
   # setup Alacritty
   if [[ $(yq '.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
-    if [ ! -f ~/.bash_completion/alacritty ]; then
+    if [[ ! -f ~/.bash_completion/alacritty ]]; then
       _info_msg "Adding bash completion for Alacritty"
       curl -fsLS --create-dirs -o ~/.bash_completion/alacritty \
         https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
@@ -1088,9 +1084,9 @@ main() {
       -V | --version) get_version ;;
       # COMMANDS
       check) check ;;
-      install) install ;;
-      update) update ;;
-      configure) configure ;;
+      i | install) install ;;
+      u | update) update ;;
+      c | configure) configure ;;
       *)
         _usage
         _error_msg "Invalid argument(s)"

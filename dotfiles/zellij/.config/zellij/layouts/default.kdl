@@ -1,7 +1,5 @@
 // base: https://github.com/zellij-org/zellij/blob/main/zellij-utils/assets/layouts/default.kdl
 layout {
     pane borderless=true
-    pane size=1 borderless=true {
-        plugin location="compact-bar"
-    }
+    pane size=1 borderless=true { plugin location="compact-bar"; }
 }
