@@ -1,5 +1,9 @@
-[include]
-    path = ~/.gitconfig.local # [user] set here
+# if you see this file being updated, run:
+# git update-index --assume-unchanged dotfiles/bash/.gitconfig
+[user]
+	name =
+    email =
+    signingkey =
 [credential]
     credentialStore = gpg
     helper = /usr/local/bin/git-credential-manager

@@ -201,8 +201,6 @@ configure:
       - yazi
       - zellij
   apps:
-    git:
-      userInfo: true # NOTE: set actual contents in secrets.yaml
     alacritty: true
     docker: true
     ulauncher: true

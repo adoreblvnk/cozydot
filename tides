@@ -722,26 +722,6 @@ configure() {
     done
   fi
 
-  # setup git user field in gitconfig via ~/.gitconfig.local
-  if [[ $(yq '.configure.apps.git.userInfo' "$CONFIG") == true ]] \
-    && [[ -n $(yq '.gitconfig.name' "$SECRETS") ]] \
-    && [[ -n $(yq '.gitconfig.email' "$SECRETS") ]]; then
-    _info_msg "Adding name & email to ${BLUE}~/.gitconfig.local${NC}"
-    tee ~/.gitconfig.local <<EOF >/dev/null
-[user]
-    name = $(yq '.gitconfig.name' "$SECRETS")
-    email = $(yq '.gitconfig.email' "$SECRETS")
-EOF
-    # add signingkey if field exists
-    if [[ -n $(yq '.gitconfig.signingkey' "$SECRETS") ]]; then
-      _info_msg "Adding signing key"
-      echo "    signingkey = $(yq '.gitconfig.signingkey' "$SECRETS")" \
-        | tee -a ~/.gitconfig.local >/dev/null
-    fi
-  elif [[ $(yq '.configure.apps.git.userInfo' "$CONFIG") == true ]]; then
-    _error_msg ".gitconfig.name or .gitconfig.email not set in $SECRETS"
-  fi
-
   # setup Alacritty
   if [[ $(yq '.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
