@@ -5,7 +5,6 @@ set -euo pipefail
 # global variables
 CONFIG="$(dirname "$0")/configs/default.yaml"
 CONFIG_DIR="$(dirname "$0")/configs"
-SECRETS="$(dirname "$0")/secrets.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 
@@ -58,7 +57,6 @@ ${YELLOW}Options:${NC}
   ${GREEN}-n, --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
   ${GREEN}-c, --config <CONFIG> ${NC} Specify a yaml config file that exists in \$CONFIG_DIR (default:
                          ${BLUE}<tides_path>/configs/${NC})
-  ${GREEN}-S, --secrets <SECRET>${NC} Set a secrets file. Add to ${BLUE}.gitignore${NC} if secrets file is in ${tides_txt} directory
   ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
                          directory
   ${GREEN}-h, --help            ${NC} Print help information
@@ -101,16 +99,6 @@ set_config() {
   fi
 }
 
-# Use secrets file specified by user.
-# Arguments:
-#   secrets file as a path
-set_secrets_file() {
-  SECRETS="$(realpath "$1")"
-  if [[ ! -f $SECRETS ]]; then
-    _error_msg "Secrets file selected \"$1\" does not exist"
-  fi
-}
-
 list_configs() {
   local configs
   # find all preset files, then filter out the parent dirs & file suffixes
@@ -136,7 +124,7 @@ get_version() {
 #   VERSION_CODENAME: only if $UBUNTU_CODENAME exists
 _set_global_var() {
   # get distro & set $DISTRO
-  . /etc/os-release # contains operating system identification data
+  source /etc/os-release # contains operating system identification data
   DISTRO="$(yq '.metadata.distro' "$CONFIG")"
   if [[ $DISTRO == "auto" ]]; then
     DISTRO="$ID"
@@ -193,7 +181,7 @@ _dl_golang() {
     _info_msg "Downloading golang $latest_go"
     curl -sSL -o "/tmp/go.tar.gz" "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-    . ~/.bashrc
+    source ~/.bashrc
   fi
   _info_msg "Golang (go $(go version | cut -d ' ' -f 3 | cut -c 3-)) installed"
 }
@@ -204,17 +192,17 @@ _dl_golang() {
 _dl_node() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_node"; fi
   if ! command -v nvm &>/dev/null; then
-    if [[ ! -f "$HOME/.nvm/nvm.sh" ]]; then
+    if [[ ! -f ~/.nvm/nvm.sh ]]; then
       _info_msg "Installing nvm" # nvm install script auto adds to PATH if needed
       curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
     fi
-    . "$HOME/.nvm/nvm.sh" # source to activate nvm
+    source ~/.nvm/nvm.sh # source to activate nvm
   fi
   local node_ver="$1"
   # set node_ver to "--lts" if value is "latest"
   [[ $1 == "latest" ]] && node_ver="--lts"
   # get latest node ver specified from nvm. NOTE: potentially flaky, investigate stability
-  latest_node_ver=$(nvm version-remote "$node_ver")
+  local latest_node_ver=$(nvm version-remote "$node_ver")
   if [[ "$(nvm current)" != "$latest_node_ver" ]]; then
     _info_msg "Installing node $latest_node_ver"
     nvm install "$node_ver"
@@ -235,8 +223,10 @@ check() {
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
   if [[ $(yq '.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
     && [[ $DISTRO == "ubuntu" ]]; then
+    # rm snap inspired from https://gist.github.com/lassekongo83/808b19e034c05d10ac4e3cc259808e4e
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
+      # exclude bare, core20, snapd first as snap depends on these
       mapfile -t snap_pkgs < <(
         snap list | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' \
           | awk '{print $1}'
@@ -255,6 +245,7 @@ check() {
       _info_msg "Removing snapd package from apt"
       sudo apt-get remove --purge -qq snapd
     fi
+    # TODO: update snap dirs for 24.10
     if [[ -d ~/snap || -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
       _info_msg "Removing snap package directories / leftover snap directories"
       sudo rm -rf ~/snap /snap /var/snap /var/lib/snapd
@@ -354,7 +345,7 @@ EOF
         #   - pyenv-update https://github.com/pyenv/pyenv-update
         #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
         curl https://pyenv.run | bash
-        . ~/.bashrc
+        source ~/.bashrc
       fi
     else
       if [[ $(yq '.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
@@ -392,7 +383,7 @@ EOF
     if ! command -v rustup &>/dev/null; then
       _info_msg "Installing Rustup toolchain (rustup, rustc, cargo)"
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      . ~/.bashrc
+      source ~/.bashrc
     fi
     _info_msg "Rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) toolchain already installed"
   fi
@@ -414,23 +405,23 @@ EOF
         && rm ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
 
       # download appimaged
-      mkdir -p "$HOME/Applications"
+      mkdir -p ~/Applications
       # get continuous release via GitHub api
-      curl -sSL -o "$HOME/Applications/appimaged.AppImage" \
+      curl -sSL -o ~/Applications/appimaged.AppImage \
         "$(curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
           | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")')"
 
       # launch
-      chmod +x "$HOME/Applications/appimaged.AppImage"
-      "$HOME/Applications/appimaged.AppImage"
+      chmod +x ~/Applications/appimaged.AppImage
+      ~/Applications/appimaged.AppImage
     else
       _info_msg "Appimaged service already running"
     fi
-    # install libfuse2t64 (named libfuse2 on older systems) for legacy AppImages
+    # install libfuse2t64 (libfuse2 on older systems) for legacy AppImages
     # https://github.com/AppImage/AppImageKit/wiki/FUSE
     local fuse2_lib=$(apt-cache search --names-only "^libfuse2" | cut -d ' ' -f 1)
     if ! dpkg -s "$fuse2_lib" &>/dev/null; then
-      _info_msg "Installing $fuse2_lib"
+      _info_msg "Installing $fuse2_lib for legacy AppImages"
       sudo apt-get update -qq && sudo apt-get install -qq "$fuse2_lib"
     fi
   fi
@@ -481,22 +472,24 @@ install() {
     for ((i = 0; i < $(yq '.install.addRepos | length' "$CONFIG"); i++)); do
       local pkg_map=$(yq ".install.addRepos[$i]" "$CONFIG")
       local source_name=$(yq '.sourceName' <<<"$pkg_map")
-      local download_url="$(yq '.remoteGpgKey' <<<"$pkg_map")"
+      local download_url="$(yq '.remoteKey' <<<"$pkg_map")"
       # eval string if subshell / variable detected
-      grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url" \
-        && download_url="$(eval echo "$(yq '.remoteGpgKey' <<<"$pkg_map")")"
+      # shellcheck disable=SC2016
+      if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url"; then
+        download_url="$(eval echo "$(yq '.remoteKey' <<<"$pkg_map")")"
+      fi
 
       # download asc key from remote
-      if [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.asc ]]; then
+      if [[ $(yq '.keyPath' <<<"$pkg_map") == *.asc ]]; then
         _info_msg "Downloading .asc key for $source_name"
-        sudo curl -fsSL -o "$(yq '.gpgKeyPath' <<<"$pkg_map")" "$download_url"
+        sudo curl -fsSL -o "$(yq '.keyPath' <<<"$pkg_map")" "$download_url"
       # if key is in gpg format, then dearmor after downloading the key
-      elif [[ $(yq '.gpgKeyPath' <<<"$pkg_map") == *.gpg ]]; then
+      elif [[ $(yq '.keyPath' <<<"$pkg_map") == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
         sudo curl -fsSL "$download_url" \
-          | sudo gpg --dearmor --yes -o "$(yq '.gpgKeyPath' <<<"$pkg_map")"
+          | sudo gpg --dearmor --yes -o "$(yq '.keyPath' <<<"$pkg_map")"
       else
-        _error_msg "Unsupported apt key format ($(yq '.gpgKeyPath' <<<"$pkg_map")) for $source_name source"
+        _error_msg "Unsupported apt key format ($(yq '.keyPath' <<<"$pkg_map")) for $source_name source"
       fi
 
       # add repo entry into sources.list.d
@@ -505,13 +498,11 @@ install() {
       eval echo "$(yq '.repo' <<<"$pkg_map")" \
         | sudo tee "$source_file_path" >/dev/null
 
-      # perform pinning if pinning entry exists
+      # perform pinning to prioritise 3rd party if pinning entry exists
       if [[ $(yq '.pinning' <<<"$pkg_map") != false ]]; then
         _info_msg "Performing pinning to prioritise $source_name"
-        # perform pinning to prioritise
-        local pref_file="/etc/apt/preferences.d/$source_name"
         yq '.pinning' <<<"$pkg_map" \
-          | sudo tee "$pref_file" >/dev/null
+          | sudo tee "/etc/apt/preferences.d/$source_name" >/dev/null
       fi
     done
 
@@ -557,10 +548,10 @@ install() {
   # install binary packages
   if [[ $(yq '.install.binaries | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing binary packages"
-    mkdir -p "$HOME/Applications"
+    mkdir -p ~/Applications
     for ((i = 0; i < "$(yq '.install.binaries | length' "$CONFIG")"; i++)); do
-      local binary_map=$(yq ".install.binaries[$i]" "$CONFIG")
-      local binary_name=$(yq '.name' <<<"$binary_map")
+      local binary_name=$(yq ".install.binaries[$i].name" "$CONFIG")
+      local download_url=$(yq ".install.binaries[$i].url" "$CONFIG")
       # skip if binary / command (for .deb) exists
       if [[ -f "$HOME/Applications/$binary_name" ]] \
         || command -v "$(head -c '-5' <<<"$binary_name")" &>/dev/null; then
@@ -570,10 +561,10 @@ install() {
 
       # downloading binary from url
       _info_msg "Downloading $binary_name"
-      local download_url="$(yq '.url' <<<"$binary_map")"
       # eval string if subshell / variable detected
-      grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url" \
-        && download_url="$(eval echo "$(yq '.url' <<<"$binary_map")")"
+      if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url"; then
+        download_url="$(eval echo "$download_url")"
+      fi
       curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
 
       # install binary (AppImage / deb package)
@@ -584,8 +575,7 @@ install() {
         sudo apt-get install -qq "$HOME/Applications/$binary_name"
         rm -f "$HOME/Applications/$binary_name"
       else
-        _warning_msg "Unsupported package: $binary_name"
-        _error_msg "${tides_txt} currently supports AppImage / deb packages only"
+        _error_msg "Unsupported package: $binary_name. Only AppImage / deb is supported"
       fi
     done
   fi
@@ -607,16 +597,14 @@ update() {
   _info_msg "Starting ${tides_txt} update"
 
   _set_global_var
-  if [[ $(yq '.update.check' "$CONFIG") == true ]]; then
-    check
-  fi
+  if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
   if [[ $(yq '.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Updating & upgrading apt packages"
     sudo apt-get -qq update
     sudo apt-get -qy upgrade
-    # aptFull upgrades the entire system, installing new packages if necessary, & removes old
-    # archive files & unused packages with their config files
+    # aptFull upgrades the entire system, installing new packages if necessary,
+    # & removes old archive files & unused packages with their config files
     if [[ $(yq '.update.apt.aptFull' "$CONFIG") == true ]]; then
       _info_msg "Performing a full upgrade & removing uneeded packages & apt cache"
       sudo apt-get -qy dist-upgrade
@@ -639,8 +627,10 @@ update() {
     _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
     rustup update 2>/dev/null
     # install cargo-update package if not installed
-    cargo install --list | grep -q "^cargo-update" \
-      || cargo install cargo-update
+    if ! cargo install --list | grep -q '^cargo-update'; then
+      _info_msg "Installing cargo-update required for updating rust packages"
+      cargo install cargo-update
+    fi
     cargo install-update -a
   fi
 
@@ -670,7 +660,7 @@ update() {
 
   # update node if exists
   if [[ $(yq '.update.other.node' "$CONFIG") == true ]] \
-    && [[ -f "$HOME/.nvm/nvm.sh" ]]; then
+    && [[ -f ~/.nvm/nvm.sh ]]; then
     _dl_node latest
   fi
 
@@ -688,9 +678,7 @@ configure() {
   _info_msg "Starting ${tides_txt} configuration"
 
   _set_global_var
-  if [[ $(yq '.configure.check' "$CONFIG") == true ]]; then
-    check
-  fi
+  if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
   # dotfile manager implementation via Stow
   if [[ $(yq '.configure.dotfiles | tag' "$CONFIG") == "!enabled" ]] \
@@ -705,19 +693,24 @@ configure() {
       # symlink between tides & actual dotfiles
       #   --no-folding stows individual files instead of directories
       #   --adopt replaces tides' dotfiles with original system ones
-      #    this is needed as Stow throws an error if there are existing system dotfiles
-      #    this results in tides' dotfiles being lost, but this is mitigated by setting
-      #    .configure.stowMode to "override".
+      #   Needed as Stow throws an error if there are existing system dotfiles.
+      #   This results in tides' dotfiles being lost, but this is mitigated by
+      #   setting .configure.stowMode to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
-      # override option overrides system files with tides' dotfiles pre-replacement
-      # conversely, if not set, system files will be used as the source of truth
+      # Override option overrides system files with tides' dotfiles
+      # pre-stow-replacement. Conversely, if set to 'backup', system files will
+      # be used as the source of truth
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
-        && [[ -n $(git status --porcelain --untracked-files=no "dotfiles/$pkg/") ]]; then
+        && [[ -n $(git status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
         _info_msg "Overriding $pkg original dotfiles with ${tides_txt}' dotfiles"
         # NOTE: commit any new changes made to dotfiles as they will be reset
         # if there are any changes detected.
         # TODO: explore a cleaner option than git restore
         git restore "dotfiles/$pkg/"
+      elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
+        _info_msg "Using system dotfiles as source of truth. ${tides_txt}' dotfiles will be overwritten"
+      else
+        _error_msg "stowMode must be set to either 'override' / 'backup'"
       fi
     done
   fi
@@ -779,7 +772,7 @@ configure() {
   # launches ulauncher
   if [[ $(yq '.configure.apps.ulauncher' "$CONFIG") == true ]] \
     && command -v ulauncher &>/dev/null; then
-    if [[ ! -f "$HOME/.config/autostart/ulauncher.desktop" ]]; then
+    if [[ ! -f ~/.config/autostart/ulauncher.desktop ]]; then
       _info_msg "Adding ulauncher to startup"
       cat <<EOF >"$HOME/.config/autostart/ulauncher.desktop"
 [Desktop Entry]
@@ -915,12 +908,12 @@ EOF
 
       # install gTile tiling assistant
       if [[ $(yq ".configure.DE.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
-        if [[ ! -d "$HOME/.local/share/cinnamon/extensions/gTile@shuairan" ]]; then
+        if [[ ! -d ~/.local/share/cinnamon/extensions/gTile@shuairan ]]; then
           _info_msg "Downloading gTile extension"
           curl -sSL -o /tmp/gTile@shuairan.zip \
             https://cinnamon-spices.linuxmint.com/files/extensions/gTile@shuairan.zip
           unzip /tmp/gTile@shuairan.zip \
-            -d "$HOME/.local/share/cinnamon/extensions" >/dev/null
+            -d ~/.local/share/cinnamon/extensions >/dev/null
         fi
         if ! gsettings get org.cinnamon enabled-extensions | grep -q "gTile"; then
           _warning_msg "Enabling gTile will disable other extensions"
@@ -932,9 +925,9 @@ EOF
         # opinionated tiling layout
         if [[ $(yq ".configure.DE.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
           _info_msg "Configuring opinionated tiling layout for gTile"
-          mkdir -p "$HOME/.local/share/cinnamon/extensions/gTile@shuairan"
+          mkdir -p ~/.local/share/cinnamon/extensions/gTile@shuairan
           cp "$(dirname "$0")/extras/gTile@shuairan.json" \
-            "$HOME/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json"
+            ~/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json
         fi
       fi
     fi
@@ -951,13 +944,15 @@ EOF
       # install GNOME extensions
       if [[ $(yq '.configure.DE.gnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
         # download & install GNOME extensions
-        local exts ver
+        local exts
         mapfile -t exts < <(yq '.configure.DE.gnome.extensions[]' "$CONFIG")
         for ext in "${exts[@]}"; do
           if ! gnome-extensions list | grep -q "$ext"; then
             _info_msg "Downloading GNOME extension $(cut -d "@" -f 1 <<<"$ext")"
-            ver=$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
-              | yq '[.shell_version_map[].version] | max')
+            local ver=$(
+              curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
+                | yq '[.shell_version_map[].version] | max'
+            )
             curl -fsSL -o "/tmp/$ext.zip" \
               "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
             gnome-extensions install --force "/tmp/$ext.zip"
@@ -1054,10 +1049,6 @@ main() {
       -n | --no-colour) colours false ;;
       -c | --config)
         set_config "$2"
-        shift
-        ;;
-      -S | --secrets)
-        set_secrets_file "$2"
         shift
         ;;
       --list-configs) list_configs ;;

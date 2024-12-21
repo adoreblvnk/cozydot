@@ -90,15 +90,15 @@ install:
     - vlc
   addRepos: !enabled
     - sourceName: brave-browser-release
-      remoteGpgKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-      gpgKeyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
+      remoteKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+      keyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
       repo: deb [arch=amd64 signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
       pinning: false
       packages:
         - brave-browser
     - sourceName: docker
-      remoteGpgKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
-      gpgKeyPath: /etc/apt/keyrings/docker.asc
+      remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
+      keyPath: /etc/apt/keyrings/docker.asc
       repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${UPSTREAM_DISTRO} $VERSION_CODENAME stable
       pinning: false
       packages:
@@ -108,8 +108,8 @@ install:
         - docker-buildx-plugin
         - docker-compose-plugin
     - sourceName: mozilla
-      remoteGpgKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
-      gpgKeyPath: /etc/apt/keyrings/packages.mozilla.org.asc
+      remoteKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
+      keyPath: /etc/apt/keyrings/packages.mozilla.org.asc
       repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
       pinning: |-
         Package: *
@@ -118,22 +118,22 @@ install:
       packages:
         - firefox
     - sourceName: onlyoffice
-      remoteGpgKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-      gpgKeyPath: /usr/share/keyrings/onlyoffice.gpg
+      remoteKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+      keyPath: /usr/share/keyrings/onlyoffice.gpg
       repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
       pinning: false
       packages:
         - onlyoffice-desktopeditors
     - sourceName: virtualbox
-      remoteGpgKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-      gpgKeyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+      remoteKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+      keyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
       repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
       pinning: false
       packages:
         - virtualbox-7.0
     - sourceName: vscode
-      remoteGpgKey: https://packages.microsoft.com/keys/microsoft.asc
-      gpgKeyPath: /etc/apt/keyrings/packages.microsoft.gpg
+      remoteKey: https://packages.microsoft.com/keys/microsoft.asc
+      keyPath: /etc/apt/keyrings/packages.microsoft.gpg
       repo: deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main
       pinning: false
       packages:
@@ -187,7 +187,7 @@ update:
 configure:
   check: true
   dotfiles: !enabled
-    stowMode: override # backup | override
+    stowMode: override # override | backup
     packages:
       - bash
       - alacritty

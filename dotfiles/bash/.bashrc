@@ -11,8 +11,7 @@ HISTCONTROL=ignoreboth
 shopt -s histappend # append to the history file, don't overwrite it
 
 # for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
-HISTSIZE=1000
-HISTFILESIZE=2000
+HISTSIZE=1000 HISTFILESIZE=2000
 
 # check the window size after each command and, if necessary, update the values
 # of LINES and COLUMNS.
@@ -32,14 +31,14 @@ shopt -s checkwinsize
 alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
 
 # best practice to add alias definitions into separate file, eg ~/.bash_aliases
-if [ -f ~/.bash_aliases ]; then . ~/.bash_aliases; fi
+if [ -f ~/.bash_aliases ]; then source ~/.bash_aliases; fi
 
 # enable programmable completion features (you don't need to enable this, if it's
 # already enabled in /etc/bash.bashrc and /etc/profile sources /etc/bash.bashrc).
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
-    . /usr/share/bash-completion/bash_completion
-  elif [ -f /etc/bash_completion ]; then . /etc/bash_completion; fi
+    source /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then source /etc/bash_completion; fi
 fi
 
 # force GPG to use pinentry (console) to prompt for passwords instead of a
@@ -54,17 +53,17 @@ if [ -d ~/.pyenv ]; then
   eval "$(pyenv virtualenv-init -)"
 fi
 
-if [ -f ~/.cargo/env ]; then . "$HOME/.cargo/env"; fi
+if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
 
 if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
 
 if [ -s ~/.nvm/nvm.sh ]; then
   export NVM_DIR="$HOME/.nvm"
-  . "$NVM_DIR/nvm.sh" && . "$NVM_DIR/bash_completion"
+  source "$NVM_DIR/nvm.sh" && source "$NVM_DIR/bash_completion"
 fi
 
 # ----- Apps -----
-if [ -f ~/.bash_completion/alacritty ]; then . ~/.bash_completion/alacritty; fi
+if [ -f ~/.bash_completion/alacritty ]; then source ~/.bash_completion/alacritty; fi
 
 if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
 
@@ -90,4 +89,4 @@ fi
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
 # ----- Extras -----
-if [ -f ~/.bash_extras ]; then . ~/.bash_extras; fi
+if [ -f ~/.bash_extras ]; then source ~/.bash_extras; fi
