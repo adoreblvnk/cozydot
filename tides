@@ -360,10 +360,10 @@ EOF
       # only install if python version exists but is not set to global
       if ! pyenv versions | grep "$latest_py"; then
         _info_msg "Installing latest Python version $latest_py"
-        pyenv install "$(yq '.check.python.version' "$CONFIG")"
+        pyenv install "$latest_py"
       fi
       _info_msg "Setting global Python version to $latest_py"
-      pyenv global "$(yq '.check.python.version' "$CONFIG")"
+      pyenv global "$latest_py"
     else
       _info_msg "Python $(pyenv version-name) is already the latest version"
     fi
