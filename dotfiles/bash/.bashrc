@@ -33,6 +33,21 @@ alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo
 # best practice to add alias definitions into separate file, eg ~/.bash_aliases
 if [ -f ~/.bash_aliases ]; then source ~/.bash_aliases; fi
 
+# bash aliases, personally, I don't use a bash_aliases file
+alias c=clear
+alias py=python
+alias pip="python -m pip"
+
+if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
+
+# eza aliases
+if command -v eza &>/dev/null; then
+  alias ls="eza --group-directories-first --icons=auto"
+  alias la="eza --group-directories-first --icons=auto -a"
+  alias ll="eza --group-directories-first --icons=auto -al"
+  alias tree="eza --group-directories-first --icons=auto -T"
+fi
+
 # enable programmable completion features (you don't need to enable this, if it's
 # already enabled in /etc/bash.bashrc and /etc/profile sources /etc/bash.bashrc).
 if ! shopt -oq posix; then
@@ -88,5 +103,8 @@ fi
 # https://github.com/ajeetdsouza/zoxide?tab=readme-ov-file#installation
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
-# ----- Extras -----
-if [ -f ~/.bash_extras ]; then source ~/.bash_extras; fi
+# display system info
+if command -v macchina &>/dev/null; then
+  macchina -o host -o kernel -o distribution -o uptime -o processor-load \
+    -o memory
+fi
