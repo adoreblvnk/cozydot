@@ -696,17 +696,19 @@ configure() {
       # Override option overrides system files with tides' dotfiles
       # pre-stow-replacement. Conversely, if set to 'backup', system files will
       # be used as the source of truth
-      if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]] \
-        && [[ -n $(git status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
+      if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
         _info_msg "Overriding $pkg original dotfiles with ${tides_txt}' dotfiles"
-        # NOTE: commit any new changes made to dotfiles as they will be reset
-        # if there are any changes detected.
-        # TODO: explore a cleaner option than git restore
-        git restore "dotfiles/$pkg/"
+        if [[ -n $(git status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
+          _info_msg "Restoring $tides_txt dotfiles for $pkg"
+          # NOTE: commit any new changes made to dotfiles as they will be reset
+          # if there are any changes detected.
+          # TODO: explore a cleaner option than git restore
+          git restore "dotfiles/$pkg/"
+        fi
       elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
         _info_msg "Using system dotfiles as source of truth. ${tides_txt}' dotfiles will be overwritten"
       else
-        _error_msg "stowMode must be set to either 'override' / 'backup'"
+        _error_msg "stowMode must be set to either ${BLUE}override${NC} / ${BLUE}backup${NC}"
       fi
     done
   fi
