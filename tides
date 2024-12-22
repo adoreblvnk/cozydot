@@ -974,7 +974,7 @@ EOF
         local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         # add terminal keyboard shortcut. if statement to check for dedicated terminal key in Ubuntu
-        if ! gsettings get org.gnome.settings-daemon.plugins.media-keys terminal; then
+        if ! gsettings get org.gnome.settings-daemon.plugins.media-keys terminal &>/dev/null; then
           _info_msg "Adding terminal keyboard shortcut to ${BLUE}<Primary><Alt>T${NC}"
           dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
             "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
