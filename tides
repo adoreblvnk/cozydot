@@ -772,6 +772,7 @@ configure() {
     && command -v ulauncher &>/dev/null; then
     if [[ ! -f ~/.config/autostart/ulauncher.desktop ]]; then
       _info_msg "Adding ulauncher to startup"
+      mkdir -p ~/.config/autostart && touch ~/.config/autostart/ulauncher.desktop
       cat <<EOF >"$HOME/.config/autostart/ulauncher.desktop"
 [Desktop Entry]
 Name=Ulauncher
