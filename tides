@@ -223,7 +223,7 @@ check() {
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
   if [[ $(yq '.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
     && [[ $DISTRO == "ubuntu" ]]; then
-    # rm snap inspired from https://gist.github.com/lassekongo83/808b19e034c05d10ac4e3cc259808e4e
+    # remove snap modified: https://www.baeldung.com/linux/snap-remove-disable
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
       # exclude bare, core20, snapd first as snap depends on these
@@ -289,10 +289,6 @@ EOF
     fi
 
     DISTRIBUTION=$VERSION_CODENAME
-    # add support for testing / unstable
-    if lsb_release -rs 2>/dev/null | grep -Eq 'testing|unstable'; then
-      DISTRIBUTION=$(lsb_release -rs 2>/dev/null)
-    fi
     cat <<EOF | sudo tee /etc/apt/sources.list >/dev/null
 deb http://deb.debian.org/debian $DISTRIBUTION main contrib non-free non-free-firmware
 deb-src http://deb.debian.org/debian $DISTRIBUTION main contrib non-free non-free-firmware
@@ -789,6 +785,8 @@ EOF
     else
       _info_msg "ulauncher already in startup apps"
     fi
+  elif [[ $(yq '.configure.apps.ulauncher' "$CONFIG") == true ]]; then
+    _warning_msg "uLauncher not installed, skipping..."
   fi
 
   # setup virtualbox
@@ -805,6 +803,8 @@ EOF
       # change group ID to vboxusers to activate change in current shell
       newgrp vboxusers
     fi
+  elif [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]]; then
+    _warning_msg "virtualbox not installed, skipping..."
   fi
 
   # install vscode extensions
@@ -822,6 +822,8 @@ EOF
         code --install-extension "$ext"
       fi
     done
+  elif [[ $(yq '.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]]; then
+    _warning_msg "VSCode not installed, skipping..."
   fi
 
   # optimisations
@@ -958,6 +960,7 @@ EOF
             gnome-extensions install --force "/tmp/$ext.zip"
             _warning_msg "Please relogin in a new session for GNOME to enable the extension"
           else
+            _info_msg "Enabling extension $ext"
             gnome-extensions enable "$ext"
           fi
         done
@@ -968,7 +971,8 @@ EOF
         local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         # add terminal keyboard shortcut. if statement to check for dedicated terminal key in Ubuntu
-        if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal; then
+        if ! gsettings get org.gnome.settings-daemon.plugins.media-keys terminal; then
+          _info_msg "Adding terminal keyboard shortcut to ${BLUE}<Primary><Alt>T${NC}"
           dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
             "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
           dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'Terminal'"
@@ -997,6 +1001,8 @@ EOF
         dconf write /org/gnome/shell/extensions/dash-to-dock/extend-height false
         # minimize on click when application is opened
         dconf write /org/gnome/shell/extensions/dash-to-dock/click-action "'minimize-or-previews'"
+      elif [[ $(yq ".configure.DE.gnome.MacOSDock" "$CONFIG") == true ]]; then
+        _warning_msg "Dash to Dock extension not installed"
       fi
 
       # configure Rounded Window Corners Reborn
@@ -1007,6 +1013,8 @@ EOF
           "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
           'borderRadius': <uint32 12>, 'smoothing': <1.0>, 'enabled': <true>}"
+      elif [[ $(yq ".configure.DE.gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
+        _warning_msg "Rounded Corners extension not installed"
       fi
     fi
   fi
