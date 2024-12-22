@@ -961,7 +961,7 @@ EOF
             curl -fsSL -o "/tmp/$ext.zip" \
               "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
             gnome-extensions install --force "/tmp/$ext.zip"
-            _warning_msg "Please relogin in a new session for GNOME to enable the extension"
+            _warning_msg "Please relogin in a new session for GNOME to enable $(cut -d "@" -f 1 <<<"$ext") extension"
           else
             _info_msg "Enabling extension $ext"
             gnome-extensions enable "$ext"
