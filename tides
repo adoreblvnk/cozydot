@@ -228,22 +228,31 @@ check() {
       _info_msg "Removing snap packages"
       # exclude bare, core20, snapd first as snap depends on these
       mapfile -t snap_pkgs < <(
-        snap list | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' \
-          | awk '{print $1}'
+        snap list 2>/dev/null \
+          | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' | awk '{print $1}'
       )
       for pkg in "${snap_pkgs[@]}"; do snap remove --purge "$pkg"; done
-      snap remove --purge "$(snap list | grep -o '^core[0-9][0-9]')"
-      snap remove --purge bare
-      snap remove --purge snapd
+      if [[ $(snap list 2>/dev/null | grep -o '^core[0-9][0-9]') ]]; then
+        sudo snap remove --purge \
+          "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]')"
+      fi
+      sudo snap remove --purge bare
+      sudo snap remove --purge snapd
     fi
     if systemctl -q is-active snapd; then
       _info_msg "Stop & disable snap services"
       sudo systemctl stop snapd
       sudo systemctl disable snapd
     fi
-    if command -v snapd &>/dev/null; then
+    if command -v snap &>/dev/null; then
+      # we need to run this after disabling service from systemctl
       _info_msg "Removing snapd package from apt"
       sudo apt-get remove --purge -qq snapd
+    fi
+    if systemctl -q is-active snapd.mounts-pre.target; then
+      # no need to disable, this is a cleanup of system boot of a non-existing process
+      _info_msg "Stop snapd.mounts-pre.target, started by system boot"
+      sudo systemctl stop snapd.mounts-pre.target
     fi
     # TODO: update snap dirs for 24.10
     if [[ -d ~/snap || -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
@@ -259,13 +268,13 @@ Pin-Priority: -10
 EOF
     fi
 
-    if ! dpkg -s ubuntu-restricted-extras; then
+    if ! dpkg -s ubuntu-restricted-extras &>/dev/null; then
       _info_msg "Installing ubuntu-restricted-extras"
       sudo apt-get update -qq && sudo apt-get install -qq ubuntu-restricted-extras
     fi
 
     # disabling auto upgrades
-    cat <<EOF >/etc/apt/apt.conf.d/20auto-upgrades
+    sudo tee /etc/apt/apt.conf.d/20auto-upgrades <<EOF >/dev/null
 APT::Periodic::Update-Package-Lists "0";
 APT::Periodic::Unattended-Upgrade "0";
 EOF
@@ -444,7 +453,6 @@ EOF
 install() {
   _info_msg "Starting ${tides_txt} install"
 
-  _set_global_var
   if [[ $(yq '.install.check' "$CONFIG") == true ]]; then check; fi
 
   # install apt packages
@@ -592,7 +600,6 @@ install() {
 update() {
   _info_msg "Starting ${tides_txt} update"
 
-  _set_global_var
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
   if [[ $(yq '.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
@@ -673,7 +680,6 @@ update() {
 configure() {
   _info_msg "Starting ${tides_txt} configuration"
 
-  _set_global_var
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
   # dotfile manager implementation via Stow
@@ -1044,6 +1050,8 @@ main() {
       https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     sudo chmod +x /usr/bin/yq
   fi
+
+  _set_global_var
 
   [[ $# -gt 0 ]] || {
     _usage

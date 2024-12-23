@@ -89,13 +89,6 @@ install:
     - pandoc # document converter
     - vlc
   addRepos: !enabled
-    - sourceName: brave-browser-release
-      remoteKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-      keyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
-      repo: deb [arch=amd64 signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
-      pinning: false
-      packages:
-        - brave-browser
     - sourceName: docker
       remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
       keyPath: /etc/apt/keyrings/docker.asc
@@ -168,8 +161,8 @@ install:
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
     - name: ulauncher.deb
       url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
-      # - name: zen.AppImage
-      #   url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
+    - name: zen.AppImage
+      url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   languages:
     goVersion: !enabled latest # latest | <major>.<minor>.<patch>
     nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
