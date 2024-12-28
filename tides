@@ -773,31 +773,6 @@ configure() {
     fi
   fi
 
-  # launches ulauncher
-  if [[ $(yq '.configure.apps.ulauncher' "$CONFIG") == true ]] \
-    && command -v ulauncher &>/dev/null; then
-    if [[ ! -f ~/.config/autostart/ulauncher.desktop ]]; then
-      _info_msg "Adding ulauncher to startup"
-      mkdir -p ~/.config/autostart && touch ~/.config/autostart/ulauncher.desktop
-      cat <<EOF >"$HOME/.config/autostart/ulauncher.desktop"
-[Desktop Entry]
-Name=Ulauncher
-Comment=Application launcher for Linux
-GenericName=Launcher
-Categories=GNOME;GTK;Utility;
-TryExec=/usr/bin/ulauncher
-Exec=env GDK_BACKEND=x11 /usr/bin/ulauncher --hide-window
-Icon=ulauncher
-Terminal=false
-Type=Application
-EOF
-    else
-      _info_msg "ulauncher already in startup apps"
-    fi
-  elif [[ $(yq '.configure.apps.ulauncher' "$CONFIG") == true ]]; then
-    _warning_msg "uLauncher not installed, skipping..."
-  fi
-
   # setup virtualbox
   if [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]] \
     && command -v virtualbox &>/dev/null; then
@@ -945,6 +920,14 @@ EOF
 
     # GNOME settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
+      # GNOME settings: dark mode
+      if [[ $(yq '.configure.DE.gnome.settings' "$CONFIG") == true ]]; then
+        # increase screen blank delay to 15 mins (the max in UI)
+        gsettings set org.gnome.desktop.session idle-delay 900
+        # dark mode
+        gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
+      fi
+
       # install gnome-tweaks & gnome-shell-extensions
       if ! command -v gnome-tweaks &>/dev/null \
         || ! command -v gnome-extensions &>/dev/null; then

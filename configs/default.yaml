@@ -161,8 +161,6 @@ install:
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
     - name: Obsidian.AppImage # note-taking app
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
-    - name: ulauncher.deb
-      url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
     - name: zen.AppImage
       url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   languages:
@@ -197,7 +195,6 @@ configure:
   apps:
     alacritty: true
     docker: true
-    ulauncher: true
     virtualbox: true
     vscode:
       extensions: !enabled
@@ -229,6 +226,7 @@ configure:
       gTile: !enabled
         tilingLayout: true
     gnome:
+      settings: true
       extensions: !enabled
         # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
         - blur-my-shell@aunetx
