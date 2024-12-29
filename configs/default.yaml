@@ -188,7 +188,6 @@ configure:
       - bottom
       - macchina
       - starship
-      - ulauncher
       - vscode
       - yazi
       - zellij
@@ -223,8 +222,7 @@ configure:
       defaultTerm: !enabled alacritty
       plankDock: true
       panelToMenuBar: true
-      gTile: !enabled
-        tilingLayout: true
+      gTile: true
     gnome:
       settings: true
       extensions: !enabled

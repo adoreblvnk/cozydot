@@ -14,7 +14,8 @@ DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 # Arguments:
 #   colours enabled, a boolean
 colours() {
-  NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN="" B_RED="" B_GREEN="" B_YELLOW="" B_BLUE="" B_MAGENTA="" B_CYAN=""
+  NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
+  B_RED="" B_GREEN="" B_YELLOW="" B_BLUE="" B_MAGENTA="" B_CYAN=""
   tides_txt="tides" TIDES_TXT="TIDES"
   if [[ "$(tput colors)" -ge 8 ]] && [[ $1 == true ]]; then
     NC="$(tput sgr0)" # text reset (select graphic representation default)
@@ -142,8 +143,11 @@ _set_global_var() {
   # detect DE modified from https://cgit.freedesktop.org/xdg/xdg-utils/tree/scripts/xdg-utils-common.in#n296
   if [[ $DESKTOP_ENVIRONMENT == "auto" ]]; then
     case "$XDG_CURRENT_DESKTOP" in
-      Cinnamon | X-Cinnamon) DESKTOP_ENVIRONMENT=cinnamon ;;
       *GNOME*) DESKTOP_ENVIRONMENT=gnome ;;
+      Cinnamon | X-Cinnamon)
+        DESKTOP_ENVIRONMENT=cinnamon
+        _warning_msg "Cinnamon has stopped receiving updates"
+        ;;
     esac
     local de_auto=" (auto)"
   fi
@@ -173,13 +177,15 @@ _dl_golang() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
   if [[ $1 == "latest" ]]; then
-    latest_go="$(curl -sSL "https://go.dev/dl/?mode=json" \
-      | yq '.[0].version' | cut -c 3-)"
+    latest_go="$(
+      curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-
+    )"
   fi
   if ! command -v go &>/dev/null \
     || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
     _info_msg "Downloading golang $latest_go"
-    curl -sSL -o "/tmp/go.tar.gz" "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
+    curl -sSL -o "/tmp/go.tar.gz" \
+      "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
     source ~/.bashrc
   fi
@@ -217,7 +223,7 @@ check() {
 
   if [[ ! -L ~/.bashrc ]]; then
     _info_msg "Copying $tides_txt .bashrc"
-    rm -f ~/.bashrc && cp dotfiles/bash/.bashrc ~
+    rm -f ~/.bashrc && cp dotfiles/bash/.bashrc ~/.bashrc
   fi
 
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
@@ -247,7 +253,7 @@ check() {
     if command -v snap &>/dev/null; then
       # we need to run this after disabling service from systemctl
       _info_msg "Removing snapd package from apt"
-      sudo apt-get remove --purge -qq snapd
+      sudo apt-get purge -qq snapd
     fi
     if systemctl -q is-active snapd.mounts-pre.target; then
       # no need to disable, this is a cleanup of system boot of a non-existing process
@@ -270,10 +276,15 @@ EOF
 
     if ! dpkg -s ubuntu-restricted-extras &>/dev/null; then
       _info_msg "Installing ubuntu-restricted-extras"
-      sudo apt-get update -qq && sudo apt-get install -qq ubuntu-restricted-extras
+      sudo apt-get update -qq
+      sudo apt-get install -qq ubuntu-restricted-extras
     fi
 
     # disabling auto upgrades
+    if command -v unattended-upgrades &>/dev/null; then
+      _info_msg "Uninstalling unattended-upgrades package"
+      sudo apt-get purge -qq unattended-upgrades >/dev/null
+    fi
     sudo tee /etc/apt/apt.conf.d/20auto-upgrades <<EOF >/dev/null
 APT::Periodic::Update-Package-Lists "0";
 APT::Periodic::Unattended-Upgrade "0";
@@ -318,7 +329,7 @@ EOF
     for pkg in "${purge_pkgs[@]}"; do
       if dpkg-query -W "$pkg" &>/dev/null; then
         _info_msg "Purging $pkg"
-        sudo apt-get remove --purge -qq "$pkg" >/dev/null
+        sudo apt-get purge -qq "$pkg" >/dev/null
       fi
     done
     # disable purge after 1st run to prevent purging properly installed packages
@@ -438,8 +449,7 @@ EOF
       if [[ ! -d "/usr/share/fonts/$font" ]]; then
         _info_msg "Downloading $font"
         sudo mkdir -p "/usr/share/fonts/$font"
-        curl -sSL \
-          "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
+        curl -sSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
           | sudo tar -xvJ -C "/usr/share/fonts/$font"
       fi
       _info_msg "Reloading fc-cache"
@@ -486,14 +496,14 @@ install() {
       # download asc key from remote
       if [[ $(yq '.keyPath' <<<"$pkg_map") == *.asc ]]; then
         _info_msg "Downloading .asc key for $source_name"
-        sudo curl -fsSL -o "$(yq '.keyPath' <<<"$pkg_map")" "$download_url"
+        sudo curl -sSL -o "$(yq '.keyPath' <<<"$pkg_map")" "$download_url"
       # if key is in gpg format, then dearmor after downloading the key
       elif [[ $(yq '.keyPath' <<<"$pkg_map") == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
-        sudo curl -fsSL "$download_url" \
+        sudo curl -sSL "$download_url" \
           | sudo gpg --dearmor --yes -o "$(yq '.keyPath' <<<"$pkg_map")"
       else
-        _error_msg "Unsupported apt key format ($(yq '.keyPath' <<<"$pkg_map")) for $source_name source"
+        _error_msg "Unsupported apt key format ($(yq '.keyPath' <<<"$pkg_map")) for $source_name"
       fi
 
       # add repo entry into sources.list.d
@@ -528,8 +538,8 @@ install() {
     _info_msg "Installing flatpak packages"
     if ! flatpak remotes | grep -q ^flathub; then
       _info_msg "Adding flathub repository"
-      flatpak remote-add \
-        --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      flatpak remote-add --if-not-exists \
+        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
     fi
     # shellcheck disable=SC2046
     flatpak install -y flathub $(yq '.install.flatpak[]' "$CONFIG")
@@ -542,7 +552,7 @@ install() {
     local rust_pkgs
     mapfile -t rust_pkgs < <(yq '.install.cargo[]' "$CONFIG")
     for pkg in "${rust_pkgs[@]}"; do
-      if ! cargo install --list | grep "$(cut -d ' ' -f 1 <<<"$pkg")" >/dev/null; then
+      if ! cargo install --list | grep -q "$(cut -d ' ' -f 1 <<<"$pkg")"; then
         # shellcheck disable=SC2086
         cargo install $pkg
       fi
@@ -569,7 +579,7 @@ install() {
       if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url"; then
         download_url="$(eval echo "$download_url")"
       fi
-      curl -fsSL -o "$HOME/Applications/$binary_name" "$download_url"
+      curl -sSL -o "$HOME/Applications/$binary_name" "$download_url"
 
       # install binary (AppImage / deb package)
       _info_msg "Installing $binary_name"
@@ -604,8 +614,7 @@ update() {
 
   if [[ $(yq '.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Updating & upgrading apt packages"
-    sudo apt-get -qq update
-    sudo apt-get -qy upgrade
+    sudo apt-get -qq update && sudo apt-get -qq upgrade
     # aptFull upgrades the entire system, installing new packages if necessary,
     # & removes old archive files & unused packages with their config files
     if [[ $(yq '.update.apt.aptFull' "$CONFIG") == true ]]; then
@@ -630,7 +639,7 @@ update() {
     _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
     rustup update 2>/dev/null
     # install cargo-update package if not installed
-    if ! cargo install --list | grep -q '^cargo-update'; then
+    if ! cargo install --list | grep -q ^cargo-update; then
       _info_msg "Installing cargo-update required for updating rust packages"
       cargo install cargo-update
     fi
@@ -687,9 +696,7 @@ configure() {
     && command -v stow &>/dev/null; then
     _info_msg "Configuring dotfiles via Stow"
     local packages
-    mapfile -t packages < <(
-      yq -r '.configure.dotfiles.packages[]' "$CONFIG"
-    )
+    mapfile -t packages < <(yq -r '.configure.dotfiles.packages[]' "$CONFIG")
     for pkg in "${packages[@]}"; do
       _info_msg "Stowing dotfiles for $pkg"
       # symlink between tides & actual dotfiles
@@ -704,7 +711,7 @@ configure() {
       # be used as the source of truth
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
         _info_msg "Overriding $pkg original dotfiles with ${tides_txt}' dotfiles"
-        if [[ -n $(git status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
+        if [[ $(git status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
           _info_msg "Restoring $tides_txt dotfiles for $pkg"
           # NOTE: commit any new changes made to dotfiles as they will be reset
           # if there are any changes detected.
@@ -724,21 +731,21 @@ configure() {
     && command -v alacritty &>/dev/null; then
     if [[ ! -f ~/.bash_completion/alacritty ]]; then
       _info_msg "Adding bash completion for Alacritty"
-      curl -fsLS --create-dirs -o ~/.bash_completion/alacritty \
+      curl -sSL --create-dirs -o ~/.bash_completion/alacritty \
         https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
     fi
 
     # add desktop icon
     if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
       _info_msg "Adding Alacritty icon"
-      sudo curl -fsLS --create-dirs -o /usr/share/pixmaps/Alacritty.svg \
+      sudo curl -sSL --create-dirs -o /usr/share/pixmaps/Alacritty.svg \
         https://github.com/alacritty/alacritty/raw/master/extra/logo/alacritty-term.svg
     fi
 
     # add desktop entry
     if [[ ! -f /usr/share/applications/Alacritty.desktop ]]; then
       _info_msg "Adding desktop entry"
-      sudo curl -fsLS --create-dirs -o /usr/share/applications/Alacritty.desktop \
+      sudo curl -sSL --create-dirs -o /usr/share/applications/Alacritty.desktop \
         https://github.com/alacritty/alacritty/raw/master/extra/linux/Alacritty.desktop
       sudo update-desktop-database
     fi
@@ -749,7 +756,7 @@ configure() {
     && command -v docker &>/dev/null; then
     # https://docs.docker.com/engine/install/linux-postinstall/
     # manage docker as non-root user
-    if ! getent group docker | grep $USER &>/dev/null; then
+    if ! getent group docker | grep "$USER" &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
       # create docker group
       sudo groupadd -f docker
@@ -811,15 +818,15 @@ configure() {
   fi
 
   # optimisations
-  if [[ $(yq ".configure.optimisations" "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.configure.optimisations | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Configuring optimisations"
 
-    if [[ $(yq ".configure.optimisations.auto-cpufreq" "$CONFIG") == true ]]; then
+    if [[ $(yq '.configure.optimisations.auto-cpufreq' "$CONFIG") == true ]]; then
       _info_msg "Configuring auto-cpufreq"
       if ! command -v auto-cpufreq &>/dev/null; then
         _info_msg "Installing auto-cpufreq"
         git clone https://github.com/AdnanHodzic/auto-cpufreq.git
-        cd auto-cpufreq && sudo ./auto-cpufreq-installer
+        cd auto-cpufreq && sudo ./auto-cpufreq-installer --install
         cd ..
         rm -rf auto-cpufreq
       fi
@@ -830,12 +837,11 @@ configure() {
   fi
 
   # desktop-environment specific configurations
-  if [[ $(yq ".configure.DE | tag" "$CONFIG") == "!enabled" ]]; then
-    _info_msg "Configuring desktop environment"
+  if [[ $(yq '.configure.DE | tag' "$CONFIG") == "!enabled" ]]; then
 
     # cinnamon settings
     if [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
-      if [[ $(yq ".configure.DE.cinnamon.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
+      if [[ $(yq '.configure.DE.cinnamon.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".configure.DE.cinnamon.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
@@ -843,7 +849,7 @@ configure() {
       fi
 
       # install & autostart plank dock
-      if [[ $(yq ".configure.DE.cinnamon.plankDock" "$CONFIG") == true ]]; then
+      if [[ $(yq '.configure.DE.cinnamon.plankDock' "$CONFIG") == true ]]; then
         if ! command -v plank &>/dev/null; then
           _info_msg "Installing plank"
           sudo apt-get update -qq && sudo apt-get install -qq plank
@@ -866,7 +872,7 @@ EOF
       fi
 
       # convert cinnamon panel to MacOS-like menu bar
-      if [[ $(yq ".configure.DE.cinnamon.panelToMenuBar" "$CONFIG") == true ]]; then
+      if [[ $(yq '.configure.DE.cinnamon.panelToMenuBar' "$CONFIG") == true ]]; then
         _info_msg "Converting panel to menu bar"
         # panel applets in order
         # https://support.apple.com/en-al/guide/mac-help/mchlp1446
@@ -893,7 +899,7 @@ EOF
       fi
 
       # install gTile tiling assistant
-      if [[ $(yq ".configure.DE.cinnamon.gTile | tag" "$CONFIG") == "!enabled" ]]; then
+      if [[ $(yq '.configure.DE.cinnamon.gTile' "$CONFIG") == true ]]; then
         if [[ ! -d ~/.local/share/cinnamon/extensions/gTile@shuairan ]]; then
           _info_msg "Downloading gTile extension"
           curl -sSL -o /tmp/gTile@shuairan.zip \
@@ -901,19 +907,11 @@ EOF
           unzip /tmp/gTile@shuairan.zip \
             -d ~/.local/share/cinnamon/extensions >/dev/null
         fi
-        if ! gsettings get org.cinnamon enabled-extensions | grep -q "gTile"; then
+        if ! gsettings get org.cinnamon enabled-extensions | grep -q gTile; then
           _warning_msg "Enabling gTile will disable other extensions"
           gsettings set org.cinnamon enabled-extensions "['gTile@shuairan']"
         else
           _info_msg "gTile already enabled"
-        fi
-
-        # opinionated tiling layout
-        if [[ $(yq ".configure.DE.cinnamon.gTile.tilingLayout" "$CONFIG") == true ]]; then
-          _info_msg "Configuring opinionated tiling layout for gTile"
-          mkdir -p ~/.local/share/cinnamon/extensions/gTile@shuairan
-          cp "$(dirname "$0")/extras/gTile@shuairan.json" \
-            ~/.local/share/cinnamon/extensions/gTile@shuairan/gTile@shuairan.json
         fi
       fi
     fi
@@ -922,6 +920,7 @@ EOF
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
       # GNOME settings: dark mode
       if [[ $(yq '.configure.DE.gnome.settings' "$CONFIG") == true ]]; then
+        _info_msg "Configuring GNOME desktop environment"
         # increase screen blank delay to 15 mins (the max in UI)
         gsettings set org.gnome.desktop.session idle-delay 900
         # dark mode
@@ -944,10 +943,10 @@ EOF
           if ! gnome-extensions list | grep -q "$ext"; then
             _info_msg "Downloading GNOME extension $(cut -d "@" -f 1 <<<"$ext")"
             local ver=$(
-              curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
+              curl -sSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
                 | yq '[.shell_version_map[].version] | max'
             )
-            curl -fsSL -o "/tmp/$ext.zip" \
+            curl -sSL -o "/tmp/$ext.zip" \
               "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
             gnome-extensions install --force "/tmp/$ext.zip"
             _warning_msg "Please relogin in a new session for GNOME to enable $(cut -d "@" -f 1 <<<"$ext") extension"
@@ -959,7 +958,7 @@ EOF
       fi
 
       # default terminal
-      if [[ $(yq ".configure.DE.gnome.defaultTerm | tag" "$CONFIG") == "!enabled" ]]; then
+      if [[ $(yq '.configure.DE.gnome.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
         # add terminal keyboard shortcut. if statement to check for dedicated terminal key in Ubuntu
@@ -975,8 +974,8 @@ EOF
       fi
 
       # make Dash to Dock mimic MacOS dock behaviour
-      if [[ $(yq ".configure.DE.gnome.MacOSDock" "$CONFIG") == true ]] \
-        && gnome-extensions list | grep -Eq "dash-to-dock|ubuntu-dock"; then
+      if [[ $(yq '.configure.DE.gnome.MacOSDock' "$CONFIG") == true ]] \
+        && gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock'; then
         _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
         # modify position & size
         dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position "'BOTTOM'"
@@ -998,13 +997,13 @@ EOF
       fi
 
       # configure Rounded Window Corners Reborn
-      if [[ $(yq ".configure.DE.gnome.smoothRoundedCorners" "$CONFIG") == true ]] \
+      if [[ $(yq '.configure.DE.gnome.smoothRoundedCorners' "$CONFIG") == true ]] \
         && gnome-extensions list | grep -q rounded-window-corners; then
         _info_msg "Smoothen Rounded Corners extension"
         dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
           "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
-          'borderRadius': <uint32 12>, 'smoothing': <1.0>, 'enabled': <true>}"
+          'borderRadius': <uint32 16>, 'smoothing': <1.0>, 'enabled': <true>}"
       elif [[ $(yq ".configure.DE.gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
         _warning_msg "Rounded Corners extension not installed"
       fi
