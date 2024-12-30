@@ -1,5 +1,4 @@
 # Expanded
-
 spacing         = 2
 padding         = 0
 hide_ascii      = true
@@ -44,7 +43,7 @@ machine         = "💻 Machine"
 local_ip        = "IP"
 backlight       = "🔆 Brightness"
 resolution      = "📺 Resolution"
-cpu_load        = "🏋🏻CPU Load"
+cpu_load        = "🏋🏻 CPU Load"
 cpu             = "🔲 CPU"
-gpu             = "GPU"
+gpu             = "🔲 GPU"
 disk_space      = "Disk Space"
