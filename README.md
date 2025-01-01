@@ -5,7 +5,7 @@
     cozydot is an automated post-install, update, & config (dotfile) manager for Linux
   </p>
   <p> <!-- Built With -->
-    Built With: [yq](https://github.com/mikefarah/yq) &bull; [GNU Stow](https://www.gnu.org/s/stow)
+    Built With: <a href="https://github.com/mikefarah/yq">yq</a> &bull; <a href="https://www.gnu.org/s/stow">GNU Stow</a>
   </p>
 </div>
 
@@ -21,6 +21,7 @@
 - [Usage](#usage)
   - [Help Message](#help-message)
   - [Commands to Run on a Fresh Install](#commands-to-run-on-a-fresh-install)
+  - [Setting Up Git Credentials](#setting-up-git-credentials)
 </details>
 
 ## About
@@ -99,6 +100,10 @@ On a fresh install, cozydot is intended to be run sequentially like:
 ./cozydot install # includes `check` step by default
 ./cozydot configure
 ```
+
+### Setting Up Git Credentials
+
+Fill up your `name`, `email` & `signingkey` (optional) in `/dotfiles/bash/.gitconfig`. Optionally, run `git update-index --assume-unchanged dotfiles/bash/.gitconfig` to avoid committing your secrets to git.
 
 ## Credits <!-- omit in toc -->
 
