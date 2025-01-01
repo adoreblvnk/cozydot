@@ -1,14 +1,9 @@
-version: 0.0.1
 metadata:
-  description: Sensible defaults for tides.
-  # NOTE: the following values are highly recommended to be set to "auto"
-  distro: auto # auto | ubuntu | linuxmint | debian
-  DE: auto # auto | gnome | cinnamon
+  description: Sensible defaults for cozydot.
+  distro: auto # auto | ubuntu | debian | linuxmint
+  DE: auto     # auto | gnome | cinnamon
 check:
-  distroCfg:
-    ubuntu: true
-    linuxmint: true
-    debian: true
+  distroCfg: true # supports ubuntu / debian / linuxmint
   purge: !disabled
     # docker installed via aptAltSources
     - docker.io
@@ -18,7 +13,7 @@ check:
     - podman-docker
     - containerd
     - runc
-    - "*firefox*" # firefox installed via aptAltSources
+    - "*firefox*"     # firefox installed via aptAltSources
     - "*libreoffice*" # libreoffice replaced with onlyoffice
   deps: !enabled
     # essential packages
@@ -71,22 +66,20 @@ check:
   rustupCheck: true
   appimaged: !enabled
     cleanInstall: false
-  nerdfont: !enabled GeistMono # list of nerdfonts: https://www.nerdfonts.com/font-downloads
+  nerdfont: !enabled GeistMono # https://www.nerdfonts.com/font-downloads
 install:
   check: true
   apt: !enabled
     # CLI utils
-    - fzf # fuzzy finder
+    - fzf         # fuzzy finder
     - gnupg2
     - openssh-server
     - pass
     - trash-cli
     - vim
-    # apps
-    - nautilus # file manager
     # multimedia
     - imagemagick # image converter
-    - pandoc # document converter
+    - pandoc      # document converter
     - vlc
   addRepos: !enabled
     - sourceName: docker
@@ -134,37 +127,37 @@ install:
   flatpak: !enabled
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
-    - io.bassi.Amberol # music player
+    - io.bassi.Amberol      # music player
     - org.qbittorrent.qBittorrent
-    - org.shotcut.Shotcut # video editor
+    - org.shotcut.Shotcut   # video editor
     - org.telegram.desktop
   cargo: !enabled
     - alacritty
-    - bat --locked # cat replacement
-    - bottom --locked # process / system monitor
+    - bat --locked      # cat replacement
+    - bottom --locked   # process / system monitor
     - du-dust
-    - eza # ls replacement
+    - eza               # ls replacement
     - fd-find
-    - macchina # system info
+    - macchina          # system info
     - ripgrep
     - starship --locked
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
     - zellij --locked
-    - zoxide --locked # smarter cd command
+    - zoxide --locked   # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')      
-    - name: Bitwarden.AppImage # password manager
+    - name: Bitwarden.AppImage
       url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
-    - name: drawio.AppImage # diagramming tool
+    - name: drawio.AppImage
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
-    - name: Obsidian.AppImage # note-taking app
+    - name: Obsidian.AppImage
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
     - name: zen.AppImage
       url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   languages:
-    goVersion: !enabled latest # latest | <major>.<minor>.<patch>
+    goVersion: !enabled latest   # latest | <major>.<minor>.<patch>
     nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
 update:
   check: true
@@ -216,7 +209,7 @@ configure:
         - wayou.vscode-todo-highlight
         - yzhang.markdown-all-in-one
   optimisations: !enabled
-    auto-cpufreq: true # laptop
+    auto-cpufreq: true
   DE: !enabled
     cinnamon:
       defaultTerm: !enabled alacritty

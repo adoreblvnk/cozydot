@@ -1,11 +1,11 @@
 <div align="center"> <!-- use align as CSS is not allowed on GitHub markdown https://github.com/orgs/community/discussions/22728 -->
-  <img src="<logo_path>" width=100> <!-- Logo -->
-  <h1>TIDES</h1> <!-- Project Name -->
+  <!-- <img src="<logo_path>" width=100> <!-- Logo -->
+  <h1>cozydot</h1> <!-- Project Name -->
   <p> <!-- Description -->
-    Description.
+    cozydot is an automated post-install, update, & config (dotfile) manager for Linux
   </p>
   <p> <!-- Built With -->
-    Built With: &bull;
+    Built With: [yq](https://github.com/mikefarah/yq) &bull; [GNU Stow](https://www.gnu.org/s/stow)
   </p>
 </div>
 
@@ -15,77 +15,90 @@
 <summary>Table of Contents</summary>
 
 - [About](#about)
-- [Demo](#demo)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-  - [Execution](#execution)
 - [Usage](#usage)
-- [Roadmap](#roadmap)
+  - [Help Message](#help-message)
+  - [Commands to Run on a Fresh Install](#commands-to-run-on-a-fresh-install)
 </details>
 
 ## About
 
-a project template for personal use.
+cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments.
+
+Features:
+
+- More than a post-install scipt. cozydot updates your system & can be run at any time, & not only on fresh installs.
+- Latest & greatest packages. cozydot uses 3rd-party apt repos, [Flatpak](https://flatpak.org/), [AppImage](https://appimage.org/) & [Cargo](https://doc.rust-lang.org/cargo/) to deliver up-to-date packages.
+- Intuitive config files. cozydot uses customisable YAML files that are easily edited, or use available presets in `./configs/` directory.
+- Uses native tools. With the exception of [yq](https://github.com/mikefarah/yq) for querying config files & [GNU Stow](https://www.gnu.org/s/stow) as a dotfile manager, cozydot uses already existing tools to perform each command.
 
 prod by blvnk.
-
-## Demo
 
 ## Getting Started
 
 ### Prerequisites
 
+[Git](https://git-scm.com/downloads/linux). Install git with `sudo apt-get install git`.
+
 ### Installation
 
-### Execution
+1. Download & navigate into cozydot.
+   ```bash
+   git clone https://github.com/adoreblvnk/cozydot.git && cd cozydot
+   ```
+2. Run cozydot.
+   ```bash
+   ./cozydot
+   ```
 
 ## Usage
 
-```
-TIDES (The Idempotent Dev Environment Setup) is an automated post-install, update, & config (dotfile) manager for Linux
+### Help Message
 
-Usage: tides [Options] [Command]
+Running `./cozydot` outputs a help message as follows.
+
+```
+cozydot is an automated post-install, update, & config (dotfile) manager for Linux
+
+Usage: cozydot [Options] [Command]
 
 Options:
-  -n, --no-colour        Do not output any colour. Useful when redirecting output to a logfile
-                         directory
-  -c, --config <CONFIG>  Set a config file that exists in $CONFIG_DIR (default: <tides_path>/configs/)
-  -S, --secrets <SECRET> Set a secrets file. Add to .gitignore if secrets file is in tides directory
-      --list-configs     List all available configs in $CONFIG_DIR (default: <tides_path>/configs/)
-                         directory
-  -h, --help             Print help information
-  -V, --version          Print version information
+  -n, --no-colour       Do not output any colour. Useful when redirecting output to a logfile
+  -c, --config <CONFIG> Specify a yaml config file that exists in <cozydot_path>/configs/
+      --list-configs    List all available configs in <cozydot_path>/configs/ directory
+  -h, --help            Print help information
+  -V, --version         Print version information
 
 Commands:
-
-     check     Purges bloat (default) & installs dependencies. Installs Python (via pyenv), Cargo
-               (via rustup), appimaged, & fonts (Geist & Nerdfonts)
+     check     Purges bloat (disabled by default) & installs dependencies. Installs Python (via pyenv), Cargo
+               (via rustup), appimaged (daemon that integrates AppImages into the system), & Nerdfonts
   i, install   Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
                packages, & coding languages (node & golang)
-  u, update    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & cleans
-               system (see configs/default.yaml for details)
-  c, configure Configures apps installed, restore / backup dotfiles via Stow (dotfile manager),
-               customise desktop environment (Cinnamon / GNOME), & performs other system configs
-  h, help      Print help information
+  u, update    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
+               Zellij cache (see configs/default.yaml for details)
+  c, configure Restore / backup dotfiles via Stow (dotfile manager), configures apps installed,
+               customise desktop environment (Cinnamon / GNOME)
 
 Configuration:
-  Customise the actions each command by modifying the configs/default.yaml file.
-  The full config schema of tides is available at README.md.
-  Preset configs are available in <tides_path>/configs/ directory. Add new configs in $CONFIG_DIR
-   (default: <tides_path>/configs/) or list them with tides --list-configs
+  Customise each command action by modifying the config (default: configs/default.yaml).
+  The full config schema of cozydot is available at README.md.
+  Preset configs are available in <cozydot_path>/configs/ directory. Add new configs in <cozydot_path>/configs/ or list them with cozydot --list-configs
 
 Example:
-  tides --config virtual_machine configure
+  cozydot --config virtual_machine configure
 
-Project Homepage: https://github.com/adoreblvnk/tides
+Project Homepage: https://github.com/adoreblvnk/cozydot
 ```
 
-## Roadmap
+### Commands to Run on a Fresh Install
 
-## License <!-- omit in toc -->
-
-Distributed under the MIT License.
+On a fresh install, cozydot is intended to be run sequentially like:
+```bash
+./cozydot install # includes `check` step by default
+./cozydot configure
+```
 
 ## Credits <!-- omit in toc -->
 

@@ -1,14 +1,9 @@
-version: 0.0.1
 metadata:
-  description: Sensible defaults for tides.
-  # NOTE: the following values are highly recommended to be set to "auto"
-  distro: auto # auto | ubuntu | linuxmint | debian
-  DE: auto # auto | gnome | cinnamon
+  description: Lightweight config with minimal utilities / apps installed.
+  distro: auto # auto | ubuntu | debian | linuxmint
+  DE: auto     # auto | gnome | cinnamon
 check:
-  distroCfg:
-    ubuntu: true
-    linuxmint: true
-    debian: true
+  distroCfg: true # supports ubuntu / debian / linuxmint
   purge: !disabled
     # docker installed via aptAltSources
     - docker.io
@@ -18,7 +13,7 @@ check:
     - podman-docker
     - containerd
     - runc
-    - "*firefox*" # firefox installed via aptAltSources
+    - "*firefox*"     # firefox installed via aptAltSources
     - "*libreoffice*" # libreoffice replaced with onlyoffice
   deps: !enabled
     # essential packages
@@ -71,22 +66,20 @@ check:
   rustupCheck: true
   appimaged: !enabled
     cleanInstall: false
-  nerdfont: !enabled GeistMono # list of nerdfonts: https://www.nerdfonts.com/font-downloads
+  nerdfont: !enabled GeistMono # https://www.nerdfonts.com/font-downloads
 install:
   check: true
   apt: !enabled
     # CLI utils
-    - fzf # fuzzy finder
+    - fzf         # fuzzy finder
     - gnupg2
     - openssh-server
+    - pass
     - trash-cli
     - vim
-    - xclip # terminal X11 clipboard
-    # apps
-    - nautilus # file manager
     # multimedia
     - imagemagick # image converter
-    - pandoc # document converter
+    - pandoc      # document converter
     - vlc
   addRepos: !enabled
     - sourceName: mozilla
@@ -108,20 +101,24 @@ install:
         - code
   flatpak: !enabled
     - com.discordapp.Discord
+    - org.qbittorrent.qBittorrent
   cargo: !enabled
     - alacritty
-    - bat --locked # cat replacement
-    - eza # ls replacement
-    - macchina # system info
+    - bat --locked      # cat replacement
+    - bottom --locked   # process / system monitor
+    - eza               # ls replacement
+    - macchina          # system info
     - starship --locked
     - zellij --locked
-    - zoxide --locked # smarter cd command
+    - zoxide --locked   # smarter cd command
   binaries: !enabled
-    - name: ulauncher.deb
-      url: $(curl -sSL https://api.github.com/repos/Ulauncher/Ulauncher/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+    - name: git-credential-manager.deb
+      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')      
+    - name: Obsidian.AppImage
+      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
   languages:
-    goVersion: !disabled latest # latest | <major>.<minor>.<patch>
-    nodeVersion: !disabled latest # latest | <major>[.<minor>[.<patch>]]
+    goVersion: !enabled latest   # latest | <major>.<minor>.<patch>
+    nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
 update:
   check: true
   apt: !enabled
@@ -144,45 +141,27 @@ configure:
       - bottom
       - macchina
       - starship
-      - ulauncher
       - vscode
-      - yazi
       - zellij
   apps:
     alacritty: true
     docker: false
-    ulauncher: true
     virtualbox: false
     vscode:
-      extensions: !disabled
+      extensions: !enabled
         - catppuccin.catppuccin-vsc
-        - christian-kohler.path-intellisense
-        - eamodio.gitlens
-        - ecmel.vscode-html-css
-        - esbenp.prettier-vscode
-        - foxundermoon.shell-format
-        - golang.go
-        - ms-python.black-formatter
-        - ms-python.debugpy
-        - ms-python.isort
-        - ms-python.python
-        - ms-python.vscode-pylance
-        - redhat.vscode-yaml
-        - streetsidesoftware.code-spell-checker
         - visualstudioexptteam.intellicode-api-usage-examples
         - visualstudioexptteam.vscodeintellicode
-        - wayou.vscode-todo-highlight
-        - yzhang.markdown-all-in-one
-  optimisations: !enabled
-    auto-cpufreq: true # laptop
+  optimisations: !disabled
+    auto-cpufreq: false
   DE: !enabled
     cinnamon:
       defaultTerm: !enabled alacritty
       plankDock: true
       panelToMenuBar: true
-      gTile: !enabled
-        tilingLayout: true
+      gTile: true
     gnome:
+      settings: true
       extensions: !enabled
         # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
         - blur-my-shell@aunetx

@@ -3,8 +3,7 @@
 set -euo pipefail
 
 # global variables
-CONFIG="$(dirname "$0")/configs/default.yaml"
-CONFIG_DIR="$(dirname "$0")/configs"
+VERSION=0.0.1 CONFIG="$(dirname "$0")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 
@@ -16,7 +15,7 @@ DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 colours() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
   B_RED="" B_GREEN="" B_YELLOW="" B_BLUE="" B_MAGENTA="" B_CYAN=""
-  tides_txt="tides" TIDES_TXT="TIDES"
+  cozydot_txt="cozydot"
   if [[ "$(tput colors)" -ge 8 ]] && [[ $1 == true ]]; then
     NC="$(tput sgr0)" # text reset (select graphic representation default)
     BOLD="$(tput bold)"
@@ -32,8 +31,7 @@ colours() {
     B_BLUE="$(tput bold setaf 4)"    # bold blue
     B_MAGENTA="$(tput bold setaf 5)" # bold magenta
     B_CYAN="$(tput bold setaf 6)"    # bold cyan
-    tides_txt="${B_RED}t${B_YELLOW}i${B_GREEN}d${B_BLUE}e${B_MAGENTA}s${NC}"
-    TIDES_TXT="${B_RED}T${B_YELLOW}I${B_GREEN}D${B_BLUE}E${B_MAGENTA}S${NC}"
+    cozydot_txt="${B_RED}c${B_YELLOW}o${B_GREEN}z${B_CYAN}y${B_BLUE}d${B_MAGENTA}o${B_RED}t${NC}"
   fi
 }
 
@@ -43,60 +41,53 @@ _success_msg() { echo "${B_GREEN}Success:${NC} $1"; }
 
 _warning_msg() { echo "${B_YELLOW}Warning:${NC} $1"; }
 
-_error_msg() {
-  echo "${B_RED}Error:${NC} $1"
-  exit 1
-}
+_error_msg() { echo "${B_RED}Error:${NC} $1" && exit 1; }
 
 _usage() {
   cat <<EOF
-${TIDES_TXT} (${B_RED}T${NC}he ${B_YELLOW}I${NC}dempotent ${B_GREEN}D${NC}ev ${B_BLUE}E${NC}nvironment ${B_MAGENTA}S${NC}etup) is an automated ${BOLD}post-install${NC}, ${BOLD}update${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux
+$cozydot_txt is an automated ${BOLD}post-install${NC}, ${BOLD}update${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux
 
-${YELLOW}Usage:${NC} ${tides_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
+${YELLOW}Usage:${NC} ${cozydot_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
-  ${GREEN}-n, --no-colour       ${NC} Do not output any colour. Useful when redirecting output to a logfile
-  ${GREEN}-c, --config <CONFIG> ${NC} Specify a yaml config file that exists in \$CONFIG_DIR (default:
-                         ${BLUE}<tides_path>/configs/${NC})
-  ${GREEN}    --list-configs    ${NC} List all available configs in \$CONFIG_DIR (default: ${BLUE}<tides_path>/configs/${NC})
-                         directory
-  ${GREEN}-h, --help            ${NC} Print help information
-  ${GREEN}-V, --version         ${NC} Print version information
+  ${GREEN}-n, --no-colour      ${NC} Do not output any colour. Useful when redirecting output to a logfile
+  ${GREEN}-c, --config <CONFIG>${NC} Specify a yaml config file that exists in ${BLUE}<cozydot_path>/configs/${NC}
+  ${GREEN}    --list-configs   ${NC} List all available configs in ${BLUE}<cozydot_path>/configs/${NC} directory
+  ${GREEN}-h, --help           ${NC} Print help information
+  ${GREEN}-V, --version        ${NC} Print version information
 
 ${YELLOW}Commands:${NC}
-  ${GREEN}   check    ${NC} Purges bloat (default) & installs dependencies. Installs Python (via pyenv), Cargo
-               (via rustup), appimaged (daemon that integrates AppImages into the system), & Nerdfonts
+  ${GREEN}   check    ${NC} Purges bloat (disabled by default) & installs dependencies. Installs Python (via
+               pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
   ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage) 
                packages, & coding languages (node & golang)
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
                Zellij cache (see ${BLUE}configs/default.yaml${NC} for details)
   ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed, 
                customise desktop environment (Cinnamon / GNOME)
-  ${GREEN}h, help     ${NC} Print help information
 
 ${YELLOW}Configuration:${NC}
   Customise each command action by modifying the config (default: ${BLUE}configs/default.yaml${NC}).
-  The full config schema of ${tides_txt} is available at ${BLUE}README.md${NC}.
-  Preset configs are available in ${BLUE}<tides_path>/configs/${NC} directory. Add new configs in \$CONFIG_DIR
-   (default: ${BLUE}<tides_path>/configs/${NC}) or list them with ${tides_txt} ${CYAN}--list-configs${NC}
+  The full config schema of ${cozydot_txt} is available at ${BLUE}README.md${NC}.
+  Preset configs are available in ${BLUE}<cozydot_path>/configs/${NC} directory. Add new configs in ${BLUE}<cozydot_path>/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
 
 ${YELLOW}Example:${NC}
-  ${tides_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
+  ${cozydot_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
 
-${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/tides${NC}
+${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/cozydot${NC}
 
 EOF
 }
 
 # ----- OPTIONS -----
 
-# Use config specified in config directory.
+# Use config specified in configs directory.
 # Arguments:
-#   config that exists in $CONFIG_DIR
+#   name of config yaml file
 set_config() {
-  CONFIG="${CONFIG_DIR}/$1.yaml"
+  CONFIG="$(dirname "$0")/configs/$1.yaml"
   if [[ ! -f $CONFIG ]]; then
-    _error_msg "Config selected \"$1\" does not exist"
+    _error_msg "Config selected ${GREEN}$1${NC} does not exist"
   fi
 }
 
@@ -104,16 +95,15 @@ list_configs() {
   local configs
   # find all preset files, then filter out the parent dirs & file suffixes
   mapfile -t configs < <(
-    find "$CONFIG_DIR" -type f | awk -F '[/.]' '{print $--NF}'
+    find "$(dirname "$0")/configs" -type f | awk -F '[/.]' '{print $(NF-1)}'
   )
   echo "${YELLOW}Available configs:${NC}"
-  for config in "${configs[@]}"; do echo "  ${GREEN}$config${NC}"; done
+  for config in "${configs[@]}"; do
+    echo "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$CONFIG")"
+  done
 }
 
-get_version() {
-  echo "${tides_txt} $(yq '.version' "$CONFIG")"
-  exit
-}
+get_version() { echo "$cozydot_txt $VERSION" && exit; }
 
 # ----- SET GLOBAL VARIABLES -----
 
@@ -124,6 +114,8 @@ get_version() {
 #   DESKTOP_ENVIRONMENT
 #   VERSION_CODENAME: only if $UBUNTU_CODENAME exists
 _set_global_var() {
+  _info_msg "Using ${GREEN}$(awk -F '[./]' '{print $(NF-1)}' <<<"$CONFIG")${NC} config file"
+
   # get distro & set $DISTRO
   source /etc/os-release # contains operating system identification data
   DISTRO="$(yq '.metadata.distro' "$CONFIG")"
@@ -153,7 +145,7 @@ _set_global_var() {
   fi
   case $DESKTOP_ENVIRONMENT in
     cinnamon | gnome) ;;
-    *) _warning_msg "${tides_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment ($DESKTOP_ENVIRONMENT)" ;;
+    *) _warning_msg "${cozydot_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment ($DESKTOP_ENVIRONMENT)" ;;
   esac
 
   # substitute nothing if auto is unset
@@ -219,15 +211,15 @@ _dl_node() {
 # ----- COMMANDS -----
 
 check() {
-  _info_msg "Starting ${tides_txt} check..."
+  _info_msg "Starting ${cozydot_txt} check..."
 
   if [[ ! -L ~/.bashrc ]]; then
-    _info_msg "Copying $tides_txt .bashrc"
+    _info_msg "Copying $cozydot_txt .bashrc"
     rm -f ~/.bashrc && cp dotfiles/bash/.bashrc ~/.bashrc
   fi
 
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
-  if [[ $(yq '.check.distroCfg.ubuntu' "$CONFIG") == true ]] \
+  if [[ $(yq '.check.distroCfg' "$CONFIG") == true ]] \
     && [[ $DISTRO == "ubuntu" ]]; then
     # remove snap modified: https://www.baeldung.com/linux/snap-remove-disable
     if command -v snap &>/dev/null; then
@@ -289,19 +281,17 @@ EOF
 APT::Periodic::Update-Package-Lists "0";
 APT::Periodic::Unattended-Upgrade "0";
 EOF
-  fi
 
   # setup mint: install multimedia codecs
-  if [[ $(yq '.check.distroCfg.linuxmint' "$CONFIG") == true ]] \
+  elif [[ $(yq '.check.distroCfg' "$CONFIG") == true ]] \
     && [[ $DISTRO == "linuxmint" ]]; then
     if ! dpkg -s mint-meta-codecs &>/dev/null; then
       _info_msg "Installing mint-meta-codecs"
       sudo apt-get update -qq && sudo apt-get install -qq mint-meta-codecs
     fi
-  fi
 
   # setup debian: enable sudo for user, add contrib + non-free sources
-  if [[ $(yq '.check.distroCfg.debian' "$CONFIG") == true ]] \
+  elif [[ $(yq '.check.distroCfg' "$CONFIG") == true ]] \
     && [[ $DISTRO == "debian" ]]; then
     if ! getent group sudo | grep -q "$USER"; then
       _warning_msg "Adding $USER to sudo group. Restart to use sudo"
@@ -321,6 +311,9 @@ deb-src http://deb.debian.org/debian-security ${DISTRIBUTION}-security main cont
 deb http://deb.debian.org/debian ${DISTRIBUTION}-updates main contrib non-free non-free-firmware
 deb-src http://deb.debian.org/debian ${DISTRIBUTION}-updates main contrib non-free non-free-firmware
 EOF
+
+  else
+    _warning_msg "${cozydot_txt} only supports Ubuntu / Debian / Linux Mint. $DISTRO unsupported."
   fi
 
   if [[ $(yq '.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
@@ -455,13 +448,13 @@ EOF
       _info_msg "Reloading fc-cache"
       fc-cache -f
     else
-      _info_msg "$font already installed"
+      _info_msg "$font font already installed"
     fi
   fi
 }
 
 install() {
-  _info_msg "Starting ${tides_txt} install"
+  _info_msg "Starting ${cozydot_txt} install"
 
   if [[ $(yq '.install.check' "$CONFIG") == true ]]; then check; fi
 
@@ -604,11 +597,11 @@ install() {
     _dl_node "$(yq '.install.languages.nodeVersion' "$CONFIG")"
   fi
 
-  _success_msg "Finished ${tides_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
+  _success_msg "Finished ${cozydot_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
 }
 
 update() {
-  _info_msg "Starting ${tides_txt} update"
+  _info_msg "Starting ${cozydot_txt} update"
 
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
@@ -683,11 +676,11 @@ update() {
     zellij delete-all-sessions -y
   fi
 
-  _success_msg "Finished ${tides_txt} update"
+  _success_msg "Finished ${cozydot_txt} update"
 }
 
 configure() {
-  _info_msg "Starting ${tides_txt} configuration"
+  _info_msg "Starting ${cozydot_txt} configuration"
 
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
@@ -699,27 +692,27 @@ configure() {
     mapfile -t packages < <(yq -r '.configure.dotfiles.packages[]' "$CONFIG")
     for pkg in "${packages[@]}"; do
       _info_msg "Stowing dotfiles for $pkg"
-      # symlink between tides & actual dotfiles
+      # symlink between cozydot & actual dotfiles
       #   --no-folding stows individual files instead of directories
-      #   --adopt replaces tides' dotfiles with original system ones
+      #   --adopt replaces cozydot's dotfiles with original system ones
       #   Needed as Stow throws an error if there are existing system dotfiles.
-      #   This results in tides' dotfiles being lost, but this is mitigated by
-      #   setting .configure.stowMode to "override".
+      #   This results in cozydot's dotfiles being lost, but this is mitigated
+      #   by setting .configure.stowMode to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
-      # Override option overrides system files with tides' dotfiles
+      # Override option overrides system files with cozydot's dotfiles
       # pre-stow-replacement. Conversely, if set to 'backup', system files will
       # be used as the source of truth
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
-        _info_msg "Overriding $pkg original dotfiles with ${tides_txt}' dotfiles"
-        if [[ $(git status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
-          _info_msg "Restoring $tides_txt dotfiles for $pkg"
+        _info_msg "Overriding $pkg original dotfiles with ${cozydot_txt}' dotfiles"
+        if [[ $(git -C "$(dirname "$0")" status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
+          _info_msg "Restoring $cozydot_txt dotfiles for $pkg"
           # NOTE: commit any new changes made to dotfiles as they will be reset
           # if there are any changes detected.
           # TODO: explore a cleaner option than git restore
-          git restore "dotfiles/$pkg/"
+          git -C "$(dirname "$0")" restore "dotfiles/$pkg/"
         fi
       elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
-        _info_msg "Using system dotfiles as source of truth. ${tides_txt}' dotfiles will be overwritten"
+        _info_msg "Using system dotfiles as source of truth. ${cozydot_txt}' dotfiles will be overwritten"
       else
         _error_msg "stowMode must be set to either ${BLUE}override${NC} / ${BLUE}backup${NC}"
       fi
@@ -1010,7 +1003,7 @@ EOF
     fi
   fi
 
-  _success_msg "Finished ${tides_txt} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognised"
+  _success_msg "Finished ${cozydot_txt} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognised"
 }
 
 # ----- MAIN -----
@@ -1033,8 +1026,6 @@ main() {
     sudo chmod +x /usr/bin/yq
   fi
 
-  _set_global_var
-
   [[ $# -gt 0 ]] || {
     _usage
     _error_msg "No argument(s)"
@@ -1042,7 +1033,7 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case $1 in
-      -h | --help | h | help)
+      -h | --help)
         _usage
         exit 0
         ;;
@@ -1055,10 +1046,10 @@ main() {
       --list-configs) list_configs ;;
       -V | --version) get_version ;;
       # COMMANDS
-      check) check ;;
-      i | install) install ;;
-      u | update) update ;;
-      c | configure) configure ;;
+      check) _set_global_var && check ;;
+      i | install) _set_global_var && install ;;
+      u | update) _set_global_var && update ;;
+      c | configure) _set_global_var && configure ;;
       *)
         _usage
         _error_msg "Invalid argument(s)"
