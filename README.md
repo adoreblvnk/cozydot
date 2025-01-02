@@ -2,10 +2,10 @@
   <!-- <img src="<logo_path>" width=100> <!-- Logo -->
   <h1>cozydot</h1> <!-- Project Name -->
   <p> <!-- Description -->
-    cozydot is an automated post-install, update, & config (dotfile) manager for Linux
+    cozydot is an automated post-install, update, & config (dotfile) manager for Linux.
   </p>
   <p> <!-- Built With -->
-    Built With: <a href="https://github.com/mikefarah/yq">yq</a> &bull; <a href="https://www.gnu.org/s/stow">GNU Stow</a>
+    Built With: <a href="https://github.com/mikefarah/yq">yq</a> &bull; <a href="https://www.gnu.org/s/stow">GNU Stow</a> &bull; <a href="https:catppuccin.com">Catppuccin</a>
   </p>
 </div>
 
@@ -26,7 +26,9 @@
 
 ## About
 
-cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments.
+<div align="center"><img src="./assets/cozydot_cover.png" alt="result" width=750></div>
+
+cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments. Riced & themed with [Catppuccin](https:catppuccin.com).
 
 Features:
 
