@@ -69,10 +69,10 @@ ${YELLOW}Commands:${NC}
 ${YELLOW}Configuration:${NC}
   Customise each command action by modifying the config (default: ${BLUE}configs/default.yaml${NC}).
   The full config schema of ${cozydot_txt} is available at ${BLUE}README.md${NC}.
-  Preset configs are available in ${BLUE}<cozydot_path>/configs/${NC} directory. Add new configs in ${BLUE}<cozydot_path>/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
+  Preset configs are available in ${BLUE}<cozydot_path>/configs/${NC} directory.
+  Add new configs in ${BLUE}<cozydot_path>/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
 
-${YELLOW}Example:${NC}
-  ${cozydot_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
+${YELLOW}Example:${NC} ${cozydot_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
 
 ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/cozydot${NC}
 
@@ -398,9 +398,8 @@ EOF
   fi
 
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
-  if [[ $(yq '.check.appimaged | tag' "$CONFIG") == "!enabled" ]]; then
-    if ! systemctl --user -q is-active appimaged \
-      || [[ $(yq '.check.appimaged.cleanInstall' "$CONFIG") == true ]]; then
+  if [[ $(yq '.check.appimaged' "$CONFIG") == true ]]; then
+    if ! systemctl --user -q is-active appimaged; then
       _info_msg "Installing appimaged"
       # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
 
@@ -763,7 +762,6 @@ configure() {
     # local logging driver performs log-rotation & compresses log files by
     # default.
     # https://docs.docker.com/config/containers/logging/configure/
-    # https://docs.docker.com/config/containers/logging/local/
     sudo touch /etc/docker/daemon.json
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
       _info_msg "Using local logging driver to prevent disk-exhaustion"

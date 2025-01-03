@@ -64,8 +64,7 @@ check:
     version: latest # latest | <major>[.<minor>]
     pip: false
   rustupCheck: true
-  appimaged: !enabled
-    cleanInstall: false
+  appimaged: true
   nerdfont: !enabled GeistMono # https://www.nerdfonts.com/font-downloads
 install:
   check: true

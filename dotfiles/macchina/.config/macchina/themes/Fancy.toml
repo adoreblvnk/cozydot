@@ -3,11 +3,11 @@ spacing         = 2
 padding         = 0
 hide_ascii      = true
 # prefer_small_ascii = true
-separator       = "❥"
+separator       = "\u2665"
 
 [palette]
 type            = "Light"
-glyph           = "● "
+glyph           = "\uf111 "
 visible         = true
 
 # [bar]
@@ -27,23 +27,23 @@ separator_color = true
 pool            = "base"
 
 [keys]
-host            = "👤 Host"
-kernel          = "🍿 Kernel"
-battery         = "🔋 Battery"
+host            = "\uf015  Host"
+kernel          = "\uf31a  Kernel"
+battery         = "\uf240  Battery"
 os              = "OS"
-de              = "🖥️ DE"
-wm              = "🪟 WM"
-distro          = "🍨 Distro"
-terminal        = "🕸️ Terminal"
-shell           = "🐚 Shell"
-packages        = "📦 Packages"
-uptime          = "⏱️ Uptime"
-memory          = "🔳 Memory"
-machine         = "💻 Machine"
+de              = "\uf26c  DE"
+wm              = "\ueb7f  WM"
+distro          = "\uef88  Distro"
+terminal        = "\uea85  Terminal"
+shell           = "\ue691  Shell"
+packages        = "\ueb29  Packages"
+uptime          = "\uf2f2  Uptime"
+memory          = "\uefc5  Memory"
+machine         = "\uf109  Machine"
 local_ip        = "IP"
-backlight       = "🔆 Brightness"
-resolution      = "📺 Resolution"
-cpu_load        = "🏋🏻 CPU Load"
-cpu             = "🔲 CPU"
-gpu             = "🔲 GPU"
+backlight       = "\uf185  Brightness"
+resolution      = "\uf030  Resolution"
+cpu_load        = "\ued93  CPU Load"
+cpu             = "\uf4bc  CPU"
+gpu             = "\uf4bc  GPU"
 disk_space      = "Disk Space"
