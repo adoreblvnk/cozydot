@@ -1,30 +1,22 @@
-# Expanded
+# https://github.com/Macchina-CLI/macchina/blob/main/doc/macchina.7.scd
 spacing         = 2
 padding         = 0
 hide_ascii      = true
-# prefer_small_ascii = true
 separator       = "\u2665"
 
 [palette]
-type            = "Light"
 glyph           = "\uf111 "
 visible         = true
-
-# [bar]
-# glyph           = "■"
-# visible = true
-# hide_delimiters = true
 
 [box]
 border          = "rounded"
 visible         = true
-inner_margin.x  = 10
+inner_margin.x  = 5
 inner_margin.y  = 0
 
 [randomize]
 key_color       = true
 separator_color = true
-pool            = "base"
 
 [keys]
 host            = "\uf015  Host"

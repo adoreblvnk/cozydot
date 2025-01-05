@@ -69,16 +69,14 @@ check:
 install:
   check: true
   apt: !enabled
-    # CLI utils
     - fzf         # fuzzy finder
     - gnupg2
+    - imagemagick # image converter
     - openssh-server
+    - pandoc      # document converter
     - pass
     - trash-cli
     - vim
-    # multimedia
-    - imagemagick # image converter
-    - pandoc      # document converter
     - vlc
   addRepos: !enabled
     - sourceName: docker
@@ -109,6 +107,13 @@ install:
       pinning: false
       packages:
         - onlyoffice-desktopeditors
+    - sourceName: thorium
+      remoteKey: null
+      keyPath: null
+      repo: deb [trusted=yes arch=amd64] http://dl.thorium.rocks/debian stable main
+      pinning: false
+      packages:
+        - thorium-browser
     - sourceName: virtualbox
       remoteKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
       keyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
@@ -187,28 +192,27 @@ configure:
     alacritty: true
     docker: true
     virtualbox: true
-    vscode:
-      extensions: !enabled
-        - catppuccin.catppuccin-vsc
-        - christian-kohler.path-intellisense
-        - eamodio.gitlens
-        - ecmel.vscode-html-css
-        - esbenp.prettier-vscode
-        - foxundermoon.shell-format
-        - golang.go
-        - ms-python.black-formatter
-        - ms-python.debugpy
-        - ms-python.isort
-        - ms-python.python
-        - ms-python.vscode-pylance
-        - redhat.vscode-yaml
-        - streetsidesoftware.code-spell-checker
-        - visualstudioexptteam.intellicode-api-usage-examples
-        - visualstudioexptteam.vscodeintellicode
-        - wayou.vscode-todo-highlight
-        - yzhang.markdown-all-in-one
+    vscodeExtensions: !enabled
+      - catppuccin.catppuccin-vsc
+      - christian-kohler.path-intellisense
+      - eamodio.gitlens
+      - ecmel.vscode-html-css
+      - esbenp.prettier-vscode
+      - foxundermoon.shell-format
+      - golang.go
+      - ms-python.black-formatter
+      - ms-python.debugpy
+      - ms-python.isort
+      - ms-python.python
+      - ms-python.vscode-pylance
+      - redhat.vscode-yaml
+      - streetsidesoftware.code-spell-checker
+      - visualstudioexptteam.intellicode-api-usage-examples
+      - visualstudioexptteam.vscodeintellicode
+      - wayou.vscode-todo-highlight
+      - yzhang.markdown-all-in-one
   optimisations: !enabled
-    auto-cpufreq: true
+    auto-cpufreq: false
   DE: !enabled
     cinnamon:
       defaultTerm: !enabled alacritty

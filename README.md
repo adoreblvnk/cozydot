@@ -19,13 +19,18 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [Usage](#usage)
+  - [Config Schema](#config-schema)
+    - [Metadata](#metadata)
+    - [Check](#check)
+    - [Install](#install)
+    - [Update](#update)
+    - [Configure](#configure)
   - [Help Message](#help-message)
   - [Commands to Run on a Fresh Install](#commands-to-run-on-a-fresh-install)
   - [Setting Up Git Credentials](#setting-up-git-credentials)
 </details>
 
 ## About
-
 <div align="center"><img src="./assets/cozydot_cover.png" alt="result" width=750></div>
 
 cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments. Riced & themed with [Catppuccin](https:catppuccin.com).
@@ -47,16 +52,86 @@ prod by blvnk.
 
 ### Installation
 
-1. Download & navigate into cozydot.
-   ```bash
-   git clone https://github.com/adoreblvnk/cozydot.git && cd cozydot
-   ```
-2. Run cozydot.
-   ```bash
-   ./cozydot
-   ```
+Clone this repository & run cozydot.
+
+```bash
+git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
+```
 
 ## Usage
+
+### Config Schema
+
+#### Metadata
+| Value       | Default    | Description                                         |
+| ----------- | ---------- | --------------------------------------------------- |
+| description | \<string\> | Config description used in `cozydot --list-configs` |
+| distro      | auto       |                                                     |
+| DE          | auto       |                                                     |
+
+#### Check
+| Value              | Default   | Description                                                                                                                          |
+| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| distroCfg          | true      | Debloats / configures distro before cozydot executes command actions                                                                 |
+| purge              | !disabled | Uninstalls unneeded / conflicting packages (eg Docker). <br> NOTE: Enable this when running on a fresh install                       |
+| deps               | !enabled  | Installs dependencies for other packages (eg alacritty) from apt. Recommended to leave this enabled to prevent dependency errors     |
+| python             | !enabled  | Manage Python & Pip via [pyenv](https://github.com/pyenv/pyenv)                                                                      |
+| python.pyenvUpdate | false     |                                                                                                                                      |
+| python.version     | latest    | Python version                                                                                                                       |
+| python.pip         | false     | Upgrades pip                                                                                                                         |
+| rustupCheck        | true      | Installs [Rustup](https://rustup.rs), the Rust toolchain (Rust, Cargo) installer                                                     |
+| appimaged          | true      | Installs [appimaged](https://github.com/probonopd/go-appimage/tree/master/src/appimaged) (Appimage integration daemon)               |
+| nerdfont           | !enabled  | Installs [Nerd Fonts](https://www.nerdfonts.com) ([Geist](https://vercel.com/font) Mono by default) which provide glyphs & ligatures |
+
+#### Install
+| Value                 | Default    | Description                                                                                                                              |
+| --------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| check                 | true       |                                                                                                                                          |
+| apt                   | !enabled   | Installs essential packages (eg vim). Some packages' (eg yazi) functionality can be extended with these packages installed               |
+| addRepos              | !enabled   | 3rd-party apt repositories                                                                                                               |
+| - sourceName          | \<string\> |                                                                                                                                          |
+| - remoteKey           | \<string\> | URL of signing key                                                                                                                       |
+| - keyPath             | \<string\> | Path of signing key on machine                                                                                                           |
+| - repo                | \<string\> | [SourcesList](https://wiki.debian.org/SourcesList) entry for repo                                                                        |
+| - pinning             | false      | Edit package priority. If [pinning](https://wiki.debian.org/AptConfiguration) is enabled, paste the contents of the preference file here |
+| - packages            | \<list\>   | List of packages to install from this source                                                                                             |
+| flatpak               | !enabled   | Install Flatpak packages                                                                                                                 |
+| cargo                 | !enabled   | Install Cargo packages                                                                                                                   |
+| binaries              | !enabled   | Install binaries (AppImage / deb packages)                                                                                               |
+| - name                | \<string\> | Name of binary. File extension determines if package is an AppImage or binary (.deb)                                                     |
+| - url                 | \<string\> | Package URL                                                                                                                              |
+| languages.goVersion   | latest     | Installs latest version of Golang                                                                                                        |
+| languages.nodeVersion | latest     | Installs latest version of Node via NVM                                                                                                  |
+
+#### Update
+| Value             | Default  | Description                                                                                                                             |
+| ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| check             | true     |                                                                                                                                         |
+| apt               | !enabled | Updates & upgrades apt packages                                                                                                         |
+| apt.aptFull       | false    | Upgrades the entire system, installing new packages if necessary, & removes old archive files & unused packages with their config files |
+| flatpak           | true     |                                                                                                                                         |
+| cargo             | false    |
+| other.yq          | true     | Updates [yq](https://github.com/mikefarah/yq) binary                                                                                    |
+| other.go          | false    | Updates go the latest version                                                                                                           |
+| other.node        | false    | Updates node to latest version via NVM                                                                                                  |
+| other.zellijClear | true     | Delete all other Zellij sessions, including exited ones                                                                                 |
+
+#### Configure
+| Value                         | Default   | Description                                                                                            |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| check                         | true      |                                                                                                        |
+| dotfiles                      | !enabled  | Dotfile manager implementation via Stow                                                                |
+| dotfiles.stowMode             | override  | Override option uses cozydot's dotfiles. Backup option uses original system dotfiles                   |
+| dotfiles.packages             | \<list\>  | List of packages to stow. Directory structure for each package in `dotfiles/` starts from `$HOME` PATH |
+| apps.alacritty                | true      | Setup Alacritty adds desktop entry & bash completion                                                   |
+| apps.docker                   | true      | Setup virtualbox adds user to vboxusers group                                                          |
+| apps.vscodeExtensions         | !enabled  | Install VS Code extensions                                                                             |
+| optimisations.auto-cpufreq    | true      | Installs / configures auto-cpufreq, a CPU optimizer                                                    |
+| DE.gnome.settings             | true      | Settings config increase screen bank delay to 15 mins, set dark mode                                   |
+| DE.gnome.extensions           | true      | Install GNOME extensions                                                                               |
+| DE.gnome.defaultTerm          | alacritty | Set default terminal                                                                                   |
+| DE.gnome.MacOSDock            | true      | Make Dash to Dock mimic MacOS dock behaviour                                                           |
+| DE.gnome.smoothRoundedCorners | true      | Smoothen corners in Rounded Window Corners Reborn                                                      |
 
 ### Help Message
 
@@ -75,8 +150,8 @@ Options:
   -V, --version         Print version information
 
 Commands:
-     check     Purges bloat (disabled by default) & installs dependencies. Installs Python (via pyenv), Cargo
-               (via rustup), appimaged (daemon that integrates AppImages into the system), & Nerdfonts
+     check     Purges bloat (disabled by default) & installs dependencies. Installs Python (via
+               pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
   i, install   Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
                packages, & coding languages (node & golang)
   u, update    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
@@ -87,10 +162,10 @@ Commands:
 Configuration:
   Customise each command action by modifying the config (default: configs/default.yaml).
   The full config schema of cozydot is available at README.md.
-  Preset configs are available in <cozydot_path>/configs/ directory. Add new configs in <cozydot_path>/configs/ or list them with cozydot --list-configs
+  Preset configs are available in <cozydot_path>/configs/ directory.
+  Add new configs in <cozydot_path>/configs/ or list them with cozydot --list-configs
 
-Example:
-  cozydot --config virtual_machine configure
+Example: cozydot --config virtual_machine configure
 
 Project Homepage: https://github.com/adoreblvnk/cozydot
 ```
@@ -98,6 +173,7 @@ Project Homepage: https://github.com/adoreblvnk/cozydot
 ### Commands to Run on a Fresh Install
 
 On a fresh install, cozydot is intended to be run sequentially like:
+
 ```bash
 ./cozydot install # includes `check` step by default
 ./cozydot configure
@@ -111,7 +187,7 @@ Fill up your `name`, `email` & `signingkey` (optional) in `/dotfiles/bash/.gitco
 
 - [adore_blvnk](https://x.com/adore_blvnk)
 
-## Acknowledgements  <!-- omit in toc -->
+## Acknowledgements <!-- omit in toc -->
 
 <!-- Inspired by Best-README-Template (https://github.com/othneildrew/Best-README-Template) -->
 <!-- Table of Contents generated by Markdown All in One (https://github.com/yzhang-gh/vscode-markdown) -->

@@ -476,38 +476,37 @@ install() {
 
     # setting up signing keys & repo entries for source (repo)
     for ((i = 0; i < $(yq '.install.addRepos | length' "$CONFIG"); i++)); do
-      local pkg_map=$(yq ".install.addRepos[$i]" "$CONFIG")
-      local source_name=$(yq '.sourceName' <<<"$pkg_map")
-      local download_url="$(yq '.remoteKey' <<<"$pkg_map")"
-      # eval string if subshell / variable detected
+      local source_name=$(yq ".install.addRepos[$i].sourceName" "$CONFIG")
+      local remote_key="$(yq ".install.addRepos[$i].remoteKey" "$CONFIG")"
+      local key_path="$(yq ".install.addRepos[$i].keyPath" "$CONFIG")"
+      local repo="$(yq ".install.addRepos[$i].repo" "$CONFIG")"
+
+      # Eval string if subshell / variable detected. Causes error if other Bash
+      # special chars are used incorrectly
       # shellcheck disable=SC2016
-      if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url"; then
-        download_url="$(eval echo "$(yq '.remoteKey' <<<"$pkg_map")")"
+      if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$remote_key"; then
+        remote_key="$(eval echo "$remote_key")"
       fi
 
       # download asc key from remote
-      if [[ $(yq '.keyPath' <<<"$pkg_map") == *.asc ]]; then
+      if [[ $key_path == *.asc ]]; then
         _info_msg "Downloading .asc key for $source_name"
-        sudo curl -sSL -o "$(yq '.keyPath' <<<"$pkg_map")" "$download_url"
+        sudo curl -sSL -o "$key_path" "$remote_key"
       # if key is in gpg format, then dearmor after downloading the key
-      elif [[ $(yq '.keyPath' <<<"$pkg_map") == *.gpg ]]; then
+      elif [[ $key_path == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
-        sudo curl -sSL "$download_url" \
-          | sudo gpg --dearmor --yes -o "$(yq '.keyPath' <<<"$pkg_map")"
-      else
-        _error_msg "Unsupported apt key format ($(yq '.keyPath' <<<"$pkg_map")) for $source_name"
+        sudo curl -sSL "$remote_key" | sudo gpg --dearmor --yes -o "$key_path"
       fi
 
       # add repo entry into sources.list.d
       local source_file_path="/etc/apt/sources.list.d/$source_name.list"
       _info_msg "Adding repo entry for $source_name into sources.list.d"
-      eval echo "$(yq '.repo' <<<"$pkg_map")" \
-        | sudo tee "$source_file_path" >/dev/null
+      eval echo "$repo" | sudo tee "$source_file_path" >/dev/null
 
       # perform pinning to prioritise 3rd party if pinning entry exists
-      if [[ $(yq '.pinning' <<<"$pkg_map") != false ]]; then
+      if [[ $(yq ".install.addRepos[$i].pinning" "$CONFIG") != false ]]; then
         _info_msg "Performing pinning to prioritise $source_name"
-        yq '.pinning' <<<"$pkg_map" \
+        yq ".install.addRepos[$i].pinning" "$CONFIG" \
           | sudo tee "/etc/apt/preferences.d/$source_name" >/dev/null
       fi
     done
@@ -551,7 +550,7 @@ install() {
     done
   fi
 
-  # install binary packages
+  # install binaries (AppImage / deb packages)
   if [[ $(yq '.install.binaries | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Installing binary packages"
     mkdir -p ~/Applications
@@ -607,8 +606,8 @@ update() {
   if [[ $(yq '.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
     _info_msg "Updating & upgrading apt packages"
     sudo apt-get -qq update && sudo apt-get -qq upgrade
-    # aptFull upgrades the entire system, installing new packages if necessary,
-    # & removes old archive files & unused packages with their config files
+    # upgrades the entire system, installing new packages if necessary, &
+    # removes old archive files & unused packages with their config files
     if [[ $(yq '.update.apt.aptFull' "$CONFIG") == true ]]; then
       _info_msg "Performing a full upgrade & removing uneeded packages & apt cache"
       sudo apt-get -qy dist-upgrade
@@ -668,7 +667,7 @@ update() {
     _dl_node latest
   fi
 
-  # zellij delete all other sessions, including exited ones
+  # delete all other Zellij sessions, including exited ones
   if [[ $(yq '.update.other.zellijClear' "$CONFIG") == true ]] \
     && command -v zellij &>/dev/null; then
     _info_msg "Deleting all other Zellij sessions"
@@ -698,9 +697,8 @@ configure() {
       #   This results in cozydot's dotfiles being lost, but this is mitigated
       #   by setting .configure.stowMode to "override".
       stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
-      # Override option overrides system files with cozydot's dotfiles
-      # pre-stow-replacement. Conversely, if set to 'backup', system files will
-      # be used as the source of truth
+      # Override option uses cozydot's dotfiles. Backup option uses original
+      # system dotfiles
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
         _info_msg "Overriding $pkg original dotfiles with ${cozydot_txt}' dotfiles"
         if [[ $(git -C "$(dirname "$0")" status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
@@ -718,15 +716,9 @@ configure() {
     done
   fi
 
-  # setup Alacritty
+  # setup Alacritty adds desktop entry & bash completion
   if [[ $(yq '.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
-    if [[ ! -f ~/.bash_completion/alacritty ]]; then
-      _info_msg "Adding bash completion for Alacritty"
-      curl -sSL --create-dirs -o ~/.bash_completion/alacritty \
-        https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
-    fi
-
     # add desktop icon
     if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
       _info_msg "Adding Alacritty icon"
@@ -741,37 +733,41 @@ configure() {
         https://github.com/alacritty/alacritty/raw/master/extra/linux/Alacritty.desktop
       sudo update-desktop-database
     fi
+
+    if [[ ! -f ~/.bash_completion/alacritty ]]; then
+      _info_msg "Adding bash completion for Alacritty"
+      curl -sSL --create-dirs -o ~/.bash_completion/alacritty \
+        https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
+    fi
   fi
 
-  # setup docker
+  # setup Docker adds user to Docker group & uses local logging driver to prevent disk-exhaustion
   if [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]] \
     && command -v docker &>/dev/null; then
     # https://docs.docker.com/engine/install/linux-postinstall/
-    # manage docker as non-root user
+    # manage Docker as non-root user
     if ! getent group docker | grep "$USER" &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
-      # create docker group
+      # create Docker group
       sudo groupadd -f docker
-      # add user to docker group
+      # add user to Docker group
       sudo usermod -aG docker "$USER"
-      # change group ID to docker to activate change in current shell
+      # change group ID to Docker to activate change in current shell
       newgrp docker
     fi
 
-    # use local logging driver to prevent disk-exhaustion
-    # local logging driver performs log-rotation & compresses log files by
-    # default.
+    # Use local logging driver to prevent disk-exhaustion. local logging driver
+    # performs log-rotation & compresses log files by default.
     # https://docs.docker.com/config/containers/logging/configure/
     sudo touch /etc/docker/daemon.json
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
       _info_msg "Using local logging driver to prevent disk-exhaustion"
-      yq -n -o=j \
-        '{"log-driver": "local", "log-opts": {"max-size": "10m"}}' \
+      yq -n -o=j '{"log-driver": "local", "log-opts": {"max-size": "10m"}}' \
         | sudo tee /etc/docker/daemon.json >/dev/null
     fi
   fi
 
-  # setup virtualbox
+  # setup virtualbox adds user to vboxusers group 
   if [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]] \
     && command -v virtualbox &>/dev/null; then
     # to allow virtualbox to access USB devices, add $USER to vboxusers group
@@ -790,12 +786,12 @@ configure() {
   fi
 
   # install vscode extensions
-  if [[ $(yq '.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.configure.apps.vscodeExtensions | tag' "$CONFIG") == "!enabled" ]] \
     && command -v code &>/dev/null; then
     _info_msg "Installing vscode extensions"
     local extensions
     mapfile -t extensions < <(
-      yq -r '.configure.apps.vscode.extensions[]' "$CONFIG"
+      yq -r '.configure.apps.vscodeExtensions[]' "$CONFIG"
     )
     local installed_ext=$(code --list-extensions)
     for ext in "${extensions[@]}"; do
@@ -909,7 +905,7 @@ EOF
 
     # GNOME settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-      # GNOME settings: dark mode
+      # settings config increase screen bank delay to 15 mins, set dark mode
       if [[ $(yq '.configure.DE.gnome.settings' "$CONFIG") == true ]]; then
         _info_msg "Configuring GNOME desktop environment"
         # increase screen blank delay to 15 mins (the max in UI)
@@ -948,7 +944,7 @@ EOF
         done
       fi
 
-      # default terminal
+      # set default terminal
       if [[ $(yq '.configure.DE.gnome.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
         local term=$(yq ".configure.DE.gnome.defaultTerm" "$CONFIG")
         _info_msg "Setting default terminal to $term"
@@ -987,10 +983,10 @@ EOF
         _warning_msg "Dash to Dock extension not installed"
       fi
 
-      # configure Rounded Window Corners Reborn
+      # smoothen corners in Rounded Window Corners Reborn
       if [[ $(yq '.configure.DE.gnome.smoothRoundedCorners' "$CONFIG") == true ]] \
         && gnome-extensions list | grep -q rounded-window-corners; then
-        _info_msg "Smoothen Rounded Corners extension"
+        _info_msg "Smoothen corners in Rounded Corners extension"
         dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
           "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \

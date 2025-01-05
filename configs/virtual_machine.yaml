@@ -69,16 +69,14 @@ check:
 install:
   check: true
   apt: !enabled
-    # CLI utils
     - fzf         # fuzzy finder
     - gnupg2
+    - imagemagick # image converter
     - openssh-server
+    - pandoc      # document converter
     - pass
     - trash-cli
     - vim
-    # multimedia
-    - imagemagick # image converter
-    - pandoc      # document converter
     - vlc
   addRepos: !enabled
     - sourceName: mozilla
@@ -146,11 +144,10 @@ configure:
     alacritty: true
     docker: false
     virtualbox: false
-    vscode:
-      extensions: !enabled
-        - catppuccin.catppuccin-vsc
-        - visualstudioexptteam.intellicode-api-usage-examples
-        - visualstudioexptteam.vscodeintellicode
+    vscodeExtensions: !enabled
+      - catppuccin.catppuccin-vsc
+      - visualstudioexptteam.intellicode-api-usage-examples
+      - visualstudioexptteam.vscodeintellicode
   optimisations: !disabled
     auto-cpufreq: false
   DE: !enabled
