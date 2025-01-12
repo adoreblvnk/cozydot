@@ -33,14 +33,14 @@
 ## About
 <div align="center"><img src="./assets/cozydot_cover.png" alt="result" width=750></div>
 
-cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments. Riced & themed with [Catppuccin](https:catppuccin.com).
+cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments. Riced & themed with [Catppuccin](https://catppuccin.com).
 
 Features:
 
 - More than a post-install scipt. cozydot updates your system & can be run at any time, & not only on fresh installs.
-- Latest & greatest packages. cozydot uses 3rd-party apt repos, [Flatpak](https://flatpak.org/), [AppImage](https://appimage.org/) & [Cargo](https://doc.rust-lang.org/cargo/) to deliver up-to-date packages.
+- Latest & greatest packages. cozydot uses 3rd-party apt repos, [Flatpak](https://flatpak.org), [AppImage](https://appimage.org) & [Cargo](https://doc.rust-lang.org/cargo) to deliver up-to-date packages.
 - Intuitive config files. cozydot uses customisable YAML files that are easily edited, or use available presets in `./configs/` directory.
-- Uses native tools. With the exception of [yq](https://github.com/mikefarah/yq) for querying config files & [GNU Stow](https://www.gnu.org/s/stow) as a dotfile manager, cozydot uses already existing tools to perform each command.
+- Uses native tools. With the exception of [yq](https://github.com/mikefarah/yq) for querying config files & [GNU Stow](https://www.gnu.org/s/stow) for managing dotfiles, cozydot uses already existing tools to perform each command.
 
 prod by blvnk.
 
@@ -65,73 +65,74 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
 #### Metadata
 | Value       | Default    | Description                                         |
 | ----------- | ---------- | --------------------------------------------------- |
-| description | \<string\> | Config description used in `cozydot --list-configs` |
+| description | `<string>` | Config description used in `cozydot --list-configs` |
 | distro      | auto       |                                                     |
 | DE          | auto       |                                                     |
 
 #### Check
-| Value              | Default   | Description                                                                                                                          |
-| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| distroCfg          | true      | Debloats / configures distro before cozydot executes command actions                                                                 |
-| purge              | !disabled | Uninstalls unneeded / conflicting packages (eg Docker). <br> NOTE: Enable this when running on a fresh install                       |
-| deps               | !enabled  | Installs dependencies for other packages (eg alacritty) from apt. Recommended to leave this enabled to prevent dependency errors     |
-| python             | !enabled  | Manage Python & Pip via [pyenv](https://github.com/pyenv/pyenv)                                                                      |
-| python.pyenvUpdate | false     |                                                                                                                                      |
-| python.version     | latest    | Python version                                                                                                                       |
-| python.pip         | false     | Upgrades pip                                                                                                                         |
-| rustupCheck        | true      | Installs [Rustup](https://rustup.rs), the Rust toolchain (Rust, Cargo) installer                                                     |
-| appimaged          | true      | Installs [appimaged](https://github.com/probonopd/go-appimage/tree/master/src/appimaged) (Appimage integration daemon)               |
-| nerdfont           | !enabled  | Installs [Nerd Fonts](https://www.nerdfonts.com) ([Geist](https://vercel.com/font) Mono by default) which provide glyphs & ligatures |
+| Value              | Default     | Description                                                                                                                          |
+| ------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| distroCfg          | `true`      | Debloats / configures distro before cozydot executes command actions                                                                 |
+| purge              | `!disabled` | Uninstalls unneeded / conflicting packages (eg [Docker](https://docs.docker.com)). NOTE: Enable this when running on a fresh install |
+| deps               | `!enabled`  | Installs dependencies for other packages (eg Alacritty) from apt. Recommended to leave this enabled to prevent dependency errors     |
+| python             | `!enabled`  | Manage Python & [Pip](https://pypi.org/project/pip) via [pyenv](https://github.com/pyenv/pyenv)                                      |
+| python.pyenvUpdate | `false`     |                                                                                                                                      |
+| python.version     | `latest`    | Python version                                                                                                                       |
+| python.pip         | `false`     | Upgrades [Pip](https://pypi.org/project/pip)                                                                                         |
+| rustupCheck        | `true`      | Installs [Rustup](https://rustup.rs), the Rust toolchain (Rust, [Cargo](https://doc.rust-lang.org/cargo)) installer                  |
+| appimaged          | `true`      | Installs [appimaged](https://github.com/probonopd/go-appimage/tree/master/src/appimaged) (Appimage integration daemon)               |
+| nerdfont           | `!enabled`  | Installs [Nerd Fonts](https://www.nerdfonts.com) ([Geist](https://vercel.com/font) Mono by default) which provide glyphs & ligatures |
 
 #### Install
 | Value                 | Default    | Description                                                                                                                              |
 | --------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| check                 | true       |                                                                                                                                          |
-| apt                   | !enabled   | Installs essential packages (eg vim). Some packages' (eg yazi) functionality can be extended with these packages installed               |
-| addRepos              | !enabled   | 3rd-party apt repositories                                                                                                               |
-| - sourceName          | \<string\> |                                                                                                                                          |
-| - remoteKey           | \<string\> | URL of signing key                                                                                                                       |
-| - keyPath             | \<string\> | Path of signing key on machine                                                                                                           |
-| - repo                | \<string\> | [SourcesList](https://wiki.debian.org/SourcesList) entry for repo                                                                        |
-| - pinning             | false      | Edit package priority. If [pinning](https://wiki.debian.org/AptConfiguration) is enabled, paste the contents of the preference file here |
-| - packages            | \<list\>   | List of packages to install from this source                                                                                             |
-| flatpak               | !enabled   | Install Flatpak packages                                                                                                                 |
-| cargo                 | !enabled   | Install Cargo packages                                                                                                                   |
-| binaries              | !enabled   | Install binaries (AppImage / deb packages)                                                                                               |
-| - name                | \<string\> | Name of binary. File extension determines if package is an AppImage or binary (.deb)                                                     |
-| - url                 | \<string\> | Package URL                                                                                                                              |
-| languages.goVersion   | latest     | Installs latest version of Golang                                                                                                        |
-| languages.nodeVersion | latest     | Installs latest version of Node via NVM                                                                                                  |
+| check                 | `true`     |                                                                                                                                          |
+| apt                   | `!enabled` | Installs essential packages (eg vim). Some packages' (eg yazi) functionality can be extended with these packages installed               |
+| addRepos              | `!enabled` | 3rd-party apt repositories ([SourcesList](https://wiki.debian.org/SourcesList))                                                          |
+| - sourceName          | `<string>` |                                                                                                                                          |
+| - remoteKey           | `<string>` | URL of signing key                                                                                                                       |
+| - keyPath             | `<string>` | Path of signing key on machine                                                                                                           |
+| - repo                | `<string>` | [SourcesList](https://wiki.debian.org/SourcesList) entry for repo                                                                        |
+| - pinning             | `false`    | Edit package priority. If [pinning](https://wiki.debian.org/AptConfiguration) is enabled, paste the contents of the preference file here |
+| - packages            | `<list>`   | List of packages to install from this source                                                                                             |
+| flatpak               | `!enabled` | Install [Flatpak](https://flatpak.org) packages                                                                                          |
+| cargo                 | `!enabled` | Install [Cargo](https://crates.io) packages                                                                                              |
+| binaries              | `!enabled` | Install binaries ([AppImage](https://appimage.org) / deb packages)                                                                       |
+| - name                | `<string>` | Name of binary. File extension determines if package is an [AppImage](https://appimage.org) or binary (.deb)                             |
+| - url                 | `<string>` | Package URL                                                                                                                              |
+| languages.goVersion   | `latest`   | Installs latest version of [Go](https://go.dev)                                                                                          |
+| languages.nodeVersion | `latest`   | Installs latest version of [Node](https://nodejs.org) via [NVM](https://github.com/nvm-sh/nvm)                                           |
 
 #### Update
-| Value             | Default  | Description                                                                                                                             |
-| ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| check             | true     |                                                                                                                                         |
-| apt               | !enabled | Updates & upgrades apt packages                                                                                                         |
-| apt.aptFull       | false    | Upgrades the entire system, installing new packages if necessary, & removes old archive files & unused packages with their config files |
-| flatpak           | true     |                                                                                                                                         |
-| cargo             | false    |
-| other.yq          | true     | Updates [yq](https://github.com/mikefarah/yq) binary                                                                                    |
-| other.go          | false    | Updates go the latest version                                                                                                           |
-| other.node        | false    | Updates node to latest version via NVM                                                                                                  |
-| other.zellijClear | true     | Delete all other Zellij sessions, including exited ones                                                                                 |
+| Value             | Default    | Description                                                                                                                             |
+| ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| check             | `true`     |                                                                                                                                         |
+| apt               | `!enabled` | Updates & upgrades apt packages                                                                                                         |
+| apt.aptFull       | `false`    | Upgrades the entire system, installing new packages if necessary, & removes old archive files & unused packages with their config files |
+| flatpak           | `true`     |                                                                                                                                         |
+| cargo             | `false`    |                                                                                                                                         |
+| other.yq          | `true`     | Updates [yq](https://github.com/mikefarah/yq) binary                                                                                    |
+| other.go          | `false`    | Updates [Go](https://go.dev) to the latest version                                                                                      |
+| other.node        | `false`    | Updates [Node](https://nodejs.org) to the latest version via [NVM](https://github.com/nvm-sh/nvm)                                       |
+| other.zellijClear | `true`     | Delete all other [Zellij](https://zellij.dev) sessions, including exited ones                                                           |
 
 #### Configure
-| Value                         | Default   | Description                                                                                            |
-| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------ |
-| check                         | true      |                                                                                                        |
-| dotfiles                      | !enabled  | Dotfile manager implementation via Stow                                                                |
-| dotfiles.stowMode             | override  | Override option uses cozydot's dotfiles. Backup option uses original system dotfiles                   |
-| dotfiles.packages             | \<list\>  | List of packages to stow. Directory structure for each package in `dotfiles/` starts from `$HOME` PATH |
-| apps.alacritty                | true      | Setup Alacritty adds desktop entry & bash completion                                                   |
-| apps.docker                   | true      | Setup virtualbox adds user to vboxusers group                                                          |
-| apps.vscodeExtensions         | !enabled  | Install VS Code extensions                                                                             |
-| optimisations.auto-cpufreq    | true      | Installs / configures auto-cpufreq, a CPU optimizer                                                    |
-| DE.gnome.settings             | true      | Settings config increase screen bank delay to 15 mins, set dark mode                                   |
-| DE.gnome.extensions           | true      | Install GNOME extensions                                                                               |
-| DE.gnome.defaultTerm          | alacritty | Set default terminal                                                                                   |
-| DE.gnome.MacOSDock            | true      | Make Dash to Dock mimic MacOS dock behaviour                                                           |
-| DE.gnome.smoothRoundedCorners | true      | Smoothen corners in Rounded Window Corners Reborn                                                      |
+| Value                         | Default     | Description                                                                                                              |
+| ----------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| check                         | `true`      |                                                                                                                          |
+| dotfiles                      | `!enabled`  | Dotfile manager implementation via [GNU Stow](https://www.gnu.org/s/stow)                                                |
+| dotfiles.stowMode             | `override`  | Override option uses cozydot's dotfiles. Backup option uses original system dotfiles                                     |
+| dotfiles.packages             | `<list>`    | List of packages to stow. Directory structure for each package in `dotfiles/` starts from `$HOME` PATH                   |
+| apps.alacritty                | `true`      | Setup [Alacritty](https://alacritty.org) adds desktop entry & bash completion                                            |
+| apps.docker                   | `true`      | Setup [Docker](https://docs.docker.com) adds user to docker group & uses local logging driver to prevent disk-exhaustion |
+| apps.virtualbox               | `true`      | Setup [VirtalBox](https://www.virtualbox.org) adds user to vboxusers group                                               |
+| apps.vscodeExtensions         | `!enabled`  | Install [VS Code](https://code.visualstudio.com) extensions                                                              |
+| optimisations.auto-cpufreq    | `true`      | Installs / configures [auto-cpufreq](https://github.com/AdnanHodzic/auto-cpufreq), a CPU optimizer                       |
+| DE.gnome.settings             | `true`      | Settings config increase screen blank delay to 15 mins, set dark mode                                                    |
+| DE.gnome.extensions           | `true`      | Install [GNOME](https://www.gnome.org) extensions                                                                        |
+| DE.gnome.defaultTerm          | `alacritty` | Set default terminal                                                                                                     |
+| DE.gnome.MacOSDock            | `true`      | Make [Dash to Dock](https://github.com/micheleg/dash-to-dock) mimic MacOS dock behaviour                                 |
+| DE.gnome.smoothRoundedCorners | `true`      | Smoothen corners in [Rounded Window Corners Reborn](https://github.com/flexagoon/rounded-window-corners)                 |
 
 ### Help Message
 

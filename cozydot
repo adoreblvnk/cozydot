@@ -59,11 +59,11 @@ ${YELLOW}Options:${NC}
 ${YELLOW}Commands:${NC}
   ${GREEN}   check    ${NC} Purges bloat (disabled by default) & installs dependencies. Installs Python (via
                pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
-  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage) 
+  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
                packages, & coding languages (node & golang)
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
                Zellij cache (see ${BLUE}configs/default.yaml${NC} for details)
-  ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed, 
+  ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed,
                customise desktop environment (Cinnamon / GNOME)
 
 ${YELLOW}Configuration:${NC}
@@ -230,7 +230,7 @@ check() {
           | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' | awk '{print $1}'
       )
       for pkg in "${snap_pkgs[@]}"; do snap remove --purge "$pkg"; done
-      if [[ $(snap list 2>/dev/null | grep -o '^core[0-9][0-9]') ]]; then
+      if snap list 2>/dev/null | grep -q '^core[0-9][0-9]'; then
         sudo snap remove --purge \
           "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]')"
       fi
@@ -741,7 +741,7 @@ configure() {
     fi
   fi
 
-  # setup Docker adds user to Docker group & uses local logging driver to prevent disk-exhaustion
+  # setup Docker adds user to docker group & uses local logging driver to prevent disk-exhaustion
   if [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]] \
     && command -v docker &>/dev/null; then
     # https://docs.docker.com/engine/install/linux-postinstall/
@@ -767,7 +767,7 @@ configure() {
     fi
   fi
 
-  # setup virtualbox adds user to vboxusers group 
+  # setup virtualbox adds user to vboxusers group
   if [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]] \
     && command -v virtualbox &>/dev/null; then
     # to allow virtualbox to access USB devices, add $USER to vboxusers group
@@ -905,7 +905,7 @@ EOF
 
     # GNOME settings
     if [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-      # settings config increase screen bank delay to 15 mins, set dark mode
+      # settings config increase screen blank delay to 15 mins, set dark mode
       if [[ $(yq '.configure.DE.gnome.settings' "$CONFIG") == true ]]; then
         _info_msg "Configuring GNOME desktop environment"
         # increase screen blank delay to 15 mins (the max in UI)

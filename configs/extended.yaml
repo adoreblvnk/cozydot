@@ -1,5 +1,5 @@
 metadata:
-  description: Lightweight config with minimal utilities / apps installed.
+  description: Sensible defaults for cozydot.
   distro: auto # auto | ubuntu | debian | linuxmint
   DE: auto     # auto | gnome | cinnamon
 check:
@@ -79,6 +79,17 @@ install:
     - vim
     - vlc
   addRepos: !enabled
+    - sourceName: docker
+      remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
+      keyPath: /etc/apt/keyrings/docker.asc
+      repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${UPSTREAM_DISTRO} $VERSION_CODENAME stable
+      pinning: false
+      packages:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
     - sourceName: mozilla
       remoteKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
       keyPath: /etc/apt/keyrings/packages.mozilla.org.asc
@@ -89,6 +100,27 @@ install:
         Pin-Priority: 1000
       packages:
         - firefox
+    - sourceName: onlyoffice
+      remoteKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+      keyPath: /usr/share/keyrings/onlyoffice.gpg
+      repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
+      pinning: false
+      packages:
+        - onlyoffice-desktopeditors
+    - sourceName: thorium
+      remoteKey: null
+      keyPath: null
+      repo: deb [trusted=yes arch=amd64] http://dl.thorium.rocks/debian stable main
+      pinning: false
+      packages:
+        - thorium-browser
+    - sourceName: virtualbox
+      remoteKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+      keyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
+      repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
+      pinning: false
+      packages:
+        - virtualbox-7.0
     - sourceName: vscode
       remoteKey: https://packages.microsoft.com/keys/microsoft.asc
       keyPath: /etc/apt/keyrings/packages.microsoft.gpg
@@ -98,21 +130,36 @@ install:
         - code
   flatpak: !enabled
     - com.discordapp.Discord
+    - com.obsproject.Studio # video recorder & live streaming software
+    - io.bassi.Amberol      # music player
     - org.qbittorrent.qBittorrent
+    - org.shotcut.Shotcut   # video editor
+    - org.telegram.desktop
   cargo: !enabled
     - alacritty
     - bat --locked      # cat replacement
     - bottom --locked   # process / system monitor
+    - du-dust
     - eza               # ls replacement
+    - fd-find
     - macchina          # system info
+    - ripgrep
     - starship --locked
+    - yazi-cli --locked # terminal file manager
+    - yazi-fm --locked
     - zellij --locked
     - zoxide --locked   # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+    - name: Bitwarden.AppImage
+      url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
+    - name: drawio.AppImage
+      url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
     - name: Obsidian.AppImage
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+    - name: zen.AppImage
+      url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   languages:
     goVersion: !enabled latest   # latest | <major>.<minor>.<patch>
     nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
@@ -139,16 +186,32 @@ configure:
       - macchina
       - starship
       - vscode
+      - yazi
       - zellij
   apps:
     alacritty: true
-    docker: false
-    virtualbox: false
+    docker: true
+    virtualbox: true
     vscodeExtensions: !enabled
       - catppuccin.catppuccin-vsc
+      - christian-kohler.path-intellisense
+      - eamodio.gitlens
+      - ecmel.vscode-html-css
+      - esbenp.prettier-vscode
+      - foxundermoon.shell-format
+      - golang.go
+      - ms-python.black-formatter
+      - ms-python.debugpy
+      - ms-python.isort
+      - ms-python.python
+      - ms-python.vscode-pylance
+      - redhat.vscode-yaml
+      - streetsidesoftware.code-spell-checker
       - visualstudioexptteam.intellicode-api-usage-examples
       - visualstudioexptteam.vscodeintellicode
-  optimisations: !disabled
+      - wayou.vscode-todo-highlight
+      - yzhang.markdown-all-in-one
+  optimisations: !enabled
     auto-cpufreq: false
   DE: !enabled
     cinnamon:
