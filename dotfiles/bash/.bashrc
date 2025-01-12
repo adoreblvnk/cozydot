@@ -83,7 +83,8 @@ if [ -f ~/.bash_completion/alacritty ]; then source ~/.bash_completion/alacritty
 if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
 
 if command -v yazi &>/dev/null; then
-  function yy() { # https://yazi-rs.github.io/docs/quick-start#shell-wrapper
+  # https://yazi-rs.github.io/docs/quick-start#shell-wrapper
+  function yy() {
     local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
     yazi "$@" --cwd-file="$tmp"
     if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
@@ -105,6 +106,5 @@ if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
 # display system info
 if command -v macchina &>/dev/null; then
-  macchina -o host -o kernel -o distribution -o uptime -o processor-load \
-    -o memory
+  macchina -o host -o kernel -o distribution -o uptime -o processor-load -o memory
 fi
