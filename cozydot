@@ -99,7 +99,7 @@ list_configs() {
   )
   echo "${YELLOW}Available configs:${NC}"
   for config in "${configs[@]}"; do
-    echo "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$CONFIG")"
+    echo "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$(dirname "$0")/configs/$config.yaml")"
   done
 }
 
@@ -492,7 +492,7 @@ install() {
       if [[ $key_path == *.asc ]]; then
         _info_msg "Downloading .asc key for $source_name"
         sudo curl -sSL -o "$key_path" "$remote_key"
-      # if key is in gpg format, then dearmor after downloading the key
+      # if key is a gpg file, then dearmor after downloading the key
       elif [[ $key_path == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
         sudo curl -sSL "$remote_key" | sudo gpg --dearmor --yes -o "$key_path"
