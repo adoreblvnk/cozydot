@@ -4,7 +4,7 @@
   "[javascript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
   "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
   "[jsonc]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
-  "[markdown]": { "editor.defaultFormatter": "yzhang.markdown-all-in-one" },
+  "[markdown]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
   "[python]": { "editor.defaultFormatter": "ms-python.black-formatter" },
   "[yaml]": { "editor.defaultFormatter": "redhat.vscode-yaml" },
   "editor.cursorBlinking": "expand",
