@@ -26,6 +26,7 @@ check:
     - ffmpeg
     - flatpak
     - git
+    - pinentry-tty
     - software-properties-common
     - stow
     - ttf-mscorefonts-installer
@@ -107,7 +108,6 @@ install:
     - eza               # ls replacement
     - fd-find
     - macchina          # system info
-    - ripgrep
     - starship --locked
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
