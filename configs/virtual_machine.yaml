@@ -47,8 +47,6 @@ check:
     - libjpeg-dev
     - libpng-dev
     - libtiff-dev
-    # docker dependencies
-    - lsb-release
     # cargo-update dependencies
     - libgit2-dev
     - libssh-dev
