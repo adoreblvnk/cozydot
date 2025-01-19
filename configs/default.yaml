@@ -153,8 +153,8 @@ install:
       url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
     - name: drawio.AppImage
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
-    - name: Obsidian.AppImage
-      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+    - name: obsidian.deb
+      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
   languages:
     goVersion: !enabled latest   # latest | <major>.<minor>.<patch>
     nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]

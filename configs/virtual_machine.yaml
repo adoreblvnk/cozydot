@@ -112,8 +112,6 @@ install:
   binaries: !enabled
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
-    - name: Obsidian.AppImage
-      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
   languages:
     goVersion: !enabled latest   # latest | <major>.<minor>.<patch>
     nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
