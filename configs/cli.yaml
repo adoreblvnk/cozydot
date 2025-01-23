@@ -68,6 +68,7 @@ check:
 install:
   check: true
   apt: !enabled
+    - default-jdk
     - fzf         # fuzzy finder
     - gnupg2
     - imagemagick # image converter
@@ -99,7 +100,6 @@ install:
   flatpak: !disabled
     - com.discordapp.Discord
   cargo: !enabled
-    - alacritty
     - bat --locked      # cat replacement
     - bottom --locked   # process / system monitor
     - du-dust
@@ -107,6 +107,7 @@ install:
     - fd-find
     - macchina          # system info
     - starship --locked
+    - tealdeer
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
     - zellij --locked
