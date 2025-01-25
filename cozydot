@@ -736,7 +736,7 @@ configure() {
   # setup Docker adds user to docker group & uses local logging driver to prevent disk-exhaustion
   if [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]] \
     && command -v docker &>/dev/null; then
-    # https://docs.docker.com/engine/install/linux-postinstall/
+    # https://docs.docker.com/engine/install/linux-postinstall
     # manage Docker as non-root user
     if ! getent group docker | grep "$USER" &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
@@ -748,9 +748,9 @@ configure() {
       newgrp docker
     fi
 
-    # Use local logging driver to prevent disk-exhaustion. local logging driver
+    # use local logging driver to prevent disk-exhaustion. Local logging driver
     # performs log-rotation & compresses log files by default.
-    # https://docs.docker.com/config/containers/logging/configure/
+    # https://docs.docker.com/config/containers/logging/configure
     sudo touch /etc/docker/daemon.json
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
       _info_msg "Using local logging driver to prevent disk-exhaustion"
@@ -798,7 +798,6 @@ configure() {
 
   # desktop-environment specific configurations
   if [[ $(yq '.configure.DE | tag' "$CONFIG") == "!enabled" ]]; then
-
     # cinnamon settings
     if [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
       if [[ $(yq '.configure.DE.cinnamon.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then

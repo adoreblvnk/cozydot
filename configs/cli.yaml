@@ -135,7 +135,6 @@ configure:
     stowMode: override # override | backup
     packages:
       - bash
-      - alacritty
       - bat
       - bottom
       - macchina
@@ -143,8 +142,8 @@ configure:
       - yazi
       - zellij
   apps:
-    alacritty: true
-    docker: false
+    alacritty: false
+    docker: true
     virtualbox: false
     vscodeExtensions: !disabled
       - catppuccin.catppuccin-vsc

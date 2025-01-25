@@ -197,7 +197,7 @@ configure:
       - esbenp.prettier-vscode
       - foxundermoon.shell-format
       - golang.go
-      - ms-python.black-formatter
+      - ms-python.autopep8
       - ms-python.debugpy
       - ms-python.isort
       - ms-python.python
