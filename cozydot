@@ -640,7 +640,6 @@ update() {
   # update yq
   if [[ $(yq '.update.other.yq' "$CONFIG") == true ]]; then
     local_yq_ver=$(yq -V | cut -d ' ' -f 4)
-    # get latest yq version
     latest_yq_ver=$(
       curl -sSL https://api.github.com/repos/mikefarah/yq/releases/latest \
         | yq '.tag_name'
@@ -690,29 +689,22 @@ configure() {
     mapfile -t packages < <(yq -r '.configure.dotfiles.packages[]' "$CONFIG")
     for pkg in "${packages[@]}"; do
       _info_msg "Stowing dotfiles for $pkg"
-      # symlink between cozydot & actual dotfiles
-      #   --no-folding stows individual files instead of directories
-      #   --adopt replaces cozydot's dotfiles with original system ones
-      #   Needed as Stow throws an error if there are existing system dotfiles.
-      #   This results in cozydot's dotfiles being lost, but this is mitigated
-      #   by setting .configure.stowMode to "override".
-      stow --no-folding --adopt -v -d "dotfiles/" -t "$HOME" "$pkg"
-      # Override option uses cozydot's dotfiles. Backup option uses original
-      # system dotfiles
+      # Override option uses cozydot's dotfiles. Backup option does nothing (ie
+      # uses original system dotfiles)
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
-        _info_msg "Overriding $pkg original dotfiles with ${cozydot_txt}' dotfiles"
-        if [[ $(git -C "$(dirname "$0")" status --porcelain --untracked-files=no "dotfiles/$pkg") ]]; then
-          _info_msg "Restoring $cozydot_txt dotfiles for $pkg"
-          # NOTE: commit any new changes made to dotfiles as they will be reset
-          # if there are any changes detected.
-          # TODO: explore a cleaner option than git restore
-          git -C "$(dirname "$0")" restore "dotfiles/$pkg/"
-        fi
+        _info_msg "Overriding $pkg original dotfiles with ${cozydot_txt}'s dotfiles"
+        # -T copies folder contents
+        # --remove-destination is used to remove files which can't be read (eg
+        #   symlinks) first
+        cp -rT --remove-destination "dotfiles/$pkg" "$HOME"
       elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
-        _info_msg "Using system dotfiles as source of truth. ${cozydot_txt}' dotfiles will be overwritten"
-      else
-        _error_msg "stowMode must be set to either ${BLUE}override${NC} / ${BLUE}backup${NC}"
+        _info_msg "Using system dotfiles as source of truth. ${cozydot_txt}'s dotfiles will be overwritten"
       fi
+      # --no-folding stows individual files instead of directories
+      # --adopt replaces cozydot's dotfiles with original system ones
+      # Needed as Stow throws an error if system dotfiles exist. Cozydot's
+      # dotfiles will be lost, but setting .stowMode to "override" fixes this
+      stow --no-folding --adopt -d "dotfiles/" -t "$HOME" "$pkg"
     done
   fi
 
@@ -802,25 +794,6 @@ configure() {
     done
   elif [[ $(yq '.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]]; then
     _warning_msg "VSCode not installed, skipping..."
-  fi
-
-  # optimisations
-  if [[ $(yq '.configure.optimisations | tag' "$CONFIG") == "!enabled" ]]; then
-    _info_msg "Configuring optimisations"
-
-    if [[ $(yq '.configure.optimisations.auto-cpufreq' "$CONFIG") == true ]]; then
-      _info_msg "Configuring auto-cpufreq"
-      if ! command -v auto-cpufreq &>/dev/null; then
-        _info_msg "Installing auto-cpufreq"
-        git clone https://github.com/AdnanHodzic/auto-cpufreq.git
-        cd auto-cpufreq && sudo ./auto-cpufreq-installer --install
-        cd ..
-        rm -rf auto-cpufreq
-      fi
-      if systemctl is-active --quiet auto-cpufreq; then
-        _info_msg "auto-cpufreq daemon is already running"
-      else sudo auto-cpufreq --install; fi
-    fi
   fi
 
   # desktop-environment specific configurations

@@ -145,8 +145,6 @@ configure:
       - catppuccin.catppuccin-vsc
       - visualstudioexptteam.intellicode-api-usage-examples
       - visualstudioexptteam.vscodeintellicode
-  optimisations: !disabled
-    auto-cpufreq: false
   DE: !enabled
     cinnamon:
       defaultTerm: !enabled alacritty

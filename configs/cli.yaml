@@ -148,8 +148,6 @@ configure:
     virtualbox: false
     vscodeExtensions: !disabled
       - catppuccin.catppuccin-vsc
-  optimisations: !disabled
-    auto-cpufreq: false
   DE: !disabled
     cinnamon:
       defaultTerm: !enabled alacritty

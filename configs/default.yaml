@@ -208,8 +208,6 @@ configure:
       - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
-  optimisations: !enabled
-    auto-cpufreq: false
   DE: !enabled
     cinnamon:
       defaultTerm: !enabled alacritty

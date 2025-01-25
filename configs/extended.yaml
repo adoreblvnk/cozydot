@@ -175,7 +175,7 @@ update:
   apt: !enabled
     aptFull: false
   flatpak: true
-  cargo: false
+  cargo: true
   other:
     yq: true
     go: false
@@ -218,8 +218,6 @@ configure:
       - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
-  optimisations: !enabled
-    auto-cpufreq: false
   DE: !enabled
     cinnamon:
       defaultTerm: !enabled alacritty
