@@ -52,7 +52,7 @@ prod by blvnk.
 
 ### Installation
 
-Clone this repository & run cozydot.
+Clone this repository & run cozydot. On the first run, cozydot will install itself in `~/.cozydot`.
 
 ```bash
 git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
@@ -63,6 +63,9 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
 ### Config Schema
 
 #### Metadata
+
+- `.description` *\<string\>*: Config description used in `cozydot --list-configs`
+
 | Value       | Default    | Description                                         |
 | ----------- | ---------- | --------------------------------------------------- |
 | description | `<string>` | Config description used in `cozydot --list-configs` |

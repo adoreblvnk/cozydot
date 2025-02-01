@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # global variables
-VERSION=0.0.1 CONFIG="$(dirname "$0")/configs/default.yaml"
+VERSION=0.0.1 CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 
@@ -85,7 +85,7 @@ EOF
 # Arguments:
 #   name of config yaml file
 set_config() {
-  CONFIG="$(dirname "$0")/configs/$1.yaml"
+  CONFIG="$(dirname "$(realpath "$0")")/configs/$1.yaml"
   if [[ ! -f $CONFIG ]]; then
     _error_msg "Config selected ${GREEN}$1${NC} does not exist"
   fi
@@ -95,11 +95,11 @@ list_configs() {
   local configs
   # find all preset files, then filter out the parent dirs & file suffixes
   mapfile -t configs < <(
-    find "$(dirname "$0")/configs" -type f | awk -F '[/.]' '{print $(NF-1)}'
+    find "$(dirname "$(realpath "$0")")/configs" -type f | awk -F '[/.]' '{print $(NF-1)}'
   )
   echo "${YELLOW}Available configs:${NC}"
   for config in "${configs[@]}"; do
-    echo "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$(dirname "$0")/configs/$config.yaml")"
+    echo "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$(dirname "$(realpath "$0")")/configs/$config.yaml")"
   done
 }
 
@@ -725,12 +725,6 @@ configure() {
         https://github.com/alacritty/alacritty/raw/master/extra/linux/Alacritty.desktop
       sudo update-desktop-database
     fi
-
-    if [[ ! -f ~/.bash_completion/alacritty ]]; then
-      _info_msg "Adding bash completion for Alacritty"
-      curl -sSL --create-dirs -o ~/.bash_completion/alacritty \
-        https://github.com/alacritty/alacritty/raw/master/extra/completions/alacritty.bash
-    fi
   fi
 
   # setup Docker adds user to docker group & uses local logging driver to prevent disk-exhaustion
@@ -978,6 +972,17 @@ main() {
   # PRINT FUNCTIONS
   colours true
 
+  # make this script an executable by creating symlink to /usr/local/bin. script path must be ~/.cozydot/cozydot for standardisation
+  if [[ ! -L /usr/local/bin/cozydot ]]; then
+    if [[ $(realpath "$0") != "/home/$USER/.cozydot/cozydot" ]]; then
+      _info_msg "Moving cozydot to ~/.cozydot"
+      mv "$(dirname "$(realpath $0)")" ~/.cozydot/
+    fi
+    sudo cp -s --remove-destination ~/.cozydot/cozydot /usr/local/bin/cozydot
+    _success_msg "Created symlink for cozydot. Run $cozydot_txt as a command anywhere after this"
+    exit
+  fi
+
   # install curl if not installed
   if ! command -v curl &>/dev/null; then
     _info_msg "Installing curl"
@@ -992,10 +997,7 @@ main() {
     sudo chmod +x /usr/bin/yq
   fi
 
-  [[ $# -gt 0 ]] || {
-    _usage
-    _error_msg "No argument(s)"
-  }
+  [[ $# -gt 0 ]] || { _usage && _error_msg "No argument(s)"; }
 
   while [[ $# -gt 0 ]]; do
     case $1 in
