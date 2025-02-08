@@ -51,8 +51,8 @@ ${YELLOW}Usage:${NC} ${cozydot_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
   ${GREEN}-n, --no-colour      ${NC} Do not output any colour. Useful when redirecting output to a logfile
-  ${GREEN}-c, --config <CONFIG>${NC} Specify a yaml config file that exists in ${BLUE}<cozydot_path>/configs/${NC}
-  ${GREEN}    --list-configs   ${NC} List all available configs in ${BLUE}<cozydot_path>/configs/${NC} directory
+  ${GREEN}-c, --config <CONFIG>${NC} Specify a yaml config file that exists in ${BLUE}~/.cozydot/configs/${NC}
+  ${GREEN}    --list-configs   ${NC} List all available configs in ${BLUE}~/.cozydot/configs/${NC} directory
   ${GREEN}-h, --help           ${NC} Print help information
   ${GREEN}-V, --version        ${NC} Print version information
 
@@ -60,19 +60,19 @@ ${YELLOW}Commands:${NC}
   ${GREEN}   check    ${NC} Purges bloat (disabled by default) & installs dependencies. Installs Python (via
                pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
   ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
-               packages, & coding languages (node & golang)
+               packages, & programming languages (node & golang)
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
-               Zellij cache (see ${BLUE}configs/default.yaml${NC} for details)
+               Zellij cache (see ${BLUE}~/.cozydot/configs/default.yaml${NC} for details)
   ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed,
                customise desktop environment (Cinnamon / GNOME)
 
 ${YELLOW}Configuration:${NC}
-  Customise each command action by modifying the config (default: ${BLUE}configs/default.yaml${NC}).
-  The full config schema of ${cozydot_txt} is available at ${BLUE}README.md${NC}.
-  Preset configs are available in ${BLUE}<cozydot_path>/configs/${NC} directory.
-  Add new configs in ${BLUE}<cozydot_path>/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
+  Customise each command action by modifying the config (default: ${BLUE}~/.cozydot/configs/default.yaml${NC}).
+  The full config schema of ${cozydot_txt} is available in ${BLUE}README.md${NC}.
+  Preset configs are available in ${BLUE}~/.cozydot/configs/${NC} directory.
+  Add new configs in ${BLUE}~/.cozydot/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
 
-${YELLOW}Example:${NC} ${cozydot_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}configure${NC}
+${YELLOW}Example:${NC} ${cozydot_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}install${NC}
 
 ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/cozydot${NC}
 
@@ -694,8 +694,8 @@ configure() {
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
         _info_msg "Overriding $pkg original dotfiles with ${cozydot_txt}'s dotfiles"
         # -T copies folder contents
-        # --remove-destination is used to remove files which can't be read (eg
-        #   symlinks) first
+        # --remove-destination is used to remove files in case files can't be
+        #   read (eg symlinks) first
         cp -rT --remove-destination "dotfiles/$pkg" "$HOME"
       elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
         _info_msg "Using system dotfiles as source of truth. ${cozydot_txt}'s dotfiles will be overwritten"
@@ -976,7 +976,7 @@ main() {
   if [[ ! -L /usr/local/bin/cozydot ]]; then
     if [[ $(realpath "$0") != "/home/$USER/.cozydot/cozydot" ]]; then
       _info_msg "Moving cozydot to ~/.cozydot"
-      mv "$(dirname "$(realpath $0)")" ~/.cozydot/
+      mv "$(dirname "$(realpath "$0")")" ~/.cozydot/
     fi
     sudo cp -s --remove-destination ~/.cozydot/cozydot /usr/local/bin/cozydot
     _success_msg "Created symlink for cozydot. Run $cozydot_txt as a command anywhere after this"
@@ -1018,10 +1018,7 @@ main() {
       i | install) _set_global_var && install ;;
       u | update) _set_global_var && update ;;
       c | configure) _set_global_var && configure ;;
-      *)
-        _usage
-        _error_msg "Invalid argument(s)"
-        ;;
+      *) _usage && _error_msg "Invalid argument(s)" ;;
     esac
     shift
   done

@@ -1,9 +1,9 @@
 metadata:
   description: Sensible defaults for cozydot.
-  distro: auto # auto | ubuntu | debian | linuxmint
-  DE: auto     # auto | gnome | cinnamon
+  distro: auto
+  DE: auto
 check:
-  distroCfg: true # supports ubuntu / debian / linuxmint
+  distroCfg: true
   purge: !disabled
     # docker installed via aptAltSources
     - docker.io
@@ -60,11 +60,11 @@ check:
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
   python: !enabled
     pyenvUpdate: false
-    version: latest # latest | <major>[.<minor>]
+    version: latest
     pip: false
   rustupCheck: true
   appimaged: true
-  nerdfont: !enabled GeistMono # https://www.nerdfonts.com/font-downloads
+  nerdfont: !enabled GeistMono
 install:
   check: true
   apt: !enabled
@@ -139,15 +139,15 @@ install:
     - alacritty
     - bat --locked      # cat replacement
     - bottom --locked   # process / system monitor
-    - du-dust
+    - du-dust           # du alternative
     - eza               # ls replacement
-    - fd-find
+    - fd-find           # find alternative
     - macchina          # system info
     - starship --locked
     - tealdeer
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
-    - zellij --locked
+    - zellij --locked   # terminal multiplexer
     - zoxide --locked   # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
@@ -159,8 +159,8 @@ install:
     - name: obsidian.deb
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
   languages:
-    goVersion: !enabled latest   # latest | <major>.<minor>.<patch>
-    nodeVersion: !enabled latest # latest | <major>[.<minor>[.<patch>]]
+    goVersion: !enabled latest
+    nodeVersion: !enabled latest
 update:
   check: true
   apt: !enabled
@@ -175,7 +175,7 @@ update:
 configure:
   check: true
   dotfiles: !enabled
-    stowMode: override # override | backup
+    stowMode: override
     packages:
       - bash
       - alacritty
