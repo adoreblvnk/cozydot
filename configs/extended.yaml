@@ -173,7 +173,7 @@ install:
 update:
   check: true
   apt: !enabled
-    aptFull: false
+    aptFull: true
   flatpak: true
   cargo: true
   other:

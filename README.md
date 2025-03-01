@@ -39,7 +39,7 @@ Features:
 
 - More than a post-install script. cozydot updates your system & can be run at any time, & not only on fresh installs.
 - Latest & greatest packages. cozydot uses 3rd-party apt repos, [Flatpak](https://flatpak.org), [AppImage](https://appimage.org) & [Cargo](https://doc.rust-lang.org/cargo) to deliver up-to-date packages.
-- Intuitive config files. cozydot uses customisable YAML files that are easily edited, or use available presets in `./configs/` directory.
+- Intuitive config files. cozydot uses customisable YAML files that are easily edited, or use available presets in `configs/` directory.
 - Uses native tools. With the exception of [yq](https://github.com/mikefarah/yq) for querying config files & [GNU Stow](https://www.gnu.org/s/stow) for managing dotfiles, cozydot uses already existing tools to perform each command.
 
 prod by blvnk.
@@ -176,7 +176,7 @@ cozydot configure
 
 ### Setting Up Git Credentials
 
-Fill up your `name`, `email` & `signingkey` (optional) in `/dotfiles/bash/.gitconfig`. Optionally, run `git update-index --assume-unchanged dotfiles/bash/.gitconfig` to avoid committing your secrets to git.
+Fill up your `name`, `email` & `signingkey` (optional) in `dotfiles/bash/.gitconfig`. Optionally, run `git update-index --assume-unchanged dotfiles/bash/.gitconfig` to avoid committing your secrets to git.
 
 ## Credits <!-- omit in toc -->
 
