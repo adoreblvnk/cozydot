@@ -139,6 +139,7 @@ install:
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
     - io.bassi.Amberol      # music player
+    - org.gimp.GIMP
     - org.qbittorrent.qBittorrent
     - org.shotcut.Shotcut   # video editor
     - org.telegram.desktop
@@ -173,7 +174,7 @@ install:
 update:
   check: true
   apt: !enabled
-    aptFull: false
+    aptFull: true
   flatpak: true
   cargo: true
   other:

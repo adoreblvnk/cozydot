@@ -1,5 +1,5 @@
 metadata:
-  description: Lightweight config with minimal utilities / apps installed.
+  description: Lightweight config with minimal utilities / apps installed for virtual machines.
   distro: auto
   DE: auto
 check:

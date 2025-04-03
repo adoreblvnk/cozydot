@@ -18,17 +18,19 @@
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
   "files.exclude": { "**/.git": false },
-  "git.enableCommitSigning": true,
-  "javascript.suggest.completeFunctionCalls": true,
-  "python.analysis.completeFunctionParens": true,
   "search.exclude": { "**/.git": true },
-  "shellformat.flag": "-i 2 -ci -bn",
   "telemetry.telemetryLevel": "off",
   "todohighlight.keywords": ["NOTE:"],
   "window.menuBarVisibility": "toggle",
+  "window.newWindowProfile": "Default",
   "workbench.colorTheme": "Catppuccin Mocha",
   "workbench.settings.enableNaturalLanguageSearch": false,
   "workbench.startupEditor": "none",
-  "zenMode.centerLayout": false,
-  "zenMode.fullScreen": false
+  "zenMode.fullScreen": false,
+  // Extensions
+  "git.enableCommitSigning": true,
+  "gitlens.telemetry.enabled": false,
+  "javascript.suggest.completeFunctionCalls": true,
+  "python.analysis.completeFunctionParens": true,
+  "shellformat.flag": "-i 2 -ci -bn"
 }
