@@ -876,6 +876,8 @@ EOF
         _info_msg "Configuring GNOME desktop environment"
         # increase screen blank delay to 15 mins (the max in UI)
         gsettings set org.gnome.desktop.session idle-delay 900
+        # disable screen dimming (doesn't work with Power Saving mode)
+        gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
         # dark mode
         gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
       fi
