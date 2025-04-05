@@ -37,28 +37,25 @@ normal_main = { fg = "#eff1f5", bg = "#1e66f5", bold = true }
 normal_alt  = { fg = "#1e66f5", bg = "#ccd0da" }
 
 # Select mode
-select_main = { fg = "#eff1f5", bg = "#40a02b", bold = true }
-select_alt  = { fg = "#40a02b", bg = "#ccd0da" }
+select_main = { fg = "#eff1f5", bg = "#179299", bold = true }
+select_alt  = { fg = "#179299", bg = "#ccd0da" }
 
 # Unset mode
 unset_main = { fg = "#eff1f5", bg = "#dd7878", bold = true }
 unset_alt  = { fg = "#dd7878", bg = "#ccd0da" }
 
 [status]
-separator_open  = ""
-separator_close = ""
-
-# Progress
-progress_label  = { fg = "#ffffff", bold = true }
-progress_normal = { fg = "#1e66f5", bg = "#bcc0cc" }
-progress_error  = { fg = "#d20f39", bg = "#bcc0cc" }
-
 # Permissions
 perm_sep   = { fg = "#8c8fa1" }
 perm_type  = { fg = "#1e66f5" }
 perm_read  = { fg = "#df8e1d" }
 perm_write = { fg = "#d20f39" }
 perm_exec  = { fg = "#40a02b" }
+
+# Progress
+progress_label  = { fg = "#ffffff", bold = true }
+progress_normal = { fg = "#1e66f5", bg = "#bcc0cc" }
+progress_error  = { fg = "#d20f39", bg = "#bcc0cc" }
 
 [pick]
 border   = { fg = "#1e66f5" }
@@ -71,7 +68,7 @@ title    = {}
 value    = {}
 selected = { reversed = true }
 
-[completion]
+[cmp]
 border = { fg = "#1e66f5" }
 
 [tasks]

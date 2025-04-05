@@ -1,3 +1,5 @@
+# source: https://github.com/sxyazi/yazi/tree/shipped/yazi-config/preset
+
 # A TOML linter such as https://taplo.tamasfe.dev/ can use this schema to validate your config.
 # If you encounter any issues, please make an issue at https://github.com/yazi-rs/schemas.
 "$schema" = "https://yazi-rs.github.io/schemas/yazi.json"
@@ -39,11 +41,13 @@ open = [
 	{ run = 'xdg-open "$1"',                desc = "Open", for = "linux" },
 	{ run = 'open "$@"',                    desc = "Open", for = "macos" },
 	{ run = 'start "" "%1"', orphan = true, desc = "Open", for = "windows" },
+	{ run = 'termux-open "$1"',             desc = "Open", for = "android" },
 ]
 reveal = [
 	{ run = 'xdg-open "$(dirname "$1")"',           desc = "Reveal", for = "linux" },
 	{ run = 'open -R "$1"',                         desc = "Reveal", for = "macos" },
 	{ run = 'explorer /select,"%1"', orphan = true, desc = "Reveal", for = "windows" },
+	{ run = 'termux-open "$(dirname "$1")"',        desc = "Reveal", for = "android" },
 	{ run = '''exiftool "$1"; echo "Press enter to exit"; read _''', block = true, desc = "Show EXIF", for = "unix" },
 ]
 extract = [
@@ -86,16 +90,15 @@ image_bound      = [ 0, 0 ]
 suppress_preload = false
 
 [plugin]
-
 fetchers = [
 	# Mimetype
-	{ id = "mime", name = "*", run = "mime", if = "!mime", prio = "high" },
+	{ id = "mime", name = "*", run = "mime", prio = "high" },
 ]
 spotters = [
 	{ name = "*/", run = "folder" },
 	# Code
 	{ mime = "text/*", run = "code" },
-	{ mime = "*/{xml,javascript,wine-extension-ini}", run = "code" },
+	{ mime = "application/{mbox,javascript,wine-extension-ini}", run = "code" },
 	# Image
 	{ mime = "image/{avif,hei?,jxl,svg+xml}", run = "magick" },
 	{ mime = "image/*", run = "image" },
@@ -120,7 +123,7 @@ previewers = [
 	{ name = "*/", run = "folder", sync = true },
 	# Code
 	{ mime = "text/*", run = "code" },
-	{ mime = "*/{xml,javascript,wine-extension-ini}", run = "code" },
+	{ mime = "application/{mbox,javascript,wine-extension-ini}", run = "code" },
 	# JSON
 	{ mime = "application/{json,ndjson}", run = "json" },
 	# Image
