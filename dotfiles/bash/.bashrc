@@ -38,6 +38,8 @@ alias c=clear
 alias py=python
 alias pip="python -m pip"
 
+if command -v cozydot &>/dev/null; then alias czy=cozydot; fi
+
 if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
 
 # eza aliases

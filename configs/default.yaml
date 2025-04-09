@@ -197,6 +197,8 @@ configure:
       - eamodio.gitlens
       - esbenp.prettier-vscode
       - foxundermoon.shell-format
+      - github.copilot
+      - github.copilot-chat
       - golang.go
       - ms-python.autopep8
       - ms-python.debugpy

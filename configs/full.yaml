@@ -207,6 +207,8 @@ configure:
       - ecmel.vscode-html-css
       - esbenp.prettier-vscode
       - foxundermoon.shell-format
+      - github.copilot
+      - github.copilot-chat
       - golang.go
       - ms-python.autopep8
       - ms-python.debugpy
