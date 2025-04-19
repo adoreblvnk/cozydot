@@ -162,7 +162,7 @@ Configuration:
   Preset configs are available in ~/.cozydot/configs/ directory.
   Add new configs in ~/.cozydot/configs/ or list them with cozydot --list-configs
 
-Example: cozydot --config virtual_machine install
+Example: cozydot --config vm install
 
 Project Homepage: https://github.com/adoreblvnk/cozydot
 ```

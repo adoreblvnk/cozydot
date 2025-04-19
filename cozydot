@@ -72,7 +72,7 @@ ${YELLOW}Configuration:${NC}
   Preset configs are available in ${BLUE}~/.cozydot/configs/${NC} directory.
   Add new configs in ${BLUE}~/.cozydot/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
 
-${YELLOW}Example:${NC} ${cozydot_txt} ${CYAN}--config${NC} virtual_machine ${CYAN}install${NC}
+${YELLOW}Example:${NC} ${cozydot_txt} ${CYAN}--config${NC} vm ${CYAN}install${NC}
 
 ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/cozydot${NC}
 
@@ -126,7 +126,8 @@ _set_global_var() {
   case "$DISTRO" in
     # https://github.com/which-distro/os-release
     ubuntu | linuxmint | pop | zorin | Deepin) UPSTREAM_DISTRO=ubuntu ;;
-    debian | kali | tails) UPSTREAM_DISTRO=debian ;;
+    debian | kali | tails) # shellcheck disable=SC2034
+      UPSTREAM_DISTRO=debian ;;
     *) _error_msg "Unsupported distro detected / in config ($DISTRO)" ;;
   esac
 
