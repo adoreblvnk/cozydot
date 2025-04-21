@@ -31,11 +31,12 @@
 </details>
 
 ## About
+
 <div align="center"><img src="./assets/cozydot_cover.png" alt="result" width=750></div>
 
 <div align="center"><img src="./assets/activities_overview.png" alt="activities_overview" width=750></div>
 
-cozydot is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments. Riced & themed with [Catppuccin](https://catppuccin.com).
+[cozydot](https://github.com/adoreblvnk/cozydot) is an automated post-install, update, & config (dotfile) manager for Linux, with a focus on idempotency & repeatability. Supports Debian-based / Ubuntu-based distros, & GNOME / Cinnamon desktop environments. Riced & themed with [Catppuccin](https://catppuccin.com).
 
 Features:
 
@@ -66,33 +67,33 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
 
 #### Metadata
 
-- **.description** `<string>`: Config description used in `cozydot --list-configs`
-- **.distro** `auto | ubuntu | debian | linuxmint` 
-- **.DE** `auto | gnome | cinnamon`
+- **description** `<string>`: Config description used in `cozydot --list-configs`
+- **distro** `auto | ubuntu | debian | linuxmint | pop | zorin | Deepin | kali | tails`
+- **DE** `auto | gnome | cinnamon`
 
 #### Check
 
 - **distroCfg** `true`: Debloats / configures distro (ubuntu / debian / linuxmint) before cozydot executes command actions.
-- **purge** `!disabled`: Uninstalls unneeded / conflicting packages (eg [Docker](https://docs.docker.com)). NOTE: Enable this when running on a fresh install
-- **deps** `!enabled`: Installs dependencies for other packages (eg Alacritty) from apt. Recommended to leave this enabled to prevent dependency errors
+- **purge** `!disabled`: Uninstalls unneeded / conflicting packages (eg [Docker](https://docs.docker.com)). **NOTE: Enable this when running on a fresh install**
+- **deps** `!enabled`: Installs dependencies for other packages (eg [Alacritty](https://alacritty.org/)) from apt. Recommended to leave this enabled to prevent dependency errors
 - **python** `!enabled`: Manage Python & [Pip](https://pypi.org/project/pip) via [pyenv](https://github.com/pyenv/pyenv)
   - **pyenvUpdate** `false`
   - **version** `latest | <major>[.<minor>]`: Python version. Accepted version examples: latest, 3, 3.12
   - **pip** `false`: Upgrades [Pip](https://pypi.org/project/pip)
-- **rustupCheck** `true`: Installs [Rustup](https://rustup.rs), the Rust toolchain (Rust, [Cargo](https://doc.rust-lang.org/cargo)) installer
+- **rustupCheck** `true`: Installs [Rustup](https://rustup.rs), the Rust toolchain (Rust, [Cargo](https://doc.rust-lang.org/cargo), etc) installer
 - **appimaged** `true`: Installs [appimaged](https://github.com/probonopd/go-appimage/tree/master/src/appimaged) (Appimage integration daemon)
 - **nerdfont** `!enabled`: Installs Nerd Fonts (Geist Mono by default) which provide glyphs & ligatures. Full font list in [Font Downloads](https://www.nerdfonts.com/font-downloads)
 
 #### Install
 
 - **check** `true`
-- **apt** `!enabled`: Installs essential packages (eg vim). Some packages' (eg yazi) functionality can be extended with these packages installed
-- **addRepos** `!enabled`: 3rd-party apt repositories ([SourcesList](https://wiki.debian.org/SourcesList))
+- **apt** `!enabled`: Installs essential packages (eg vim). Some packages' (eg [yazi](https://yazi-rs.github.io)) functionality can be extended with these packages installed
+- **addRepos** `!enabled`: configures 3rd-party apt repositories ([SourcesList](https://wiki.debian.org/SourcesList))
   - **sourceName** `<string>`
   - **remoteKey** `<string> | null`: URL of signing key
-  - **keyPath** `<string> | null`: Path of signing key on machine
+  - **keyPath** `<string> | null`: Path of signing key on machine. _NOTE: if there is no signing key, `remoteKey` & `keyPath` should be `null`_
   - **repo** `<string>`: [SourcesList](https://wiki.debian.org/SourcesList) entry for repo
-  - **pinning** `false`: Edit package priority. If [pinning](https://wiki.debian.org/AptConfiguration) is enabled, paste the contents of the preference file here
+  - **pinning** `false`: Edit package priority. If [pinning](https://wiki.debian.org/AptConfiguration) is enabled, paste the preference file contents here
   - **packages** `<list>`: List of packages to install from this source
 - **flatpak** `!enabled`: Install [Flatpak](https://flatpak.org) packages
 - **cargo** `!enabled`: Install [Cargo](https://crates.io) packages
@@ -100,7 +101,7 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
   - **name** `<string>`: Name of binary. File extension determines if package is an [AppImage](https://appimage.org) or binary (.deb)
   - **url** `<string>`: Package URL
 - **languages.goVersion** `latest | <major>.<minor>.<patch>`: Installs latest version of [Go](https://go.dev). Accepted version examples: latest, 1.23.5
-- **languages.nodeVersion** `latest | <major>[.<minor>[.<patch>]]`:  Installs latest version of [Node](https://nodejs.org) via [NVM](https://github.com/nvm-sh/nvm). Accepted version examples: latest, 22, 22.13.0
+- **languages.nodeVersion** `latest | <major>[.<minor>[.<patch>]]`: Installs latest version of [Node](https://nodejs.org) via [NVM](https://github.com/nvm-sh/nvm). Accepted version examples: latest, 22, 22.13.0
 
 #### Update
 
@@ -120,13 +121,13 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
 - **dotfiles** `!enabled`: Dotfile manager implementation via [GNU Stow](https://www.gnu.org/s/stow)
   - **stowMode** `override | backup`: Override option uses cozydot's dotfiles. Backup option uses original system dotfiles
   - **packages** `<list>`: List of packages to stow. Directory structure for each package in `dotfiles/` starts from `$HOME` PATH
-- **apps.alacritty** `true`: Setup [Alacritty](https://alacritty.org) adds desktop entry & bash completion
-- **apps.docker** `true`: Setup [Docker](https://docs.docker.com) adds user to docker group & uses local logging driver to prevent disk-exhaustion
-- **apps.virtualbox** `true`: Setup [VirtualBox](https://www.virtualbox.org) adds user to vboxusers group
+- **apps.alacritty** `true`: [Alacritty](https://alacritty.org) setup adds [desktop entry](https://github.com/alacritty/alacritty/blob/master/INSTALL.md#desktop-entry) & [bash completion](https://github.com/alacritty/alacritty/blob/master/INSTALL.md#bash)
+- **apps.docker** `true`: [Docker](https://docs.docker.com) setup adds user to docker group & uses [local logging driver](https://docs.docker.com/engine/logging/configure/) to prevent disk-exhaustion
+- **apps.virtualbox** `true`: [VirtualBox](https://www.virtualbox.org) setup adds user to vboxusers group to [access USB devices](https://www.virtualbox.org/manual/topics/installation.html#install-linux-vboxusers)
 - **apps.vscodeExtensions** `!enabled`: Install [VS Code](https://code.visualstudio.com) extensions
 - **optimisations.auto-cpufreq** `true`: Installs / configures [auto-cpufreq](https://github.com/AdnanHodzic/auto-cpufreq), a CPU optimizer
 - **DE** `!enabled`: Desktop environment customisations
-  - **gnome.settings** `true`: Settings config increase screen blank delay to 15 mins, set dark mode
+  - **gnome.settings** `true`: Settings config increase screen blank delay to 15 mins, set dark mode, & other minor setting changes
   - **gnome.extensions** `true`: Install [GNOME](https://www.gnome.org) extensions
   - **gnome.defaultTerm** `alacritty`: Set default terminal
   - **gnome.MacOSDock** `true`: Make [Dash to Dock](https://github.com/micheleg/dash-to-dock) mimic MacOS dock behaviour

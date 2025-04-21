@@ -32,5 +32,6 @@
   "gitlens.telemetry.enabled": false,
   "javascript.suggest.completeFunctionCalls": true,
   "python.analysis.completeFunctionParens": true,
+  "rust-analyzer.check.command": "clippy",
   "shellformat.flag": "-i 2 -ci -bn"
 }
