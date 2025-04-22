@@ -95,7 +95,8 @@ list_configs() {
   local configs
   # find all preset files, then filter out the parent dirs & file suffixes
   mapfile -t configs < <(
-    find "$(dirname "$(realpath "$0")")/configs" -type f | awk -F '[/.]' '{print $(NF-1)}'
+    find "$(dirname "$(realpath "$0")")/configs" -type f \
+      | awk -F '[/.]' '{print $(NF-1)}'
   )
   echo "${YELLOW}Available configs:${NC}"
   for config in "${configs[@]}"; do
@@ -137,15 +138,14 @@ _set_global_var() {
   if [[ $DESKTOP_ENVIRONMENT == "auto" ]]; then
     case "$XDG_CURRENT_DESKTOP" in
       *GNOME*) DESKTOP_ENVIRONMENT=gnome ;;
-      Cinnamon | X-Cinnamon)
-        DESKTOP_ENVIRONMENT=cinnamon
-        _warning_msg "Cinnamon has stopped receiving updates"
-        ;;
+      Cinnamon | X-Cinnamon) DESKTOP_ENVIRONMENT=cinnamon ;;
+      *) _warning_msg "Unsupported desktop environment detected ($XDG_CURRENT_DESKTOP)" ;;
     esac
     local de_auto=" (auto)"
   fi
   case $DESKTOP_ENVIRONMENT in
-    cinnamon | gnome) ;;
+    gnome) ;;
+    cinnamon) _warning_msg "Cinnamon has stopped receiving updates" ;;
     *) _warning_msg "${cozydot_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment ($DESKTOP_ENVIRONMENT)" ;;
   esac
 
@@ -154,10 +154,8 @@ _set_global_var() {
 
   if [[ -n ${UBUNTU_CODENAME:-} ]]; then
     _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
-    # overwrite $VERSION_CODENAME for adding repos which use $VERSION_CODENAME in config. Modifying
-    # this system variable has no major consequences anyways
-    # shellcheck disable=SC2034
-    VERSION_CODENAME=$UBUNTU_CODENAME
+    # overwrite $VERSION_CODENAME to use $UBUNTU_CODENAME for adding repos in config. No major consequences
+    VERSION_CODENAME="$UBUNTU_CODENAME"
   fi
 }
 
@@ -170,15 +168,12 @@ _dl_golang() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
   if [[ $1 == "latest" ]]; then
-    latest_go="$(
-      curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-
-    )"
+    latest_go="$(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-)"
   fi
   if ! command -v go &>/dev/null \
     || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
     _info_msg "Downloading golang $latest_go"
-    curl -sSL -o "/tmp/go.tar.gz" \
-      "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
+    curl -sSL -o "/tmp/go.tar.gz" "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
     source ~/.bashrc
   fi
@@ -195,12 +190,11 @@ _dl_node() {
       _info_msg "Installing nvm" # nvm install script auto adds to PATH if needed
       curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
     fi
-    source ~/.nvm/nvm.sh # source to activate nvm
+    source ~/.nvm/nvm.sh # source to activate nvm for scripts
   fi
   local node_ver="$1"
-  # set node_ver to "--lts" if value is "latest"
-  [[ $1 == "latest" ]] && node_ver="--lts"
-  # get latest node ver specified from nvm. NOTE: potentially flaky, investigate stability
+  [[ $1 == "latest" ]] && node_ver="--lts" # set node_ver to "--lts" if value is "latest"
+  # get latest node ver specified from nvm. TODO: potentially flaky, investigate stability
   local latest_node_ver=$(nvm version-remote "$node_ver")
   if [[ "$(nvm current)" != "$latest_node_ver" ]]; then
     _info_msg "Installing node $latest_node_ver"
@@ -222,7 +216,7 @@ check() {
   # setup ubuntu: remove snaps, install ubuntu-restricted-extras, disable auto upgrades
   if [[ $(yq '.check.distroCfg' "$CONFIG") == true ]] \
     && [[ $DISTRO == "ubuntu" ]]; then
-    # remove snap modified: https://www.baeldung.com/linux/snap-remove-disable
+    # remove snap modified from https://www.baeldung.com/linux/snap-remove-disable
     if command -v snap &>/dev/null; then
       _info_msg "Removing snap packages"
       # exclude bare, core20, snapd first as snap depends on these
@@ -231,9 +225,9 @@ check() {
           | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' | awk '{print $1}'
       )
       for pkg in "${snap_pkgs[@]}"; do snap remove --purge "$pkg"; done
+      # remove core20. NOTE: this number can change
       if snap list 2>/dev/null | grep -q '^core[0-9][0-9]'; then
-        sudo snap remove --purge \
-          "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]')"
+        sudo snap remove --purge "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]')"
       fi
       sudo snap remove --purge bare
       sudo snap remove --purge snapd
@@ -253,19 +247,15 @@ check() {
       _info_msg "Stop snapd.mounts-pre.target, started by system boot"
       sudo systemctl stop snapd.mounts-pre.target
     fi
-    # TODO: update snap dirs for 24.10
     if [[ -d ~/snap || -d /snap || -d /var/snap || -d /var/lib/snapd ]]; then
       _info_msg "Removing snap package directories / leftover snap directories"
       sudo rm -rf ~/snap /snap /var/snap /var/lib/snapd
     fi
-    if [[ ! -f /etc/apt/preferences.d/nosnap.pref ]]; then
-      _info_msg "Creating nosnap.pref to prevent snap from being reinstalled"
-      sudo tee /etc/apt/preferences.d/nosnap.pref <<EOF >/dev/null
+    sudo tee /etc/apt/preferences.d/nosnap.pref <<EOF >/dev/null
 Package: snapd
 Pin: release a=*
 Pin-Priority: -10
 EOF
-    fi
 
     if ! dpkg -s ubuntu-restricted-extras &>/dev/null; then
       _info_msg "Installing ubuntu-restricted-extras"
@@ -365,13 +355,12 @@ EOF
     fi
 
     # install latest python version if pyenv python version is not latest.
+    local latest_py=$(pyenv latest -k "$(yq '.check.python.version' "$CONFIG")")
     if [[ $(yq '.check.python.version' "$CONFIG") == "latest" ]]; then
-      local latest_py=$(pyenv latest -k 3)
-    else
-      local latest_py=$(pyenv latest -k "$(yq '.check.python.version' "$CONFIG")")
+      latest_py=$(pyenv latest -k 3)
     fi
     if [[ $(pyenv version-name) != "$latest_py" ]]; then
-      # only install if python version exists but is not set to global
+      # install if latest ver is not in system (ie not previously installed)
       if ! pyenv versions | grep "$latest_py"; then
         _info_msg "Installing latest Python version $latest_py"
         pyenv install "$latest_py"
