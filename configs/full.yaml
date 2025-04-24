@@ -164,8 +164,8 @@ install:
       url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
     - name: drawio.AppImage
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
-    - name: obsidian.deb
-      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+    - name: Obsidian.AppImage
+      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
     - name: zen.AppImage
       url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
   languages:
@@ -226,7 +226,6 @@ configure:
       defaultTerm: !enabled alacritty
       plankDock: true
       panelToMenuBar: true
-      gTile: true
     gnome:
       settings: true
       extensions: !enabled

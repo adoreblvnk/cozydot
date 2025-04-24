@@ -150,7 +150,6 @@ configure:
       defaultTerm: !enabled alacritty
       plankDock: true
       panelToMenuBar: true
-      gTile: true
     gnome:
       settings: true
       extensions: !enabled

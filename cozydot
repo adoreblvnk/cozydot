@@ -154,7 +154,8 @@ _set_global_var() {
 
   if [[ -n ${UBUNTU_CODENAME:-} ]]; then
     _info_msg "Ubuntu-based distro detected. overwriting \$VERSION_CODENAME to $UBUNTU_CODENAME"
-    # overwrite $VERSION_CODENAME to use $UBUNTU_CODENAME for adding repos in config. No major consequences
+    # Overwrite $VERSION_CODENAME to use $UBUNTU_CODENAME for adding repos in
+    # config. No major consequences anyways
     VERSION_CODENAME="$UBUNTU_CODENAME"
   fi
 }
@@ -168,12 +169,15 @@ _dl_golang() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
   if [[ $1 == "latest" ]]; then
-    latest_go="$(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-)"
+    latest_go="$(
+      curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-
+    )"
   fi
   if ! command -v go &>/dev/null \
     || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
     _info_msg "Downloading golang $latest_go"
-    curl -sSL -o "/tmp/go.tar.gz" "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
+    curl -sSL -o "/tmp/go.tar.gz" \
+      "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
     source ~/.bashrc
   fi
@@ -187,13 +191,14 @@ _dl_node() {
   if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_node"; fi
   if ! command -v nvm &>/dev/null; then
     if [[ ! -f ~/.nvm/nvm.sh ]]; then
-      _info_msg "Installing nvm" # nvm install script auto adds to PATH if needed
+      _info_msg "Installing nvm" # install script adds nvm to PATH if needed
       curl -ssLo- https://github.com/nvm-sh/nvm/raw/master/install.sh | bash
     fi
     source ~/.nvm/nvm.sh # source to activate nvm for scripts
   fi
   local node_ver="$1"
-  [[ $1 == "latest" ]] && node_ver="--lts" # set node_ver to "--lts" if value is "latest"
+  # set node_ver to "--lts" if value is "latest"
+  [[ $1 == "latest" ]] && node_ver="--lts"
   # get latest node ver specified from nvm. TODO: potentially flaky, investigate stability
   local latest_node_ver=$(nvm version-remote "$node_ver")
   if [[ "$(nvm current)" != "$latest_node_ver" ]]; then
@@ -227,7 +232,8 @@ check() {
       for pkg in "${snap_pkgs[@]}"; do snap remove --purge "$pkg"; done
       # remove core20. NOTE: this number can change
       if snap list 2>/dev/null | grep -q '^core[0-9][0-9]'; then
-        sudo snap remove --purge "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]')"
+        sudo snap remove --purge \
+          "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]')"
       fi
       sudo snap remove --purge bare
       sudo snap remove --purge snapd
@@ -290,7 +296,7 @@ EOF
     fi
 
     DISTRIBUTION=$VERSION_CODENAME
-    cat <<EOF | sudo tee /etc/apt/sources.list >/dev/null
+    sudo tee /etc/apt/sources.list <<EOF >/dev/null
 deb http://deb.debian.org/debian $DISTRIBUTION main contrib non-free non-free-firmware
 deb-src http://deb.debian.org/debian $DISTRIBUTION main contrib non-free non-free-firmware
 
@@ -304,7 +310,7 @@ deb-src http://deb.debian.org/debian ${DISTRIBUTION}-updates main contrib non-fr
 EOF
 
   else
-    _warning_msg "${cozydot_txt} only supports Ubuntu / Debian / Linux Mint. $DISTRO unsupported."
+    _warning_msg "$cozydot_txt only supports Ubuntu / Debian / Linux Mint. $DISTRO unsupported."
   fi
 
   if [[ $(yq '.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
@@ -338,8 +344,9 @@ EOF
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
       if [[ ! -d ~/.pyenv ]]; then
-        # NOTE: if pyenv dir exists but pyenv command fails, this means that pyenv isn't in PATH
-        # install pyenv-installer https://github.com/pyenv/pyenv-installer &:
+        # NOTE: if pyenv dir exists but pyenv command fails, this means that
+        # pyenv isn't in PATH
+        # install pyenv-installer https://github.com/pyenv/pyenv-installer
         #   - pyenv https://github.com/pyenv/pyenv
         #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
         #   - pyenv-update https://github.com/pyenv/pyenv-update
@@ -390,8 +397,8 @@ EOF
   # setup appimaged if appimaged service isn't running or appimage.cleanInstall is specified
   if [[ $(yq '.check.appimaged' "$CONFIG") == true ]]; then
     if ! systemctl --user -q is-active appimaged; then
-      _info_msg "Installing appimaged"
       # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
+      _info_msg "Installing appimaged"
 
       # remove pre-existing similar tools
       systemctl --user stop appimaged.service || true
@@ -399,8 +406,7 @@ EOF
 
       # clear cache
       rm -rf "$HOME/.local/share/applications/appimage*"
-      [ -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service ] \
-        && rm ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
+      rm -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
 
       # download appimaged
       mkdir -p ~/Applications
@@ -471,9 +477,8 @@ install() {
       local key_path="$(yq ".install.addRepos[$i].keyPath" "$CONFIG")"
       local repo="$(yq ".install.addRepos[$i].repo" "$CONFIG")"
 
-      # Eval string if subshell / variable detected. Causes error if other Bash
-      # special chars are used incorrectly
-      # shellcheck disable=SC2016
+      # Eval string if subshell / var detected. Causes error if Bash special
+      # characters used incorrectly
       if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$remote_key"; then
         remote_key="$(eval echo "$remote_key")"
       fi
@@ -485,13 +490,13 @@ install() {
       # if key is a gpg file, then dearmor after downloading the key
       elif [[ $key_path == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
-        sudo curl -sSL "$remote_key" | sudo gpg --dearmor --yes -o "$key_path"
+        curl -sSL "$remote_key" | sudo gpg --dearmor --yes -o "$key_path"
       fi
 
       # add repo entry into sources.list.d
       local source_file_path="/etc/apt/sources.list.d/$source_name.list"
       _info_msg "Adding repo entry for $source_name into sources.list.d"
-      eval echo "$repo" | sudo tee "$source_file_path" >/dev/null
+      sudo tee "$source_file_path" <<<"$repo" >/dev/null
 
       # perform pinning to prioritise 3rd party if pinning entry exists
       if [[ $(yq ".install.addRepos[$i].pinning" "$CONFIG") != false ]]; then
@@ -597,11 +602,10 @@ update() {
     _info_msg "Updating & upgrading apt packages"
     sudo apt-get -qq update && sudo apt-get -qq upgrade
     # upgrades the entire system, installing new packages if necessary, &
-    # removes old archive files & unused packages with their config files
+    # removes unused (orphaned) packages with their config files
     if [[ $(yq '.update.apt.aptFull' "$CONFIG") == true ]]; then
       _info_msg "Performing a full upgrade & removing uneeded packages & apt cache"
       sudo apt-get -qy dist-upgrade
-      sudo apt-get -qy autoclean
       sudo apt-get -qy --purge autoremove
     fi
   fi
@@ -629,8 +633,8 @@ update() {
 
   # update yq
   if [[ $(yq '.update.other.yq' "$CONFIG") == true ]]; then
-    local_yq_ver=$(yq -V | cut -d ' ' -f 4)
-    latest_yq_ver=$(
+    local local_yq_ver=$(yq -V | cut -d ' ' -f 4)
+    local latest_yq_ver=$(
       curl -sSL https://api.github.com/repos/mikefarah/yq/releases/latest \
         | yq '.tag_name'
     )
@@ -698,17 +702,15 @@ configure() {
     done
   fi
 
-  # setup Alacritty adds desktop entry & bash completion
+  # setup Alacritty adds desktop icon & entry
   if [[ $(yq '.configure.apps.alacritty' "$CONFIG") == true ]] \
     && command -v alacritty &>/dev/null; then
-    # add desktop icon
     if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
       _info_msg "Adding Alacritty icon"
       sudo curl -sSL --create-dirs -o /usr/share/pixmaps/Alacritty.svg \
         https://github.com/alacritty/alacritty/raw/master/extra/logo/alacritty-term.svg
     fi
 
-    # add desktop entry
     if [[ ! -f /usr/share/applications/Alacritty.desktop ]]; then
       _info_msg "Adding desktop entry"
       sudo curl -sSL --create-dirs -o /usr/share/applications/Alacritty.desktop \
@@ -724,10 +726,8 @@ configure() {
     # manage Docker as non-root user
     if ! getent group docker | grep "$USER" &>/dev/null; then
       _info_msg "Adding user to docker group to allow user to execute docker commands"
-      # create Docker group
-      sudo groupadd -f docker
-      # add user to Docker group
-      sudo usermod -aG docker "$USER"
+      sudo groupadd -f docker         # create Docker group
+      sudo usermod -aG docker "$USER" # add user to Docker group
       # change group ID to Docker to activate change in current shell
       newgrp docker
     fi
@@ -741,19 +741,18 @@ configure() {
       yq -n -o=j '{"log-driver": "local", "log-opts": {"max-size": "10m"}}' \
         | sudo tee /etc/docker/daemon.json >/dev/null
     fi
+  elif [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]]; then
+    _warning_msg "Docker not installed, skipping..."
   fi
 
   # setup virtualbox adds user to vboxusers group
   if [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]] \
     && command -v virtualbox &>/dev/null; then
-    # to allow virtualbox to access USB devices, add $USER to vboxusers group
-    # https://www.virtualbox.org/manual/ch02.html
+    # accesss USB devices https://www.virtualbox.org/manual/ch02.html#install-linux-vboxusers
     if ! getent group vboxusers | grep "$USER" &>/dev/null; then
-      _info_msg "Adding user to vboxusers group to allow user to execute virtualbox commands"
-      # create vboxusers group
-      sudo groupadd -f vboxusers
-      # add user to vboxusers group
-      sudo usermod -aG vboxusers "$USER"
+      _info_msg "Adding user to vboxusers group to allow user to access USB devices"
+      sudo groupadd -f vboxusers         # create vboxusers group
+      sudo usermod -aG vboxusers "$USER" # add user to vboxusers group
       # change group ID to vboxusers to activate change in current shell
       newgrp vboxusers
     fi
@@ -769,10 +768,9 @@ configure() {
     mapfile -t extensions < <(
       yq -r '.configure.apps.vscodeExtensions[]' "$CONFIG"
     )
-    local installed_ext=$(code --list-extensions)
+    local installed_ext="$(code --list-extensions)"
     for ext in "${extensions[@]}"; do
-      if ! grep -iq "$ext" <<<"$installed_ext"; then
-        # install vscode extensions
+      if ! grep -q "$ext" <<<"$installed_ext"; then
         code --install-extension "$ext"
       fi
     done
@@ -839,23 +837,6 @@ EOF
         gsettings set org.cinnamon panels-enabled "['1:0:top']"
         # smaller panel height
         gsettings set org.cinnamon panels-height "['1:25']"
-      fi
-
-      # install gTile tiling assistant
-      if [[ $(yq '.configure.DE.cinnamon.gTile' "$CONFIG") == true ]]; then
-        if [[ ! -d ~/.local/share/cinnamon/extensions/gTile@shuairan ]]; then
-          _info_msg "Downloading gTile extension"
-          curl -sSL -o /tmp/gTile@shuairan.zip \
-            https://cinnamon-spices.linuxmint.com/files/extensions/gTile@shuairan.zip
-          unzip /tmp/gTile@shuairan.zip \
-            -d ~/.local/share/cinnamon/extensions >/dev/null
-        fi
-        if ! gsettings get org.cinnamon enabled-extensions | grep -q gTile; then
-          _warning_msg "Enabling gTile will disable other extensions"
-          gsettings set org.cinnamon enabled-extensions "['gTile@shuairan']"
-        else
-          _info_msg "gTile already enabled"
-        fi
       fi
     fi
 
@@ -965,7 +946,8 @@ main() {
   # PRINT FUNCTIONS
   colours true
 
-  # make this script an executable by creating symlink to /usr/local/bin. script path must be ~/.cozydot/cozydot for standardisation
+  # Make this script an executable by creating symlink to /usr/local/bin.
+  # script path must be ~/.cozydot/cozydot for standardisation
   if [[ ! -L /usr/local/bin/cozydot ]]; then
     if [[ $(realpath "$0") != "/home/$USER/.cozydot/cozydot" ]]; then
       _info_msg "Moving cozydot to ~/.cozydot"
@@ -976,15 +958,13 @@ main() {
     exit
   fi
 
-  # install curl if not installed
   if ! command -v curl &>/dev/null; then
-    _info_msg "Installing curl"
-    sudo apt-get install -qq curl # NOTE: do not update to save time
+    _info_msg "Installing curl" # NOTE: do not update curl to save time
+    sudo apt-get install -qq curl
   fi
 
-  # download & install yq if not installed
   if ! command -v yq &>/dev/null; then
-    _info_msg "Installing yq"
+    _info_msg "Installing yq" # NOTE: do not update yq to save time
     sudo curl -sSL -o /usr/bin/yq \
       https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     sudo chmod +x /usr/bin/yq

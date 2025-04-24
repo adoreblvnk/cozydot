@@ -1,8 +1,6 @@
 # Can't follow non-constant source. Use a directive to specify location
 disable=SC1090
-# Not following: (error message here)
-disable=SC1091
-# Add a shebang
-disable=SC2148
+# Expressions don't expand in single quotes, use double quotes for that.
+disable=SC2016
 # Declare and assign separately to avoid masking return values
 disable=SC2155
