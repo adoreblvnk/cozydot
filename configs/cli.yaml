@@ -147,16 +147,15 @@ configure:
     virtualbox: false
     vscodeExtensions: !disabled
       - catppuccin.catppuccin-vsc
-  DE: !disabled
-    cinnamon:
-      defaultTerm: !enabled alacritty
-      plankDock: true
-      panelToMenuBar: true
-    gnome:
-      settings: true
-      extensions: !enabled
-        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-        - rounded-window-corners@fxgn
-      defaultTerm: !enabled alacritty
-      MacOSDock: true
-      smoothRoundedCorners: true
+  DE_cinnamon: !disabled
+    defaultTerm: !enabled alacritty
+    plankDock: true
+    panelToMenuBar: true
+  DE_gnome: !disabled
+    settings: true
+    extensions: !enabled
+      # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
+      - rounded-window-corners@fxgn
+    defaultTerm: !enabled alacritty
+    MacOSDock: true
+    smoothRoundedCorners: true

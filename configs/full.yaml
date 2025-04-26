@@ -221,18 +221,17 @@ configure:
       - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
-  DE: !enabled
-    cinnamon:
-      defaultTerm: !enabled alacritty
-      plankDock: true
-      panelToMenuBar: true
-    gnome:
-      settings: true
-      extensions: !enabled
-        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-        - blur-my-shell@aunetx
-        - netspeedsimplified@prateekmedia.extension
-        - rounded-window-corners@fxgn
-      defaultTerm: !enabled alacritty
-      MacOSDock: true
-      smoothRoundedCorners: true
+  DE_cinnamon: !enabled
+    defaultTerm: !enabled alacritty
+    plankDock: true
+    panelToMenuBar: true
+  DE_gnome: !enabled
+    settings: true
+    extensions: !enabled
+      # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
+      - blur-my-shell@aunetx
+      - netspeedsimplified@prateekmedia.extension
+      - rounded-window-corners@fxgn
+    defaultTerm: !enabled alacritty
+    MacOSDock: true
+    smoothRoundedCorners: true
