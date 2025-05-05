@@ -79,6 +79,13 @@ install:
     - vim
     - vlc
   addRepos: !enabled
+    - sourceName: brave-browser-release
+      remoteKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+      keyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
+      repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
+      pinning: false
+      packages:
+        - brave-browser
     - sourceName: docker
       remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
       keyPath: /etc/apt/keyrings/docker.asc
@@ -114,13 +121,6 @@ install:
       pinning: false
       packages:
         - onlyoffice-desktopeditors
-    - sourceName: thorium
-      remoteKey: null
-      keyPath: null
-      repo: deb [trusted=yes arch=amd64] http://dl.thorium.rocks/debian stable main
-      pinning: false
-      packages:
-        - thorium-browser
     - sourceName: virtualbox
       remoteKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
       keyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
