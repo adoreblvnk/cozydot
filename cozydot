@@ -3,7 +3,8 @@
 set -euo pipefail
 
 # global variables
-VERSION=0.0.1 CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
+readonly VERSION=0.0.1
+CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 

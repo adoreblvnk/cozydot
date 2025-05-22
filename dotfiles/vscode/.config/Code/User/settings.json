@@ -17,8 +17,9 @@
   "editor.wordWrap": "on",
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
-  "files.exclude": { "**/.git": false },
+  "files.exclude": {"**/.DS_Store": false, "**/.git": false},
   "search.exclude": { "**/.git": true },
+  "telemetry.feedback.enabled": false,
   "telemetry.telemetryLevel": "off",
   "todohighlight.keywords": ["NOTE:"],
   "window.menuBarVisibility": "toggle",
@@ -30,6 +31,7 @@
   // Extensions
   "git.enableCommitSigning": true,
   "gitlens.telemetry.enabled": false,
+  "go.survey.prompt": false,
   "javascript.suggest.completeFunctionCalls": true,
   "python.analysis.completeFunctionParens": true,
   "rust-analyzer.check.command": "clippy",
