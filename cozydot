@@ -1,5 +1,4 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 set -euo pipefail
 
 # global variables
@@ -15,34 +14,27 @@ DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 #   colours enabled, a boolean
 colours() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
-  B_RED="" B_GREEN="" B_YELLOW="" B_BLUE="" B_MAGENTA="" B_CYAN=""
   cozydot_txt="cozydot"
   if [[ "$(tput colors)" -ge 8 ]] && [[ $1 == true ]]; then
     NC="$(tput sgr0)" # text reset (select graphic representation default)
     BOLD="$(tput bold)"
-    RED="$(tput setaf 1)"            # red
-    GREEN="$(tput setaf 2)"          # green
-    YELLOW="$(tput setaf 3)"         # yellow
-    BLUE="$(tput setaf 4)"           # blue
-    MAGENTA="$(tput setaf 5)"        # magenta
-    CYAN="$(tput setaf 6)"           # cyan
-    B_RED="$(tput bold setaf 1)"     # bold red
-    B_GREEN="$(tput bold setaf 2)"   # bold green
-    B_YELLOW="$(tput bold setaf 3)"  # bold yellow
-    B_BLUE="$(tput bold setaf 4)"    # bold blue
-    B_MAGENTA="$(tput bold setaf 5)" # bold magenta
-    B_CYAN="$(tput bold setaf 6)"    # bold cyan
-    cozydot_txt="${B_RED}c${B_YELLOW}o${B_GREEN}z${B_CYAN}y${B_BLUE}d${B_MAGENTA}o${B_RED}t${NC}"
+    RED="$(tput setaf 1)"       # red
+    GREEN="$(tput setaf 2)"     # green
+    YELLOW="$(tput setaf 3)"    # yellow
+    BLUE="$(tput setaf 4)"      # blue
+    MAGENTA="$(tput setaf 5)"   # magenta
+    CYAN="$(tput setaf 6)"      # cyan
+    cozydot_txt="${RED}c${YELLOW}o${GREEN}z${CYAN}y${BLUE}d${MAGENTA}o${RED}t${NC}"
   fi
 }
 
-_info_msg() { echo "${B_BLUE}Info:${NC} $1"; }
+_info_msg() { echo "${BOLD}${BLUE}Info:${NC} $1"; }
 
-_success_msg() { echo "${B_GREEN}Success:${NC} $1"; }
+_success_msg() { echo "${BOLD}${GREEN}Success:${NC} $1"; }
 
-_warning_msg() { echo "${B_YELLOW}Warning:${NC} $1"; }
+_warning_msg() { echo "${BOLD}${YELLOW}Warning:${NC} $1"; }
 
-_error_msg() { echo "${B_RED}Error:${NC} $1" && exit 1; }
+_error_msg() { echo "${BOLD}${RED}Error:${NC} $1" && exit 1; }
 
 _usage() {
   cat <<EOF

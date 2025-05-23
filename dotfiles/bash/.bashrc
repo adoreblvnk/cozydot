@@ -97,7 +97,6 @@ if command -v yazi &>/dev/null; then
 fi
 
 if command -v zellij &>/dev/null; then
-  export ZELLIJ_AUTO_EXIT=true # https://zellij.dev/documentation/integration#bash
   eval "$(zellij setup --generate-auto-start bash)"
   # https://zellij.dev/documentation/controlling-zellij-through-cli#completions
   eval "$(zellij setup --generate-completion bash)"
