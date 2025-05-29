@@ -15,14 +15,8 @@ DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 colours() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
   if [[ $(tput colors) -ge 8 ]] && [[ $1 == true ]]; then
-    NC=$(tput sgr0) # text reset (select graphic representation default)
-    BOLD=$(tput bold)
-    RED=$(tput setaf 1)
-    GREEN=$(tput setaf 2)
-    YELLOW=$(tput setaf 3)
-    BLUE=$(tput setaf 4)
-    MAGENTA=$(tput setaf 5)
-    CYAN=$(tput setaf 6)
+    NC=$(tput sgr0) BOLD=$(tput bold) # text reset (select graphic representation default)
+    RED=$(tput setaf 1) GREEN=$(tput setaf 2) YELLOW=$(tput setaf 3) BLUE=$(tput setaf 4) MAGENTA=$(tput setaf 5) CYAN=$(tput setaf 6)
   fi
   cozydot_txt="${RED}c${YELLOW}o${GREEN}z${CYAN}y${BLUE}d${MAGENTA}o${RED}t${NC}"
 }
