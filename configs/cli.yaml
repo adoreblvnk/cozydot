@@ -149,8 +149,6 @@ configure:
       - catppuccin.catppuccin-vsc
   DE_cinnamon: !disabled
     defaultTerm: !enabled alacritty
-    plankDock: true
-    panelToMenuBar: true
   DE_gnome: !disabled
     settings: true
     extensions: !enabled

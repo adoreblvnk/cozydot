@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # global variables
-readonly VERSION=0.0.1
+readonly COZYDOT_VERSION=0.0.1
 CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
@@ -65,33 +65,6 @@ ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/cozydot$
 EOF
 }
 
-# ----- OPTIONS -----
-
-# Use config specified in configs directory.
-# Arguments:
-#   $1: name of config yaml file
-set_config() {
-  CONFIG="$(dirname "$(realpath "$0")")/configs/$1.yaml"
-  if [[ ! -f $CONFIG ]]; then
-    _error_msg "Config selected ${GREEN}$1${NC} does not exist"
-  fi
-}
-
-list_configs() {
-  local configs
-  # find all preset files, then filter out the parent dirs & file suffixes
-  mapfile -t configs < <(
-    find "$(dirname "$(realpath "$0")")/configs" -type f \
-      | awk -F '[/.]' '{print $(NF-1)}'
-  )
-  printf "%s\n" "${YELLOW}Available configs:${NC}"
-  for config in "${configs[@]}"; do
-    printf "%s\n" "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$(dirname "$(realpath "$0")")/configs/$config.yaml")"
-  done
-}
-
-get_version() { printf "%s\n" "$cozydot_txt $VERSION" && exit; }
-
 # ----- SET GLOBAL VARIABLES -----
 
 # Set complex global variables that require commands to be set.
@@ -152,7 +125,7 @@ _set_global_var() {
 # Arguments:
 #   $1: go version. must be either "latest" or <major>.<minor>.<patch>
 _dl_golang() {
-  if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
+  if [ -z "${1:-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
   if [[ $1 == "latest" ]]; then
     latest_go="$(
@@ -174,7 +147,7 @@ _dl_golang() {
 # Arguments:
 #   $1: node version. format must either be "latest" | <major>[.<minor>[.<patch>]]
 _dl_node() {
-  if [ -z "${1-}" ]; then _error_msg "no value supplied to _dl_node"; fi
+  if [ -z "${1:-}" ]; then _error_msg "no value supplied to _dl_node"; fi
   if ! command -v nvm &>/dev/null; then
     if [[ ! -f ~/.nvm/nvm.sh ]]; then
       _info_msg "Installing nvm" # install script adds nvm to PATH if needed
@@ -193,6 +166,33 @@ _dl_node() {
   fi
   _info_msg "nvm $(nvm -v), node $(node -v), npm $(npm -v) installed"
 }
+
+# ----- OPTIONS -----
+
+# Use config specified in configs directory.
+# Arguments:
+#   $1: name of config yaml file
+set_config() {
+  CONFIG="$(dirname "$(realpath "$0")")/configs/$1.yaml"
+  if [[ ! -f $CONFIG ]]; then
+    _error_msg "Config selected ${GREEN}$1${NC} does not exist"
+  fi
+}
+
+list_configs() {
+  local configs
+  # find all preset files, then filter out the parent dirs & file suffixes
+  mapfile -t configs < <(
+    find "$(dirname "$(realpath "$0")")/configs" -type f \
+      | awk -F '[/.]' '{print $(NF-1)}'
+  )
+  printf "%s\n" "${YELLOW}Available configs:${NC}"
+  for config in "${configs[@]}"; do
+    printf "%s\n" "  ${GREEN}$config${NC}: $(yq '.metadata.description' "$(dirname "$(realpath "$0")")/configs/$config.yaml")"
+  done
+}
+
+get_version() { printf "%s\n" "$cozydot_txt $COZYDOT_VERSION" && exit; }
 
 # ----- COMMANDS -----
 
@@ -775,56 +775,6 @@ configure() {
       gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
       gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
     fi
-
-    # install & autostart plank dock
-    if [[ $(yq '.configure.DE_cinnamon.plankDock' "$CONFIG") == true ]]; then
-      if ! command -v plank &>/dev/null; then
-        _info_msg "Installing plank"
-        sudo apt-get update -qq && sudo apt-get install -qq plank
-      fi
-
-      _info_msg "Adding plank to startup"
-      # sleep to let apps load before adding to plank
-      cat <<EOF >"$HOME/.config/autostart/plank.desktop"
-[Desktop Entry]
-Name=Plank
-GenericName=Dock
-Comment=Stupidly simple.
-Categories=Utility;
-Type=Application
-Exec=bash -c "sleep 5 && plank"
-Icon=plank
-Terminal=false
-NoDisplay=false
-EOF
-    fi
-
-    # convert cinnamon panel to MacOS-like menu bar
-    if [[ $(yq '.configure.DE_cinnamon.panelToMenuBar' "$CONFIG") == true ]]; then
-      _info_msg "Converting panel to menu bar"
-      # panel applets in order
-      # https://support.apple.com/en-al/guide/mac-help/mchlp1446
-      # https://support.apple.com/en-kw/guide/mac-help/mchlad96d366
-      gsettings set org.cinnamon enabled-applets "[ \
-          'panel1:left:0:menu@cinnamon.org:1', \
-          'panel1:right:1:xapp-status@cinnamon.org:2', \
-          'panel1:right:2:notifications@cinnamon.org:3', \
-          'panel1:right:3:printers@cinnamon.org:4', \
-          'panel1:right:4:removable-drives@cinnamon.org:5', \
-          'panel1:right:5:keyboard@cinnamon.org:6', \
-          'panel1:right:6:power@cinnamon.org:7', \
-          'panel1:right:7:sound@cinnamon.org:8', \
-          'panel1:right:8:network@cinnamon.org:9', \
-          'panel1:right:9:calendar@cinnamon.org:10' \
-        ]"
-      # panel icon sizes
-      gsettings set org.cinnamon panel-zone-symbolic-icon-sizes \
-        '[{"left": 25, "center": 25, "right": 20, "panelId": 1}]'
-      # shift panel position to top
-      gsettings set org.cinnamon panels-enabled "['1:0:top']"
-      # smaller panel height
-      gsettings set org.cinnamon panels-height "['1:25']"
-    fi
   fi
 
   # GNOME desktop environment configurations
@@ -875,8 +825,11 @@ EOF
     if [[ $(yq '.configure.DE_gnome.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
       local term=$(yq ".configure.DE_gnome.defaultTerm" "$CONFIG")
       _info_msg "Setting default terminal to $term"
-      # add terminal keyboard shortcut. if statement to check for dedicated terminal key in Ubuntu
-      if ! gsettings get org.gnome.settings-daemon.plugins.media-keys terminal &>/dev/null; then
+      # Ubuntu has a dedicated terminal key, so we just need to set (not add) a keyboard shortcut
+      if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal &>/dev/null; then
+        gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
+        gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
+      else
         _info_msg "Adding terminal keyboard shortcut to ${BLUE}<Primary><Alt>T${NC}"
         dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
           "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
@@ -884,10 +837,10 @@ EOF
         dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'$term'"
         dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'<Primary><Alt>T'"
       fi
-      gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
     fi
 
     # make Dash to Dock mimic MacOS dock behaviour
+    # default settings: https://github.com/micheleg/dash-to-dock/blob/master/schemas/org.gnome.shell.extensions.dash-to-dock.gschema.xml
     if [[ $(yq '.configure.DE_gnome.MacOSDock' "$CONFIG") == true ]] \
       && gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock'; then
       _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
@@ -911,13 +864,14 @@ EOF
     fi
 
     # smoothen corners in Rounded Window Corners Reborn
+    # default settings: https://github.com/flexagoon/rounded-window-corners/blob/main/resources/schemas/org.gnome.shell.extensions.rounded-window-corners-reborn.gschema.xml
     if [[ $(yq '.configure.DE_gnome.smoothRoundedCorners' "$CONFIG") == true ]] \
       && gnome-extensions list | grep -q rounded-window-corners; then
       _info_msg "Smoothen corners in Rounded Corners extension"
       dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
         "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
-          'borderRadius': <uint32 16>, 'smoothing': <1.0>, \
+          'borderRadius': <uint32 16>, 'smoothing': <0.5>, \
           'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}"
     elif [[ $(yq ".configure.DE_gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
       _warning_msg "Rounded Corners extension not installed"

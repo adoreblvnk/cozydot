@@ -223,8 +223,6 @@ configure:
       - yzhang.markdown-all-in-one
   DE_cinnamon: !enabled
     defaultTerm: !enabled alacritty
-    plankDock: true
-    panelToMenuBar: true
   DE_gnome: !enabled
     settings: true
     extensions: !enabled
