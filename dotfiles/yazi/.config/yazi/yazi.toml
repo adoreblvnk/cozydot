@@ -4,7 +4,7 @@
 # If you encounter any issues, please make an issue at https://github.com/yazi-rs/schemas.
 "$schema" = "https://yazi-rs.github.io/schemas/yazi.json"
 
-[manager]
+[mgr]
 ratio          = [ 1, 3, 4 ]
 sort_by        = "alphabetical"
 sort_sensitive = false
@@ -27,7 +27,6 @@ cache_dir       = ""
 image_delay     = 30
 image_filter    = "triangle"
 image_quality   = 75
-sixel_fraction  = 15
 ueberzug_scale  = 1
 ueberzug_offset = [ 0, 0, 0, 0 ]
 
@@ -48,7 +47,7 @@ reveal = [
 	{ run = 'open -R "$1"',                         desc = "Reveal", for = "macos" },
 	{ run = 'explorer /select,"%1"', orphan = true, desc = "Reveal", for = "windows" },
 	{ run = 'termux-open "$(dirname "$1")"',        desc = "Reveal", for = "android" },
-	{ run = '''exiftool "$1"; echo "Press enter to exit"; read _''', block = true, desc = "Show EXIF", for = "unix" },
+	{ run = '''clear; exiftool "$1"; echo "Press enter to exit"; read _''', block = true, desc = "Show EXIF", for = "unix" },
 ]
 extract = [
 	{ run = 'ya pub extract --list "$@"', desc = "Extract here", for = "unix" },
@@ -86,7 +85,7 @@ micro_workers    = 10
 macro_workers    = 10
 bizarre_retry    = 3
 image_alloc      = 536870912 # 512MB
-image_bound      = [ 0, 0 ]
+image_bound      = [ 5000, 5000 ]
 suppress_preload = false
 
 [plugin]
@@ -100,7 +99,8 @@ spotters = [
 	{ mime = "text/*", run = "code" },
 	{ mime = "application/{mbox,javascript,wine-extension-ini}", run = "code" },
 	# Image
-	{ mime = "image/{avif,hei?,jxl,svg+xml}", run = "magick" },
+	{ mime = "image/{avif,hei?,jxl}", run = "magick" },
+	{ mime = "image/svg+xml", run = "svg" },
 	{ mime = "image/*", run = "image" },
 	# Video
 	{ mime = "video/*", run = "video" },
@@ -109,7 +109,8 @@ spotters = [
 ]
 preloaders = [
 	# Image
-	{ mime = "image/{avif,hei?,jxl,svg+xml}", run = "magick" },
+	{ mime = "image/{avif,hei?,jxl}", run = "magick" },
+	{ mime = "image/svg+xml", run = "svg" },
 	{ mime = "image/*", run = "image" },
 	# Video
 	{ mime = "video/*", run = "video" },
@@ -120,14 +121,15 @@ preloaders = [
 	{ mime = "application/ms-opentype", run = "font" },
 ]
 previewers = [
-	{ name = "*/", run = "folder", sync = true },
+	{ name = "*/", run = "folder" },
 	# Code
 	{ mime = "text/*", run = "code" },
 	{ mime = "application/{mbox,javascript,wine-extension-ini}", run = "code" },
 	# JSON
 	{ mime = "application/{json,ndjson}", run = "json" },
 	# Image
-	{ mime = "image/{avif,hei?,jxl,svg+xml}", run = "magick" },
+	{ mime = "image/{avif,hei?,jxl}", run = "magick" },
+	{ mime = "image/svg+xml", run = "svg" },
 	{ mime = "image/*", run = "image" },
 	# Video
 	{ mime = "video/*", run = "video" },

@@ -63,12 +63,12 @@ fi
 export GPG_TTY=$(tty)
 
 # ----- Load Languages -----
-if [ -d ~/.pyenv ]; then
-  # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
-  export PATH="$HOME/.pyenv/bin:$PATH"
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
-fi
+# if [ -d ~/.pyenv ]; then
+#   # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
+#   export PATH="$HOME/.pyenv/bin:$PATH"
+#   eval "$(pyenv init -)"
+#   eval "$(pyenv virtualenv-init -)"
+# fi
 
 if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
 

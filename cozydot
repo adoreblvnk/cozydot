@@ -326,52 +326,52 @@ EOF
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG
-  if [[ $(yq '.check.python | tag' "$CONFIG") == "!enabled" ]]; then
-    if ! command -v pyenv &>/dev/null; then
-      _info_msg "Installing pyenv"
-      if [[ ! -d ~/.pyenv ]]; then
-        # NOTE: if pyenv dir exists but pyenv command fails, this means that
-        # pyenv isn't in PATH
-        # install pyenv-installer https://github.com/pyenv/pyenv-installer
-        #   - pyenv https://github.com/pyenv/pyenv
-        #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
-        #   - pyenv-update https://github.com/pyenv/pyenv-update
-        #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
-        curl https://pyenv.run | bash
-        source ~/.bashrc
-      fi
-    else
-      if [[ $(yq '.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
-        pyenv update 2>/dev/null
-      fi
-      _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
-    fi
+  # if [[ $(yq '.check.python | tag' "$CONFIG") == "!enabled" ]]; then
+  #   if ! command -v pyenv &>/dev/null; then
+  #     _info_msg "Installing pyenv"
+  #     if [[ ! -d ~/.pyenv ]]; then
+  #       # NOTE: if pyenv dir exists but pyenv command fails, this means that
+  #       # pyenv isn't in PATH
+  #       # install pyenv-installer https://github.com/pyenv/pyenv-installer
+  #       #   - pyenv https://github.com/pyenv/pyenv
+  #       #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
+  #       #   - pyenv-update https://github.com/pyenv/pyenv-update
+  #       #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
+  #       curl https://pyenv.run | bash
+  #       source ~/.bashrc
+  #     fi
+  #   else
+  #     if [[ $(yq '.check.python.pyenvUpdate' "$CONFIG") == true ]]; then
+  #       pyenv update 2>/dev/null
+  #     fi
+  #     _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
+  #   fi
 
-    # install latest python version if pyenv python version is not latest.
-    local latest_py
-    if [[ $(yq '.check.python.version' "$CONFIG") == "latest" ]]; then
-      latest_py=$(pyenv latest -k 3)
-    else
-      latest_py=$(pyenv latest -k "$(yq '.check.python.version' "$CONFIG")")
-    fi
-    if [[ $(pyenv version-name) != "$latest_py" ]]; then
-      # install if latest ver is not in system (ie not previously installed)
-      if ! pyenv versions | grep "$latest_py"; then
-        _info_msg "Installing latest Python version $latest_py"
-        pyenv install "$latest_py"
-      fi
-      _info_msg "Setting global Python version to $latest_py"
-      pyenv global "$latest_py"
-    else
-      _info_msg "Python $(pyenv version-name) is already the latest version"
-    fi
+  #   # install latest python version if pyenv python version is not latest.
+  #   local latest_py
+  #   if [[ $(yq '.check.python.version' "$CONFIG") == "latest" ]]; then
+  #     latest_py=$(pyenv latest -k 3)
+  #   else
+  #     latest_py=$(pyenv latest -k "$(yq '.check.python.version' "$CONFIG")")
+  #   fi
+  #   if [[ $(pyenv version-name) != "$latest_py" ]]; then
+  #     # install if latest ver is not in system (ie not previously installed)
+  #     if ! pyenv versions | grep "$latest_py"; then
+  #       _info_msg "Installing latest Python version $latest_py"
+  #       pyenv install "$latest_py"
+  #     fi
+  #     _info_msg "Setting global Python version to $latest_py"
+  #     pyenv global "$latest_py"
+  #   else
+  #     _info_msg "Python $(pyenv version-name) is already the latest version"
+  #   fi
 
-    if [[ $(yq '.check.python.pip' "$CONFIG") == true ]]; then
-      local py_ver="python$(yq '.check.python.version' "$CONFIG")"
-      $py_ver -m pip install --upgrade pip
-      _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
-    fi
-  fi
+  #   if [[ $(yq '.check.python.pip' "$CONFIG") == true ]]; then
+  #     local py_ver="python$(yq '.check.python.version' "$CONFIG")"
+  #     $py_ver -m pip install --upgrade pip
+  #     _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
+  #   fi
+  # fi
 
   if [[ $(yq '.check.rustupCheck' "$CONFIG") == true ]]; then
     if ! command -v rustup &>/dev/null; then

@@ -1,6 +1,6 @@
 # vim:fileencoding=utf-8:foldmethod=marker
 
-[manager]
+[mgr]
 cwd = { fg = "#81c8be" }
 
 # Hovered
@@ -30,6 +30,10 @@ count_selected = { fg = "#303446", bg = "#e5c890" }
 # Border
 border_symbol = "│"
 border_style  = { fg = "#838ba7" }
+
+[tabs]
+active   = { fg = "#303446", bg = "#8caaee", bold = true }
+inactive = { fg = "#8caaee", bg = "#414559" }
 
 [mode]
 
