@@ -1,24 +1,19 @@
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc) for examples
 
-# if not running interactively, don't do anything
-case $- in *i*) ;; *) return ;; esac
+case $- in *i*) ;; *) return ;; esac # if not running interactively, don't do anything
 
-# don't put duplicate lines or lines starting with space in the history.
-# see bash(1) for more options
+# don't put duplicate lines or lines starting with space in the history. see bash(1) for more options
 HISTCONTROL=ignoreboth
 
 shopt -s histappend # append to the history file, don't overwrite it
 
-# for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
-HISTSIZE=1000 HISTFILESIZE=2000
+HISTSIZE=1000 HISTFILESIZE=2000 # for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
 
-# check the window size after each command and, if necessary, update the values
-# of LINES and COLUMNS.
+# check the window size after each command and, if necessary, update the values of LINES and COLUMNS.
 shopt -s checkwinsize
 
-# If set, the pattern "**" used in a pathname expansion context will match all
-# files and zero or more directories and subdirectories.
+# If set, the pattern "**" used in a pathname expansion context will match all files and zero or more directories and subdirectories.
 # shopt -s globstar
 
 # make less more friendly for non-text input files, see lesspipe(1)
@@ -33,12 +28,10 @@ alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo
 # best practice to add alias definitions into separate file, eg ~/.bash_aliases
 if [ -f ~/.bash_aliases ]; then source ~/.bash_aliases; fi
 
-# bash aliases, personally, I don't use a bash_aliases file
+# bash aliases if you don't use a bash_aliases file
 alias c=clear
 alias py=python
 alias pip="python -m pip"
-
-if command -v cozydot &>/dev/null; then alias czy=cozydot; fi
 
 if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
 
@@ -50,25 +43,24 @@ if command -v eza &>/dev/null; then
   alias tree="eza --group-directories-first --icons=auto -T"
 fi
 
+if command -v cozydot &>/dev/null; then alias czy=cozydot; fi
+
 # enable programmable completion features (you don't need to enable this, if it's
 # already enabled in /etc/bash.bashrc and /etc/profile sources /etc/bash.bashrc).
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
     source /usr/share/bash-completion/bash_completion
-  elif [ -f /etc/bash_completion ]; then source /etc/bash_completion; fi
+  elif [ -f /etc/bash_completion ]; then
+    source /etc/bash_completion
+  fi
 fi
 
-# force GPG to use pinentry (console) to prompt for passwords instead of a
-# window as per `man gpg-agent`
+# force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
 # ----- Load Languages -----
-# if [ -d ~/.pyenv ]; then
-#   # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
-#   export PATH="$HOME/.pyenv/bin:$PATH"
-#   eval "$(pyenv init -)"
-#   eval "$(pyenv virtualenv-init -)"
-# fi
+if command -v uv &>/dev/null; then eval "$(uv generate-shell-completion bash)"; fi
+if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion bash)"; fi
 
 if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
 
@@ -76,7 +68,8 @@ if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
 
 if [ -s ~/.nvm/nvm.sh ]; then
   export NVM_DIR="$HOME/.nvm"
-  source "$NVM_DIR/nvm.sh" && source "$NVM_DIR/bash_completion"
+  source "$NVM_DIR/nvm.sh"
+  source "$NVM_DIR/bash_completion"
 fi
 
 # ----- Apps -----
@@ -89,9 +82,8 @@ if command -v yazi &>/dev/null; then
   function y() {
     local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
     yazi "$@" --cwd-file="$tmp"
-    if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-      builtin cd -- "$cwd"
-    fi
+    IFS= read -r -d '' cwd <"$tmp"
+    [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
     rm -f -- "$tmp"
   }
 fi

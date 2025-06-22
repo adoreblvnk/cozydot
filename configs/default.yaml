@@ -59,9 +59,8 @@ check:
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
   python: !enabled
-    pyenvUpdate: false
-    version: latest
-    pip: false
+    uvUpdate: true
+    version: !enabled 3.13
   rustupCheck: true
   appimaged: true
   nerdfont: !enabled GeistMono

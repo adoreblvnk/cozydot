@@ -59,9 +59,8 @@ check:
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
   python: !enabled
-    pyenvUpdate: false
-    version: latest
-    pip: false
+    uvUpdate: true
+    version: !enabled 3.13
   rustupCheck: true
   appimaged: true
   nerdfont: !enabled GeistMono
@@ -79,17 +78,6 @@ install:
     - vim
     - vlc
   addRepos: !enabled
-    # - sourceName: docker
-    #   remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
-    #   keyPath: /etc/apt/keyrings/docker.asc
-    #   repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${UPSTREAM_DISTRO} $VERSION_CODENAME stable
-    #   pinning: false
-    #   packages:
-    #     - docker-ce
-    #     - docker-ce-cli
-    #     - containerd.io
-    #     - docker-buildx-plugin
-    #     - docker-compose-plugin
     - sourceName: github-cli
       remoteKey: https://cli.github.com/packages/githubcli-archive-keyring.gpg
       keyPath: /etc/apt/keyrings/githubcli-archive-keyring.gpg

@@ -34,6 +34,7 @@
   "go.survey.prompt": false,
   "javascript.suggest.completeFunctionCalls": true,
   "python.analysis.completeFunctionParens": true,
+  "python.analysis.typeCheckingMode": "standard",
   "rust-analyzer.check.command": "clippy",
   "shellformat.flag": "-i 2 -ci -bn"
 }
