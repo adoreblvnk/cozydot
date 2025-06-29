@@ -325,8 +325,53 @@ EOF
     done
   fi
 
+  # installs pyenv, installs python according to version specified in $CONFIG
+  if [[ $(yq '.check.pyenv | tag' "$CONFIG") == "!enabled" ]]; then
+    if ! command -v pyenv &>/dev/null; then
+      _info_msg "Installing pyenv"
+      if [[ ! -d ~/.pyenv ]]; then
+        # NOTE: if pyenv dir exists but pyenv command fails, this means that pyenv isn't in PATH
+        # install pyenv-installer https://github.com/pyenv/pyenv-installer
+        #   - pyenv https://github.com/pyenv/pyenv
+        #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
+        #   - pyenv-update https://github.com/pyenv/pyenv-update
+        #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
+        curl https://pyenv.run | bash
+        source ~/.bashrc
+      else
+        _error_msg "pyenv directory already exists, but pyenv command not found. Please add ~/.pyenv/bin to PATH"
+      fi
+    else
+      if [[ $(yq '.check.pyenv.update' "$CONFIG") == true ]]; then
+        _info_msg "Updating pyenv"
+        pyenv update &>/dev/null
+      fi
+      _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
+    fi
+
+    # install latest python version if pyenv python version is not latest
+    local latest_py=$(pyenv latest -k "$(yq '.check.pyenv.version' "$CONFIG")")
+    if [[ $(pyenv version-name) != "$latest_py" ]]; then
+      # install if latest ver is not in system (ie not previously installed)
+      if ! pyenv versions | grep "$latest_py"; then
+        _info_msg "Installing latest Python version $latest_py"
+        pyenv install "$latest_py"
+      fi
+      _info_msg "Setting global Python version to $latest_py"
+      pyenv global "$latest_py"
+    else
+      _info_msg "Python $(pyenv version-name) is already the latest"
+    fi
+
+    if [[ $(yq '.check.pyenv.pip' "$CONFIG") == true ]]; then
+      local py_ver="python$(yq '.check.pyenv.version' "$CONFIG")"
+      $py_ver -m pip install --upgrade pip
+      _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
+    fi
+  fi
+
   # installs uv, optionally pins to a specific version of Python
-  if [[ $(yq '.check.python | tag' "$CONFIG") == "!enabled" ]]; then
+  if [[ $(yq '.check.uv | tag' "$CONFIG") == "!enabled" ]]; then
     if ! command -v uv &>/dev/null; then
       _info_msg "Installing uv, a Python package & project manager"
       curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -335,18 +380,18 @@ EOF
       uv self update -q
     fi
 
-    if [[ $(yq '.check.python.version | tag' "$CONFIG") == "!enabled" ]]; then
-      local py_ver="$(yq '.check.python.version' "$CONFIG")"
+    if [[ $(yq '.check.uv.version | tag' "$CONFIG") == "!enabled" ]]; then
+      local py_ver="$(yq '.check.uv.version' "$CONFIG")"
       # use managed-python flag to exclude system Python
-      local local_py_ver="$(uv python list --managed-python --only-installed "$py_ver" \
-        | grep -Eom 1 '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
-      # NOTE: if py_ver is set to major version (eg 3), it may install latest pre-release version
-      local latest_py_ver="$(uv python list --all-versions "$py_ver" \
-        | grep -Eom 1 '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+      local local_py_ver="$(uv python find --managed-python --show-version "$py_ver")"
+      # NOTE: if py_ver is set to major version only (eg 3)
+      local latest_py_ver="$(uv python list "$py_ver" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
       # this also triggers if local_py_ver is not set
       if [[ $local_py_ver != "$latest_py_ver" ]]; then
         _info_msg "Installing Python $latest_py_ver"
         uv python install "$latest_py_ver"
+      else
+        _info_msg "Python $latest_py_ver is already the latest"
       fi
     fi
   fi
@@ -745,10 +790,10 @@ configure() {
   fi
 
   # cinnamon desktop environment configurations
-  if [[ $(yq '.configure.DE_cinnamon | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.configure.DECinnamon | tag' "$CONFIG") == "!enabled" ]] \
     && [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
-    if [[ $(yq '.configure.DE_cinnamon.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
-      local term=$(yq ".configure.DE_cinnamon.defaultTerm" "$CONFIG")
+    if [[ $(yq '.configure.DECinnamon.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
+      local term=$(yq ".configure.DECinnamon.defaultTerm" "$CONFIG")
       _info_msg "Setting default terminal to $term"
       gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
       gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
@@ -756,10 +801,10 @@ configure() {
   fi
 
   # GNOME desktop environment configurations
-  if [[ $(yq '.configure.DE_gnome | tag' "$CONFIG") == "!enabled" ]] \
+  if [[ $(yq '.configure.DEGnome | tag' "$CONFIG") == "!enabled" ]] \
     && [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
     # settings config increase screen blank delay to 15 mins, set dark mode
-    if [[ $(yq '.configure.DE_gnome.settings' "$CONFIG") == true ]]; then
+    if [[ $(yq '.configure.DEGnome.settings' "$CONFIG") == true ]]; then
       _info_msg "Configuring GNOME desktop environment"
       # increase screen blank delay to 15 mins (the max in UI)
       gsettings set org.gnome.desktop.session idle-delay 900
@@ -777,10 +822,10 @@ configure() {
     fi
 
     # install GNOME extensions
-    if [[ $(yq '.configure.DE_gnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
+    if [[ $(yq '.configure.DEGnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
       # download & install GNOME extensions
       local exts
-      mapfile -t exts < <(yq '.configure.DE_gnome.extensions[]' "$CONFIG")
+      mapfile -t exts < <(yq '.configure.DEGnome.extensions[]' "$CONFIG")
       for ext in "${exts[@]}"; do
         if ! gnome-extensions list | grep -q "$ext"; then
           _info_msg "Downloading GNOME extension $(cut -d "@" -f 1 <<<"$ext")"
@@ -800,8 +845,8 @@ configure() {
     fi
 
     # set default terminal
-    if [[ $(yq '.configure.DE_gnome.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
-      local term=$(yq ".configure.DE_gnome.defaultTerm" "$CONFIG")
+    if [[ $(yq '.configure.DEGnome.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
+      local term=$(yq ".configure.DEGnome.defaultTerm" "$CONFIG")
       _info_msg "Setting default terminal to $term"
       # Ubuntu has a dedicated terminal key, so we just need to set (not add) a keyboard shortcut
       if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal &>/dev/null; then
@@ -819,7 +864,7 @@ configure() {
 
     # make Dash to Dock mimic MacOS dock behaviour
     # default settings: https://github.com/micheleg/dash-to-dock/blob/master/schemas/org.gnome.shell.extensions.dash-to-dock.gschema.xml
-    if [[ $(yq '.configure.DE_gnome.MacOSDock' "$CONFIG") == true ]] \
+    if [[ $(yq '.configure.DEGnome.MacOSDock' "$CONFIG") == true ]] \
       && gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock'; then
       _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
       # modify position & size
@@ -837,13 +882,13 @@ configure() {
       dconf write /org/gnome/shell/extensions/dash-to-dock/extend-height false
       # minimize on click when application is opened
       dconf write /org/gnome/shell/extensions/dash-to-dock/click-action "'minimize-or-previews'"
-    elif [[ $(yq ".configure.DE_gnome.MacOSDock" "$CONFIG") == true ]]; then
+    elif [[ $(yq ".configure.DEGnome.MacOSDock" "$CONFIG") == true ]]; then
       _warning_msg "Dash to Dock extension not installed"
     fi
 
     # smoothen corners in Rounded Window Corners Reborn
     # default settings: https://github.com/flexagoon/rounded-window-corners/blob/main/resources/schemas/org.gnome.shell.extensions.rounded-window-corners-reborn.gschema.xml
-    if [[ $(yq '.configure.DE_gnome.smoothRoundedCorners' "$CONFIG") == true ]] \
+    if [[ $(yq '.configure.DEGnome.smoothRoundedCorners' "$CONFIG") == true ]] \
       && gnome-extensions list | grep -q rounded-window-corners; then
       _info_msg "Smoothen corners in Rounded Corners extension"
       dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
@@ -851,7 +896,7 @@ configure() {
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
           'borderRadius': <uint32 16>, 'smoothing': <0.5>, \
           'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}"
-    elif [[ $(yq ".configure.DE_gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
+    elif [[ $(yq ".configure.DEGnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
       _warning_msg "Rounded Corners extension not installed"
     fi
   fi

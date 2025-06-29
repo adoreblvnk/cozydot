@@ -13,7 +13,7 @@ check:
     - podman-docker
     - containerd
     - runc
-    - "*firefox*"     # firefox installed via aptAltSources
+    - "*firefox*" # firefox installed via aptAltSources
     - "*libreoffice*" # libreoffice replaced with onlyoffice
   deps: !enabled
     # essential packages
@@ -58,8 +58,11 @@ check:
     - libxcb-xfixes0-dev
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-  python: !enabled
-    uvUpdate: true
+  pyenv: !enabled
+    update: true
+    version: 3
+    pip: true
+  uv: !enabled
     version: !enabled 3.13
   rustupCheck: true
   appimaged: true
@@ -68,11 +71,11 @@ install:
   check: true
   apt: !enabled
     - default-jdk
-    - fzf         # fuzzy finder
+    - fzf # fuzzy finder
     - gnupg2
     - imagemagick # image converter
     - openssh-server
-    - pandoc      # document converter
+    - pandoc # document converter
     - pass
     - trash-cli
     - vim
@@ -137,25 +140,25 @@ install:
   flatpak: !enabled
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
-    - io.bassi.Amberol      # music player
+    - io.bassi.Amberol # music player
     - org.gimp.GIMP
     - org.qbittorrent.qBittorrent
-    - org.shotcut.Shotcut   # video editor
+    - org.shotcut.Shotcut # video editor
     - org.telegram.desktop
   cargo: !enabled
     - alacritty
-    - bat --locked      # cat replacement
-    - bottom --locked   # process / system monitor
-    - du-dust           # du alternative
-    - eza               # ls replacement
-    - fd-find           # find alternative
-    - macchina          # system info
+    - bat --locked # cat replacement
+    - bottom --locked # process / system monitor
+    - du-dust # du alternative
+    - eza # ls replacement
+    - fd-find # find alternative
+    - macchina # system info
     - starship --locked
     - tealdeer
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
-    - zellij --locked   # terminal multiplexer
-    - zoxide --locked   # smarter cd command
+    - zellij --locked # terminal multiplexer
+    - zoxide --locked # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
@@ -166,7 +169,7 @@ install:
     - name: Obsidian.AppImage
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
     - name: zen.AppImage
-      url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*specific.AppImage")')
+      url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64.AppImage")')
   languages:
     goVersion: !enabled latest
     nodeVersion: !enabled latest
@@ -201,17 +204,14 @@ configure:
     virtualbox: true
     vscodeExtensions: !enabled
       - catppuccin.catppuccin-vsc
+      - charliermarsh.ruff
       - christian-kohler.path-intellisense
       - eamodio.gitlens
       - ecmel.vscode-html-css
       - esbenp.prettier-vscode
-      - foxundermoon.shell-format
       - github.copilot
       - github.copilot-chat
-      - golang.go
-      - ms-python.autopep8
       - ms-python.debugpy
-      - ms-python.isort
       - ms-python.python
       - ms-python.vscode-pylance
       - redhat.vscode-yaml
@@ -220,9 +220,13 @@ configure:
       - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
-  DE_cinnamon: !enabled
+      - foxundermoon.shell-format
+      - golang.go
+      - rust-lang.rust-analyzer
+      - timonwong.shellcheck
+  DECinnamon: !enabled
     defaultTerm: !enabled alacritty
-  DE_gnome: !enabled
+  DEGnome: !enabled
     settings: true
     extensions: !enabled
       # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg

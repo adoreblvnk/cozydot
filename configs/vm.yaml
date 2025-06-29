@@ -13,7 +13,7 @@ check:
     - podman-docker
     - containerd
     - runc
-    - "*firefox*"     # firefox installed via aptAltSources
+    - "*firefox*" # firefox installed via aptAltSources
     - "*libreoffice*" # libreoffice replaced with onlyoffice
   deps: !enabled
     # essential packages
@@ -58,8 +58,11 @@ check:
     - libxcb-xfixes0-dev
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-  python: !enabled
-    uvUpdate: true
+  pyenv: !enabled
+    update: false
+    version: 3
+    pip: true
+  uv: !disabled
     version: !enabled 3.13
   rustupCheck: true
   appimaged: true
@@ -67,11 +70,12 @@ check:
 install:
   check: true
   apt: !enabled
-    - fzf         # fuzzy finder
+    - default-jdk
+    - fzf # fuzzy finder
     - gnupg2
     - imagemagick # image converter
     - openssh-server
-    - pandoc      # document converter
+    - pandoc # document converter
     - pass
     - trash-cli
     - vim
@@ -94,18 +98,16 @@ install:
       pinning: false
       packages:
         - code
-  flatpak: !enabled
-    - com.discordapp.Discord
-    - org.qbittorrent.qBittorrent
+  flatpak: !disabled []
   cargo: !enabled
     - alacritty
-    - bat --locked      # cat replacement
-    - bottom --locked   # process / system monitor
-    - eza               # ls replacement
-    - macchina          # system info
+    - bat --locked # cat replacement
+    - bottom --locked # process / system monitor
+    - eza # ls replacement
+    - macchina # system info
     - starship --locked
-    - zellij --locked
-    - zoxide --locked   # smarter cd command
+    - zellij --locked # terminal multiplexer
+    - zoxide --locked # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
@@ -144,9 +146,9 @@ configure:
       - catppuccin.catppuccin-vsc
       - visualstudioexptteam.intellicode-api-usage-examples
       - visualstudioexptteam.vscodeintellicode
-  DE_cinnamon: !enabled
+  DECinnamon: !enabled
     defaultTerm: !enabled alacritty
-  DE_gnome: !enabled
+  DEGnome: !enabled
     settings: true
     extensions: !enabled
       # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg

@@ -58,8 +58,11 @@ check:
     - libxcb-xfixes0-dev
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-  python: !enabled
-    uvUpdate: true
+  pyenv: !enabled 
+    update: false
+    version: 3
+    pip: true
+  uv: !disabled
     version: !enabled 3.13
   rustupCheck: true
   appimaged: true
@@ -199,16 +202,14 @@ configure:
     virtualbox: true
     vscodeExtensions: !enabled
       - catppuccin.catppuccin-vsc
+      - charliermarsh.ruff
       - christian-kohler.path-intellisense
       - eamodio.gitlens
+      - ecmel.vscode-html-css
       - esbenp.prettier-vscode
-      - foxundermoon.shell-format
       - github.copilot
       - github.copilot-chat
-      - golang.go
-      - ms-python.autopep8
       - ms-python.debugpy
-      - ms-python.isort
       - ms-python.python
       - ms-python.vscode-pylance
       - redhat.vscode-yaml
@@ -217,9 +218,9 @@ configure:
       - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
-  DE_cinnamon: !enabled
+  DECinnamon: !enabled
     defaultTerm: !enabled alacritty
-  DE_gnome: !enabled
+  DEGnome: !enabled
     settings: true
     extensions: !enabled
       # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg

@@ -59,6 +59,12 @@ fi
 export GPG_TTY=$(tty)
 
 # ----- Load Languages -----
+if [ -d ~/.pyenv ]; then
+  # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
+  export PATH="$HOME/.pyenv/bin:$PATH"
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
+fi
 if command -v uv &>/dev/null; then eval "$(uv generate-shell-completion bash)"; fi
 if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion bash)"; fi
 
