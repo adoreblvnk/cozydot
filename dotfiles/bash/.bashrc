@@ -58,6 +58,9 @@ fi
 # force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
+# WSL
+if [[ -n $WSL_DISTRO_NAME ]]; then export WIN="/mnt/c/Users/$USER"; fi
+
 # ----- Load Languages -----
 if [ -d ~/.pyenv ]; then
   # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
