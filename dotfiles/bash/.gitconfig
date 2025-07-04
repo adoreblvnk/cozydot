@@ -1,7 +1,7 @@
 # if you see this file being updated, run:
 # git update-index --assume-unchanged dotfiles/bash/.gitconfig
 [user]
-	name =
+    name =
     email =
     signingkey =
 [credential]
