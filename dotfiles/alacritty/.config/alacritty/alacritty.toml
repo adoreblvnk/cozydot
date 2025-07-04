@@ -1,5 +1,5 @@
 # see https://github.com/alacritty/alacritty-theme
-general.import = ["~/.config/alacritty/themes/catppuccin_mocha.toml"]
+general.import = ["themes/catppuccin_mocha.toml"]
 
 [window]
 dimensions = { columns = 140, lines = 40 }
