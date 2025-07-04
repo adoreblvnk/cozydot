@@ -26,4 +26,7 @@ if [ -d ~/.pyenv ]; then
   eval "$(pyenv virtualenv-init -)"
 fi
 
+# uv
+if [[ -f ~/.local/bin/env ]]; then source ~/.local/bin/env; fi
+
 if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi

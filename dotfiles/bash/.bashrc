@@ -65,6 +65,9 @@ if [ -d ~/.pyenv ]; then
   eval "$(pyenv init -)"
   eval "$(pyenv virtualenv-init -)"
 fi
+
+# uv
+if [[ -f ~/.local/bin/env ]]; then source ~/.local/bin/env; fi
 if command -v uv &>/dev/null; then eval "$(uv generate-shell-completion bash)"; fi
 if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion bash)"; fi
 

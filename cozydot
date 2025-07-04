@@ -95,10 +95,10 @@ _set_global_var() {
   DESKTOP_ENVIRONMENT="$(yq '.metadata.DE' "$CONFIG")"
   # detect DE modified from https://cgit.freedesktop.org/xdg/xdg-utils/tree/scripts/xdg-utils-common.in#n296
   if [[ $DESKTOP_ENVIRONMENT == "auto" ]]; then
-    case "$XDG_CURRENT_DESKTOP" in
+    case "${XDG_CURRENT_DESKTOP:-}" in
       *GNOME*) DESKTOP_ENVIRONMENT=gnome ;;
       Cinnamon | X-Cinnamon) DESKTOP_ENVIRONMENT=cinnamon ;;
-      *) _warning_msg "Unsupported desktop environment detected ($XDG_CURRENT_DESKTOP)" ;;
+      *) _warning_msg "Unsupported desktop environment detected (${XDG_CURRENT_DESKTOP:-})" ;;
     esac
     local de_auto=" (auto)"
   fi
@@ -329,6 +329,7 @@ EOF
   if [[ $(yq '.check.pyenv | tag' "$CONFIG") == "!enabled" ]]; then
     if ! command -v pyenv &>/dev/null; then
       _info_msg "Installing pyenv"
+      source ~/.bashrc
       if [[ ! -d ~/.pyenv ]]; then
         # NOTE: if pyenv dir exists but pyenv command fails, this means that pyenv isn't in PATH
         # install pyenv-installer https://github.com/pyenv/pyenv-installer
@@ -337,7 +338,6 @@ EOF
         #   - pyenv-update https://github.com/pyenv/pyenv-update
         #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
         curl https://pyenv.run | bash
-        source ~/.bashrc
       else
         _error_msg "pyenv directory already exists, but pyenv command not found. Please add ~/.pyenv/bin to PATH"
       fi
@@ -375,6 +375,7 @@ EOF
     if ! command -v uv &>/dev/null; then
       _info_msg "Installing uv, a Python package & project manager"
       curl -LsSf https://astral.sh/uv/install.sh | sh
+      source ~/.bashrc
     else
       _info_msg "uv $(uv -V | cut -d ' ' -f 2) already installed"
       uv self update -q
@@ -413,7 +414,7 @@ EOF
 
       # remove pre-existing similar tools
       systemctl --user stop appimaged.service || true
-      sudo apt-get remove -qy appimagelauncher || true
+      sudo apt-get remove -qy appimagelauncher &>/dev/null || true
 
       # clear cache
       rm -rf "$HOME/.local/share/applications/appimage*"
@@ -449,7 +450,7 @@ EOF
         _info_msg "Downloading $font"
         sudo mkdir -p "/usr/share/fonts/$font"
         curl -sSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz" \
-          | sudo tar -xvJ -C "/usr/share/fonts/$font"
+          | sudo tar -xvJ -C "/usr/share/fonts/$font" &>/dev/null
       fi
       _info_msg "Reloading fc-cache"
       fc-cache -f
@@ -507,7 +508,8 @@ install() {
       # add repo entry into sources.list.d
       local source_file_path="/etc/apt/sources.list.d/$source_name.list"
       _info_msg "Adding repo entry for $source_name into sources.list.d"
-      sudo tee "$source_file_path" <<<"$repo" >/dev/null
+      # TODO: check before eval echo
+      sudo tee "$source_file_path" <<<"$(eval echo $repo)" >/dev/null
 
       # perform pinning to prioritise 3rd party if pinning entry exists
       if [[ $(yq ".install.addRepos[$i].pinning" "$CONFIG") != false ]]; then
