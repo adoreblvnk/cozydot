@@ -62,7 +62,7 @@ check:
     update: false
     version: 3
     pip: true
-  uv: !disabled
+  uv: !enabled
     version: !enabled 3.13
   rustupCheck: true
   appimaged: true
