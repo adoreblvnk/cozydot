@@ -365,7 +365,7 @@ EOF
 
     if [[ $(yq '.check.pyenv.pip' "$CONFIG") == true ]]; then
       local py_ver="python$(yq '.check.pyenv.version' "$CONFIG")"
-      $py_ver -m pip install --upgrade pip
+      $py_ver -m pip install -q --upgrade pip
       _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
     fi
   fi
@@ -703,7 +703,7 @@ configure() {
         # -T copies folder contents
         # --remove-destination is used to remove files in case files can't be
         #   read (eg symlinks) first
-        cp -rT --remove-destination "dotfiles/$pkg" "$HOME"
+        cp -rT --remove-destination "$(dirname "$(realpath "$0")")/dotfiles/$pkg" "$HOME"
       elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
         _info_msg "Using system dotfiles as source of truth. ${cozydot_txt}'s dotfiles will be overwritten"
       fi
@@ -711,7 +711,7 @@ configure() {
       # --adopt replaces cozydot's dotfiles with original system ones
       # Needed as Stow throws an error if system dotfiles exist. Cozydot's
       # dotfiles will be lost, but setting .stowMode to "override" fixes this
-      stow --no-folding --adopt -d "dotfiles/" -t "$HOME" "$pkg"
+      stow --no-folding --adopt -d "$(dirname "$(realpath "$0")")/dotfiles/" -t "$HOME" "$pkg"
     done
   fi
 
@@ -918,6 +918,7 @@ main() {
       _info_msg "Moving cozydot to ~/.cozydot"
       mv "$(dirname "$(realpath "$0")")" ~/.cozydot/
     fi
+    # TODO: proper local path for cozydot .local
     sudo cp -s --remove-destination ~/.cozydot/cozydot /usr/local/bin/cozydot
     _success_msg "Created symlink for cozydot. Run $cozydot_txt as a command anywhere after this"
     exit
