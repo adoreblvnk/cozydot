@@ -4,6 +4,8 @@
     name =
     email =
     signingkey =
+[core]
+    autocrlf = input
 [credential]
     credentialStore = gpg
     helper = /usr/local/bin/git-credential-manager
