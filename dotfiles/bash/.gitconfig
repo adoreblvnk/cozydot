@@ -9,6 +9,8 @@
     helper = /usr/local/bin/git-credential-manager
 [credential "https://dev.azure.com"]
     useHttpPath = true
+[gpg]
+	program = gpg
 [commit]
     gpgsign = true
 [tag]
