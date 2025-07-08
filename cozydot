@@ -412,13 +412,14 @@ EOF
       # https://github.com/probonopd/go-appimage/tree/master/src/appimaged#initial-setup
       _info_msg "Installing appimaged"
 
-      # remove pre-existing similar tools
+      # remove pre-existing conflicting tools (if any)
       systemctl --user stop appimaged.service || true
       sudo apt-get remove -qy appimagelauncher &>/dev/null || true
+      [ -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service ] \
+        && rm ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
 
       # clear cache
       rm -rf "$HOME/.local/share/applications/appimage*"
-      rm -f ~/.config/systemd/user/default.target.wants/appimagelauncherd.service
 
       # download appimaged
       mkdir -p ~/Applications
@@ -426,9 +427,9 @@ EOF
       curl -sSL -o ~/Applications/appimaged.AppImage \
         "$(curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
           | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")')"
+      chmod +x ~/Applications/appimaged.AppImage
 
       # launch
-      chmod +x ~/Applications/appimaged.AppImage
       ~/Applications/appimaged.AppImage
     else
       _info_msg "Appimaged service already running"

@@ -62,10 +62,10 @@ check:
     update: false
     version: 3
     pip: true
-  uv: !enabled
+  uv: !disabled
     version: !enabled 3.13
   rustupCheck: true
-  appimaged: true
+  appimaged: false
   nerdfont: !enabled GeistMono
 install:
   check: true
@@ -133,7 +133,7 @@ configure:
       - zellij
   apps:
     alacritty: false
-    docker: true
+    docker: false
     virtualbox: false
     vscodeExtensions: !disabled []
   DECinnamon: !disabled
