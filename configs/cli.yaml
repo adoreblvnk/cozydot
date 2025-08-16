@@ -133,18 +133,21 @@ configure:
       - zellij
   apps:
     alacritty: false
-    docker: false
+    docker: true
     virtualbox: false
     vscodeExtensions: !disabled []
-  DECinnamon: !disabled
-    defaultTerm: !enabled alacritty
-  DEGnome: !disabled
-    settings: true
-    extensions: !enabled
-      # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-      - blur-my-shell@aunetx
-      - netspeedsimplified@prateekmedia.extension
-      - rounded-window-corners@fxgn
-    defaultTerm: !enabled alacritty
-    MacOSDock: true
-    smoothRoundedCorners: true
+  desktopEnvironment: !disabled
+    common: !enabled
+      defaultTerm: !enabled alacritty
+      tag: '!disabled'
+    gnome: !enabled
+      settings: true
+      extensions: !enabled
+        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
+        - blur-my-shell@aunetx
+        - netspeedsimplified@prateekmedia.extension
+        - rounded-window-corners@fxgn
+      MacOSDock: true
+      smoothRoundedCorners: true
+      tag: '!disabled'
+    cinnamon: !enabled

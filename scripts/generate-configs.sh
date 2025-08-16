@@ -8,7 +8,11 @@ CLI="$PWD/configs/cli.yaml"
 VM="$PWD/configs/vm.yaml"
 declare -a CONFIGS=("$FULL" "$CLI" "$VM")
 
-for file in "${CONFIGS[@]}"; do if [[ -f $file ]]; then touch "$file"; fi; done
+for file in "${CONFIGS[@]}"; do
+  if [[ -f $file ]]; then
+    touch "$file"
+  fi
+done
 
 yq ".metadata.description = \"All features enabled & apps installed.\" \
   | with(.check; \
@@ -37,11 +41,12 @@ yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
   | with(.configure; \
     .dotfiles.packages |= filter(. != \"alacritty\" and . != \"vscode\") \
     | .apps.alacritty = false \
-    | .apps.docker = false \
     | .apps.virtualbox = false \
     | .apps.vscodeExtensions tag = \"!disabled\" | .apps.vscodeExtensions |= [] \
-    | .DECinnamon tag = \"!disabled\" \
-    | .DEGnome tag = \"!disabled\")" "$DEFAULT" > "$CLI"
+    | .desktopEnvironment tag = \"!disabled\" \
+    | .desktopEnvironment.common.tag = \"!disabled\" \
+    | .desktopEnvironment.gnome.tag = \"!disabled\" \
+    | .desktopEnvironment.cinnamon.tag = \"!disabled\")" "$DEFAULT" >"$CLI"
 
 yq ".metadata.description = \"Lightweight config with minimal utilities / apps installed for virtual machines.\" \
   | with(.install; \
@@ -63,4 +68,4 @@ yq ".metadata.description = \"Lightweight config with minimal utilities / apps i
     | .apps.vscodeExtensions |= filter( \
       . == \"catppuccin.catppuccin-vsc\" \
       or . == \"visualstudioexptteam.intellicode-api-usage-examples\" \
-      or . == \"visualstudioexptteam.vscodeintellicode\"))" "$DEFAULT" > "$VM"
+      or . == \"visualstudioexptteam.vscodeintellicode\"))" "$DEFAULT" >"$VM"

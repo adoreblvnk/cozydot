@@ -125,7 +125,7 @@ _set_global_var() {
 # Arguments:
 #   $1: go version. must be either "latest" or <major>.<minor>.<patch>
 _dl_golang() {
-  if [ -z "${1:-}" ]; then _error_msg "no value supplied to _dl_golang"; fi
+  if [[ -z "${1:-}" ]]; then _error_msg "no value supplied to _dl_golang"; fi
   local latest_go=$1
   if [[ $1 == "latest" ]]; then
     latest_go="$(
@@ -147,7 +147,7 @@ _dl_golang() {
 # Arguments:
 #   $1: node version. format must either be "latest" | <major>[.<minor>[.<patch>]]
 _dl_node() {
-  if [ -z "${1:-}" ]; then _error_msg "no value supplied to _dl_node"; fi
+  if [[ -z "${1:-}" ]]; then _error_msg "no value supplied to _dl_node"; fi
   if ! command -v nvm &>/dev/null; then
     if [[ ! -f ~/.nvm/nvm.sh ]]; then
       _info_msg "Installing nvm" # install script adds nvm to PATH if needed
@@ -171,8 +171,9 @@ _dl_node() {
 
 # Use config specified in configs directory.
 # Arguments:
-#   $1: name of config yaml file
+#   $1: config yaml file name
 set_config() {
+  if [[ -z "${1:-}" ]]; then _error_msg "no value supplied to set_config"; fi
   CONFIG="$(dirname "$(realpath "$0")")/configs/$1.yaml"
   if [[ ! -f $CONFIG ]]; then
     _error_msg "Config selected ${GREEN}$1${NC} does not exist"
@@ -792,115 +793,119 @@ configure() {
     _warning_msg "VSCode not installed, skipping..."
   fi
 
-  # cinnamon desktop environment configurations
-  if [[ $(yq '.configure.DECinnamon | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
-    if [[ $(yq '.configure.DECinnamon.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
-      local term=$(yq ".configure.DECinnamon.defaultTerm" "$CONFIG")
-      _info_msg "Setting default terminal to $term"
-      gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
-      gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
-    fi
-  fi
+  if [[ $(yq '.configure.desktopEnvironment | tag' "$CONFIG") == "!enabled" ]]; then
 
-  # GNOME desktop environment configurations
-  if [[ $(yq '.configure.DEGnome | tag' "$CONFIG") == "!enabled" ]] \
-    && [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
-    # settings config increase screen blank delay to 15 mins, set dark mode
-    if [[ $(yq '.configure.DEGnome.settings' "$CONFIG") == true ]]; then
-      _info_msg "Configuring GNOME desktop environment"
-      # increase screen blank delay to 15 mins (the max in UI)
-      gsettings set org.gnome.desktop.session idle-delay 900
-      # disable screen dimming (doesn't work with Power Saving mode)
-      gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
-      # dark mode
-      gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
-    fi
-
-    # install gnome-tweaks & gnome-shell-extensions
-    if ! command -v gnome-tweaks &>/dev/null \
-      || ! command -v gnome-extensions &>/dev/null; then
-      _info_msg "Installing gnome-tweaks & gnome-shell-extensions"
-      sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
-    fi
-
-    # install GNOME extensions
-    if [[ $(yq '.configure.DEGnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
-      # download & install GNOME extensions
-      local exts
-      mapfile -t exts < <(yq '.configure.DEGnome.extensions[]' "$CONFIG")
-      for ext in "${exts[@]}"; do
-        if ! gnome-extensions list | grep -q "$ext"; then
-          _info_msg "Downloading GNOME extension $(cut -d "@" -f 1 <<<"$ext")"
-          local ver=$(
-            curl -sSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
-              | yq '[.shell_version_map[].version] | max'
-          )
-          curl -sSL -o "/tmp/$ext.zip" \
-            "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
-          gnome-extensions install --force "/tmp/$ext.zip"
-          _warning_msg "Please relogin in a new session for GNOME to enable $(cut -d "@" -f 1 <<<"$ext") extension"
-        else
-          _info_msg "Enabling extension $ext"
-          gnome-extensions enable "$ext"
+    # common desktop environment configurations
+    if [[ $(yq '.configure.desktopEnvironment.common | tag' "$CONFIG") == "!enabled" ]]; then
+      if [[ $(yq '.configure.desktopEnvironment.common.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
+        _info_msg "Setting default terminal to $term"
+        if [[ $DESKTOP_ENVIRONMENT == "gnome" ]]; then
+          local term=$(yq ".configure.desktopEnvironment.common.defaultTerm" "$CONFIG")
+          # Ubuntu has a dedicated terminal key, so we just need to set (not add) the keyboard shortcut
+          if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal &>/dev/null; then
+            gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
+            gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
+          else
+            _info_msg "Adding terminal keyboard shortcut to ${BLUE}<Primary><Alt>T${NC}"
+            dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
+              "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
+            dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'Terminal'"
+            dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'$term'"
+            dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'<Primary><Alt>T'"
+          fi
+        elif [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
+          local term=$(yq ".configure.desktopEnvironment.common.defaultTerm" "$CONFIG")
+          gsettings set org.cinnamon.desktop.default-applications.terminal exec "$term"
+          gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''
         fi
-      done
-    fi
-
-    # set default terminal
-    if [[ $(yq '.configure.DEGnome.defaultTerm | tag' "$CONFIG") == "!enabled" ]]; then
-      local term=$(yq ".configure.DEGnome.defaultTerm" "$CONFIG")
-      _info_msg "Setting default terminal to $term"
-      # Ubuntu has a dedicated terminal key, so we just need to set (not add) a keyboard shortcut
-      if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal &>/dev/null; then
-        gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
-        gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
-      else
-        _info_msg "Adding terminal keyboard shortcut to ${BLUE}<Primary><Alt>T${NC}"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings \
-          "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'Terminal'"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'$term'"
-        dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'<Primary><Alt>T'"
       fi
     fi
 
-    # make Dash to Dock mimic MacOS dock behaviour
-    # default settings: https://github.com/micheleg/dash-to-dock/blob/master/schemas/org.gnome.shell.extensions.dash-to-dock.gschema.xml
-    if [[ $(yq '.configure.DEGnome.MacOSDock' "$CONFIG") == true ]] \
-      && gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock'; then
-      _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
-      # modify position & size
-      dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position "'BOTTOM'"
-      dconf write /org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size 32
-      # hide dock
-      dconf write /org/gnome/shell/extensions/dash-to-dock/dock-fixed false
-      # show dock on mouse hover
-      dconf write /org/gnome/shell/extensions/dash-to-dock/autohide true
-      dconf write /org/gnome/shell/extensions/dash-to-dock/require-pressure-to-show false
-      # show dock when it doesn't obstruct focused application
-      dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide true
-      dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide-mode "'FOCUS_APPLICATION_WINDOWS'"
-      # disable panel mode
-      dconf write /org/gnome/shell/extensions/dash-to-dock/extend-height false
-      # minimize on click when application is opened
-      dconf write /org/gnome/shell/extensions/dash-to-dock/click-action "'minimize-or-previews'"
-    elif [[ $(yq ".configure.DEGnome.MacOSDock" "$CONFIG") == true ]]; then
-      _warning_msg "Dash to Dock extension not installed"
-    fi
+    # GNOME desktop environment configurations
+    if [[ $(yq '.configure.desktopEnvironment.gnome | tag' "$CONFIG") == "!enabled" ]] \
+      && [[ "$DESKTOP_ENVIRONMENT" == "gnome" ]]; then
+      # settings config increase screen blank delay to 15 mins, set dark mode
+      if [[ $(yq '.configure.desktopEnvironment.gnome.settings' "$CONFIG") == true ]]; then
+        _info_msg "Configuring GNOME desktop environment"
+        # increase screen blank delay to 15 mins (the max in UI)
+        gsettings set org.gnome.desktop.session idle-delay 900
+        # disable screen dimming (doesn't work with Power Saving mode)
+        gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
+        # dark mode
+        gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
+      fi
 
-    # smoothen corners in Rounded Window Corners Reborn
-    # default settings: https://github.com/flexagoon/rounded-window-corners/blob/main/resources/schemas/org.gnome.shell.extensions.rounded-window-corners-reborn.gschema.xml
-    if [[ $(yq '.configure.DEGnome.smoothRoundedCorners' "$CONFIG") == true ]] \
-      && gnome-extensions list | grep -q rounded-window-corners; then
-      _info_msg "Smoothen corners in Rounded Corners extension"
-      dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
-        "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
+      # install gnome-tweaks & gnome-shell-extensions
+      if ! command -v gnome-tweaks &>/dev/null \
+        || ! command -v gnome-extensions &>/dev/null; then
+        _info_msg "Installing gnome-tweaks & gnome-shell-extensions"
+        sudo apt-get update -qq && sudo apt-get install -qq gnome-tweaks gnome-shell-extensions
+      fi
+
+      # install GNOME extensions
+      if [[ $(yq '.configure.desktopEnvironment.gnome.extensions | tag' "$CONFIG") == "!enabled" ]]; then
+        # download & install GNOME extensions
+        local exts
+        mapfile -t exts < <(yq '.configure.desktopEnvironment.gnome.extensions[]' "$CONFIG")
+        for ext in "${exts[@]}"; do
+          if ! gnome-extensions list | grep -q "$ext"; then
+            _info_msg "Downloading GNOME extension $(cut -d "@" -f 1 <<<"$ext")"
+            local ver=$(curl -sSL "https://extensions.gnome.org/extension-info/?uuid=$ext" \
+              | yq '[.shell_version_map[].version] | max')
+            curl -sSL -o "/tmp/$ext.zip" \
+              "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
+            gnome-extensions install --force "/tmp/$ext.zip"
+            _warning_msg "Please relogin in a new session for GNOME to enable $(cut -d "@" -f 1 <<<"$ext") extension"
+          else
+            _info_msg "Enabling extension $ext"
+            gnome-extensions enable "$ext"
+          fi
+        done
+      fi
+
+      # make Dash to Dock mimic MacOS dock behaviour
+      # default settings: https://github.com/micheleg/dash-to-dock/blob/master/schemas/org.gnome.shell.extensions.dash-to-dock.gschema.xml
+      if [[ $(yq '.configure.desktopEnvironment.gnome.MacOSDock' "$CONFIG") == true ]] \
+        && gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock'; then
+        _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
+        # modify position & size
+        dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position "'BOTTOM'"
+        dconf write /org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size 32
+        # hide dock
+        dconf write /org/gnome/shell/extensions/dash-to-dock/dock-fixed false
+        # show dock on mouse hover
+        dconf write /org/gnome/shell/extensions/dash-to-dock/autohide true
+        dconf write /org/gnome/shell/extensions/dash-to-dock/require-pressure-to-show false
+        # show dock when it doesn't obstruct focused application
+        dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide true
+        dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide-mode "'FOCUS_APPLICATION_WINDOWS'"
+        # disable panel mode
+        dconf write /org/gnome/shell/extensions/dash-to-dock/extend-height false
+        # minimize on click when application is opened
+        dconf write /org/gnome/shell/extensions/dash-to-dock/click-action "'minimize-or-previews'"
+      elif [[ $(yq ".configure.desktopEnvironment.gnome.MacOSDock" "$CONFIG") == true ]]; then
+        _warning_msg "Dash to Dock extension not installed"
+      fi
+
+      # smoothen corners in Rounded Window Corners Reborn
+      # default settings: https://github.com/flexagoon/rounded-window-corners/blob/main/resources/schemas/org.gnome.shell.extensions.rounded-window-corners-reborn.gschema.xml
+      if [[ $(yq '.configure.desktopEnvironment.gnome.smoothRoundedCorners' "$CONFIG") == true ]] \
+        && gnome-extensions list | grep -q rounded-window-corners; then
+        _info_msg "Smoothen corners in Rounded Corners extension"
+        dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
+          "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
           'borderRadius': <uint32 16>, 'smoothing': <0.5>, \
           'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}"
-    elif [[ $(yq ".configure.DEGnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
-      _warning_msg "Rounded Corners extension not installed"
+      elif [[ $(yq ".configure.desktopEnvironment.gnome.smoothRoundedCorners" "$CONFIG") == true ]]; then
+        _warning_msg "Rounded Corners extension not installed"
+      fi
+    fi
+
+    # Cinnamon desktop environment configurations
+    if [[ $(yq '.configure.desktopEnvironment.cinnamon | tag' "$CONFIG") == "!enabled" ]] \
+      && [[ $DESKTOP_ENVIRONMENT == "cinnamon" ]]; then
+      :
     fi
   fi
 
@@ -945,8 +950,9 @@ main() {
       # OPTIONS
       -n | --no-colour) colours false ;;
       -c | --config)
-        set_config "$2"
-        shift
+        local config_file="${2:-}"
+        [[ -n "${2:-}" ]] && shift
+        set_config "$config_file"
         ;;
       --list-configs) list_configs ;;
       -V | --version) get_version ;;

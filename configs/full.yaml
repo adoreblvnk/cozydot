@@ -224,15 +224,16 @@ configure:
       - golang.go
       - rust-lang.rust-analyzer
       - timonwong.shellcheck
-  DECinnamon: !enabled
-    defaultTerm: !enabled alacritty
-  DEGnome: !enabled
-    settings: true
-    extensions: !enabled
-      # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-      - blur-my-shell@aunetx
-      - netspeedsimplified@prateekmedia.extension
-      - rounded-window-corners@fxgn
-    defaultTerm: !enabled alacritty
-    MacOSDock: true
-    smoothRoundedCorners: true
+  desktopEnvironment: !enabled
+    common: !enabled
+      defaultTerm: !enabled alacritty
+    gnome: !enabled
+      settings: true
+      extensions: !enabled
+        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
+        - blur-my-shell@aunetx
+        - netspeedsimplified@prateekmedia.extension
+        - rounded-window-corners@fxgn
+      MacOSDock: true
+      smoothRoundedCorners: true
+    cinnamon: !enabled
