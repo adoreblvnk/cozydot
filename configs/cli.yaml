@@ -137,9 +137,8 @@ configure:
     virtualbox: false
     vscodeExtensions: !disabled []
   desktopEnvironment: !disabled
-    common: !enabled
+    common: !disabled
       defaultTerm: !enabled alacritty
-      tag: '!disabled'
     gnome: !enabled
       settings: true
       extensions: !enabled
