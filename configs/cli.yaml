@@ -139,7 +139,7 @@ configure:
   desktopEnvironment: !disabled
     common: !disabled
       defaultTerm: !enabled alacritty
-    gnome: !enabled
+    gnome: !disabled
       settings: true
       extensions: !enabled
         # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
@@ -148,5 +148,4 @@ configure:
         - rounded-window-corners@fxgn
       MacOSDock: true
       smoothRoundedCorners: true
-      tag: '!disabled'
-    cinnamon: !enabled
+    cinnamon: !disabled

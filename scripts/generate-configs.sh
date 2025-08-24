@@ -45,8 +45,8 @@ yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
     | .apps.vscodeExtensions tag = \"!disabled\" | .apps.vscodeExtensions |= [] \
     | .desktopEnvironment tag = \"!disabled\" \
     | .desktopEnvironment.common tag = \"!disabled\" \
-    | .desktopEnvironment.gnome.tag = \"!disabled\" \
-    | .desktopEnvironment.cinnamon.tag = \"!disabled\")" "$DEFAULT" >"$CLI"
+    | .desktopEnvironment.gnome tag = \"!disabled\" \
+    | .desktopEnvironment.cinnamon tag = \"!disabled\")" "$DEFAULT" >"$CLI"
 
 yq ".metadata.description = \"Lightweight config with minimal utilities / apps installed for virtual machines.\" \
   | with(.install; \
