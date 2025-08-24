@@ -30,7 +30,6 @@ if [ -f ~/.bash_aliases ]; then source ~/.bash_aliases; fi
 
 # bash aliases if you don't use a bash_aliases file
 alias c=clear
-alias py=python
 alias pip="python -m pip"
 
 if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
@@ -42,8 +41,6 @@ if command -v eza &>/dev/null; then
   alias ll="eza --group-directories-first --icons=auto -al"
   alias tree="eza --group-directories-first --icons=auto -T"
 fi
-
-if command -v cozydot &>/dev/null; then alias czy=cozydot; fi
 
 # enable programmable completion features (you don't need to enable this, if it's
 # already enabled in /etc/bash.bashrc and /etc/profile sources /etc/bash.bashrc).
