@@ -30,6 +30,7 @@ check:
     - software-properties-common
     - stow
     - ttf-mscorefonts-installer
+    - unzip
     # pyenv dependencies
     - libbz2-dev
     - libffi-dev
@@ -58,12 +59,6 @@ check:
     - libxcb-xfixes0-dev
     - libxkbcommon-dev
     # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
-  pyenv: !enabled
-    update: true
-    version: 3
-    pip: true
-  uv: !enabled
-    version: !enabled 3.13
   rustupCheck: true
   appimaged: true
   nerdfont: !enabled GeistMono
@@ -160,19 +155,23 @@ install:
     - zellij --locked # terminal multiplexer
     - zoxide --locked # smarter cd command
   binaries: !enabled
-    - name: git-credential-manager.deb
-      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
     - name: Bitwarden.AppImage
       url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
     - name: drawio.AppImage
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
+    - name: git-credential-manager.deb
+      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
     - name: Obsidian.AppImage
       url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
-    - name: zen.AppImage
-      url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64.AppImage")')
   languages:
     goVersion: !enabled latest
     nodeVersion: !enabled latest
+    pyenv: !enabled
+      update: true
+      version: 3
+      pip: true
+    uv: !enabled
+      version: !enabled 3.13
 update:
   check: true
   apt: !enabled
@@ -237,3 +236,6 @@ configure:
       MacOSDock: true
       smoothRoundedCorners: true
     cinnamon: !enabled
+binaries:
+  - name: zen.AppImage
+    url: $(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64.AppImage")')

@@ -59,6 +59,19 @@ export GPG_TTY=$(tty)
 if [[ -n $WSL_DISTRO_NAME ]]; then export WIN="/mnt/c/Users/$USER"; fi
 
 # ----- Load Languages -----
+if [ -d ~/.bun/bin ]; then
+  export BUN_INSTALL="$HOME/.bun"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+fi
+
+if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
+
+if [ -f ~/.nvm/nvm.sh ]; then
+  export NVM_DIR="$HOME/.nvm"
+  source "$NVM_DIR/nvm.sh"
+  source "$NVM_DIR/bash_completion"
+fi
+
 if [ -d ~/.pyenv ]; then
   # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
   export PATH="$HOME/.pyenv/bin:$PATH"
@@ -71,15 +84,7 @@ if [[ -f ~/.local/bin/env ]]; then source ~/.local/bin/env; fi
 if command -v uv &>/dev/null; then eval "$(uv generate-shell-completion bash)"; fi
 if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion bash)"; fi
 
-if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
-
 if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
-
-if [ -s ~/.nvm/nvm.sh ]; then
-  export NVM_DIR="$HOME/.nvm"
-  source "$NVM_DIR/nvm.sh"
-  source "$NVM_DIR/bash_completion"
-fi
 
 # ----- Apps -----
 if [ -f ~/.bash_completion/alacritty ]; then source ~/.bash_completion/alacritty; fi

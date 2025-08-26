@@ -98,7 +98,9 @@ _set_global_var() {
     case "${XDG_CURRENT_DESKTOP:-}" in
       *GNOME*) DESKTOP_ENVIRONMENT=gnome ;;
       Cinnamon | X-Cinnamon) DESKTOP_ENVIRONMENT=cinnamon ;;
-      *) _warning_msg "Unsupported desktop environment detected (${XDG_CURRENT_DESKTOP:-})" ;;
+      *) DESKTOP_ENVIRONMENT=${XDG_CURRENT_DESKTOP:-none}
+         _warning_msg "Unsupported desktop environment detected (${DESKTOP_ENVIRONMENT})"
+         ;;
     esac
     local de_auto=" (auto)"
   fi
@@ -315,6 +317,7 @@ EOF
 
   # install dependency packages
   if [[ $(yq '.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
+    _info_msg "Installing dependency packages"
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
@@ -324,78 +327,6 @@ EOF
         sudo apt-get install -qq "$pkg"
       fi
     done
-  fi
-
-  # installs pyenv, installs python according to version specified in $CONFIG
-  if [[ $(yq '.check.pyenv | tag' "$CONFIG") == "!enabled" ]]; then
-    if ! command -v pyenv &>/dev/null; then
-      _info_msg "Installing pyenv"
-      source ~/.bashrc
-      if [[ ! -d ~/.pyenv ]]; then
-        # NOTE: if pyenv dir exists but pyenv command fails, this means that pyenv isn't in PATH
-        # install pyenv-installer https://github.com/pyenv/pyenv-installer
-        #   - pyenv https://github.com/pyenv/pyenv
-        #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
-        #   - pyenv-update https://github.com/pyenv/pyenv-update
-        #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
-        curl https://pyenv.run | bash
-      else
-        _error_msg "pyenv directory already exists, but pyenv command not found. Please add ~/.pyenv/bin to PATH"
-      fi
-    else
-      if [[ $(yq '.check.pyenv.update' "$CONFIG") == true ]]; then
-        _info_msg "Updating pyenv"
-        pyenv update &>/dev/null
-      fi
-      _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
-    fi
-
-    # install latest python version if pyenv python version is not latest
-    local latest_py=$(pyenv latest -k "$(yq '.check.pyenv.version' "$CONFIG")")
-    if [[ $(pyenv version-name) != "$latest_py" ]]; then
-      # install if latest ver is not in system (ie not previously installed)
-      if ! pyenv versions | grep "$latest_py"; then
-        _info_msg "Installing latest Python version $latest_py"
-        pyenv install "$latest_py"
-      fi
-      _info_msg "Setting global Python version to $latest_py"
-      pyenv global "$latest_py"
-    else
-      _info_msg "Python $(pyenv version-name) is already the latest"
-    fi
-
-    if [[ $(yq '.check.pyenv.pip' "$CONFIG") == true ]]; then
-      local py_ver="python$(yq '.check.pyenv.version' "$CONFIG")"
-      $py_ver -m pip install -q --upgrade pip
-      _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
-    fi
-  fi
-
-  # installs uv, optionally pins to a specific version of Python
-  if [[ $(yq '.check.uv | tag' "$CONFIG") == "!enabled" ]]; then
-    if ! command -v uv &>/dev/null; then
-      _info_msg "Installing uv, a Python package & project manager"
-      curl -LsSf https://astral.sh/uv/install.sh | sh
-      source ~/.bashrc
-    else
-      _info_msg "uv $(uv -V | cut -d ' ' -f 2) already installed"
-      uv self update -q
-    fi
-
-    if [[ $(yq '.check.uv.version | tag' "$CONFIG") == "!enabled" ]]; then
-      local py_ver="$(yq '.check.uv.version' "$CONFIG")"
-      # use managed-python flag to exclude system Python
-      local local_py_ver="$(uv python find --managed-python --show-version "$py_ver")"
-      # NOTE: if py_ver is set to major version only (eg 3)
-      local latest_py_ver="$(uv python list "$py_ver" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
-      # this also triggers if local_py_ver is not set
-      if [[ $local_py_ver != "$latest_py_ver" ]]; then
-        _info_msg "Installing Python $latest_py_ver"
-        uv python install "$latest_py_ver"
-      else
-        _info_msg "Python $latest_py_ver is already the latest"
-      fi
-    fi
   fi
 
   if [[ $(yq '.check.rustupCheck' "$CONFIG") == true ]]; then
@@ -504,7 +435,7 @@ install() {
       # if key is a gpg file, then dearmor after downloading the key
       elif [[ $key_path == *.gpg ]]; then
         _info_msg "Downloading & dearmoring .gpg key for $source_name"
-        curl -sSL "$remote_key" | sudo gpg --dearmor --yes -o "$key_path"
+        curl -sSL "$remote_key" | sudo gpg --dearmor --yes | sudo tee "$key_path" >/dev/null
       fi
 
       # add repo entry into sources.list.d
@@ -603,6 +534,78 @@ install() {
   # install nvm, node (& npm)
   if [[ $(yq '.install.languages.nodeVersion | tag' "$CONFIG") == "!enabled" ]]; then
     _dl_node "$(yq '.install.languages.nodeVersion' "$CONFIG")"
+  fi
+
+  # installs pyenv, installs python according to version specified in $CONFIG
+  if [[ $(yq '.install.languages.pyenv | tag' "$CONFIG") == "!enabled" ]]; then
+    if ! command -v pyenv &>/dev/null; then
+      _info_msg "Installing pyenv"
+      source ~/.bashrc
+      if [[ ! -d ~/.pyenv ]]; then
+        # NOTE: if pyenv dir exists but pyenv command fails, this means that pyenv isn't in PATH
+        # install pyenv-installer https://github.com/pyenv/pyenv-installer
+        #   - pyenv https://github.com/pyenv/pyenv
+        #   - pyenv-doctor https://github.com/pyenv/pyenv-doctor
+        #   - pyenv-update https://github.com/pyenv/pyenv-update
+        #   - pyenv-virtualenv https://github.com/pyenv/pyenv-virtualenv
+        curl https://pyenv.run | bash
+      else
+        _error_msg "pyenv directory already exists, but pyenv command not found. Please add ~/.pyenv/bin to PATH"
+      fi
+    else
+      if [[ $(yq '.install.languages.pyenv.update' "$CONFIG") == true ]]; then
+        _info_msg "Updating pyenv"
+        pyenv update &>/dev/null
+      fi
+      _info_msg "pyenv $(pyenv --version | cut -d ' ' -f 2) is already installed"
+    fi
+
+    # install latest python version if pyenv python version is not latest
+    local latest_py=$(pyenv latest -k "$(yq '.install.languages.pyenv.version' "$CONFIG")")
+    if [[ $(pyenv version-name) != "$latest_py" ]]; then
+      # install if latest ver is not in system (ie not previously installed)
+      if ! pyenv versions | grep "$latest_py"; then
+        _info_msg "Installing latest Python version $latest_py"
+        pyenv install "$latest_py"
+      fi
+      _info_msg "Setting global Python version to $latest_py"
+      pyenv global "$latest_py"
+    else
+      _info_msg "Python $(pyenv version-name) is already the latest"
+    fi
+
+    if [[ $(yq '.install.languages.pyenv.pip' "$CONFIG") == true ]]; then
+      local py_ver="python$(yq '.install.languages.pyenv.version' "$CONFIG")"
+      $py_ver -m pip install -q --upgrade pip
+      _info_msg "Pip version $($py_ver -m pip -V | cut -d ' ' -f 2) installed"
+    fi
+  fi
+
+  # installs uv, optionally pins to a specific version of Python
+  if [[ $(yq '.install.languages.uv | tag' "$CONFIG") == "!enabled" ]]; then
+    if ! command -v uv &>/dev/null; then
+      _info_msg "Installing uv, a Python package & project manager"
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      source ~/.bashrc
+    else
+      _info_msg "uv $(uv -V | cut -d ' ' -f 2) already installed"
+      uv self update -q
+    fi
+
+    if [[ $(yq '.install.languages.uv.version | tag' "$CONFIG") == "!enabled" ]]; then
+      local py_ver="$(yq '.install.languages.uv.version' "$CONFIG")"
+      # use managed-python flag to exclude system Python
+      local local_py_ver="$(uv python find --managed-python --show-version "$py_ver")"
+      # NOTE: if py_ver is set to major version only (eg 3)
+      local latest_py_ver="$(uv python list "$py_ver" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+      # this also triggers if local_py_ver is not set
+      if [[ $local_py_ver != "$latest_py_ver" ]]; then
+        _info_msg "Installing Python $latest_py_ver"
+        uv python install "$latest_py_ver"
+      else
+        _info_msg "Python $latest_py_ver is already the latest"
+      fi
+    fi
   fi
 
   _success_msg "Finished ${cozydot_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"

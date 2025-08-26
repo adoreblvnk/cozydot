@@ -15,13 +15,13 @@ for file in "${CONFIGS[@]}"; do
 done
 
 yq ".metadata.description = \"All features enabled & apps installed.\" \
-  | with(.check; \
-    .pyenv.update = true \
-    | .uv tag = \"!enabled\") \
-  | .install.binaries += [ \
-    {\"name\": \"zen.AppImage\", \
-    \"url\": \"\$(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == \\\"*x86_64.AppImage\\\")')\"} \
-  ] \
+  | with(.install; \
+    .languages.pyenv.update = true \
+    | .languages.uv tag = \"!enabled\") \
+    | .binaries += [ \
+      {\"name\": \"zen.AppImage\", \
+      \"url\": \"\$(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == \\\"*x86_64.AppImage\\\")')\"} \
+    ] \
   | with(.update; \
     .apt.aptFull = true \
     | .cargo = true) \
