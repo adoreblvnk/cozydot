@@ -134,7 +134,7 @@ configure:
       - zellij
   apps:
     alacritty: false
-    docker: true
+    docker: false
     virtualbox: false
     vscodeExtensions: !disabled []
   desktopEnvironment: !disabled

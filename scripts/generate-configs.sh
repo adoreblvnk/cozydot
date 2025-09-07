@@ -41,6 +41,7 @@ yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
   | with(.configure; \
     .dotfiles.packages |= filter(. != \"alacritty\" and . != \"vscode\") \
     | .apps.alacritty = false \
+    | .apps.docker = false \
     | .apps.virtualbox = false \
     | .apps.vscodeExtensions tag = \"!disabled\" | .apps.vscodeExtensions |= [] \
     | .desktopEnvironment tag = \"!disabled\" \

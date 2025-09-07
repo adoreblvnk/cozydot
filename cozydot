@@ -317,7 +317,7 @@ EOF
 
   # install dependency packages
   if [[ $(yq '.check.deps | tag' "$CONFIG") == "!enabled" ]]; then
-    _info_msg "Installing dependency packages"
+    _info_msg "Installing dependency packages..."
     local apt_pkgs
     mapfile -t apt_pkgs < <(yq '.check.deps[]' "$CONFIG")
     sudo apt-get update -qq
@@ -617,7 +617,7 @@ update() {
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
   if [[ $(yq '.update.apt | tag' "$CONFIG") == "!enabled" ]]; then
-    _info_msg "Updating & upgrading apt packages"
+    _info_msg "Updating & upgrading apt packages..."
     sudo apt-get -qq update && sudo apt-get -qq upgrade
     # upgrades the entire system, installing new packages if necessary, &
     # removes unused (orphaned) packages with their config files
@@ -753,6 +753,7 @@ configure() {
     # use local logging driver to prevent disk-exhaustion. Local logging driver
     # performs log-rotation & compresses log files by default.
     # https://docs.docker.com/config/containers/logging/configure
+    sudo mkdir -p /etc/docker
     sudo touch /etc/docker/daemon.json
     if [[ "$(yq -r '.log-driver' /etc/docker/daemon.json)" != "local" ]]; then
       _info_msg "Using local logging driver to prevent disk-exhaustion"
@@ -760,7 +761,7 @@ configure() {
         | sudo tee /etc/docker/daemon.json >/dev/null
     fi
   elif [[ $(yq '.configure.apps.docker' "$CONFIG") == true ]]; then
-    _warning_msg "Docker not installed, skipping..."
+    _warning_msg "Docker not installed, skipping"
   fi
 
   # setup virtualbox adds user to vboxusers group
@@ -775,7 +776,7 @@ configure() {
       newgrp vboxusers
     fi
   elif [[ $(yq '.configure.apps.virtualbox' "$CONFIG") == true ]]; then
-    _warning_msg "virtualbox not installed, skipping..."
+    _warning_msg "virtualbox not installed, skipping"
   fi
 
   # install vscode extensions
@@ -793,7 +794,7 @@ configure() {
       fi
     done
   elif [[ $(yq '.configure.apps.vscode.extensions | tag' "$CONFIG") == "!enabled" ]]; then
-    _warning_msg "VSCode not installed, skipping..."
+    _warning_msg "VSCode not installed, skipping"
   fi
 
   if [[ $(yq '.configure.desktopEnvironment | tag' "$CONFIG") == "!enabled" ]]; then
