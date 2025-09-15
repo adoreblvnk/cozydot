@@ -28,6 +28,7 @@ yq ".metadata.description = \"All features enabled & apps installed.\" \
   | .configure.apps.vscodeExtensions += [ \
     \"foxundermoon.shell-format\", \
     \"golang.go\", \
+    \"llvm-vs-code-extensions.vscode-clangd\", \
     \"rust-lang.rust-analyzer\", \
     \"timonwong.shellcheck\"]" "$DEFAULT" > "$FULL"
 
