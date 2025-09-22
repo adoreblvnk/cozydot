@@ -208,15 +208,12 @@ configure:
       - eamodio.gitlens
       - ecmel.vscode-html-css
       - esbenp.prettier-vscode
-      - github.copilot
-      - github.copilot-chat
+      - mathematic.vscode-pdf
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
       - redhat.vscode-yaml
       - streetsidesoftware.code-spell-checker
-      - visualstudioexptteam.intellicode-api-usage-examples
-      - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
   desktopEnvironment: !enabled
