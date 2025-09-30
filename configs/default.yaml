@@ -208,7 +208,6 @@ configure:
       - eamodio.gitlens
       - ecmel.vscode-html-css
       - esbenp.prettier-vscode
-      - mathematic.vscode-pdf
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
