@@ -211,6 +211,7 @@ configure:
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
+      - net.sapples.LiveCaptions
       - redhat.vscode-yaml
       - streetsidesoftware.code-spell-checker
       - wayou.vscode-todo-highlight
