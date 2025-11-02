@@ -208,19 +208,17 @@ configure:
       - eamodio.gitlens
       - ecmel.vscode-html-css
       - esbenp.prettier-vscode
-      - github.copilot
-      - github.copilot-chat
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
+      - net.sapples.LiveCaptions
       - redhat.vscode-yaml
       - streetsidesoftware.code-spell-checker
-      - visualstudioexptteam.intellicode-api-usage-examples
-      - visualstudioexptteam.vscodeintellicode
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
       - foxundermoon.shell-format
       - golang.go
+      - llvm-vs-code-extensions.vscode-clangd
       - rust-lang.rust-analyzer
       - timonwong.shellcheck
   desktopEnvironment: !enabled

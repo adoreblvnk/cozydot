@@ -145,8 +145,6 @@ configure:
     virtualbox: false
     vscodeExtensions: !enabled
       - catppuccin.catppuccin-vsc
-      - visualstudioexptteam.intellicode-api-usage-examples
-      - visualstudioexptteam.vscodeintellicode
   desktopEnvironment: !enabled
     common: !enabled
       defaultTerm: !enabled alacritty
