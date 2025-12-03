@@ -207,7 +207,7 @@ configure:
       - christian-kohler.path-intellisense
       - eamodio.gitlens
       - ecmel.vscode-html-css
-      - esbenp.prettier-vscode
+      - prettier.prettier-vscode
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
