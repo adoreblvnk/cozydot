@@ -97,6 +97,7 @@ install:
     - yazi-fm --locked
     - zellij --locked # terminal multiplexer
     - zoxide --locked # smarter cd command
+    - presenterm --locked
   binaries: !enabled
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
@@ -114,7 +115,7 @@ update:
   apt: !enabled
     aptFull: false
   flatpak: true
-  cargo: false
+  cargo: true
   other:
     yq: true
     go: false

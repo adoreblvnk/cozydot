@@ -9,28 +9,25 @@ VM="$PWD/configs/vm.yaml"
 declare -a CONFIGS=("$FULL" "$CLI" "$VM")
 
 for file in "${CONFIGS[@]}"; do
-  if [[ -f $file ]]; then
-    touch "$file"
-  fi
+  if [[ -f $file ]]; then touch "$file"; fi
 done
 
 yq ".metadata.description = \"All features enabled & apps installed.\" \
   | with(.install; \
     .languages.pyenv.update = true \
-    | .languages.uv tag = \"!enabled\") \
+    | .languages.uv tag = \"!enabled\" \
+    | .cargo += [\"presenterm --locked\"] \
     | .binaries += [ \
       {\"name\": \"zen.AppImage\", \
       \"url\": \"\$(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == \\\"*x86_64.AppImage\\\")')\"} \
-    ] \
-  | with(.update; \
-    .apt.aptFull = true \
-    | .cargo = true) \
+    ]) \
+  | with(.update; .apt.aptFull = true | .cargo = true) \
   | .configure.apps.vscodeExtensions += [ \
     \"foxundermoon.shell-format\", \
     \"golang.go\", \
     \"llvm-vs-code-extensions.vscode-clangd\", \
     \"rust-lang.rust-analyzer\", \
-    \"timonwong.shellcheck\"]" "$DEFAULT" > "$FULL"
+    \"timonwong.shellcheck\"]" "$DEFAULT" >"$FULL"
 
 yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
   | with(.check; .appimaged = false) \
@@ -38,7 +35,9 @@ yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
     .addRepos |= filter(.sourceName == \"github-cli\") \
     | .flatpak tag = \"!disabled\" | .flatpak |= [] \
     | .cargo |= filter(. != \"alacritty\") \
+    | .cargo += [\"presenterm --locked\"] \
     | .binaries |= filter(.name == \"git-credential-manager.deb\")) \
+  | with(.update; .cargo = true) \
   | with(.configure; \
     .dotfiles.packages |= filter(. != \"alacritty\" and . != \"vscode\") \
     | .apps.alacritty = false \
