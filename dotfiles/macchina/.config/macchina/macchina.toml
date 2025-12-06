@@ -1,3 +1,5 @@
+# source: https://github.com/Macchina-CLI/macchina/blob/main/macchina.toml
+
 # Specifies the network interface to use for the LocalIP readout
 interface = "wlan0"
 
