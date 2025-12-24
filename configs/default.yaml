@@ -53,12 +53,6 @@ check:
     - libssh-dev
     - libssl-dev
     - pkgconf
-    # alacritty dependencies
-    - libfontconfig1-dev
-    - libfreetype-dev # libfreetype6-dev is a transitional pkg
-    - libxcb-xfixes0-dev
-    - libxkbcommon-dev
-    # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
   rustupCheck: true
   appimaged: true
   nerdfont: !enabled GeistMono
@@ -132,6 +126,13 @@ install:
       pinning: false
       packages:
         - code
+    - sourceName: wezterm
+      remoteKey: https://apt.fury.io/wez/gpg.key
+      keyPath: /usr/share/keyrings/wezterm-fury.asc
+      repo: deb [signed-by=/usr/share/keyrings/wezterm-fury.asc] https://apt.fury.io/wez/ * *
+      pinning: false
+      packages:
+        - wezterm-nightly
   flatpak: !enabled
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
@@ -141,7 +142,6 @@ install:
     - org.shotcut.Shotcut   # video editor
     - org.telegram.desktop
   cargo: !enabled
-    - alacritty
     - bat --locked      # cat replacement
     - bottom --locked   # process / system monitor
     - du-dust           # du alternative
@@ -152,7 +152,6 @@ install:
     - tealdeer
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
-    - zellij --locked   # terminal multiplexer
     - zoxide --locked   # smarter cd command
   binaries: !enabled
     - name: Bitwarden.AppImage
@@ -182,23 +181,20 @@ update:
     yq: true
     go: false
     node: false
-    zellijClear: true
 configure:
   check: true
   dotfiles: !enabled
     stowMode: override
     packages:
       - bash
-      - alacritty
       - bat
       - bottom
       - macchina
       - starship
       - vscode
+      - wezterm
       - yazi
-      - zellij
   apps:
-    alacritty: true
     docker: true
     virtualbox: true
     vscodeExtensions: !enabled
@@ -218,7 +214,7 @@ configure:
       - yzhang.markdown-all-in-one
   desktopEnvironment: !enabled
     common: !enabled
-      defaultTerm: !enabled alacritty
+      defaultTerm: !enabled wezterm
     gnome: !enabled
       settings: true
       extensions: !enabled

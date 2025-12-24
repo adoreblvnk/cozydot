@@ -9,9 +9,9 @@ palette = "catppuccin_mocha"
 
 # Starship modules
 [character]
-success_symbol = "[[󰄛](green) ❯](peach)" # Note the use of Catppuccin color 'peach'
-error_symbol   = "[[󰄛](red) ❯](peach)"
-vimcmd_symbol  = "[󰄛 ❮](subtext1)"       # For use with zsh-vi-mode
+success_symbol = "[[󰄛](green) ](peach)" # Note the use of Catppuccin color 'peach', nf-fa-chevron_right
+error_symbol   = "[[󰄛](red) ](peach)"
+vimcmd_symbol  = "[󰄛 ](subtext1)"       # For use with zsh-vi-mode, nf-fa-chevron_left
 
 [git_branch]
 style = "bold mauve"

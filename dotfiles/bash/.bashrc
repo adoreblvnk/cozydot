@@ -22,7 +22,7 @@ shopt -s checkwinsize
 # colored GCC warnings and errors
 # export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
 
-# Add "alert" alias for long running commands. Use like `sleep 10; alert``
+# Add "alert" alias for long running commands. Use like `sleep 10; alert`
 alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
 
 # best practice to add alias definitions into separate file, eg ~/.bash_aliases
@@ -31,16 +31,6 @@ if [ -f ~/.bash_aliases ]; then source ~/.bash_aliases; fi
 # bash aliases if you don't use a bash_aliases file
 alias c=clear
 alias pip="python -m pip"
-
-if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
-
-# eza aliases
-if command -v eza &>/dev/null; then
-  alias ls="eza --group-directories-first --icons=auto"
-  alias la="eza --group-directories-first --icons=auto -a"
-  alias ll="eza --group-directories-first --icons=auto -al"
-  alias tree="eza --group-directories-first --icons=auto -T"
-fi
 
 # enable programmable completion features (you don't need to enable this, if it's
 # already enabled in /etc/bash.bashrc and /etc/profile sources /etc/bash.bashrc).
@@ -55,7 +45,11 @@ fi
 # force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
-# WSL
+# tells wezterm the current cwd (for tabs) & command status
+# uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
+if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
+
+# WSL: add Win user folder as env var
 if [[ -n $WSL_DISTRO_NAME ]]; then export WIN="/mnt/c/Users/$USER"; fi
 
 # ----- Load Languages -----
@@ -87,7 +81,15 @@ if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion bash
 if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
 
 # ----- Apps -----
-if [ -f ~/.bash_completion/alacritty ]; then source ~/.bash_completion/alacritty; fi
+if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
+
+# eza aliases
+if command -v eza &>/dev/null; then
+  alias ls="eza --group-directories-first --icons=auto"
+  alias la="eza --group-directories-first --icons=auto -a"
+  alias ll="eza --group-directories-first --icons=auto -al"
+  alias tree="eza --group-directories-first --icons=auto -T"
+fi
 
 if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
 
@@ -96,16 +98,10 @@ if command -v yazi &>/dev/null; then
   function y() {
     local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
     yazi "$@" --cwd-file="$tmp"
-    IFS= read -r -d '' cwd <"$tmp"
+    IFS= read -r -d '' cwd < "$tmp"
     [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
     rm -f -- "$tmp"
   }
-fi
-
-if command -v zellij &>/dev/null; then
-  eval "$(zellij setup --generate-auto-start bash)"
-  # https://zellij.dev/documentation/controlling-zellij-through-cli#completions
-  eval "$(zellij setup --generate-completion bash)"
 fi
 
 # https://github.com/ajeetdsouza/zoxide?tab=readme-ov-file#installation

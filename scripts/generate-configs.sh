@@ -34,13 +34,11 @@ yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
   | with(.install; \
     .addRepos |= filter(.sourceName == \"github-cli\") \
     | .flatpak tag = \"!disabled\" | .flatpak |= [] \
-    | .cargo |= filter(. != \"alacritty\") \
     | .cargo += [\"presenterm --locked\"] \
     | .binaries |= filter(.name == \"git-credential-manager.deb\")) \
   | with(.update; .cargo = true) \
   | with(.configure; \
-    .dotfiles.packages |= filter(. != \"alacritty\" and . != \"vscode\") \
-    | .apps.alacritty = false \
+    .dotfiles.packages |= filter(. != \"vscode\" and . != \"wezterm\") \
     | .apps.docker = false \
     | .apps.virtualbox = false \
     | .apps.vscodeExtensions tag = \"!disabled\" | .apps.vscodeExtensions |= [] \
@@ -66,7 +64,5 @@ yq ".metadata.description = \"Lightweight config with minimal utilities / apps i
     .dotfiles.packages |= filter(. != \"yazi\") \
     | .apps.docker = false \
     | .apps.virtualbox = false \
-    | .apps.vscodeExtensions |= filter( \
-      . == \"catppuccin.catppuccin-vsc\" \
-      or . == \"visualstudioexptteam.intellicode-api-usage-examples\" \
-      or . == \"visualstudioexptteam.vscodeintellicode\"))" "$DEFAULT" >"$VM"
+    | .apps.vscodeExtensions |= filter(. == \"catppuccin.catppuccin-vsc\") \
+  )" "$DEFAULT" >"$VM"

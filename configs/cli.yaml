@@ -53,12 +53,6 @@ check:
     - libssh-dev
     - libssl-dev
     - pkgconf
-    # alacritty dependencies
-    - libfontconfig1-dev
-    - libfreetype-dev # libfreetype6-dev is a transitional pkg
-    - libxcb-xfixes0-dev
-    - libxkbcommon-dev
-    # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
   rustupCheck: true
   appimaged: false
   nerdfont: !enabled GeistMono
@@ -95,7 +89,6 @@ install:
     - tealdeer
     - yazi-cli --locked # terminal file manager
     - yazi-fm --locked
-    - zellij --locked # terminal multiplexer
     - zoxide --locked # smarter cd command
     - presenterm --locked
   binaries: !enabled
@@ -120,7 +113,6 @@ update:
     yq: true
     go: false
     node: false
-    zellijClear: true
 configure:
   check: true
   dotfiles: !enabled
@@ -132,15 +124,13 @@ configure:
       - macchina
       - starship
       - yazi
-      - zellij
   apps:
-    alacritty: false
     docker: false
     virtualbox: false
     vscodeExtensions: !disabled []
   desktopEnvironment: !disabled
     common: !disabled
-      defaultTerm: !enabled alacritty
+      defaultTerm: !enabled wezterm
     gnome: !disabled
       settings: true
       extensions: !enabled

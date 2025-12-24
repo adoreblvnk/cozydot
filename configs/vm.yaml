@@ -53,12 +53,6 @@ check:
     - libssh-dev
     - libssl-dev
     - pkgconf
-    # alacritty dependencies
-    - libfontconfig1-dev
-    - libfreetype-dev # libfreetype6-dev is a transitional pkg
-    - libxcb-xfixes0-dev
-    - libxkbcommon-dev
-    # - pkg-config # NOTE: pkgconf breaks pkg-config (>= 0.29-1)
   rustupCheck: true
   appimaged: true
   nerdfont: !enabled GeistMono
@@ -95,13 +89,11 @@ install:
         - code
   flatpak: !disabled []
   cargo: !enabled
-    - alacritty
     - bat --locked # cat replacement
     - bottom --locked # process / system monitor
     - eza # ls replacement
     - macchina # system info
     - starship --locked
-    - zellij --locked # terminal multiplexer
     - zoxide --locked # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
@@ -125,29 +117,26 @@ update:
     yq: true
     go: false
     node: false
-    zellijClear: true
 configure:
   check: true
   dotfiles: !enabled
     stowMode: override
     packages:
       - bash
-      - alacritty
       - bat
       - bottom
       - macchina
       - starship
       - vscode
-      - zellij
+      - wezterm
   apps:
-    alacritty: true
     docker: false
     virtualbox: false
     vscodeExtensions: !enabled
       - catppuccin.catppuccin-vsc
   desktopEnvironment: !enabled
     common: !enabled
-      defaultTerm: !enabled alacritty
+      defaultTerm: !enabled wezterm
     gnome: !enabled
       settings: true
       extensions: !enabled

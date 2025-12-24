@@ -47,8 +47,8 @@ ${YELLOW}Commands:${NC}
                pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
   ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
                packages, & programming languages (node & golang)
-  ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
-               Zellij cache (see ${BLUE}~/.cozydot/configs/default.yaml${NC} for details)
+  ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & other stuff
+               (see ${BLUE}~/.cozydot/configs/default.yaml${NC} for details)
   ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed,
                customise desktop environment (Cinnamon / GNOME)
 
@@ -425,7 +425,7 @@ install() {
       # Eval string if subshell / var detected. Causes error if Bash special
       # characters used incorrectly
       if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$remote_key"; then
-        remote_key="$(eval echo "$remote_key")"
+        remote_key="$(eval echo \"$remote_key\")"
       fi
 
       # download asc key from remote
@@ -442,7 +442,7 @@ install() {
       local source_file_path="/etc/apt/sources.list.d/$source_name.list"
       _info_msg "Adding repo entry for $source_name into sources.list.d"
       # TODO: check before eval echo
-      sudo tee "$source_file_path" <<<"$(eval echo $repo)" >/dev/null
+      sudo tee "$source_file_path" <<<"$(eval echo \"$repo\")" >/dev/null
 
       # perform pinning to prioritise 3rd party if pinning entry exists
       if [[ $(yq ".install.addRepos[$i].pinning" "$CONFIG") != false ]]; then
@@ -509,7 +509,7 @@ install() {
       _info_msg "Downloading $binary_name"
       # eval string if subshell / variable detected
       if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url"; then
-        download_url="$(eval echo "$download_url")"
+        download_url="$(eval echo \"$download_url\")"
       fi
       curl -sSL -o "$HOME/Applications/$binary_name" "$download_url"
 
@@ -678,13 +678,6 @@ update() {
     _dl_node latest
   fi
 
-  # delete all other Zellij sessions, including exited ones
-  if [[ $(yq '.update.other.zellijClear' "$CONFIG") == true ]] \
-    && command -v zellij &>/dev/null; then
-    _info_msg "Deleting all other Zellij sessions"
-    zellij delete-all-sessions -y
-  fi
-
   _success_msg "Finished ${cozydot_txt} update"
 }
 
@@ -718,23 +711,6 @@ configure() {
       # dotfiles will be lost, but setting .stowMode to "override" fixes this
       stow --no-folding --adopt -d "$(dirname "$(realpath "$0")")/dotfiles/" -t "$HOME" "$pkg"
     done
-  fi
-
-  # setup Alacritty adds desktop icon & entry
-  if [[ $(yq '.configure.apps.alacritty' "$CONFIG") == true ]] \
-    && command -v alacritty &>/dev/null; then
-    if [[ ! -f /usr/share/pixmaps/Alacritty.svg ]]; then
-      _info_msg "Adding Alacritty icon"
-      sudo curl -sSL --create-dirs -o /usr/share/pixmaps/Alacritty.svg \
-        https://github.com/alacritty/alacritty/raw/master/extra/logo/alacritty-term.svg
-    fi
-
-    if [[ ! -f /usr/share/applications/Alacritty.desktop ]]; then
-      _info_msg "Adding desktop entry"
-      sudo curl -sSL --create-dirs -o /usr/share/applications/Alacritty.desktop \
-        https://github.com/alacritty/alacritty/raw/master/extra/linux/Alacritty.desktop
-      sudo update-desktop-database
-    fi
   fi
 
   # setup Docker adds user to docker group & uses local logging driver to prevent disk-exhaustion
