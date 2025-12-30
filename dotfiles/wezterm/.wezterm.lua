@@ -5,15 +5,19 @@ local act = wezterm.action
 local config = wezterm.config_builder()
 
 if wezterm.target_triple == 'x86_64-unknown-linux-gnu' then
-  config.front_end = "Software"
+  config.front_end = "Software" -- [OpenGL, WebGpu, Software] use Software if no GPU
 elseif wezterm.target_triple == 'x86_64-pc-windows-msvc' then
-  config.front_end = "Software" -- default 'WebGpu' but
+  config.front_end = "WebGpu"
   config.default_domain = 'WSL:Ubuntu'
+  -- tells wezterm the current cwd (for tabs) & command status
+  -- uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
+  -- source this in shell config (eg ~/.bashrc)
+  -- https://github.com/wezterm/wezterm/blob/main/assets/shell-integration/wezterm.sh
 end
 
 -- Window Management
-config.initial_cols = 120 -- default 120
-config.initial_rows = 28 -- default 28
+config.initial_cols = 176 -- default 120
+config.initial_rows = 44 -- default 28
 config.window_background_opacity = 0.80 -- default 1.0
 config.window_decorations = "RESIZE" -- default "TITLE | RESIZE"
 config.window_padding = { left = 8, right = 8, top = 8, bottom = 8 } -- default 0
@@ -64,6 +68,7 @@ local palettes = {
 local colors = palettes[config.color_scheme] or palettes['Catppuccin Mocha']
 
 -- Other Stuff
+config.disable_default_key_bindings = true
 config.hyperlink_rules = wezterm.default_hyperlink_rules()
 
 -- Cursor
@@ -75,7 +80,6 @@ config.cursor_blink_ease_out = 'Constant'
 config.use_fancy_tab_bar = false -- default true, we set our own tab bar style
 config.tab_max_width = 32
 config.colors = { tab_bar = { background = colors.base } }
-config.disable_default_key_bindings = true
 
 wezterm.on('update-status', function(window, pane)
   local mode_text = "NORMAL"
@@ -89,7 +93,7 @@ wezterm.on('update-status', function(window, pane)
     { Attribute = { Intensity = 'Bold' } },
     { Background = { Color = mode_bg } },
     { Foreground = { Color = colors.base } },
-    { Text = ' ' .. string.format("%-6s", mode_text) .. ' ' },
+    { Text = '  ' .. string.format("%-6s", mode_text) .. ' ' }, -- nf-oct-terminal
     { Background = { Color = colors.base } },
     { Foreground = { Color = mode_bg } },
     { Text = '' }, -- nf-pl-left_hard_divider
@@ -97,23 +101,20 @@ wezterm.on('update-status', function(window, pane)
   -- right status for workspace
   local cwd = ""
   if pane:get_current_working_dir() then
-    -- convert Win paths to Unix style
-    cwd = pane:get_current_working_dir().file_path:gsub("\\", "/")
+    cwd = pane:get_current_working_dir().file_path:gsub("\\", "/") -- convert Win paths to Unix style
   end
   -- replace home with ~ (replaces /home/user on WSL as well)
   cwd = cwd:gsub(wezterm.home_dir:gsub("\\", "/"), "~"):gsub("^/home/[^/]+", "~")
-  -- match last 2 folders in path (eg converts ~/code/a/ to code/a)
-  -- if no match, fallback to cwd
+  -- match last 2 folders in path (eg converts ~/code/a/ to code/a). If no match, fallback to cwd
   cwd = cwd:match("([^/]+/[^/]+)/?$") or cwd
   window:set_right_status(wezterm.format {
     { Foreground = { Color = colors.peach } },
     { Attribute = { Intensity = 'Bold' } },
     { Text = '  ' .. cwd .. ' ' }, -- nf-fa-folder
     { Foreground = { Color = colors.mauve } },
-    { Text = '|' },
+    { Text = '' }, -- nf-fa-ellipsis_vertical
     { Foreground = { Color = colors.peach } },
-    { Attribute = { Intensity = 'Bold' } },
-    { Text = '  ' .. window:active_workspace() .. ' ' }, -- nf-oct-terminal
+    { Text = '  ' .. window:active_workspace() .. ' ' }, -- nf-fa-desktop
   })
 end)
 
@@ -121,9 +122,7 @@ end)
 wezterm.on('format-tab-title', function(tab, tabs, panes, config, hover, max_width)
   local title = tab.active_pane.title -- title of active pane in tab
   -- use custom tab title if set (via tab:set_title())
-  if tab.tab_title and #tab.tab_title > 0 then
-    title = tab.tab_title
-  end
+  if tab.tab_title and #tab.tab_title > 0 then title = tab.tab_title end
   -- ensure title fits within max width
   title = wezterm.truncate_right(title, max_width - 4)
   local bg_color = colors.text
@@ -155,6 +154,7 @@ config.keys = {
   { key = 'v', mods = 'CTRL|SHIFT', action = act.PasteFrom 'Clipboard' },
   { key = 'f', mods = 'CTRL|SHIFT', action = act.Search 'CurrentSelectionOrEmptyString' },
   { key = 'x', mods = 'CTRL|SHIFT', action = act.ActivateCopyMode },
+  { key = 'Enter', mods = 'ALT', action = act.ToggleFullScreen },
   -- font size
   { key = '+', mods = 'CTRL|SHIFT', action = act.IncreaseFontSize },
   { key = '_', mods = 'CTRL|SHIFT', action = act.DecreaseFontSize },
@@ -245,9 +245,7 @@ local common_keys = {
   { key = 'Enter', action = 'PopKeyTable' }
 }
 for mode, tables in pairs(key_tables) do
-  for _, key_obj in ipairs(common_keys) do
-    table.insert(tables, key_obj)
-  end
+  for _, key_obj in ipairs(common_keys) do table.insert(tables, key_obj) end
 end
 config.key_tables = key_tables -- set config.key_tables
 
