@@ -6,6 +6,8 @@ readonly COZYDOT_VERSION=0.0.1
 CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
+# set in _set_arch_var()
+ARCH=""
 
 # ----- PRINT FUNCTIONS -----
 
@@ -66,6 +68,21 @@ EOF
 }
 
 # ----- SET GLOBAL VARIABLES -----
+
+# Set architecture variables for release assets.
+# Globals:
+#   ARCH: common release arch name (eg amd64, arm64)
+_set_arch_var() {
+  case "$(uname -m)" in
+    x86_64 | amd64)
+      ARCH="amd64"
+      ;;
+    aarch64 | arm64)
+      ARCH="arm64"
+      ;;
+    *) _error_msg "Unsupported architecture: $(uname -m)" ;;
+  esac
+}
 
 # Set complex global variables that require commands to be set.
 # Globals:
@@ -138,7 +155,7 @@ _dl_golang() {
     || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
     _info_msg "Downloading golang $latest_go"
     curl -sSL -o "/tmp/go.tar.gz" \
-      "https://go.dev/dl/go${latest_go}.linux-amd64.tar.gz"
+      "https://go.dev/dl/go${latest_go}.linux-${ARCH}.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
     source ~/.bashrc
   fi
@@ -358,7 +375,7 @@ EOF
       # get continuous release via GitHub api
       curl -sSL -o ~/Applications/appimaged.AppImage \
         "$(curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
-          | yq '.assets[].browser_download_url | select(. == "*appimaged*x86_64.AppImage")')"
+          | yq ".assets[].browser_download_url | select(. == \"*appimaged*$(uname -m).AppImage\")")"
       chmod +x ~/Applications/appimaged.AppImage
 
       # launch
@@ -659,7 +676,7 @@ update() {
     if [[ $local_yq_ver != "$latest_yq_ver" ]]; then
       _info_msg "Downloading & installing latest yq (version $latest_yq_ver)"
       sudo curl -sSL -o /usr/bin/yq \
-        https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}"
       sudo chmod +x /usr/bin/yq
     else
       _info_msg "yq $local_yq_ver is already the latest version"
@@ -896,6 +913,7 @@ configure() {
 
 main() {
   colours true # PRINT FUNCTIONS
+  _set_arch_var
 
   # Make this script an executable by creating symlink to /usr/local/bin.
   # script path must be ~/.cozydot/cozydot for standardisation
@@ -918,7 +936,7 @@ main() {
   if ! command -v yq &>/dev/null; then
     _info_msg "Installing yq" # NOTE: do not update yq to save time
     sudo curl -sSL -o /usr/bin/yq \
-      https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}"
     sudo chmod +x /usr/bin/yq
   fi
 
