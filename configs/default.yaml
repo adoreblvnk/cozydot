@@ -137,6 +137,7 @@ install:
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
     - io.bassi.Amberol      # music player
+    - net.sapples.LiveCaptions
     - org.gimp.GIMP
     - org.qbittorrent.qBittorrent
     - org.shotcut.Shotcut   # video editor
@@ -207,7 +208,6 @@ configure:
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
-      - net.sapples.LiveCaptions
       - redhat.vscode-yaml
       - streetsidesoftware.code-spell-checker
       - wayou.vscode-todo-highlight
