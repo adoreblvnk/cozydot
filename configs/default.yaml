@@ -61,7 +61,6 @@ install:
   apt: !enabled
     - default-jdk
     - figlet
-    - fzf         # fuzzy finder
     - gnupg2
     - imagemagick # image converter
     - lolcat
@@ -72,13 +71,6 @@ install:
     - vim
     - vlc
   addRepos: !enabled
-    - sourceName: brave-browser-release
-      remoteKey: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-      keyPath: /usr/share/keyrings/brave-browser-archive-keyring.gpg
-      repo: deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main
-      pinning: false
-      packages:
-        - brave-browser
     - sourceName: docker
       remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
       keyPath: /etc/apt/keyrings/docker.asc
@@ -90,6 +82,16 @@ install:
         - containerd.io
         - docker-buildx-plugin
         - docker-compose-plugin
+    - sourceName: debian-griffo
+      remoteKey: https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc
+      keyPath: /etc/apt/keyrings/debian-griffo.gpg
+      repo: deb [signed-by=/etc/apt/keyrings/debian-griffo.gpg] https://debian.griffo.io/apt $VERSION_CODENAME main
+      pinning: false
+      packages:
+        - eza
+        - fzf
+        - yazi
+        - zoxide
     - sourceName: github-cli
       remoteKey: https://cli.github.com/packages/githubcli-archive-keyring.gpg
       keyPath: /etc/apt/keyrings/githubcli-archive-keyring.gpg
@@ -97,16 +99,13 @@ install:
       pinning: false
       packages:
         - gh
-    - sourceName: mozilla
-      remoteKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
-      keyPath: /etc/apt/keyrings/packages.mozilla.org.asc
-      repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
-      pinning: |-
-        Package: *
-        Pin: origin packages.mozilla.org
-        Pin-Priority: 1000
+    - sourceName: helium
+      remoteKey: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
+      keyPath: /usr/share/keyrings/helium.gpg
+      repo: deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/helium.gpg] https://pkg.helium.computer/deb stable main
+      pinning: false
       packages:
-        - firefox
+        - helium-bin
     - sourceName: onlyoffice
       remoteKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
       keyPath: /usr/share/keyrings/onlyoffice.gpg
@@ -136,6 +135,7 @@ install:
       packages:
         - wezterm-nightly
   flatpak: !enabled
+    - com.bitwarden.desktop
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
     - io.bassi.Amberol      # music player
@@ -148,32 +148,28 @@ install:
     - bat --locked      # cat replacement
     - bottom --locked   # process / system monitor
     - du-dust           # du alternative
-    - eza               # ls replacement
     - fd-find           # find alternative
     - starship --locked
     - tealdeer
-    - yazi-cli --locked # terminal file manager
-    - yazi-fm --locked
-    - zoxide --locked   # smarter cd command
   binaries: !enabled
-    - name: Bitwarden.AppImage
-      url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
-    - name: drawio.AppImage
-      url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
+    - name: drawio.deb
+      url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq ".assets[].browser_download_url | select(. == \"*${GO_ARCH}*.deb\")")
     - name: fastfetch.deb
       url: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-${LINUX_ARCH}.deb
     - name: git-credential-manager.deb
-      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq ".assets[].browser_download_url | select(. == \"*linux-${X64_ARCH}-*.deb\")")
     - name: Obsidian.AppImage
-      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq '.assets[].browser_download_url | select(. == "*AppImage" and . != "*arm64*")')
+      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq ".assets[].browser_download_url | select(test(\"Obsidian-[0-9.]+${ARM64_SUFFIX}\\\\.AppImage$\"))")
+    - name: zen.AppImage
+      url: https://github.com/zen-browser/desktop/releases/latest/download/zen-${UNAME_ARCH}.AppImage
   languages:
     goVersion: !enabled latest
     nodeVersion: !enabled latest
-    pyenv: !enabled
+    pyenv: !disabled
       update: false
       version: 3
       pip: true
-    uv: !disabled
+    uv: !enabled
       version: !enabled 3.13
 update:
   check: true

@@ -61,7 +61,6 @@ install:
   apt: !enabled
     - default-jdk
     - figlet
-    - fzf # fuzzy finder
     - gnupg2
     - imagemagick # image converter
     - lolcat
@@ -72,16 +71,6 @@ install:
     - vim
     - vlc
   addRepos: !enabled
-    - sourceName: mozilla
-      remoteKey: https://packages.mozilla.org/apt/repo-signing-key.gpg
-      keyPath: /etc/apt/keyrings/packages.mozilla.org.asc
-      repo: deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main
-      pinning: |-
-        Package: *
-        Pin: origin packages.mozilla.org
-        Pin-Priority: 1000
-      packages:
-        - firefox
     - sourceName: vscode
       remoteKey: https://packages.microsoft.com/keys/microsoft.asc
       keyPath: /etc/apt/keyrings/packages.microsoft.gpg
@@ -93,20 +82,18 @@ install:
   cargo: !enabled
     - bat --locked # cat replacement
     - bottom --locked # process / system monitor
-    - eza # ls replacement
     - starship --locked
-    - zoxide --locked # smarter cd command
   binaries: !enabled
     - name: git-credential-manager.deb
-      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq ".assets[].browser_download_url | select(. == \"*linux-${X64_ARCH}-*.deb\")")
   languages:
     goVersion: !enabled latest
     nodeVersion: !enabled latest
-    pyenv: !enabled
+    pyenv: !disabled
       update: false
       version: 3
       pip: true
-    uv: !disabled
+    uv: !enabled
       version: !enabled 3.13
 update:
   check: true

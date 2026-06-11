@@ -61,7 +61,6 @@ install:
   apt: !enabled
     - default-jdk
     - figlet
-    - fzf # fuzzy finder
     - gnupg2
     - imagemagick # image converter
     - lolcat
@@ -84,25 +83,21 @@ install:
     - bat --locked # cat replacement
     - bottom --locked # process / system monitor
     - du-dust # du alternative
-    - eza # ls replacement
     - fd-find # find alternative
     - starship --locked
     - tealdeer
-    - yazi-cli --locked # terminal file manager
-    - yazi-fm --locked
-    - zoxide --locked # smarter cd command
     - presenterm --locked
   binaries: !enabled
     - name: git-credential-manager.deb
-      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
+      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq ".assets[].browser_download_url | select(. == \"*linux-${X64_ARCH}-*.deb\")")
   languages:
     goVersion: !enabled latest
     nodeVersion: !enabled latest
-    pyenv: !enabled
+    pyenv: !disabled
       update: false
       version: 3
       pip: true
-    uv: !disabled
+    uv: !enabled
       version: !enabled 3.13
 update:
   check: true

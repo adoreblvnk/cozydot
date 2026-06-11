@@ -7,7 +7,7 @@ CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 # set in _set_arch_var()
-GO_ARCH="" LINUX_ARCH=""
+UNAME_ARCH="" GO_ARCH="" LINUX_ARCH="" X64_ARCH="" ARM64_SUFFIX=""
 
 # ----- PRINT FUNCTIONS -----
 
@@ -71,20 +71,27 @@ EOF
 
 # Set architecture variables for release assets.
 # Globals:
+#   UNAME_ARCH: uname-style arch name (eg x86_64, aarch64)
 #   GO_ARCH: Go-style arch name (eg amd64, arm64)
 #   LINUX_ARCH: Linux release asset arch name (eg amd64, aarch64)
+#   X64_ARCH: release asset arch name used by some projects (eg x64, arm64)
+#   ARM64_SUFFIX: release asset arch suffix used by some projects (eg empty, -arm64)
 _set_arch_var() {
-  local uname_arch="$(uname -m)"
-  case "$uname_arch" in
+  UNAME_ARCH="$(uname -m)"
+  case "$UNAME_ARCH" in
     x86_64)
       GO_ARCH="amd64"
       LINUX_ARCH="amd64"
+      X64_ARCH="x64"
+      ARM64_SUFFIX=""
       ;;
     aarch64)
       GO_ARCH="arm64"
       LINUX_ARCH="aarch64"
+      X64_ARCH="arm64"
+      ARM64_SUFFIX="-arm64"
       ;;
-    *) _error_msg "Unsupported architecture: $uname_arch" ;;
+    *) _error_msg "Unsupported architecture: $UNAME_ARCH" ;;
   esac
 }
 
@@ -143,6 +150,13 @@ _set_global_var() {
 }
 
 # ----- HELPERS -----
+
+# Expands config values containing shell variables / substitutions without
+# allowing glob patterns like apt suite "*" to expand to local files.
+_expand_config_value() {
+  if [[ -z "${1:-}" ]]; then _error_msg "no value supplied to _expand_config_value"; fi
+  eval "printf '%s' \"$1\""
+}
 
 # Downloads / updates golang.
 # Arguments:
@@ -379,7 +393,7 @@ EOF
       # get continuous release via GitHub api
       curl -sSL -o ~/Applications/appimaged.AppImage \
         "$(curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous \
-          | yq ".assets[].browser_download_url | select(. == \"*appimaged*$(uname -m).AppImage\")")"
+          | yq ".assets[].browser_download_url | select(. == \"*appimaged*${UNAME_ARCH}.AppImage\")")"
       chmod +x ~/Applications/appimaged.AppImage
 
       # launch
@@ -446,7 +460,7 @@ install() {
       # Eval string if subshell / var detected. Causes error if Bash special
       # characters used incorrectly
       if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$remote_key"; then
-        remote_key="$(eval echo \"$remote_key\")"
+        remote_key="$(_expand_config_value "$remote_key")"
       fi
 
       # download asc key from remote
@@ -462,8 +476,7 @@ install() {
       # add repo entry into sources.list.d
       local source_file_path="/etc/apt/sources.list.d/$source_name.list"
       _info_msg "Adding repo entry for $source_name into sources.list.d"
-      # TODO: check before eval echo
-      sudo tee "$source_file_path" <<<"$(eval echo \"$repo\")" >/dev/null
+      sudo tee "$source_file_path" <<<"$(_expand_config_value "$repo")" >/dev/null
 
       # perform pinning to prioritise 3rd party if pinning entry exists
       if [[ $(yq ".install.addRepos[$i].pinning" "$CONFIG") != false ]]; then
@@ -530,7 +543,7 @@ install() {
       _info_msg "Downloading $binary_name"
       # eval string if subshell / variable detected
       if grep -Eq '\$(\(|\{).*(\)|\})' <<<"$download_url"; then
-        download_url="$(eval echo \"$download_url\")"
+        download_url="$(_expand_config_value "$download_url")"
       fi
       curl -sSL -o "$HOME/Applications/$binary_name" "$download_url"
 

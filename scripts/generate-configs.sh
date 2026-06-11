@@ -16,11 +16,7 @@ yq ".metadata.description = \"All features enabled & apps installed.\" \
   | with(.install; \
     .languages.pyenv.update = true \
     | .languages.uv tag = \"!enabled\" \
-    | .cargo += [\"presenterm --locked\"] \
-    | .binaries += [ \
-      {\"name\": \"zen.AppImage\", \
-      \"url\": \"\$(curl -sSL https://api.github.com/repos/zen-browser/desktop/releases/latest | yq '.assets[].browser_download_url | select(. == \\\"*x86_64.AppImage\\\")')\"} \
-    ]) \
+    | .cargo += [\"presenterm --locked\"]) \
   | with(.update; .apt.aptFull = true | .cargo = true) \
   | .configure.apps.vscodeExtensions += [ \
     \"foxundermoon.shell-format\", \
@@ -50,15 +46,12 @@ yq ".metadata.description = \"CLI utilities only. For use with WSL2 too.\" \
 yq ".metadata.description = \"Lightweight config with minimal utilities / apps installed for virtual machines.\" \
   | with(.install; \
     .addRepos |= filter( \
-      .sourceName == \"mozilla\" \
-      or .sourceName == \"vscode\") \
+      .sourceName == \"vscode\") \
     | .flatpak tag = \"!disabled\" | .flatpak |= [] \
     | .cargo |= filter(
       . != \"du-dust\" \
       and . != \"fd-find\" \
-      and . != \"tealdeer\" \
-      and . != \"yazi-cli --locked\" \
-      and . != \"yazi-fm --locked\") \
+      and . != \"tealdeer\") \
     | .binaries |= filter(.name == \"git-credential-manager.deb\")) \
   | with(.configure; \
     .dotfiles.packages |= filter(. != \"yazi\") \
