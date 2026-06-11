@@ -403,7 +403,7 @@ EOF
     fi
     # install libfuse2t64 (libfuse2 on older systems) for legacy AppImages
     # https://github.com/AppImage/AppImageKit/wiki/FUSE
-    local fuse2_lib=$(apt-cache search --names-only "^libfuse2" | cut -d ' ' -f 1)
+    local fuse2_lib=$(apt-cache show libfuse2t64 &>/dev/null && printf libfuse2t64 || printf libfuse2)
     if ! dpkg -s "$fuse2_lib" &>/dev/null; then
       _info_msg "Installing $fuse2_lib for legacy AppImages"
       sudo apt-get update -qq && sudo apt-get install -qq "$fuse2_lib"
