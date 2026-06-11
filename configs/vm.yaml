@@ -92,7 +92,6 @@ install:
     - bat --locked # cat replacement
     - bottom --locked # process / system monitor
     - eza # ls replacement
-    - macchina # system info
     - starship --locked
     - zoxide --locked # smarter cd command
   binaries: !enabled
@@ -125,7 +124,6 @@ configure:
       - bash
       - bat
       - bottom
-      - macchina
       - starship
       - vscode
       - wezterm

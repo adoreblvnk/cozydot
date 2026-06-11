@@ -7,7 +7,7 @@ CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
 # set in _set_arch_var()
-ARCH=""
+GO_ARCH="" LINUX_ARCH=""
 
 # ----- PRINT FUNCTIONS -----
 
@@ -71,16 +71,20 @@ EOF
 
 # Set architecture variables for release assets.
 # Globals:
-#   ARCH: common release arch name (eg amd64, arm64)
+#   GO_ARCH: Go-style arch name (eg amd64, arm64)
+#   LINUX_ARCH: Linux release asset arch name (eg amd64, aarch64)
 _set_arch_var() {
-  case "$(uname -m)" in
-    x86_64 | amd64)
-      ARCH="amd64"
+  local uname_arch="$(uname -m)"
+  case "$uname_arch" in
+    x86_64)
+      GO_ARCH="amd64"
+      LINUX_ARCH="amd64"
       ;;
-    aarch64 | arm64)
-      ARCH="arm64"
+    aarch64)
+      GO_ARCH="arm64"
+      LINUX_ARCH="aarch64"
       ;;
-    *) _error_msg "Unsupported architecture: $(uname -m)" ;;
+    *) _error_msg "Unsupported architecture: $uname_arch" ;;
   esac
 }
 
@@ -155,7 +159,7 @@ _dl_golang() {
     || [[ "$(go version | cut -d ' ' -f 3)" != "go$latest_go" ]]; then
     _info_msg "Downloading golang $latest_go"
     curl -sSL -o "/tmp/go.tar.gz" \
-      "https://go.dev/dl/go${latest_go}.linux-${ARCH}.tar.gz"
+      "https://go.dev/dl/go${latest_go}.linux-${GO_ARCH}.tar.gz"
     sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tar.gz
     source ~/.bashrc
   fi
@@ -676,7 +680,7 @@ update() {
     if [[ $local_yq_ver != "$latest_yq_ver" ]]; then
       _info_msg "Downloading & installing latest yq (version $latest_yq_ver)"
       sudo curl -sSL -o /usr/bin/yq \
-        "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}"
+        "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${GO_ARCH}"
       sudo chmod +x /usr/bin/yq
     else
       _info_msg "yq $local_yq_ver is already the latest version"
@@ -936,7 +940,7 @@ main() {
   if ! command -v yq &>/dev/null; then
     _info_msg "Installing yq" # NOTE: do not update yq to save time
     sudo curl -sSL -o /usr/bin/yq \
-      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}"
+      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${GO_ARCH}"
     sudo chmod +x /usr/bin/yq
   fi
 

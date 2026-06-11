@@ -108,6 +108,4 @@ fi
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
 # display system info
-if command -v macchina &>/dev/null; then
-  macchina -o host -o kernel -o distribution -o uptime -o processor-load -o memory
-fi
+if command -v fastfetch &>/dev/null; then fastfetch; fi

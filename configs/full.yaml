@@ -137,6 +137,7 @@ install:
     - com.discordapp.Discord
     - com.obsproject.Studio # video recorder & live streaming software
     - io.bassi.Amberol # music player
+    - net.sapples.LiveCaptions
     - org.gimp.GIMP
     - org.qbittorrent.qBittorrent
     - org.shotcut.Shotcut # video editor
@@ -147,7 +148,6 @@ install:
     - du-dust # du alternative
     - eza # ls replacement
     - fd-find # find alternative
-    - macchina # system info
     - starship --locked
     - tealdeer
     - yazi-cli --locked # terminal file manager
@@ -159,6 +159,8 @@ install:
       url: https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=appimage
     - name: drawio.AppImage
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq '.assets[].browser_download_url | select(. == "*x86_64*AppImage")')
+    - name: fastfetch.deb
+      url: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-${LINUX_ARCH}.deb
     - name: git-credential-manager.deb
       url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq '.assets[].browser_download_url | select(. == "*deb")')
     - name: Obsidian.AppImage
@@ -192,7 +194,6 @@ configure:
       - bash
       - bat
       - bottom
-      - macchina
       - starship
       - vscode
       - wezterm
@@ -210,7 +211,6 @@ configure:
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
-      - net.sapples.LiveCaptions
       - redhat.vscode-yaml
       - streetsidesoftware.code-spell-checker
       - wayou.vscode-todo-highlight

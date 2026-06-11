@@ -84,7 +84,6 @@ install:
     - du-dust # du alternative
     - eza # ls replacement
     - fd-find # find alternative
-    - macchina # system info
     - starship --locked
     - tealdeer
     - yazi-cli --locked # terminal file manager
@@ -121,7 +120,6 @@ configure:
       - bash
       - bat
       - bottom
-      - macchina
       - starship
       - yazi
   apps:
