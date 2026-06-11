@@ -60,9 +60,11 @@ install:
   check: true
   apt: !enabled
     - default-jdk
+    - figlet
     - fzf # fuzzy finder
     - gnupg2
     - imagemagick # image converter
+    - lolcat
     - openssh-server
     - pandoc # document converter
     - pass
@@ -194,6 +196,7 @@ configure:
       - bash
       - bat
       - bottom
+      - fastfetch
       - starship
       - vscode
       - wezterm
