@@ -565,7 +565,9 @@ def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
         title = titles.get(source, f"{source} PAYG")
         cache_label = "cache→in" if args.no_cache else "cache priced/fallback→in"
         print_cost_box(title, totals["cost_usd"], f"{args.days}d · {cache_label}", cyan=cyan, green=green, dim=dim)
+        total_tokens = totals["input_tokens"] + totals["output_tokens"] + totals["cache_read_tokens"] + totals["cache_write_tokens"]
         call_part = f"  {dim('calls')} {fmt_int(totals['calls'])}" if totals["calls"] else ""
+        print(f"{dim('total tokens')} {fmt_tokens(total_tokens)}")
         print(
             f"{dim('tokens')} in {fmt_tokens(totals['input_tokens'])} / "
             f"out {fmt_tokens(totals['output_tokens'])} / "
@@ -573,7 +575,6 @@ def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
             f"{call_part}  "
             f"{dim('sessions')} {fmt_int(totals['sessions'])}"
         )
-        print()
 
         for item in items:
             cost = item["cost_usd"]
