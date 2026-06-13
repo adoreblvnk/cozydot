@@ -2,14 +2,17 @@
 """Estimate AI PAYG spend from local Hermes and OpenCode usage.
 
 Pricing is fetched from https://models.dev/api.json. Cost fields are treated as
-USD per 1M tokens. Cached input is deliberately folded into input cost.
+USD per 1M tokens. Cache tokens use cache pricing when available, otherwise
+fall back to input pricing.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
+import sys
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -17,9 +20,61 @@ from pathlib import Path
 from typing import Any
 
 MODELS_DEV_API = "https://models.dev/api.json"
-DEFAULT_HERMES_DB = Path.home() / ".hermes" / "state.db"
-DEFAULT_OPENCODE_DB = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
-DEFAULT_CACHE = Path.home() / ".cache" / "ai-spend-tracker" / "models.dev.api.json"
+
+
+def user_cache_dir() -> Path:
+    """Return the platform-appropriate user cache directory."""
+    if xdg_cache := os.environ.get("XDG_CACHE_HOME"):
+        return Path(xdg_cache).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches"
+    return Path.home() / ".cache"
+
+
+def user_data_dir() -> Path:
+    """Return the platform-appropriate user data directory."""
+    if xdg_data := os.environ.get("XDG_DATA_HOME"):
+        return Path(xdg_data).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support"
+    return Path.home() / ".local" / "share"
+
+
+def first_existing(paths: list[Path]) -> Path:
+    """Pick the first existing path, falling back to the platform default."""
+    expanded = [p.expanduser() for p in paths]
+    for path in expanded:
+        if path.exists():
+            return path
+    return expanded[0]
+
+
+def default_hermes_db() -> Path:
+    if env_path := os.environ.get("HERMES_DB"):
+        return Path(env_path).expanduser()
+    return Path.home() / ".hermes" / "state.db"
+
+
+def default_opencode_db() -> Path:
+    if env_path := os.environ.get("OPENCODE_DB"):
+        return Path(env_path).expanduser()
+
+    platform_default = user_data_dir() / "opencode" / "opencode.db"
+    linux_default = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+    macos_default = Path.home() / "Library" / "Application Support" / "opencode" / "opencode.db"
+    return first_existing([platform_default, linux_default, macos_default])
+
+
+def default_claude_dir() -> Path:
+    if env_path := os.environ.get("CLAUDE_CONFIG_DIR"):
+        return Path(env_path).expanduser()
+    return Path.home() / ".claude"
+
+
+DEFAULT_HERMES_DB = default_hermes_db()
+DEFAULT_OPENCODE_DB = default_opencode_db()
+DEFAULT_CLAUDE_DIR = default_claude_dir()
+DEFAULT_CACHE = user_cache_dir() / "ai-spend-tracker" / "models.dev.api.json"
 
 # Map local tool/provider names to models.dev provider keys.
 PROVIDER_ALIASES = {
@@ -31,6 +86,8 @@ PROVIDER_ALIASES = {
     "github-copilot": "github-copilot",
     "google": "google",
     "gemini": "google",
+    "anthropic": "anthropic",
+    "claude-code": "anthropic",
 }
 
 MODEL_ALIASES: dict[str, str] = {}
@@ -125,19 +182,13 @@ def money(tokens: int, price_per_million: float | None) -> float:
     return 0.0 if not price_per_million else tokens * price_per_million / 1_000_000
 
 
-def query_hermes_usage(db_path: Path, days: int, platform: str | None, title_contains: str | None, model_like: str | None) -> list[UsageRow]:
+def query_hermes_usage(db_path: Path, days: int, model_like: str | None) -> list[UsageRow]:
     if not db_path.exists():
         return []
 
     cutoff = time.time() - days * 86400
     where = ["started_at >= ?", "model IS NOT NULL", "(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) > 0"]
     params: list[Any] = [cutoff]
-    if platform:
-        where.append("source = ?")
-        params.append(platform)
-    if title_contains:
-        where.append("COALESCE(title, '') LIKE ?")
-        params.append(f"%{title_contains}%")
     if model_like:
         where.append("model LIKE ?")
         params.append(f"%{model_like}%")
@@ -173,6 +224,32 @@ def parse_opencode_model(raw: str | None) -> tuple[str | None, str | None]:
     except json.JSONDecodeError:
         return None, raw
     return data.get("providerID"), data.get("id") or data.get("modelID")
+
+
+def to_int(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def parse_timestamp(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        # Claude Code JSONL may use epoch seconds or milliseconds.
+        return float(value) / 1000 if value > 10_000_000_000 else float(value)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        from datetime import datetime
+
+        text = value.replace("Z", "+00:00")
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
 
 
 def query_opencode_usage(db_path: Path, days: int, model_like: str | None) -> list[UsageRow]:
@@ -233,7 +310,114 @@ def query_opencode_usage(db_path: Path, days: int, model_like: str | None) -> li
     return list(merged.values())
 
 
-def estimate(rows: list[UsageRow], provider_data: dict[str, Any]) -> dict[str, Any]:
+def iter_claude_jsonl_files(claude_dir: Path) -> list[Path]:
+    if not claude_dir.exists():
+        return []
+
+    roots = [claude_dir / "projects", claude_dir]
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.jsonl"):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                files.append(path)
+    return files
+
+
+def query_claude_code_usage(claude_dir: Path, days: int, model_like: str | None) -> list[UsageRow]:
+    """Parse Claude Code JSONL transcripts under ~/.claude/projects."""
+    cutoff = time.time() - days * 86400
+    merged: dict[str, UsageRow] = {}
+    sessions_by_model: dict[str, set[str]] = {}
+
+    for path in iter_claude_jsonl_files(claude_dir.expanduser()):
+        try:
+            file_mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if file_mtime < cutoff:
+            continue
+
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+
+        session_key = str(path)
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+
+            event_ts = parse_timestamp(event.get("timestamp") or event.get("created_at") or event.get("time"))
+            if event_ts is not None and event_ts < cutoff:
+                continue
+
+            message = event.get("message") if isinstance(event.get("message"), dict) else event
+            usage = message.get("usage") if isinstance(message.get("usage"), dict) else event.get("usage")
+            if not isinstance(usage, dict):
+                continue
+
+            model = message.get("model") or event.get("model")
+            if not isinstance(model, str) or not model:
+                continue
+            if model_like and model_like.lower() not in model.lower():
+                continue
+
+            input_tokens = to_int(usage.get("input_tokens"))
+            output_tokens = to_int(usage.get("output_tokens"))
+            cache_read_tokens = to_int(usage.get("cache_read_input_tokens")) + to_int(usage.get("cache_read_tokens"))
+            cache_write_tokens = (
+                to_int(usage.get("cache_creation_input_tokens"))
+                + to_int(usage.get("cache_creation_tokens"))
+                + to_int(usage.get("cache_creation_ephemeral_5m_input_tokens"))
+                + to_int(usage.get("cache_creation_ephemeral_1h_input_tokens"))
+            )
+            reasoning_tokens = to_int(usage.get("thinking_tokens")) + to_int(usage.get("reasoning_tokens"))
+
+            if input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens <= 0:
+                continue
+
+            existing = merged.get(model)
+            if existing is None:
+                existing = UsageRow(
+                    source="claude-code",
+                    model=model,
+                    billing_provider="anthropic",
+                    sessions=0,
+                    calls=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_read_tokens=0,
+                    cache_write_tokens=0,
+                    reasoning_tokens=0,
+                )
+                merged[model] = existing
+                sessions_by_model[model] = set()
+
+            sessions_by_model[model].add(session_key)
+            existing.calls += 1
+            existing.input_tokens += input_tokens
+            existing.output_tokens += output_tokens
+            existing.cache_read_tokens += cache_read_tokens
+            existing.cache_write_tokens += cache_write_tokens
+            existing.reasoning_tokens += reasoning_tokens
+
+    for model, row in merged.items():
+        row.sessions = len(sessions_by_model.get(model, set()))
+    return list(merged.values())
+
+
+def estimate(rows: list[UsageRow], provider_data: dict[str, Any], no_cache: bool = False) -> dict[str, Any]:
     results = []
     missing = []
     totals = {
@@ -280,11 +464,17 @@ def estimate(rows: list[UsageRow], provider_data: dict[str, Any]) -> dict[str, A
             continue
 
         prices, price_tier = pick_cost(meta["cost"])
-        effective_input_tokens = row.input_tokens + row.cache_read_tokens
-        cost_input = money(effective_input_tokens, prices.get("input"))
+        input_price = prices.get("input")
+        cost_input = money(row.input_tokens, input_price)
         cost_output = money(row.output_tokens, prices.get("output"))
-        cost_cache_write = money(row.cache_write_tokens, prices.get("cache_write"))
-        cost_total = cost_input + cost_output + cost_cache_write
+        cache_read_price = input_price if no_cache else prices.get("cache_read", input_price)
+        cache_write_price = input_price if no_cache else prices.get("cache_write", input_price)
+        cost_cache_read = money(row.cache_read_tokens, cache_read_price)
+        cost_cache_write = money(row.cache_write_tokens, cache_write_price)
+        cost_total = cost_input + cost_output + cost_cache_read + cost_cache_write
+        cache_pricing = "input" if no_cache else "cache"
+        cache_read_priced_as = "input" if no_cache or "cache_read" not in prices else "cache_read"
+        cache_write_priced_as = "input" if no_cache or "cache_write" not in prices else "cache_write"
         totals["cost_usd"] += cost_total
         src["cost_usd"] = float(src["cost_usd"]) + cost_total
 
@@ -293,7 +483,10 @@ def estimate(rows: list[UsageRow], provider_data: dict[str, Any]) -> dict[str, A
             "pricing_provider": provider,
             "priced_as": found_id,
             "cost_usd": cost_total,
-            "cost_breakdown_usd": {"input": cost_input, "output": cost_output, "cache_write": cost_cache_write},
+            "cost_breakdown_usd": {"input": cost_input, "output": cost_output, "cache_read": cost_cache_read, "cache_write": cost_cache_write},
+            "cache_pricing": cache_pricing,
+            "cache_read_priced_as": cache_read_priced_as,
+            "cache_write_priced_as": cache_write_priced_as,
             "price_tier": price_tier,
         })
 
@@ -348,7 +541,10 @@ def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
     red = lambda s: color(s, "1;31", use_color)
 
     if args.source is None and len(report["by_source"]) > 1:
-        print_cost_box("Total AI spend", report["totals"]["cost_usd"], f"{args.days}d · Hermes + OpenCode · cache→in", cyan=cyan, green=green, dim=dim)
+        source_labels = {"hermes": "Hermes", "opencode": "OpenCode", "claude-code": "Claude Code"}
+        active_sources = [source_labels.get(s, s) for s in ("hermes", "opencode", "claude-code") if s in report["by_source"]]
+        cache_label = "cache→in" if args.no_cache else "cache priced/fallback→in"
+        print_cost_box("Total AI spend", report["totals"]["cost_usd"], f"{args.days}d · {' + '.join(active_sources)} · {cache_label}", cyan=cyan, green=green, dim=dim)
         print()
 
     def section(source: str) -> None:
@@ -362,15 +558,18 @@ def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
             "input_tokens": sum(int(i["input_tokens"]) for i in items),
             "output_tokens": sum(int(i["output_tokens"]) for i in items),
             "cache_read_tokens": sum(int(i["cache_read_tokens"]) for i in items),
+            "cache_write_tokens": sum(int(i["cache_write_tokens"]) for i in items),
             "cost_usd": sum(float(i["cost_usd"] or 0.0) for i in items),
         }
-        title = "Hermes PAYG" if source == "hermes" else "OpenCode PAYG"
-        print_cost_box(title, totals["cost_usd"], f"{args.days}d · cache→in", cyan=cyan, green=green, dim=dim)
+        titles = {"hermes": "Hermes PAYG", "opencode": "OpenCode PAYG", "claude-code": "Claude Code PAYG"}
+        title = titles.get(source, f"{source} PAYG")
+        cache_label = "cache→in" if args.no_cache else "cache priced/fallback→in"
+        print_cost_box(title, totals["cost_usd"], f"{args.days}d · {cache_label}", cyan=cyan, green=green, dim=dim)
         call_part = f"  {dim('calls')} {fmt_int(totals['calls'])}" if totals["calls"] else ""
         print(
-            f"{dim('tokens')} in {fmt_tokens(totals['input_tokens'] + totals['cache_read_tokens'])} "
-            f"({fmt_tokens(totals['input_tokens'])}+{fmt_tokens(totals['cache_read_tokens'])} cache) / "
-            f"out {fmt_tokens(totals['output_tokens'])}"
+            f"{dim('tokens')} in {fmt_tokens(totals['input_tokens'])} / "
+            f"out {fmt_tokens(totals['output_tokens'])} / "
+            f"cache {fmt_tokens(totals['cache_read_tokens'] + totals['cache_write_tokens'])}"
             f"{call_part}  "
             f"{dim('sessions')} {fmt_int(totals['sessions'])}"
         )
@@ -385,19 +584,21 @@ def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
             print(f"{model}  {cost_s}  {priced_as}")
             if args.verbose:
                 print(
-                    f"  {dim('tokens')} in {fmt_tokens(item['input_tokens'] + item['cache_read_tokens'])} "
-                    f"({fmt_tokens(item['input_tokens'])}+{fmt_tokens(item['cache_read_tokens'])} cache), "
-                    f"out {fmt_tokens(item['output_tokens'])}; "
+                    f"  {dim('tokens')} in {fmt_tokens(item['input_tokens'])}, "
+                    f"out {fmt_tokens(item['output_tokens'])}, "
+                    f"cache {fmt_tokens(item['cache_read_tokens'] + item['cache_write_tokens'])}; "
                     f"{dim('sessions')} {fmt_int(item['sessions'])}"
                     + (f"; {dim('calls')} {fmt_int(item['calls'])}" if item["calls"] else "")
                 )
                 if item.get("cost_breakdown_usd"):
                     b = item["cost_breakdown_usd"]
-                    print(f"  {dim('cost')} in ${b['input']:,.2f}, out ${b['output']:,.2f}")
+                    print(f"  {dim('cost')} in ${b['input']:,.2f}, out ${b['output']:,.2f}, cache ${b['cache_read'] + b['cache_write']:,.2f}")
+                    print(f"  {dim('cache priced as')} read={item.get('cache_read_priced_as')}, write={item.get('cache_write_priced_as')}")
         print()
 
     section("hermes")
     section("opencode")
+    section("claude-code")
 
     if report["missing_prices"]:
         labels = [f"{m['source']}:{m['billing_provider']}/{m['model']}" for m in report["missing_prices"]]
@@ -407,15 +608,15 @@ def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Estimate AI PAYG spend from Hermes and OpenCode usage.")
+    p = argparse.ArgumentParser(description="Estimate AI PAYG spend from Hermes, OpenCode, and Claude Code usage.")
     p.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
     p.add_argument("--hermes-db", type=Path, default=DEFAULT_HERMES_DB, help=f"Hermes state DB path (default: {DEFAULT_HERMES_DB})")
     p.add_argument("--opencode-db", type=Path, default=DEFAULT_OPENCODE_DB, help=f"OpenCode DB path (default: {DEFAULT_OPENCODE_DB})")
-    p.add_argument("--source", choices=["hermes", "opencode"], help="Only include one source")
-    p.add_argument("--platform", help="Hermes platform filter, e.g. telegram or cli")
-    p.add_argument("--title-contains", help="Hermes session title filter")
+    p.add_argument("--claude-dir", type=Path, default=DEFAULT_CLAUDE_DIR, help=f"Claude Code config dir (default: {DEFAULT_CLAUDE_DIR})")
+    p.add_argument("--source", choices=["hermes", "opencode", "claude-code"], help="Only include one source")
     p.add_argument("--model-like", help="Filter model names containing this text")
     p.add_argument("--refresh-prices", action="store_true", help="Ignore cached models.dev pricing and fetch fresh data")
+    p.add_argument("--no-cache", action="store_true", help="Treat cache tokens as input-priced tokens instead of using cache pricing")
     p.add_argument("--verbose", "-v", action="store_true", help="Show per-model token and cost breakdown")
     p.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     p.add_argument("--json", action="store_true", help="Print machine-readable JSON")
@@ -427,10 +628,12 @@ def main() -> int:
     provider_data = fetch_json(MODELS_DEV_API, DEFAULT_CACHE, refresh=args.refresh_prices)
     rows: list[UsageRow] = []
     if args.source in (None, "hermes"):
-        rows.extend(query_hermes_usage(args.hermes_db.expanduser(), args.days, args.platform, args.title_contains, args.model_like))
+        rows.extend(query_hermes_usage(args.hermes_db.expanduser(), args.days, args.model_like))
     if args.source in (None, "opencode"):
         rows.extend(query_opencode_usage(args.opencode_db.expanduser(), args.days, args.model_like))
-    report = estimate(rows, provider_data)
+    if args.source in (None, "claude-code"):
+        rows.extend(query_claude_code_usage(args.claude_dir.expanduser(), args.days, args.model_like))
+    report = estimate(rows, provider_data, no_cache=args.no_cache)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
