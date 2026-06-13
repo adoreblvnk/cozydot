@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+"""Estimate AI PAYG spend from local Hermes and OpenCode usage.
+
+Pricing is fetched from https://models.dev/api.json. Cost fields are treated as
+USD per 1M tokens. Cached input is deliberately folded into input cost.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import time
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+MODELS_DEV_API = "https://models.dev/api.json"
+DEFAULT_HERMES_DB = Path.home() / ".hermes" / "state.db"
+DEFAULT_OPENCODE_DB = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+DEFAULT_CACHE = Path.home() / ".cache" / "ai-spend-tracker" / "models.dev.api.json"
+
+# Map local tool/provider names to models.dev provider keys.
+PROVIDER_ALIASES = {
+    "openai-codex": "openai",
+    "chatgpt": "openai",
+    "openai-chatgpt": "openai",
+    "copilot": "github-copilot",
+    "copilot-cli": "github-copilot",
+    "github-copilot": "github-copilot",
+    "google": "google",
+    "gemini": "google",
+}
+
+MODEL_ALIASES: dict[str, str] = {}
+
+
+@dataclass
+class UsageRow:
+    source: str
+    model: str
+    billing_provider: str | None
+    sessions: int
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    reasoning_tokens: int
+
+
+def fetch_json(url: str, cache_path: Path, max_cache_age_hours: float = 24, refresh: bool = False) -> dict[str, Any]:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if not refresh and cache_path.exists():
+        age_hours = (time.time() - cache_path.stat().st_mtime) / 3600
+        if age_hours <= max_cache_age_hours:
+            return json.loads(cache_path.read_text())
+
+    req = urllib.request.Request(url, headers={"User-Agent": "ai-spend-tracker/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.load(resp)
+    cache_path.write_text(json.dumps(data, indent=2, sort_keys=True))
+    return data
+
+
+def normalize_pricing_provider(provider: str | None) -> str | None:
+    if not provider:
+        return None
+    p = provider.lower()
+    return PROVIDER_ALIASES.get(p, p)
+
+
+def candidate_model_ids(model: str, provider: str) -> list[str]:
+    m = MODEL_ALIASES.get(model, model)
+    lab_prefixes = ["openai/", "anthropic/", "google/", "xai/", "moonshotai/", "deepseek/"]
+    stripped = m
+    for prefix in lab_prefixes:
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix) :]
+            break
+
+    candidates = [m, stripped]
+    if provider == "openrouter" and "/" not in stripped:
+        candidates.append(f"openai/{stripped}")
+    if provider == "openai" and stripped.startswith("openai/"):
+        candidates.append(stripped.split("/", 1)[1])
+
+    out: list[str] = []
+    for c in candidates:
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+def find_model(provider_data: dict[str, Any], provider: str, model: str) -> tuple[str | None, dict[str, Any] | None]:
+    models = provider_data.get(provider, {}).get("models", {})
+    for mid in candidate_model_ids(model, provider):
+        if mid in models:
+            return mid, models[mid]
+
+    want = model.lower()
+    for mid, meta in models.items():
+        if want == mid.lower() or want == str(meta.get("name", "")).lower():
+            return mid, meta
+    return None, None
+
+
+def pick_cost(cost: dict[str, Any]) -> tuple[dict[str, float], str]:
+    """Return prices, using the model's first context tier when present."""
+    tiers = cost.get("tiers")
+    if isinstance(tiers, list):
+        for tier in tiers:
+            tier_meta = tier.get("tier") if isinstance(tier, dict) else None
+            if isinstance(tier_meta, dict) and tier_meta.get("type") == "context":
+                prices = dict(cost)
+                prices.update(tier)
+                size = tier_meta.get("size")
+                numeric = {k: float(v) for k, v in prices.items() if isinstance(v, (int, float))}
+                return numeric, f"context>{fmt_int(size) if isinstance(size, int) else size}"
+    return {k: float(v) for k, v in cost.items() if isinstance(v, (int, float))}, "standard"
+
+
+def money(tokens: int, price_per_million: float | None) -> float:
+    return 0.0 if not price_per_million else tokens * price_per_million / 1_000_000
+
+
+def query_hermes_usage(db_path: Path, days: int, platform: str | None, title_contains: str | None, model_like: str | None) -> list[UsageRow]:
+    if not db_path.exists():
+        return []
+
+    cutoff = time.time() - days * 86400
+    where = ["started_at >= ?", "model IS NOT NULL", "(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) > 0"]
+    params: list[Any] = [cutoff]
+    if platform:
+        where.append("source = ?")
+        params.append(platform)
+    if title_contains:
+        where.append("COALESCE(title, '') LIKE ?")
+        params.append(f"%{title_contains}%")
+    if model_like:
+        where.append("model LIKE ?")
+        params.append(f"%{model_like}%")
+
+    sql = f"""
+        SELECT
+            model,
+            billing_provider,
+            COUNT(*) AS sessions,
+            COALESCE(SUM(api_call_count), 0) AS calls,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens,
+            COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+            COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+            COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
+        FROM sessions
+        WHERE {' AND '.join(where)}
+        GROUP BY model, billing_provider
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+    return [UsageRow("hermes", *r) for r in rows]
+
+
+def parse_opencode_model(raw: str | None) -> tuple[str | None, str | None]:
+    if not raw:
+        return None, None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, raw
+    return data.get("providerID"), data.get("id") or data.get("modelID")
+
+
+def query_opencode_usage(db_path: Path, days: int, model_like: str | None) -> list[UsageRow]:
+    if not db_path.exists():
+        return []
+
+    cutoff_ms = int((time.time() - days * 86400) * 1000)
+    sql = """
+        SELECT
+            model,
+            COUNT(*) AS sessions,
+            COALESCE(SUM(tokens_input), 0) AS input_tokens,
+            COALESCE(SUM(tokens_output), 0) AS output_tokens,
+            COALESCE(SUM(tokens_cache_read), 0) AS cache_read_tokens,
+            COALESCE(SUM(tokens_cache_write), 0) AS cache_write_tokens,
+            COALESCE(SUM(tokens_reasoning), 0) AS reasoning_tokens
+        FROM session
+        WHERE time_created >= ?
+          AND model IS NOT NULL
+          AND (tokens_input + tokens_output + tokens_cache_read + tokens_cache_write) > 0
+        GROUP BY model
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        raw_rows = conn.execute(sql, (cutoff_ms,)).fetchall()
+    finally:
+        conn.close()
+
+    merged: dict[tuple[str | None, str], UsageRow] = {}
+    for raw_model, sessions, input_t, output_t, cache_read_t, cache_write_t, reasoning_t in raw_rows:
+        provider, model = parse_opencode_model(raw_model)
+        if not model:
+            continue
+        if model_like and model_like.lower() not in model.lower():
+            continue
+        key = (provider, model)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = UsageRow(
+                source="opencode",
+                model=model,
+                billing_provider=provider,
+                sessions=int(sessions),
+                calls=0,
+                input_tokens=int(input_t),
+                output_tokens=int(output_t),
+                cache_read_tokens=int(cache_read_t),
+                cache_write_tokens=int(cache_write_t),
+                reasoning_tokens=int(reasoning_t),
+            )
+        else:
+            existing.sessions += int(sessions)
+            existing.input_tokens += int(input_t)
+            existing.output_tokens += int(output_t)
+            existing.cache_read_tokens += int(cache_read_t)
+            existing.cache_write_tokens += int(cache_write_t)
+            existing.reasoning_tokens += int(reasoning_t)
+    return list(merged.values())
+
+
+def estimate(rows: list[UsageRow], provider_data: dict[str, Any]) -> dict[str, Any]:
+    results = []
+    missing = []
+    totals = {
+        "sessions": 0,
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": 0,
+        "cost_usd": 0.0,
+    }
+    by_source: dict[str, dict[str, float | int]] = {}
+
+    for row in rows:
+        for k in ["sessions", "calls", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens"]:
+            totals[k] += int(getattr(row, k))
+        src = by_source.setdefault(row.source, {"cost_usd": 0.0, "sessions": 0})
+        src["sessions"] = int(src["sessions"]) + row.sessions
+
+        provider = normalize_pricing_provider(row.billing_provider)
+        base = {
+            "source": row.source,
+            "model": row.model,
+            "billing_provider": row.billing_provider,
+            "pricing_provider": provider,
+            "sessions": row.sessions,
+            "calls": row.calls,
+            "input_tokens": row.input_tokens,
+            "output_tokens": row.output_tokens,
+            "cache_read_tokens": row.cache_read_tokens,
+            "cache_write_tokens": row.cache_write_tokens,
+            "reasoning_tokens": row.reasoning_tokens,
+        }
+        if not provider:
+            missing.append({**base, "priced_as": None})
+            results.append({**base, "priced_as": None, "cost_usd": None, "price_tier": None})
+            continue
+
+        found_id, meta = find_model(provider_data, provider, row.model)
+        if not meta or not isinstance(meta.get("cost"), dict):
+            missing.append({**base, "priced_as": None})
+            results.append({**base, "priced_as": None, "cost_usd": None, "price_tier": None})
+            continue
+
+        prices, price_tier = pick_cost(meta["cost"])
+        effective_input_tokens = row.input_tokens + row.cache_read_tokens
+        cost_input = money(effective_input_tokens, prices.get("input"))
+        cost_output = money(row.output_tokens, prices.get("output"))
+        cost_cache_write = money(row.cache_write_tokens, prices.get("cache_write"))
+        cost_total = cost_input + cost_output + cost_cache_write
+        totals["cost_usd"] += cost_total
+        src["cost_usd"] = float(src["cost_usd"]) + cost_total
+
+        results.append({
+            **base,
+            "pricing_provider": provider,
+            "priced_as": found_id,
+            "cost_usd": cost_total,
+            "cost_breakdown_usd": {"input": cost_input, "output": cost_output, "cache_write": cost_cache_write},
+            "price_tier": price_tier,
+        })
+
+    results.sort(key=lambda x: float("inf") if x["cost_usd"] is None else -float(x["cost_usd"]))
+    return {"totals": totals, "by_source": by_source, "by_model": results, "missing_prices": missing}
+
+
+def fmt_int(n: int) -> str:
+    return f"{n:,}"
+
+
+def fmt_tokens(n: int) -> str:
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.2f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def color(text: str, code: str, enabled: bool) -> str:
+    return f"\033[{code}m{text}\033[0m" if enabled else text
+
+
+def visible_len(text: str) -> int:
+    import re
+    return len(re.sub(r"\033\[[0-9;]*m", "", text))
+
+
+def pad_visible(text: str, width: int) -> str:
+    return text + " " * max(0, width - visible_len(text))
+
+
+def print_cost_box(title: str, amount: float, subtitle: str, *, cyan, green, dim) -> None:
+    amount_s = "$" + format(amount, ",.2f")
+    line1 = f"{cyan(title)} {green(amount_s)}"
+    line2 = dim(subtitle)
+    width = max(32, visible_len(line1), visible_len(line2))
+    print(dim("╭" + "─" * (width + 2) + "╮"))
+    print(dim("│ ") + pad_visible(line1, width) + dim(" │"))
+    print(dim("│ ") + pad_visible(line2, width) + dim(" │"))
+    print(dim("╰" + "─" * (width + 2) + "╯"))
+
+
+def print_human(report: dict[str, Any], args: argparse.Namespace) -> None:
+    use_color = not args.no_color
+    green = lambda s: color(s, "1;32", use_color)
+    cyan = lambda s: color(s, "1;36", use_color)
+    yellow = lambda s: color(s, "1;33", use_color)
+    dim = lambda s: color(s, "2", use_color)
+    red = lambda s: color(s, "1;31", use_color)
+
+    if args.source is None and len(report["by_source"]) > 1:
+        print_cost_box("Total AI spend", report["totals"]["cost_usd"], f"{args.days}d · Hermes + OpenCode · cache→in", cyan=cyan, green=green, dim=dim)
+        print()
+
+    def section(source: str) -> None:
+        items = [i for i in report["by_model"] if i["source"] == source]
+        if not items:
+            return
+
+        totals = {
+            "sessions": sum(int(i["sessions"]) for i in items),
+            "calls": sum(int(i["calls"]) for i in items),
+            "input_tokens": sum(int(i["input_tokens"]) for i in items),
+            "output_tokens": sum(int(i["output_tokens"]) for i in items),
+            "cache_read_tokens": sum(int(i["cache_read_tokens"]) for i in items),
+            "cost_usd": sum(float(i["cost_usd"] or 0.0) for i in items),
+        }
+        title = "Hermes PAYG" if source == "hermes" else "OpenCode PAYG"
+        print_cost_box(title, totals["cost_usd"], f"{args.days}d · cache→in", cyan=cyan, green=green, dim=dim)
+        call_part = f"  {dim('calls')} {fmt_int(totals['calls'])}" if totals["calls"] else ""
+        print(
+            f"{dim('tokens')} in {fmt_tokens(totals['input_tokens'] + totals['cache_read_tokens'])} "
+            f"({fmt_tokens(totals['input_tokens'])}+{fmt_tokens(totals['cache_read_tokens'])} cache) / "
+            f"out {fmt_tokens(totals['output_tokens'])}"
+            f"{call_part}  "
+            f"{dim('sessions')} {fmt_int(totals['sessions'])}"
+        )
+        print()
+
+        for item in items:
+            cost = item["cost_usd"]
+            cost_s = red("missing") if cost is None else green(f"${cost:,.2f}")
+            model = cyan(item["model"])
+            tier = item.get("price_tier")
+            priced_as = dim(f"{item['pricing_provider']}:{item['priced_as'] or '?'}" + (f" [{tier}]" if tier else ""))
+            print(f"{model}  {cost_s}  {priced_as}")
+            if args.verbose:
+                print(
+                    f"  {dim('tokens')} in {fmt_tokens(item['input_tokens'] + item['cache_read_tokens'])} "
+                    f"({fmt_tokens(item['input_tokens'])}+{fmt_tokens(item['cache_read_tokens'])} cache), "
+                    f"out {fmt_tokens(item['output_tokens'])}; "
+                    f"{dim('sessions')} {fmt_int(item['sessions'])}"
+                    + (f"; {dim('calls')} {fmt_int(item['calls'])}" if item["calls"] else "")
+                )
+                if item.get("cost_breakdown_usd"):
+                    b = item["cost_breakdown_usd"]
+                    print(f"  {dim('cost')} in ${b['input']:,.2f}, out ${b['output']:,.2f}")
+        print()
+
+    section("hermes")
+    section("opencode")
+
+    if report["missing_prices"]:
+        labels = [f"{m['source']}:{m['billing_provider']}/{m['model']}" for m in report["missing_prices"]]
+        print(f"\n{yellow('missing prices')}: " + ", ".join(labels))
+
+    print(dim("\n--verbose for breakdown"))
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Estimate AI PAYG spend from Hermes and OpenCode usage.")
+    p.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
+    p.add_argument("--hermes-db", type=Path, default=DEFAULT_HERMES_DB, help=f"Hermes state DB path (default: {DEFAULT_HERMES_DB})")
+    p.add_argument("--opencode-db", type=Path, default=DEFAULT_OPENCODE_DB, help=f"OpenCode DB path (default: {DEFAULT_OPENCODE_DB})")
+    p.add_argument("--source", choices=["hermes", "opencode"], help="Only include one source")
+    p.add_argument("--platform", help="Hermes platform filter, e.g. telegram or cli")
+    p.add_argument("--title-contains", help="Hermes session title filter")
+    p.add_argument("--model-like", help="Filter model names containing this text")
+    p.add_argument("--refresh-prices", action="store_true", help="Ignore cached models.dev pricing and fetch fresh data")
+    p.add_argument("--verbose", "-v", action="store_true", help="Show per-model token and cost breakdown")
+    p.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+    p.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    return p.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    provider_data = fetch_json(MODELS_DEV_API, DEFAULT_CACHE, refresh=args.refresh_prices)
+    rows: list[UsageRow] = []
+    if args.source in (None, "hermes"):
+        rows.extend(query_hermes_usage(args.hermes_db.expanduser(), args.days, args.platform, args.title_contains, args.model_like))
+    if args.source in (None, "opencode"):
+        rows.extend(query_opencode_usage(args.opencode_db.expanduser(), args.days, args.model_like))
+    report = estimate(rows, provider_data)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print_human(report, args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

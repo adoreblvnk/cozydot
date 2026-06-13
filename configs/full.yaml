@@ -188,6 +188,7 @@ configure:
     stowMode: override
     packages:
       - bash
+      - bin
       - bat
       - bottom
       - fastfetch

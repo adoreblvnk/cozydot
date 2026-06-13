@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+screenshots_dir="/mnt/c/Users/$(basename "$HOME")/Pictures/Screenshots"
+output="${1:-./ss.png}"
+
+if [[ ! -d "$screenshots_dir" ]]; then
+  echo "shot: screenshots directory not found: $screenshots_dir" >&2
+  exit 1
+fi
+
+latest="$(
+  find "$screenshots_dir" -maxdepth 1 -type f -iname '*.png' -printf '%T@ %p\n' \
+    | sort -nr \
+    | head -n 1 \
+    | cut -d' ' -f2-
+)"
+
+if [[ -z "$latest" ]]; then
+  echo "shot: no PNG screenshots found in $screenshots_dir" >&2
+  exit 1
+fi
+
+cp -- "$latest" "$output"
+printf 'Copied %s -> %s\n' "$latest" "$output"
