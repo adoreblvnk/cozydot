@@ -12,19 +12,19 @@ UNAME_ARCH="" GO_ARCH="" LINUX_ARCH="" X64_ARCH="" ARM64_SUFFIX=""
 
 # ----- PRINT FUNCTIONS -----
 
-# Set text colours if supported.
+# Set text colors if supported.
 # Arguments:
-#   $1: boolean indicating if colours is enabled
-colours() {
+#   $1: boolean indicating if colors is enabled
+colors() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
   PROG="$(basename "$0")"
   if [[ $1 == true ]] && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
     NC=$(tput sgr0) BOLD=$(tput bold) # text reset (select graphic representation default)
     RED=$(tput setaf 1) GREEN=$(tput setaf 2) YELLOW=$(tput setaf 3) BLUE=$(tput setaf 4) MAGENTA=$(tput setaf 5) CYAN=$(tput setaf 6)
     local prog_txt="" i
-    local colours=("$RED" "$YELLOW" "$GREEN" "$CYAN" "$BLUE" "$MAGENTA")
+    local colors=("$RED" "$YELLOW" "$GREEN" "$CYAN" "$BLUE" "$MAGENTA")
     for ((i = 0; i < ${#PROG}; i++)); do
-      prog_txt+="${colours[i % ${#colours[@]}]}${PROG:i:1}"
+      prog_txt+="${colors[i % ${#colors[@]}]}${PROG:i:1}"
     done
     PROG="${prog_txt}${NC}"
   fi
@@ -45,7 +45,7 @@ ${PROG} is an automated ${BOLD}post-install${NC}, ${BOLD}update${NC}, & ${BOLD}c
 ${YELLOW}Usage:${NC} ${PROG} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
-  ${GREEN}-n, --no-colour      ${NC} Do not output any colour. Useful when redirecting output to a logfile
+  ${GREEN}-n, --no-color       ${NC} Do not output any color. Useful when redirecting output to a logfile
   ${GREEN}-c, --config <CONFIG>${NC} Specify a yaml config file that exists in ${BLUE}~/.cozydot/configs/${NC}
   ${GREEN}    --list-configs   ${NC} List all available configs in ${BLUE}~/.cozydot/configs/${NC} directory
   ${GREEN}-h, --help           ${NC} Print help information
@@ -59,10 +59,10 @@ ${YELLOW}Commands:${NC}
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & other stuff
                (see ${BLUE}~/.cozydot/configs/default.yaml${NC} for details)
   ${GREEN}c, configure${NC} Restore / backup dotfiles via Stow (dotfile manager), configures apps installed,
-               customise desktop environment (Cinnamon / GNOME)
+               customize desktop environment (Cinnamon / GNOME)
 
 ${YELLOW}Configuration:${NC}
-  Customise each command action by modifying the config (default: ${BLUE}~/.cozydot/configs/default.yaml${NC}).
+  Customize each command action by modifying the config (default: ${BLUE}~/.cozydot/configs/default.yaml${NC}).
   The full config schema of ${PROG} is available in ${BLUE}README.md${NC}.
   Preset configs are available in ${BLUE}~/.cozydot/configs/${NC} directory.
   Add new configs in ${BLUE}~/.cozydot/configs/${NC} or list them with ${PROG} ${CYAN}--list-configs${NC}
@@ -485,9 +485,9 @@ install() {
       _info_msg "Adding repo entry for $source_name into sources.list.d"
       sudo tee "$source_file_path" <<<"$(_expand_config_value "$repo")" >/dev/null
 
-      # perform pinning to prioritise 3rd party if pinning entry exists
+      # perform pinning to prioritize 3rd party if pinning entry exists
       if [[ $(yq ".install.addRepos[$i].pinning" "$CONFIG") != false ]]; then
-        _info_msg "Performing pinning to prioritise $source_name"
+        _info_msg "Performing pinning to prioritize $source_name"
         yq ".install.addRepos[$i].pinning" "$CONFIG" \
           | sudo tee "/etc/apt/preferences.d/$source_name" >/dev/null
       fi
@@ -884,11 +884,11 @@ configure() {
         done
       fi
 
-      # make Dash to Dock mimic MacOS dock behaviour
+      # make Dash to Dock mimic MacOS dock behavior
       # default settings: https://github.com/micheleg/dash-to-dock/blob/master/schemas/org.gnome.shell.extensions.dash-to-dock.gschema.xml
       if [[ $(yq '.configure.desktopEnvironment.gnome.MacOSDock' "$CONFIG") == true ]] \
         && gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock'; then
-        _info_msg "Making Dash to Dock mimic MacOS dock behaviour"
+        _info_msg "Making Dash to Dock mimic MacOS dock behavior"
         # modify position & size
         dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position "'BOTTOM'"
         dconf write /org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size 32
@@ -908,11 +908,11 @@ configure() {
         _warning_msg "Dash to Dock extension not installed"
       fi
 
-      # smoothen corners in Rounded Window Corners Reborn
+      # smooth corners in Rounded Window Corners Reborn
       # default settings: https://github.com/flexagoon/rounded-window-corners/blob/main/resources/schemas/org.gnome.shell.extensions.rounded-window-corners-reborn.gschema.xml
       if [[ $(yq '.configure.desktopEnvironment.gnome.smoothRoundedCorners' "$CONFIG") == true ]] \
         && gnome-extensions list | grep -q rounded-window-corners; then
-        _info_msg "Smoothen corners in Rounded Corners extension"
+        _info_msg "Smooth corners in Rounded Corners extension"
         dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \
           "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, \
           'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, \
@@ -930,13 +930,13 @@ configure() {
     fi
   fi
 
-  _success_msg "Finished ${PROG} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognised"
+  _success_msg "Finished ${PROG} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognized"
 }
 
 # ----- MAIN -----
 
 main() {
-  colours true # PRINT FUNCTIONS
+  colors true # PRINT FUNCTIONS
   _set_arch_var
 
   # Make this script an executable by creating symlink to /usr/local/bin.
@@ -970,7 +970,7 @@ main() {
     case $1 in
       -h | --help) _usage && exit ;;
       # OPTIONS
-      -n | --no-colour) colours false ;;
+      -n | --no-color) colors false ;;
       -c | --config)
         local config_file="${2:-}"
         [[ -n "${2:-}" ]] && shift

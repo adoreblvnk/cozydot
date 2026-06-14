@@ -5,33 +5,29 @@ set -euo pipefail
 readonly PROGRAM_NAME="${0##*/}"
 APP_NAME=""
 CREATE_GITHUB=0
-STYLE="high-end-visual-design"
-VALID_STYLES=(
-  industrial-brutalist-ui
-  minimalist-ui
-  high-end-visual-design
-)
+STYLE="minimalist-ui"
+VALID_STYLES=(industrial-brutalist-ui minimalist-ui high-end-visual-design)
 
-# ----- print functions -----
+# ----- PRINT FUNCTIONS -----
 
-# set text colours if supported.
-# arguments:
-#   $1: boolean indicating if colours are enabled
-colours() {
+# Set text colors if supported.
+# Arguments:
+#   $1: boolean indicating if colors are enabled
+colors() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
-  if [[ $(tput colors) -ge 8 ]] && [[ $1 == true ]]; then
+  if [[ $1 == true ]] && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
     NC=$(tput sgr0) BOLD=$(tput bold) # text reset (select graphic representation default)
     RED=$(tput setaf 1) GREEN=$(tput setaf 2) YELLOW=$(tput setaf 3) BLUE=$(tput setaf 4) MAGENTA=$(tput setaf 5) CYAN=$(tput setaf 6)
   fi
 }
 
-_info_msg() { printf "%s\n" "${BOLD}${BLUE}info:${NC} $1"; }
+_info_msg() { printf "%s\n" "${BOLD}${BLUE}Info:${NC} $1"; }
 
-_success_msg() { printf "%s\n" "${BOLD}${GREEN}success:${NC} $1"; }
+_success_msg() { printf "%s\n" "${BOLD}${GREEN}Success:${NC} $1"; }
 
-_warning_msg() { printf "%s\n" "${BOLD}${YELLOW}warning:${NC} $1"; }
+_warning_msg() { printf "%s\n" "${BOLD}${YELLOW}Warning:${NC} $1"; }
 
-_error_msg() { printf "%s\n" "${BOLD}${RED}error:${NC} $1" >&2 && exit 1; }
+_error_msg() { printf "%s\n" "${BOLD}${RED}Error:${NC} $1" >&2 && exit 1; }
 
 _usage() {
   cat <<EOF
@@ -44,7 +40,7 @@ ${YELLOW}usage:${NC} ${PROGRAM_NAME} ${CYAN}[app-name]${NC} ${CYAN}[options]${NC
 ${YELLOW}options:${NC}
   ${GREEN}--style <name>    ${NC} install a supported taste-skill style
   ${GREEN}--github          ${NC} create and push a public github repository
-  ${GREEN}-n, --no-colour   ${NC} disable coloured output
+  ${GREEN}-n, --no-color    ${NC} disable colored output
   ${GREEN}-h, --help        ${NC} print help information
 
 ${YELLOW}valid styles:${NC}
@@ -57,7 +53,7 @@ ${YELLOW}examples:${NC}
 EOF
 }
 
-# ----- helpers -----
+# ----- HELPERS -----
 
 _validate_style() {
   local valid_style=0
@@ -73,42 +69,9 @@ _validate_style() {
   [[ "$valid_style" -eq 1 ]] || { _usage; _error_msg "Invalid style: $STYLE"; }
 }
 
-# ----- options -----
+# ----- OPTIONS -----
 
-parse_args() {
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -h | --help)
-        _usage
-        exit
-        ;;
-      -n | --no-colour)
-        colours false
-        shift
-        ;;
-      --github)
-        CREATE_GITHUB=1
-        shift
-        ;;
-      --style)
-        [[ -n "${2:-}" && "$2" != --* ]] || _error_msg "Missing value for --style"
-        STYLE="$2"
-        shift 2
-        ;;
-      --*)
-        _usage
-        _error_msg "Invalid option: $1"
-        ;;
-      *)
-        [[ -z "$APP_NAME" ]] || { _usage; _error_msg "Unexpected argument: $1"; }
-        APP_NAME="$1"
-        shift
-        ;;
-    esac
-  done
-}
-
-# ----- commands -----
+# ----- COMMANDS -----
 
 ensure_global_skills() {
   if ! npx skills list -g --json | jq -e '.[] | select(.name == "impeccable")' >/dev/null; then
@@ -129,6 +92,7 @@ install_project_skills() {
   npx skills add https://github.com/vercel-labs/next-skills --skill next-best-practices --agent opencode -y
   npx skills add shadcn/ui --skill shadcn --agent opencode -y
   npx skills add https://github.com/leonxlnx/taste-skill --skill "$STYLE" --agent opencode -y
+  npx skills add https://github.com/vercel/ai --skill ai-sdk
 }
 
 setup_ui() {
@@ -137,13 +101,19 @@ setup_ui() {
 }
 
 install_dependencies() {
-  npm install ai @ai-sdk/openai @ai-sdk/google zod motion
+  npm install ai @ai-sdk/openai zod motion
+}
+
+write_files() {
+  cat >.env.example <<EOF
+OPENAI_API_KEY=
+EOF
 }
 
 setup_git() {
   git init
   git add .
-  git commit -m "Initial hackathon app"
+  git commit -m "chore: create initial hackathon app"
 
   if [[ "$CREATE_GITHUB" -eq 1 ]]; then
     gh repo create "${APP_NAME:-$(basename "$PWD")}" --public --source . --push
@@ -155,17 +125,43 @@ print_next_steps() {
   _info_msg "Next: cd '$PWD' && npm run dev"
 }
 
-# ----- main -----
+# ----- MAIN -----
 
 main() {
-  colours true
-  parse_args "$@"
+  colors true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h | --help)
+        _usage
+        exit
+        ;;
+      -n | --no-color) colors false ;;
+      --github) CREATE_GITHUB=1 ;;
+      --style)
+        [[ -n "${2:-}" && "$2" != --* ]] || _error_msg "Missing value for --style"
+        STYLE="$2"
+        shift
+        ;;
+      --*)
+        _usage
+        _error_msg "Invalid option: $1"
+        ;;
+      *)
+        [[ -z "$APP_NAME" ]] || { _usage; _error_msg "Unexpected argument: $1"; }
+        APP_NAME="$1"
+        ;;
+    esac
+    shift
+  done
+
   _validate_style
   ensure_global_skills
   create_app
   install_project_skills
   setup_ui
   install_dependencies
+  write_files
   setup_git
   print_next_steps
 }
