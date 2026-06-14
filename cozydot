@@ -16,7 +16,7 @@ UNAME_ARCH="" GO_ARCH="" LINUX_ARCH="" X64_ARCH="" ARM64_SUFFIX=""
 #   $1: boolean indicating if colours is enabled
 colours() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
-  if [[ $(tput colors) -ge 8 ]] && [[ $1 == true ]]; then
+  if [[ $1 == true ]] && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
     NC=$(tput sgr0) BOLD=$(tput bold) # text reset (select graphic representation default)
     RED=$(tput setaf 1) GREEN=$(tput setaf 2) YELLOW=$(tput setaf 3) BLUE=$(tput setaf 4) MAGENTA=$(tput setaf 5) CYAN=$(tput setaf 6)
   fi
@@ -29,7 +29,7 @@ _success_msg() { printf "%s\n" "${BOLD}${GREEN}Success:${NC} $1"; }
 
 _warning_msg() { printf "%s\n" "${BOLD}${YELLOW}Warning:${NC} $1"; }
 
-_error_msg() { printf "%s\n" "${BOLD}${RED}Error:${NC} $1" && exit 1; }
+_error_msg() { printf "%s\n" "${BOLD}${RED}Error:${NC} $1" >&2 && exit 1; }
 
 _usage() {
   cat <<EOF
