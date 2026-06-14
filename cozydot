@@ -3,6 +3,7 @@ set -euo pipefail
 
 # global variables
 readonly COZYDOT_VERSION=0.0.1
+PROG="$(basename "$0")"
 CONFIG="$(dirname "$(realpath "$0")")/configs/default.yaml"
 # set in _set_global_var()
 DISTRO="" UPSTREAM_DISTRO="" DESKTOP_ENVIRONMENT=""
@@ -16,11 +17,17 @@ UNAME_ARCH="" GO_ARCH="" LINUX_ARCH="" X64_ARCH="" ARM64_SUFFIX=""
 #   $1: boolean indicating if colours is enabled
 colours() {
   NC="" BOLD="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN=""
+  PROG="$(basename "$0")"
   if [[ $1 == true ]] && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
     NC=$(tput sgr0) BOLD=$(tput bold) # text reset (select graphic representation default)
     RED=$(tput setaf 1) GREEN=$(tput setaf 2) YELLOW=$(tput setaf 3) BLUE=$(tput setaf 4) MAGENTA=$(tput setaf 5) CYAN=$(tput setaf 6)
+    local prog_txt="" i
+    local colours=("$RED" "$YELLOW" "$GREEN" "$CYAN" "$BLUE" "$MAGENTA")
+    for ((i = 0; i < ${#PROG}; i++)); do
+      prog_txt+="${colours[i % ${#colours[@]}]}${PROG:i:1}"
+    done
+    PROG="${prog_txt}${NC}"
   fi
-  cozydot_txt="${RED}c${YELLOW}o${GREEN}z${CYAN}y${BLUE}d${MAGENTA}o${RED}t${NC}"
 }
 
 _info_msg() { printf "%s\n" "${BOLD}${BLUE}Info:${NC} $1"; }
@@ -33,9 +40,9 @@ _error_msg() { printf "%s\n" "${BOLD}${RED}Error:${NC} $1" >&2 && exit 1; }
 
 _usage() {
   cat <<EOF
-$cozydot_txt is an automated ${BOLD}post-install${NC}, ${BOLD}update${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux
+${PROG} is an automated ${BOLD}post-install${NC}, ${BOLD}update${NC}, & ${BOLD}config (dotfile) manager${NC} for Linux
 
-${YELLOW}Usage:${NC} ${cozydot_txt} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
+${YELLOW}Usage:${NC} ${PROG} ${CYAN}[Options]${NC} ${CYAN}[Command]${NC}
 
 ${YELLOW}Options:${NC}
   ${GREEN}-n, --no-colour      ${NC} Do not output any colour. Useful when redirecting output to a logfile
@@ -56,11 +63,11 @@ ${YELLOW}Commands:${NC}
 
 ${YELLOW}Configuration:${NC}
   Customise each command action by modifying the config (default: ${BLUE}~/.cozydot/configs/default.yaml${NC}).
-  The full config schema of ${cozydot_txt} is available in ${BLUE}README.md${NC}.
+  The full config schema of ${PROG} is available in ${BLUE}README.md${NC}.
   Preset configs are available in ${BLUE}~/.cozydot/configs/${NC} directory.
-  Add new configs in ${BLUE}~/.cozydot/configs/${NC} or list them with ${cozydot_txt} ${CYAN}--list-configs${NC}
+  Add new configs in ${BLUE}~/.cozydot/configs/${NC} or list them with ${PROG} ${CYAN}--list-configs${NC}
 
-${YELLOW}Example:${NC} ${cozydot_txt} ${CYAN}--config${NC} vm ${CYAN}install${NC}
+${YELLOW}Example:${NC} ${PROG} ${CYAN}--config${NC} vm ${CYAN}install${NC}
 
 ${YELLOW}Project Homepage:${NC} ${MAGENTA}https://github.com/adoreblvnk/cozydot${NC}
 
@@ -135,7 +142,7 @@ _set_global_var() {
   case $DESKTOP_ENVIRONMENT in
     gnome) ;;
     cinnamon) _warning_msg "Cinnamon has stopped receiving updates" ;;
-    *) _warning_msg "${cozydot_txt} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment ($DESKTOP_ENVIRONMENT)" ;;
+    *) _warning_msg "${PROG} ${CYAN}configure${NC} will ${RED}not${NC} configure this unsupported desktop environment ($DESKTOP_ENVIRONMENT)" ;;
   esac
 
   # substitute nothing if auto is unset
@@ -230,15 +237,15 @@ list_configs() {
   done
 }
 
-get_version() { printf "%s\n" "$cozydot_txt $COZYDOT_VERSION" && exit; }
+get_version() { printf "%s\n" "$PROG $COZYDOT_VERSION" && exit; }
 
 # ----- COMMANDS -----
 
 check() {
-  _info_msg "Starting ${cozydot_txt} check..."
+  _info_msg "Starting ${PROG} check..."
 
   if [[ ! -L ~/.bashrc ]]; then
-    _info_msg "Copying $cozydot_txt .bashrc"
+    _info_msg "Copying $PROG .bashrc"
     rm -f ~/.bashrc && cp dotfiles/bash/.bashrc ~/.bashrc
   fi
 
@@ -334,7 +341,7 @@ deb-src http://deb.debian.org/debian ${DISTRIBUTION}-updates main contrib non-fr
 EOF
 
   else
-    _warning_msg "$cozydot_txt only supports Ubuntu / Debian / Linux Mint. $DISTRO unsupported."
+    _warning_msg "$PROG only supports Ubuntu / Debian / Linux Mint. $DISTRO unsupported."
   fi
 
   if [[ $(yq '.check.purge | tag' "$CONFIG") == "!enabled" ]]; then
@@ -429,7 +436,7 @@ EOF
 }
 
 install() {
-  _info_msg "Starting ${cozydot_txt} install"
+  _info_msg "Starting ${PROG} install"
 
   if [[ $(yq '.install.check' "$CONFIG") == true ]]; then check; fi
 
@@ -642,11 +649,11 @@ install() {
     fi
   fi
 
-  _success_msg "Finished ${cozydot_txt} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
+  _success_msg "Finished ${PROG} install. You may need to reload your shell with ${BLUE}. ~/.bashrc${NC} to use certain commands"
 }
 
 update() {
-  _info_msg "Starting ${cozydot_txt} update"
+  _info_msg "Starting ${PROG} update"
 
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
@@ -712,11 +719,11 @@ update() {
     _dl_node latest
   fi
 
-  _success_msg "Finished ${cozydot_txt} update"
+  _success_msg "Finished ${PROG} update"
 }
 
 configure() {
-  _info_msg "Starting ${cozydot_txt} configuration"
+  _info_msg "Starting ${PROG} configuration"
 
   if [[ $(yq '.update.check' "$CONFIG") == true ]]; then check; fi
 
@@ -731,13 +738,13 @@ configure() {
       # Override option uses cozydot's dotfiles. Backup option does nothing (ie
       # uses original system dotfiles)
       if [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "override" ]]; then
-        _info_msg "Overriding $pkg original dotfiles with ${cozydot_txt}'s dotfiles"
+        _info_msg "Overriding $pkg original dotfiles with ${PROG}'s dotfiles"
         # -T copies folder contents
         # --remove-destination is used to remove files in case files can't be
         #   read (eg symlinks) first
         cp -rT --remove-destination "$(dirname "$(realpath "$0")")/dotfiles/$pkg" "$HOME"
       elif [[ $(yq -r '.configure.dotfiles.stowMode' "$CONFIG") == "backup" ]]; then
-        _info_msg "Using system dotfiles as source of truth. ${cozydot_txt}'s dotfiles will be overwritten"
+        _info_msg "Using system dotfiles as source of truth. ${PROG}'s dotfiles will be overwritten"
       fi
       # --no-folding stows individual files instead of directories
       # --adopt replaces cozydot's dotfiles with original system ones
@@ -923,7 +930,7 @@ configure() {
     fi
   fi
 
-  _success_msg "Finished ${cozydot_txt} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognised"
+  _success_msg "Finished ${PROG} configuration. You may need to run ${BLUE}. ~/.bashrc${NC} if commands aren't recognised"
 }
 
 # ----- MAIN -----
@@ -941,7 +948,7 @@ main() {
     fi
     # TODO: proper local path for cozydot .local
     sudo cp -s --remove-destination ~/.cozydot/cozydot /usr/local/bin/cozydot
-    _success_msg "Created symlink for cozydot. Run $cozydot_txt as a command anywhere after this"
+    _success_msg "Created symlink for cozydot. Run $PROG as a command anywhere after this"
     exit
   fi
 
