@@ -125,15 +125,20 @@ esac
 
 const GO_INSTALL: &str = r#"
 requested=$1; arch=$2
+metadata=$(mktemp "${TMPDIR:-/tmp}/go-metadata.XXXXXX.json")
+trap 'rm -rf "$metadata" "${tmp:-}" "${stage:-}"' EXIT
+curl -fsSL -o "$metadata" "https://go.dev/dl/?mode=json&include=all"
 version=$requested
-if [ "$version" = latest ]; then
-  version=$(curl -sSL "https://go.dev/dl/?mode=json" | yq '.[0].version' | cut -c 3-)
-fi
+if [ "$version" = latest ]; then version=$(yq '.[0].version' "$metadata" | cut -c 3-); fi
 if command -v go >/dev/null && [ "$(go version | cut -d ' ' -f 3)" = "go$version" ]; then exit 0; fi
+filename="go${version}.linux-${arch}.tar.gz"
+checksum=$(yq ".[] | select(.version == \"go${version}\") | .files[] | select(.filename == \"${filename}\") | .sha256" "$metadata")
+[ "${#checksum}" -eq 64 ] && printf '%s' "$checksum" | grep -Eq '^[0-9a-fA-F]+$'
 tmp=$(mktemp "${TMPDIR:-/tmp}/go.XXXXXX.tar.gz")
 stage=$(mktemp -d "${TMPDIR:-/tmp}/go-stage.XXXXXX")
-trap 'rm -rf "$tmp" "$stage"' EXIT
-curl -fL -o "$tmp" "https://go.dev/dl/go${version}.linux-${arch}.tar.gz"
+curl -fL -o "$tmp" "https://go.dev/dl/${filename}"
+printf '%s  %s\n' "$checksum" "$tmp" | sha256sum -c -
+tar -tzf "$tmp" >/dev/null
 tar -C "$stage" -xzf "$tmp"
 [ -x "$stage/go/bin/go" ]
 sudo rm -rf /usr/local/go
@@ -286,16 +291,12 @@ fn run_if2(kind: &str, a: impl Into<String>, b: impl Into<String>, command: Step
 }
 
 fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
-    out.push(run_if(
-        "file-absent",
-        home_path(".bashrc"),
-        Step::owned(
-            "cp",
-            vec![
-                root.join("dotfiles/bash/.bashrc").display().to_string(),
-                home_path(".bashrc"),
-            ],
-        ),
+    out.push(Step::bash(
+        "[ -L \"$2\" ] || cp \"$1\" \"$2\"",
+        vec![
+            root.join("dotfiles/bash/.bashrc").display().to_string(),
+            home_path(".bashrc"),
+        ],
     ));
     if cfg.bool("check.distroCfg") {
         match p.distro.as_str() {
@@ -311,7 +312,10 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                 out.push(run_if(
                     "package-missing",
                     "ubuntu-restricted-extras",
-                    apt(&["install", "-qq", "ubuntu-restricted-extras"]),
+                    Step::bash(
+                        "sudo apt-get update -qq; sudo apt-get install -qq ubuntu-restricted-extras",
+                        vec![],
+                    ),
                 ));
                 out.push(run_if(
                     "command",
@@ -332,7 +336,10 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
             "linuxmint" => out.push(run_if(
                 "package-missing",
                 "mint-meta-codecs",
-                apt(&["install", "-qq", "mint-meta-codecs"]),
+                Step::bash(
+                    "sudo apt-get update -qq; sudo apt-get install -qq mint-meta-codecs",
+                    vec![],
+                ),
             )),
             "debian" => {
                 let user = user();
@@ -491,20 +498,10 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         out.push(run_if("command", "flatpak", Step::owned("flatpak", a)));
     }
     if cfg.tagged_enabled("install.cargo") {
-        out.push(run_if(
-            "command",
-            "cargo",
-            run_if(
-                "no-command",
-                "cargo-binstall",
-                Step::new("cargo", &["install", "cargo-binstall", "--locked"]),
-            ),
+        out.push(Step::bash(
+            "export PATH=\"${CARGO_HOME:-$HOME/.cargo}/bin:$PATH\"; command -v cargo >/dev/null || exit 0; command -v cargo-binstall >/dev/null || cargo install cargo-binstall --locked; for pkg in \"$@\"; do read -r -a parts <<<\"$pkg\"; cargo binstall --no-confirm \"${parts[@]}\"; done",
+            cfg.strings("install.cargo"),
         ));
-        for pkg in cfg.strings("install.cargo") {
-            let mut a = vec!["binstall".into(), "--no-confirm".into()];
-            a.extend(pkg.split_whitespace().map(str::to_owned));
-            out.push(run_if("command", "cargo", Step::owned("cargo", a)));
-        }
     }
     if cfg.tagged_enabled("install.binaries") {
         for b in cfg.sequence("install.binaries") {
@@ -529,14 +526,18 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         ));
     }
     if cfg.tagged_enabled("install.languages.nodeVersion") {
+        let mut args = vec![cfg
+            .string("install.languages.nodeVersion")
+            .expect("validated nodeVersion")];
+        if cfg.tagged_enabled("install.npm") {
+            args.extend(cfg.strings("install.npm"));
+        }
         out.push(Step::bash(
-            NODE_INSTALL,
-            vec![cfg
-                .string("install.languages.nodeVersion")
-                .expect("validated nodeVersion")],
+            format!("{NODE_INSTALL}\nshift; [ \"$#\" -eq 0 ] || npm install --global \"$@\""),
+            args,
         ));
     }
-    if cfg.tagged_enabled("install.npm") {
+    if cfg.tagged_enabled("install.npm") && !cfg.tagged_enabled("install.languages.nodeVersion") {
         let mut a = vec!["install".into(), "--global".into()];
         a.extend(cfg.strings("install.npm"));
         out.push(run_if("command", "npm", Step::owned("npm", a)));

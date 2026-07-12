@@ -54,4 +54,4 @@ scripts/package-release.sh
 bash -n dotfiles/bash/.bashrc
 ```
 
-Privileged downloads now use unique temporary files and stage destructive replacements after archive extraction succeeds. The rewrite does not invent checksums for upstream assets that do not have pinned hashes in the current config; adding explicit checksum fields would be the next schema extension if those upstream artifacts are to be cryptographically pinned.
+Privileged downloads use fail-fast curl options, unique temporary files, and stage destructive replacements only after archive validation succeeds. Go archives are matched against and verified with the official SHA-256 published by `go.dev/dl/?mode=json&include=all`. Other upstream installers and mutable release assets currently provide no checksum in the preset schema; executing those HTTPS-delivered installers/assets remains an explicit trust boundary. The project does not claim end-to-end integrity for them and does not fabricate hashes.

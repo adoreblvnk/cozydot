@@ -27,7 +27,10 @@ fn aliases_and_dry_run_work() {
         .env("COZYDOT_DRY_RUN", "1")
         .assert()
         .success()
-        .stdout(predicate::str::contains("npm install --global opencode-ai"));
+        .stdout(
+            predicate::str::contains("npm install --global")
+                .and(predicate::str::contains("latest opencode-ai")),
+        );
 }
 #[test]
 fn no_color_and_multiple_commands_work() {

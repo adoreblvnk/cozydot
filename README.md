@@ -4,19 +4,19 @@ cozydot is a Rust command-line post-install, update, and dotfile manager for Deb
 
 ## Install
 
-A stable Rust toolchain is required when building from source:
-
-```bash
-git clone https://github.com/adoreblvnk/cozydot.git ~/.cozydot
-cargo install --locked --path ~/.cozydot
-```
-
-Alternatively, build or download the release archive and keep the extracted layout together:
+The recommended standalone installation is a release archive, whose extracted `cozydot`, `configs/`, and `dotfiles/` must remain together:
 
 ```bash
 scripts/package-release.sh
 tar -C ~/.local/share -xzf target/cozydot-0.0.1.tar.gz
 ln -sf ~/.local/share/cozydot-0.0.1/cozydot ~/.local/bin/cozydot
+```
+
+A stable Rust toolchain can also install from source, but the checkout is a runtime data dependency and must be retained because Cargo installs only the executable:
+
+```bash
+git clone https://github.com/adoreblvnk/cozydot.git ~/.cozydot
+cargo install --locked --path ~/.cozydot
 ```
 
 The binary locates bundled presets and dotfiles beside itself, or from `COZYDOT_ROOT`. `--config` selects a named YAML preset under the bundled `configs/` directory; arbitrary config paths are intentionally rejected.

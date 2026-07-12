@@ -64,6 +64,36 @@ impl Config {
             .unwrap_or_default()
     }
 
+    /// Disable the one-shot purge tag without reserializing or reformatting YAML.
+    pub fn disable_purge(path: &Path) -> Result<bool> {
+        let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        let mut matches = Vec::new();
+        let mut offset = 0;
+        for line in text.split_inclusive('\n') {
+            let trimmed = line.trim_start();
+            if let Some(value) = trimmed.strip_prefix("purge:") {
+                if let Some(tag_at) = value.find("!enabled") {
+                    let start = offset + line.len() - trimmed.len() + "purge:".len() + tag_at;
+                    matches.push(start..start + "!enabled".len());
+                }
+            }
+            offset += line.len();
+        }
+        match matches.as_slice() {
+            [] => Ok(false),
+            [range] => {
+                let mut changed = text;
+                changed.replace_range(range.clone(), "!disabled");
+                fs::write(path, changed).with_context(|| format!("write {}", path.display()))?;
+                Ok(true)
+            }
+            _ => bail!(
+                "refusing to modify ambiguous check.purge tag in {}",
+                path.display()
+            ),
+        }
+    }
+
     fn validate(&self) -> Result<()> {
         let root = mapping(&self.root, "")?;
         expect_keys(
@@ -563,5 +593,18 @@ mod tests {
     fn rejects_unknown_top_level_fields() {
         let err = Config::load(Path::new("tests/fixtures/invalid-extra.yaml")).unwrap_err();
         assert!(err.to_string().contains("validate"));
+    }
+
+    #[test]
+    fn disables_only_the_purge_tag_and_preserves_yaml_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let before = "# keep this comment\ncheck:\n  purge: !enabled [foo] # one shot\n  deps: !enabled [bar]\n";
+        fs::write(&path, before).unwrap();
+        assert!(Config::disable_purge(&path).unwrap());
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            before.replacen("purge: !enabled", "purge: !disabled", 1)
+        );
     }
 }
