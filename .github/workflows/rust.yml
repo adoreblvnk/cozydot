@@ -16,7 +16,7 @@ jobs:
       - name: Build deterministic release
         run: |
           archive="$(COZYDOT_ARCH=amd64 scripts/package-release.sh 0.0.1 target)"
-          test "$archive" = "$PWD/target/cozydot-0.0.1-linux-amd64.tar.gz"
+          test "$archive" = "target/cozydot-0.0.1-linux-amd64.tar.gz"
           (cd target && sha256sum -c cozydot-0.0.1-linux-amd64.tar.gz.sha256)
       - name: Smoke-test installed release
         run: |
