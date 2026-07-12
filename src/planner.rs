@@ -1,5 +1,6 @@
 use crate::{
     config::{field, field_string, untag, Config},
+    operations::Operation,
     platform::Platform,
     runner::Step,
 };
@@ -20,249 +21,6 @@ case "$kind" in
   file-present) [ -e "$1" ] || exit 0; shift; exec "$@" ;;
   *) printf 'unsupported condition: %s\n' "$kind" >&2; exit 2 ;;
 esac
-"#;
-
-const SNAP_CLEANUP: &str = r#"
-if command -v snap >/dev/null; then
-  snap list 2>/dev/null | grep -Ev '^(Name|bare|core[0-9][0-9]|snapd\s)' | awk '{print $1}' |
-    while IFS= read -r pkg; do [ -n "$pkg" ] && snap remove --purge "$pkg"; done
-  if snap list 2>/dev/null | grep -q '^core[0-9][0-9]'; then
-    sudo snap remove --purge "$(snap list 2>/dev/null | grep -o '^core[0-9][0-9]' | head -n 1)" || true
-  fi
-  sudo snap remove --purge bare || true
-  sudo snap remove --purge snapd || true
-fi
-if systemctl -q is-active snapd; then sudo systemctl stop snapd; sudo systemctl disable snapd; fi
-if command -v snap >/dev/null; then sudo apt-get purge -qq snapd >/dev/null; fi
-if systemctl -q is-active snapd.mounts-pre.target; then sudo systemctl stop snapd.mounts-pre.target; fi
-if [ -d "$HOME/snap" ] || [ -d /snap ] || [ -d /var/snap ] || [ -d /var/lib/snapd ]; then
-  sudo rm -rf "$HOME/snap" /snap /var/snap /var/lib/snapd
-fi
-"#;
-
-const APPIMAGED: &str = r#"
-arch=$1
-if ! systemctl --user -q is-active appimaged; then
-  systemctl --user stop appimaged.service || true
-  sudo apt-get remove -qy appimagelauncher >/dev/null 2>&1 || true
-  [ -f "$HOME/.config/systemd/user/default.target.wants/appimagelauncherd.service" ] &&
-    rm "$HOME/.config/systemd/user/default.target.wants/appimagelauncherd.service"
-  rm -rf "$HOME/.local/share/applications/appimage"*
-  mkdir -p "$HOME/Applications"
-  url=$(curl -sSL https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous |
-    yq ".assets[].browser_download_url | select(. == \"*appimaged*${arch}.AppImage\")")
-  tmp=$(mktemp "${TMPDIR:-/tmp}/appimaged.XXXXXX")
-  trap 'rm -f "$tmp"' EXIT
-  curl -fL -o "$tmp" "$url"
-  chmod +x "$tmp"
-  mv "$tmp" "$HOME/Applications/appimaged.AppImage"
-  "$HOME/Applications/appimaged.AppImage"
-fi
-fuse2_lib=$(apt-cache show libfuse2t64 >/dev/null 2>&1 && printf libfuse2t64 || printf libfuse2)
-if ! dpkg -s "$fuse2_lib" >/dev/null 2>&1; then
-  sudo apt-get update -qq
-  sudo apt-get install -qq "$fuse2_lib"
-fi
-"#;
-
-const NERDFONT: &str = r#"
-font=$1
-if [ -z "$(fc-list :family="$font NF")" ]; then
-  if [ ! -d "/usr/share/fonts/$font" ]; then
-    sudo mkdir -p "/usr/share/fonts/$font"
-    tmp=$(mktemp "${TMPDIR:-/tmp}/font.XXXXXX.tar.xz")
-    trap 'rm -f "$tmp"' EXIT
-    curl -fL -o "$tmp" "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$font.tar.xz"
-    sudo tar -xJ -C "/usr/share/fonts/$font" -f "$tmp" >/dev/null
-  fi
-  fc-cache -f
-fi
-"#;
-
-const RESOLVE_URL: &str = r#"
-resolve_url() {
-expr=$1
-shift
-for kv in "$@"; do export "$kv"; done
-case "$expr" in
-  https://*) printf '%s' "$expr"; return ;;
-esac
-case "$expr" in
-  '$('curl\ -sSL\ https://*\ \|\ yq\ *')') ;;
-  *) printf 'unsupported URL lookup: %s\n' "$expr" >&2; exit 2 ;;
-esac
-inner=${expr#'$(curl -sSL '}
-inner=${inner%')'}
-api=${inner%% | yq *}
-filter=${inner#* | yq }
-filter=${filter#\"}; filter=${filter%\"}
-filter=${filter//\$\{GO_ARCH\}/$GO_ARCH}
-filter=${filter//\$\{LINUX_ARCH\}/$LINUX_ARCH}
-filter=${filter//\$\{X64_ARCH\}/$X64_ARCH}
-filter=${filter//\$\{UNAME_ARCH\}/$UNAME_ARCH}
-filter=${filter//\$\{ARM64_SUFFIX\}/$ARM64_SUFFIX}
-curl -sSL "$api" | yq "$filter"
-}
-"#;
-
-const DOWNLOAD_BINARY: &str = r#"
-name=$1; expr=$2; shift 2
-dest="$HOME/Applications/$name"
-cmd=${name%.deb}
-[ ! -f "$dest" ] || exit 0
-case "$name" in *.deb) command -v "$cmd" >/dev/null && exit 0 ;; esac
-mkdir -p "$HOME/Applications"
-url=$(resolve_url "$expr" "$@")
-tmp=$(mktemp "${TMPDIR:-/tmp}/${name}.XXXXXX")
-trap 'rm -f "$tmp"' EXIT
-curl -fL -o "$tmp" "$url"
-case "$name" in
-  *.AppImage) chmod +x "$tmp"; mv "$tmp" "$dest" ;;
-  *.deb) mv "$tmp" "$dest"; sudo apt-get install -qq "$dest"; rm -f "$dest" ;;
-  *) printf 'unsupported package: %s\n' "$name" >&2; exit 2 ;;
-esac
-"#;
-
-const GO_INSTALL: &str = r#"
-requested=$1; arch=$2
-metadata=$(mktemp "${TMPDIR:-/tmp}/go-metadata.XXXXXX.json")
-trap 'rm -rf "$metadata" "${tmp:-}" "${stage:-}"' EXIT
-curl -fsSL -o "$metadata" "https://go.dev/dl/?mode=json&include=all"
-version=$requested
-if [ "$version" = latest ]; then
-  version=$(yq '[.[] | select(.version | test("^go[0-9]+\\.[0-9]+(\\.[0-9]+)?$"))][0].version' "$metadata" | cut -c 3-)
-fi
-[ -n "$version" ]
-if command -v go >/dev/null && [ "$(go version | cut -d ' ' -f 3)" = "go$version" ]; then exit 0; fi
-filename="go${version}.linux-${arch}.tar.gz"
-checksum=$(yq ".[] | select(.version == \"go${version}\") | .files[] | select(.filename == \"${filename}\") | .sha256" "$metadata")
-[ "${#checksum}" -eq 64 ] && printf '%s' "$checksum" | grep -Eq '^[0-9a-fA-F]+$'
-tmp=$(mktemp "${TMPDIR:-/tmp}/go.XXXXXX.tar.gz")
-stage=$(mktemp -d "${TMPDIR:-/tmp}/go-stage.XXXXXX")
-curl -fL -o "$tmp" "https://go.dev/dl/${filename}"
-printf '%s  %s\n' "$checksum" "$tmp" | sha256sum -c -
-tar -tzf "$tmp" >/dev/null
-tar -C "$stage" -xzf "$tmp"
-[ -x "$stage/go/bin/go" ]
-sudo rm -rf /usr/local/go
-sudo mv "$stage/go" /usr/local/go
-"#;
-
-const NODE_INSTALL: &str = r#"
-version=$1
-fnm_path="${XDG_DATA_HOME:-$HOME/.local/share}/fnm"
-if ! command -v fnm >/dev/null; then
-  tmp=$(mktemp "${TMPDIR:-/tmp}/fnm-install.XXXXXX")
-  trap 'rm -f "$tmp"' EXIT
-  curl -fsSL -o "$tmp" https://fnm.vercel.app/install
-  bash "$tmp" --skip-shell
-  export PATH="$fnm_path:$PATH"
-fi
-eval "$(fnm env --shell bash)"
-if [ "$version" = latest ]; then fnm install --lts --use; else fnm install "$version" --use; fi
-fnm default "$(fnm current)"
-"#;
-
-const PYENV_INSTALL: &str = r#"
-update=$1; version=$2; pip=$3
-if ! command -v pyenv >/dev/null; then
-  if [ -d "$HOME/.pyenv" ]; then
-    printf 'pyenv directory exists but pyenv is not in PATH\n' >&2
-    exit 2
-  fi
-  tmp=$(mktemp "${TMPDIR:-/tmp}/pyenv.XXXXXX")
-  trap 'rm -f "$tmp"' EXIT
-  curl -fL -o "$tmp" https://pyenv.run
-  bash "$tmp"
-  export PATH="$HOME/.pyenv/bin:$PATH"
-  eval "$(pyenv init - bash)"
-else
-  [ "$update" != true ] || pyenv update >/dev/null
-fi
-latest=$(pyenv latest -k "$version")
-if [ "$(pyenv version-name)" != "$latest" ]; then
-  pyenv versions --bare | grep -Fxq "$latest" || pyenv install "$latest"
-  pyenv global "$latest"
-fi
-if [ "$pip" = true ]; then "python$version" -m pip install -q --upgrade pip; fi
-"#;
-
-const UV_INSTALL: &str = r#"
-version_enabled=$1; version=$2
-if ! command -v uv >/dev/null; then
-  tmp=$(mktemp "${TMPDIR:-/tmp}/uv-install.XXXXXX")
-  trap 'rm -f "$tmp"' EXIT
-  curl -LsSf -o "$tmp" https://astral.sh/uv/install.sh
-  sh "$tmp"
-  export PATH="$HOME/.local/bin:$PATH"
-else
-  uv self update -q
-fi
-if [ "$version_enabled" = true ]; then
-  local_py_ver=$(uv python find --managed-python --show-version "$version" 2>/dev/null || true)
-  latest_py_ver=$(uv python list "$version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-  [ -z "$latest_py_ver" ] && exit 0
-  [ "$local_py_ver" = "$latest_py_ver" ] || uv python install "$latest_py_ver"
-fi
-"#;
-
-const DOCKER_CONFIG: &str = r#"
-user=$1
-command -v docker >/dev/null || exit 0
-if ! getent group docker | grep -Fq "$user"; then
-  sudo groupadd -f docker
-  sudo usermod -aG docker "$user"
-  newgrp docker || true
-fi
-sudo mkdir -p /etc/docker
-sudo touch /etc/docker/daemon.json
-if [ "$(yq -r '.log-driver' /etc/docker/daemon.json 2>/dev/null || true)" != local ]; then
-  printf '%s\n' '{"log-driver":"local","log-opts":{"max-size":"10m"}}' | sudo tee /etc/docker/daemon.json >/dev/null
-fi
-"#;
-
-const VBOX_CONFIG: &str = r#"
-user=$1
-command -v virtualbox >/dev/null || exit 0
-if ! getent group vboxusers | grep -Fq "$user"; then
-  sudo groupadd -f vboxusers
-  sudo usermod -aG vboxusers "$user"
-  newgrp vboxusers || true
-fi
-"#;
-
-const VSCODE_EXT: &str = r#"
-ext=$1
-command -v code >/dev/null || exit 0
-code --list-extensions | grep -Fxq "$ext" || code --install-extension "$ext"
-"#;
-
-const GNOME_EXT: &str = r#"
-ext=$1
-command -v gnome-extensions >/dev/null || exit 0
-if ! gnome-extensions list | grep -Fxq "$ext"; then
-  ver=$(curl -sSL "https://extensions.gnome.org/extension-info/?uuid=$ext" |
-    yq '[.shell_version_map[].version] | max')
-  tmp=$(mktemp "${TMPDIR:-/tmp}/${ext}.XXXXXX.zip")
-  trap 'rm -f "$tmp"' EXIT
-  curl -fL -o "$tmp" "https://extensions.gnome.org/extension-data/$(tr -d @ <<<"$ext").v$ver.shell-extension.zip"
-  gnome-extensions install --force "$tmp"
-else
-  gnome-extensions enable "$ext"
-fi
-"#;
-
-const GNOME_TERMINAL: &str = r#"
-term=$1
-if gsettings get org.gnome.settings-daemon.plugins.media-keys terminal >/dev/null 2>&1; then
-  gsettings set org.gnome.desktop.default-applications.terminal exec "$term"
-  gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
-else
-  dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
-  dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/name "'Terminal'"
-  dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/command "'$term'"
-  dconf write /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/binding "'<Primary><Alt>T'"
-fi
 "#;
 
 fn sudo(args: Vec<String>) -> Step {
@@ -322,7 +80,7 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     if cfg.bool("check.distroCfg") {
         match p.distro.as_str() {
             "ubuntu" => {
-                out.push(Step::bash(SNAP_CLEANUP, vec![]));
+                out.push(Step::operation(Operation::SnapCleanup));
                 out.push(
                     sudo(vec![
                         "tee".into(),
@@ -407,11 +165,13 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
         ));
     }
     if cfg.bool("check.appimaged") {
-        out.push(Step::bash(APPIMAGED, vec![p.uname_arch.clone()]));
+        out.push(Step::operation(Operation::Appimaged {
+            arch: p.uname_arch.clone(),
+        }));
     }
     if cfg.tagged_enabled("check.nerdfont") {
         if let Some(font) = cfg.string("check.nerdfont") {
-            out.push(Step::bash(NERDFONT, vec![font]));
+            out.push(Step::operation(Operation::NerdFont { font }));
         }
     }
 }
@@ -526,36 +286,41 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("install.binaries") {
         for b in cfg.sequence("install.binaries") {
             let name = field_string(b, "name").expect("validated name");
-            let url = p.expand(&field_string(b, "url").expect("validated url"));
-            let mut args = vec![name, url];
-            args.extend(resolve_env(p));
-            out.push(Step::bash(
-                format!("{RESOLVE_URL}\n{DOWNLOAD_BINARY}"),
-                args,
-            ));
+            let url_value = field(b, "url").expect("validated url");
+            let (url, repo, pattern) = if let Some(url) = untag(url_value).as_str() {
+                (p.expand(url), String::new(), String::new())
+            } else {
+                let repo = field_string(url_value, "repo").expect("validated repo");
+                let pattern = p.expand(&field_string(url_value, "asset").expect("validated asset"));
+                (String::new(), repo, pattern)
+            };
+            out.push(Step::operation(Operation::DownloadBinary {
+                name,
+                url,
+                repo,
+                pattern,
+            }));
         }
     }
     if cfg.tagged_enabled("install.languages.goVersion") {
-        out.push(Step::bash(
-            GO_INSTALL,
-            vec![
-                cfg.string("install.languages.goVersion")
-                    .expect("validated goVersion"),
-                p.go_arch.clone(),
-            ],
-        ));
+        out.push(Step::operation(Operation::GoInstall {
+            version: cfg
+                .string("install.languages.goVersion")
+                .expect("validated goVersion"),
+            arch: p.go_arch.clone(),
+        }));
     }
     if cfg.tagged_enabled("install.languages.nodeVersion") {
-        let mut args = vec![cfg
-            .string("install.languages.nodeVersion")
-            .expect("validated nodeVersion")];
-        if cfg.tagged_enabled("install.npm") {
-            args.extend(cfg.strings("install.npm"));
-        }
-        out.push(Step::bash(
-            format!("{NODE_INSTALL}\nshift; [ \"$#\" -eq 0 ] || npm install --global \"$@\""),
-            args,
-        ));
+        out.push(Step::operation(Operation::NodeInstall {
+            version: cfg
+                .string("install.languages.nodeVersion")
+                .expect("validated nodeVersion"),
+            npm: if cfg.tagged_enabled("install.npm") {
+                cfg.strings("install.npm")
+            } else {
+                vec![]
+            },
+        }));
     }
     if cfg.tagged_enabled("install.npm") && !cfg.tagged_enabled("install.languages.nodeVersion") {
         let mut a = vec!["install".into(), "--global".into()];
@@ -563,26 +328,21 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         out.push(run_if("command", "npm", Step::owned("npm", a)));
     }
     if cfg.tagged_enabled("install.languages.pyenv") {
-        out.push(Step::bash(
-            PYENV_INSTALL,
-            vec![
-                cfg.bool("install.languages.pyenv.update").to_string(),
-                cfg.string("install.languages.pyenv.version")
-                    .expect("validated pyenv version"),
-                cfg.bool("install.languages.pyenv.pip").to_string(),
-            ],
-        ));
+        out.push(Step::operation(Operation::PyenvInstall {
+            update: cfg.bool("install.languages.pyenv.update"),
+            version: cfg
+                .string("install.languages.pyenv.version")
+                .expect("validated pyenv version"),
+            pip: cfg.bool("install.languages.pyenv.pip"),
+        }));
     }
     if cfg.tagged_enabled("install.languages.uv") {
-        out.push(Step::bash(
-            UV_INSTALL,
-            vec![
-                cfg.tagged_enabled("install.languages.uv.version")
-                    .to_string(),
-                cfg.string("install.languages.uv.version")
-                    .expect("validated uv version"),
-            ],
-        ));
+        out.push(Step::operation(Operation::UvInstall {
+            version_enabled: cfg.tagged_enabled("install.languages.uv.version"),
+            version: cfg
+                .string("install.languages.uv.version")
+                .expect("validated uv version"),
+        }));
     }
 }
 
@@ -623,24 +383,25 @@ fn update(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             out.push(run_if("command", "cargo", Step::owned("cargo", a)));
         }
     }
-    if cfg.bool("update.other.yq") {
-        out.push(Step::bash(
-            "local_ver=$(yq -V 2>/dev/null | cut -d ' ' -f 4 || true); latest=$(curl -sSL https://api.github.com/repos/mikefarah/yq/releases/latest | yq '.tag_name'); [ \"$local_ver\" = \"$latest\" ] && exit 0; tmp=$(mktemp \"${TMPDIR:-/tmp}/yq.XXXXXX\"); trap 'rm -f \"$tmp\"' EXIT; curl -fL -o \"$tmp\" \"https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$1\"; chmod +x \"$tmp\"; sudo mv \"$tmp\" /usr/bin/yq",
-            vec![p.go_arch.clone()],
-        ));
-    }
+
     if cfg.bool("update.other.go") {
         out.push(run_if(
             "command",
             "go",
-            Step::bash(GO_INSTALL, vec!["latest".into(), p.go_arch.clone()]),
+            Step::operation(Operation::GoInstall {
+                version: "latest".into(),
+                arch: p.go_arch.clone(),
+            }),
         ));
     }
     if cfg.bool("update.other.node") {
         out.push(run_if(
             "command",
             "fnm",
-            Step::bash(NODE_INSTALL, vec!["latest".into()]),
+            Step::operation(Operation::NodeInstall {
+                version: "latest".into(),
+                npm: vec![],
+            }),
         ));
     }
 }
@@ -683,14 +444,18 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     }
     let user = user();
     if cfg.bool("configure.apps.docker") {
-        out.push(Step::bash(DOCKER_CONFIG, vec![user.clone()]));
+        out.push(Step::operation(Operation::DockerConfig {
+            user: user.clone(),
+        }));
     }
     if cfg.bool("configure.apps.virtualbox") {
-        out.push(Step::bash(VBOX_CONFIG, vec![user]));
+        out.push(Step::operation(Operation::VirtualBoxConfig { user }));
     }
     if cfg.tagged_enabled("configure.apps.vscodeExtensions") {
         for ext in cfg.strings("configure.apps.vscodeExtensions") {
-            out.push(Step::bash(VSCODE_EXT, vec![ext]));
+            out.push(Step::operation(Operation::VsCodeExtension {
+                extension: ext,
+            }));
         }
     }
     if cfg.tagged_enabled("configure.desktopEnvironment")
@@ -701,7 +466,7 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
             .string("configure.desktopEnvironment.common.defaultTerm")
             .expect("validated terminal");
         if p.desktop == "gnome" {
-            out.push(Step::bash(GNOME_TERMINAL, vec![term]));
+            out.push(Step::operation(Operation::GnomeTerminal { terminal: term }));
         } else if p.desktop == "cinnamon" {
             out.push(Step::owned(
                 "gsettings",
@@ -754,7 +519,9 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
         ));
         if cfg.tagged_enabled("configure.desktopEnvironment.gnome.extensions") {
             for ext in cfg.strings("configure.desktopEnvironment.gnome.extensions") {
-                out.push(Step::bash(GNOME_EXT, vec![ext]));
+                out.push(Step::operation(Operation::GnomeExtension {
+                    extension: ext,
+                }));
             }
         }
         if cfg.bool("configure.desktopEnvironment.gnome.MacOSDock") {
@@ -812,16 +579,6 @@ fn pinning_text(value: &serde_yaml::Value) -> String {
         serde_yaml::Value::String(s) => format!("{s}\n"),
         other => serde_yaml::to_string(other).expect("serialize pinning"),
     }
-}
-
-fn resolve_env(p: &Platform) -> Vec<String> {
-    vec![
-        format!("GO_ARCH={}", p.go_arch),
-        format!("LINUX_ARCH={}", p.linux_arch),
-        format!("X64_ARCH={}", p.x64_arch),
-        format!("UNAME_ARCH={}", p.uname_arch),
-        format!("ARM64_SUFFIX={}", p.arm64_suffix),
-    ]
 }
 
 fn home() -> String {

@@ -11,6 +11,9 @@ use std::{
 };
 
 fn main() -> Result<()> {
+    if let Ok(exe) = std::env::current_exe() {
+        std::env::set_var("COZYDOT_EXE", exe);
+    }
     let root = installation_root();
     let mut config = "default".to_owned();
     let mut runner = ProcessRunner {

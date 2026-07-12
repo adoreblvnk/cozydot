@@ -1,4 +1,4 @@
-use cozydot::{config::Config, planner, platform::Platform, runner::Step};
+use cozydot::{config::Config, operations, planner, platform::Platform, runner::Step};
 use std::{
     fs,
     os::unix::fs::{symlink, PermissionsExt},
@@ -32,6 +32,11 @@ impl Host {
         fs::create_dir_all(&home).unwrap();
         fs::create_dir_all(&bin).unwrap();
         fs::create_dir_all(dir.path().join("tmp")).unwrap();
+        symlink(
+            assert_cmd::cargo::cargo_bin!("cozydot"),
+            bin.join("cozydot"),
+        )
+        .unwrap();
         Self {
             log: dir.path().join("commands.log"),
             _dir: dir,
@@ -51,6 +56,34 @@ impl Host {
     }
 
     fn run(&self, step: &Step) -> std::process::Output {
+        if let Some(operation) = &step.operation {
+            let env = [
+                ("HOME".into(), self.home.as_os_str().to_owned()),
+                ("USER".into(), "tester".into()),
+                ("LOG".into(), self.log.as_os_str().to_owned()),
+                (
+                    "TMPDIR".into(),
+                    self._dir.path().join("tmp").into_os_string(),
+                ),
+                (
+                    "PATH".into(),
+                    format!("{}:/usr/bin:/bin", self.bin.display()).into(),
+                ),
+                (
+                    "XDG_CONFIG_HOME".into(),
+                    self.home.join(".config").into_os_string(),
+                ),
+                (
+                    "XDG_DATA_HOME".into(),
+                    self.home.join(".local/share").into_os_string(),
+                ),
+            ];
+            let result = operations::execute(operation, &env);
+            return Command::new("sh")
+                .args(["-c", if result.is_ok() { "exit 0" } else { "exit 1" }])
+                .output()
+                .unwrap();
+        }
         let mut command = Command::new(&step.program);
         command
             .args(&step.args)
@@ -107,18 +140,9 @@ out=''; url=''
 while [ "$#" -gt 0 ]; do
   case "$1" in -o) out=$2; shift 2 ;; http*) url=$1; shift ;; *) shift ;; esac
 done
-if [[ "$url" == *'mode=json'* ]]; then cp '{}' "$out"; else printf archive >"$out"; fi"#,
+if [[ "$url" == *'mode=json'* ]]; then cat '{}'; else printf archive >"$out"; fi"#,
             fixture.display()
         ),
-    );
-    host.fake(
-        "yq",
-        r#"printf 'yq %s\n' "$*" >>"$LOG"
-case "$1" in
-  *'test("^go[0-9]+'*) printf 'go1.26.1\n' ;;
-  *'.sha256'*) printf 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n' ;;
-  *) exit 44 ;;
-esac"#,
     );
     host.fake("go", "printf 'go version go1.25.7 linux/amd64\n'");
     host.fake("sha256sum", "input=$(cat); printf 'sha256sum %s\\n' \"$input\" >>\"$LOG\"; [[ \"$input\" == cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc* ]]");
@@ -130,12 +154,11 @@ if [ "$1" = -C ]; then mkdir -p "$2/go/bin"; printf '#!/bin/sh\n' >"$2/go/bin/go
     host.logging_fake("sudo");
     let step = step_containing(
         &plans("configs/cli.yaml", "install", "ubuntu"),
-        "go-metadata",
+        "cozydot-operation go-install",
     );
     host.run_ok(&step);
     let log = host.log();
     assert!(log.contains("include=all"));
-    assert!(log.contains("test(\"^go[0-9]+"));
     assert!(log.contains("go1.26.1.linux-amd64.tar.gz"));
     assert!(
         log.contains("sha256sum cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
@@ -169,7 +192,7 @@ INSTALL"#,
     );
     let step = step_containing(
         &plans("configs/cli.yaml", "install", "ubuntu"),
-        "npm install --global",
+        "cozydot-operation node-install",
     );
     host.run_ok(&step);
     let log = host.log();
@@ -315,18 +338,52 @@ fn appimaged_active_and_inactive_branches_execute_against_fake_state() {
         host.logging_fake("sudo");
         host.fake("apt-cache", "exit 1");
         host.fake("dpkg", "exit 0");
-        host.fake("yq", "printf 'https://example.test/appimaged.AppImage\n'");
         host.fake(
             "curl",
             r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-if [ -n "$out" ]; then printf '#!/bin/bash\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; fi"#,
+if [ -n "$out" ]; then printf '#!/bin/bash\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; else printf '{"assets":[{"name":"appimaged-x86_64.AppImage","browser_download_url":"https://example.test/appimaged.AppImage"}]}\n'; fi"#,
         );
         let step = step_containing(
             &plans("configs/default.yaml", "check", "ubuntu"),
-            "appimaged.service",
+            "cozydot-operation appimaged",
         );
         host.run_ok(&step);
         assert_eq!(host.log().contains("appimaged-run"), !active);
+    }
+}
+
+#[test]
+fn snap_cleanup_parses_packages_and_handles_present_and_absent_snap() {
+    for present in [true, false] {
+        let host = Host::new();
+        host.fake("systemctl", "exit 1");
+        host.logging_fake("sudo");
+        if present {
+            host.fake(
+                "snap",
+                r#"printf 'snap %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = list ]; then
+  printf 'Name Version Rev Tracking Publisher Notes\nfirefox 1 1 latest x -\ncore22 1 1 latest x -\nbare 1 1 latest x -\nsnapd 1 1 latest x -\n'
+fi"#,
+            );
+        }
+        let step = step_containing(
+            &plans("configs/default.yaml", "check", "ubuntu"),
+            "cozydot-operation snap-cleanup",
+        );
+        host.run_ok(&step);
+        let log = host.log();
+        assert_eq!(
+            log.contains("snap remove --purge firefox"),
+            present,
+            "{log}"
+        );
+        assert_eq!(
+            log.contains("sudo snap remove --purge core22"),
+            present,
+            "{log}"
+        );
+        assert_eq!(log.contains("apt-get purge -qq snapd"), present, "{log}");
     }
 }
 
@@ -344,12 +401,14 @@ fn group_membership_branches_only_modify_missing_membership() {
                 "printf 'docker:x:999:\\n'".into()
             },
         );
-        host.logging_fake("sudo");
+        host.fake(
+            "sudo",
+            "printf 'sudo %s\\n' \"$*\" >>\"$LOG\"; if [ \"${1:-}\" = cat ]; then printf '{}\\n'; elif [ \"${1:-}\" = tee ]; then cat >/dev/null; fi",
+        );
         host.logging_fake("newgrp");
-        host.fake("yq", "cat >/dev/null; printf 'local\\n'");
         let step = step_containing(
             &plans("configs/full.yaml", "configure", "ubuntu"),
-            ".log-driver",
+            "cozydot-operation docker-config",
         );
         host.run_ok(&step);
         assert_eq!(
@@ -367,7 +426,7 @@ fn group_membership_branches_only_modify_missing_membership() {
 #[test]
 fn gnome_extension_present_enables_and_absent_installs() {
     let steps = plans("configs/full.yaml", "configure", "ubuntu");
-    let step = step_containing(&steps, "extension-info/?uuid");
+    let step = step_containing(&steps, "cozydot-operation gnome-extension");
     let extension = step.args.last().unwrap().clone();
     for present in [true, false] {
         let host = Host::new();
@@ -378,14 +437,98 @@ fn gnome_extension_present_enables_and_absent_installs() {
 if [ "${{1:-}}" = list ] && [ {present} = true ]; then printf '%s\n' '{extension}'; fi"#
             ),
         );
-        host.fake("yq", "cat >/dev/null; printf '42\\n'");
         host.fake(
             "curl",
-            r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{}\n'"#,
+            r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{"shell_version_map":{"45":{"version":42}}}\n'"#,
         );
         host.run_ok(&step);
         let log = host.log();
         assert_eq!(log.contains("gnome-extensions enable"), present);
         assert_eq!(log.contains("gnome-extensions install --force"), !present);
+    }
+}
+
+#[test]
+fn appimage_download_is_executable_and_existing_destination_is_idempotent() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+if [ -n "$out" ]; then printf appimage >"$out"; else printf '{"assets":[{"name":"Obsidian-1.AppImage","browser_download_url":"https://example.test/Obsidian.AppImage"}]}'; fi"#,
+    );
+    let step = step_containing(
+        &plans("configs/default.yaml", "install", "ubuntu"),
+        "download-binary Obsidian.AppImage",
+    );
+    host.run_ok(&step);
+    let destination = host.home.join("Applications/Obsidian.AppImage");
+    assert!(destination.is_file());
+    assert_ne!(
+        fs::metadata(&destination).unwrap().permissions().mode() & 0o111,
+        0
+    );
+    let first_log = host.log();
+    host.run_ok(&step);
+    assert_eq!(host.log(), first_log);
+}
+
+#[test]
+fn uv_existing_runtime_updates_and_only_installs_missing_python() {
+    for current in ["3.13.2", "3.13.1"] {
+        let host = Host::new();
+        host.fake(
+            "uv",
+            &format!(
+                r#"printf 'uv %s\n' "$*" >>"$LOG"
+case "$*" in
+  'python find --managed-python --show-version 3.13') printf '{current}\n' ;;
+  'python list 3.13') printf '3.13.2 available\n' ;;
+esac"#
+            ),
+        );
+        let step = step_containing(
+            &plans("configs/cli.yaml", "install", "ubuntu"),
+            "cozydot-operation uv-install",
+        );
+        host.run_ok(&step);
+        let log = host.log();
+        assert!(log.contains("uv self update -q"), "{log}");
+        assert_eq!(
+            log.contains("uv python install 3.13.2"),
+            current != "3.13.2"
+        );
+    }
+}
+
+#[test]
+fn nerdfont_skips_present_font_and_refreshes_after_installing_absent_font() {
+    for present in [true, false] {
+        let host = Host::new();
+        host.fake(
+            "fc-list",
+            if present {
+                "printf 'GeistMono NF\n'"
+            } else {
+                "exit 0"
+            },
+        );
+        host.logging_fake("fc-cache");
+        host.logging_fake("sudo");
+        host.fake(
+            "curl",
+            "out=''; while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift 2; else shift; fi; done; : >\"$out\"",
+        );
+        let step = step_containing(
+            &plans("configs/default.yaml", "check", "ubuntu"),
+            "cozydot-operation nerdfont",
+        );
+        host.run_ok(&step);
+        assert_eq!(
+            host.log().contains("fc-cache -f"),
+            !present,
+            "{}",
+            host.log()
+        );
     }
 }
