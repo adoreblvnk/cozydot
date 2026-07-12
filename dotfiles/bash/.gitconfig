@@ -1,6 +1,3 @@
-# if you see this file being updated, run:
-# git update-index --assume-unchanged dotfiles/bash/.gitconfig
-    signingkey =
 [core]
     autocrlf = input
 [credential]
