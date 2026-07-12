@@ -10,12 +10,24 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - run: rustup show active-toolchain
-      - run: cargo fmt --check
+      - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features
-      - run: scripts/package-release.sh
-      - run: |
-          mkdir -p /tmp/cozydot-smoke
-          tar -C /tmp/cozydot-smoke -xzf target/cozydot-0.0.1.tar.gz
-          COZYDOT_ROOT=/tmp/cozydot-smoke/cozydot-0.0.1 /tmp/cozydot-smoke/cozydot-0.0.1/cozydot --list-configs
-      - run: bash -n dotfiles/bash/.bashrc
+      - name: Build deterministic release
+        run: |
+          archive="$(COZYDOT_ARCH=amd64 scripts/package-release.sh 0.0.1 target)"
+          test "$archive" = "$PWD/target/cozydot-0.0.1-linux-amd64.tar.gz"
+          (cd target && sha256sum -c cozydot-0.0.1-linux-amd64.tar.gz.sha256)
+      - name: Smoke-test installed release
+        run: |
+          root="$(mktemp -d)"
+          mkdir -p "$root/mirror/download/v0.0.1" "$root/bin"
+          cp target/cozydot-0.0.1-linux-amd64.tar.gz* "$root/mirror/download/v0.0.1/"
+          HOME="$root/home" XDG_BIN_HOME="$root/bin" XDG_CACHE_HOME="$root/cache" \
+            COZYDOT_RELEASE_BASE_URL="file://$root/mirror" bash install.sh
+          HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_CACHE_HOME="$root/cache" \
+            COZYDOT_RELEASE_BASE_URL="file://$root/mirror" "$root/bin/cozydot" init
+          test -f "$root/config/cozydot/cozydot.yaml"
+          test -f "$root/config/cozydot/dotfiles/bash/.bashrc"
+          "$root/bin/cozydot" --version
+      - run: bash -n install.sh scripts/package-release.sh dotfiles/bash/.bashrc

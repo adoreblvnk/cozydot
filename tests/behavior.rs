@@ -61,6 +61,10 @@ impl Host {
     }
 
     fn run(&self, step: &Step) -> std::process::Output {
+        self.run_with_path(step, format!("{}:/usr/bin:/bin", self.bin.display()))
+    }
+
+    fn run_with_path(&self, step: &Step, path: String) -> std::process::Output {
         if let Step::Workflow(operation) = step {
             let env = [
                 ("HOME".into(), self.home.as_os_str().to_owned()),
@@ -70,10 +74,7 @@ impl Host {
                     "TMPDIR".into(),
                     self._dir.path().join("tmp").into_os_string(),
                 ),
-                (
-                    "PATH".into(),
-                    format!("{}:/usr/bin:/bin", self.bin.display()).into(),
-                ),
+                ("PATH".into(), path.clone().into()),
                 (
                     "XDG_CONFIG_HOME".into(),
                     self.home.join(".config").into_os_string(),
@@ -93,7 +94,7 @@ impl Host {
             if !self.condition_matches(condition) {
                 return Command::new("sh").args(["-c", "exit 0"]).output().unwrap();
             }
-            return self.run(action);
+            return self.run_with_path(action, path);
         }
         let command_step = step.command().expect("command or shell step");
         let mut command = Command::new(&command_step.program);
@@ -103,7 +104,7 @@ impl Host {
             .env("USER", "tester")
             .env("LOG", &self.log)
             .env("TMPDIR", self._dir.path().join("tmp"))
-            .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
+            .env("PATH", path)
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("XDG_DATA_HOME", self.home.join(".local/share"))
             .env_remove("CARGO_HOME");
@@ -300,6 +301,7 @@ fn real_cli_check_disables_purge_after_fake_package_purge() {
         .env("USER", "tester")
         .env("LOG", &host.log)
         .env("PATH", format!("{}:/usr/bin:/bin", host.bin.display()))
+        .env("XDG_CONFIG_HOME", host.home.join(".config"))
         .output()
         .unwrap();
     assert!(
@@ -406,7 +408,13 @@ fi"#,
             &plans("configs/default.yaml", "check", "ubuntu"),
             "workflow snap-cleanup",
         );
-        host.run_ok(&step);
+        let output = host.run_with_path(&step, host.bin.display().to_string());
+        assert!(
+            output.status.success(),
+            "{} failed: {}",
+            step.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
         let log = host.log();
         assert_eq!(
             log.contains("snap remove --purge firefox"),
