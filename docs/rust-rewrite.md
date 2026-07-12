@@ -1,23 +1,47 @@
 # Rust rewrite
 
-cozydot is now a single Rust binary; the legacy root Bash executable has been removed. The implementation is split into CLI entrypoint, tagged-YAML config access, platform mappings, command planning, and process execution.
+cozydot is now a Rust binary; the legacy root Bash executable is not restored. The implementation is split into CLI parsing, tagged-YAML validation, platform mappings, command planning, and process execution.
 
 ## Compatibility
 
-All four presets are parsed directly with `serde_yaml`, including `!enabled` and `!disabled` tagged scalars, sequences, and mappings. Repository variables (`UPSTREAM_DISTRO`, `VERSION_CODENAME`, and release architecture variants) are expanded from detected platform data. Existing repository-owned download expressions remain passed to narrowly generated Bash pipeline steps where a GitHub API lookup is required; user input is otherwise passed as process arguments or stdin rather than re-evaluated.
+The CLI keeps the original command-loop shape:
 
-The command planner covers:
+- `-V` reports `cozydot 0.0.1`.
+- `--config <name>` selects `<root>/configs/<name>.yaml`; path-style config arguments are rejected.
+- `--list-configs` can be combined with other options.
+- Multiple commands can run sequentially, such as `cozydot check update`.
+- `--no-color` is accepted for compatibility; Rust output is plain by default.
 
-- distro preparation, apt purge/dependencies, Rustup, appimaged, and Nerd Fonts;
-- apt packages, third-party signing keys/repos/pinning, Flatpak, Cargo via cargo-binstall, release binaries, Go, FNM/Node, global npm packages, pyenv, and uv;
-- apt/Flatpak/Rustup/Cargo/yq/Go/Node updates;
-- Stow override/backup flows, Docker and VirtualBox groups, VS Code extensions, terminal selection, and GNOME settings/extensions/dock preferences.
+Tagged config values are validated before planning. Unknown fields, mistyped fields, unsafe paths, unsupported binary suffixes, malformed versions, and unsupported URL lookup forms fail with contextual errors instead of panics. `!enabled` executes a section and `!disabled` skips it while preserving the data.
 
-Cargo-binstall bootstrap is intentionally infrastructure, not YAML, and always precedes Cargo package operations. FNM replaces NVM. The existing `install.npm` list includes `opencode-ai`.
+Repository variables (`UPSTREAM_DISTRO`, `VERSION_CODENAME`, `UNAME_ARCH`, `GO_ARCH`, `LINUX_ARCH`, `X64_ARCH`, `ARM64_SUFFIX`) are expanded from detected platform data. Apt repo entries also resolve the legacy `$(dpkg --print-architecture)` expression to the planned Debian architecture instead of writing it literally.
 
-## Safety and testing
+## Behavior Covered
 
-Every side effect crosses the `Runner` trait. Production uses `ProcessRunner`; tests inspect plans or use the recording/dry-run seam and never invoke package managers. `COZYDOT_DRY_RUN=1 cozydot -c full install` is the supported local plan inspection mode.
+The planner covers the legacy host-facing flows from `3b98859:cozydot`:
+
+- distro preparation for Ubuntu, Linux Mint, and Debian, including snap cleanup, nosnap pinning, auto-upgrade disabling, Debian sources, and per-package apt guards;
+- apt purge/dependency installs, Rustup bootstrap, appimaged cleanup/install, dynamic FUSE package selection, and Nerd Font install;
+- third-party apt signing keys, repo files, exact pinning stdin, and package installs with per-package guards;
+- Flatpak, Cargo/cargo-binstall, release binaries, Go, FNM/Node, npm, pyenv update/pip, and uv self-update/managed-Python behavior;
+- apt/Flatpak/Rustup/Cargo/yq/Go/Node update behavior with command/state guards;
+- Stow override/backup, Docker daemon preservation, Docker/VirtualBox groups, VS Code extension idempotency, terminal selection, GNOME settings, extension install/enable, dock keys, and rounded-corner settings.
+
+Config-derived values are passed as process arguments or stdin to fixed command snippets. The remaining shell snippets are static and are used for state checks or tightly scoped workflows that need shell features; YAML values are not interpolated into generated shell source.
+
+## Packaging
+
+`scripts/package-release.sh` builds `target/cozydot-0.0.1.tar.gz` with:
+
+- `cozydot`
+- `configs/`
+- `dotfiles/`
+
+At runtime the binary uses `COZYDOT_ROOT` when set, otherwise an adjacent `configs/` and `dotfiles/` directory, otherwise the source checkout path for development. CI and tests smoke the extracted layout.
+
+## Safety and Testing
+
+Every side effect crosses the `Runner` trait. Production uses `ProcessRunner`; tests inspect plans, dry-run CLI output, validation errors, and packaged-layout behavior without invoking package managers.
 
 Development gates:
 
@@ -26,7 +50,8 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo build --release
+scripts/package-release.sh
 bash -n dotfiles/bash/.bashrc
 ```
 
-Real package-manager and desktop integration is intentionally not exercised in CI because it would mutate the runner host. Plan tests cover ordering, disabled sections, mappings, presets, aliases, and integrated package-manager behavior.
+Privileged downloads now use unique temporary files and stage destructive replacements after archive extraction succeeds. The rewrite does not invent checksums for upstream assets that do not have pinned hashes in the current config; adding explicit checksum fields would be the next schema extension if those upstream artifacts are to be cryptographically pinned.
