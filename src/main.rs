@@ -81,6 +81,13 @@ fn run_command(
     )?;
     let steps = planner::plan(name, &cfg, &p, root)?;
     execute(runner, &steps)?;
+    let ran_check = name == "check"
+        || (name == "install" && cfg.bool("install.check"))
+        || (name == "update" && cfg.bool("update.check"))
+        || (name == "configure" && cfg.bool("configure.check"));
+    if ran_check && cfg.tagged_enabled("check.purge") && !runner.dry_run {
+        Config::disable_purge(&path)?;
+    }
     println!("Finished cozydot {name}");
     Ok(())
 }

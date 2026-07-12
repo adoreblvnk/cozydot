@@ -26,7 +26,10 @@ fn install_order_and_integrations() {
     let bins = text.find("cargo binstall").unwrap();
     assert!(boot < bins);
     assert!(text.contains("fnm install --lts"));
-    assert!(text.contains("npm install --global opencode-ai"));
+    assert!(text.contains("npm install --global"));
+    assert!(text.contains("latest opencode-ai"));
+    assert!(text.contains("${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"));
+    assert!(text.contains("export PATH=\"$fnm_path:$PATH\""));
     assert!(!text.contains("flatpak install"));
 }
 #[test]
