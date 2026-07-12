@@ -3,6 +3,7 @@ mod apps;
 mod desktop;
 mod downloads;
 mod languages;
+mod provisioning;
 mod snap_cleanup;
 
 use anyhow::{bail, Context, Result};
@@ -15,6 +16,9 @@ use std::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
+    AptCodecs {
+        package: String,
+    },
     Appimaged {
         arch: String,
     },
@@ -30,6 +34,9 @@ pub enum Operation {
     GnomeExtension {
         extension: String,
     },
+    GnomeDependencies,
+    GnomeDockSettings,
+    GnomeRoundedCornersSettings,
     GnomeTerminal {
         terminal: String,
     },
@@ -39,6 +46,14 @@ pub enum Operation {
     },
     NerdFont {
         font: String,
+    },
+    RepositoryKey {
+        url: String,
+        destination: String,
+    },
+    RustupBootstrap,
+    CargoPackages {
+        packages: Vec<String>,
     },
     NodeInstall {
         version: String,
@@ -65,17 +80,28 @@ pub enum Operation {
 impl Operation {
     pub fn display_args(&self) -> Vec<String> {
         match self {
+            Self::AptCodecs { package } => vec!["apt-codecs".into(), package.clone()],
             Self::Appimaged { arch } => vec!["appimaged".into(), arch.clone()],
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
             Self::GnomeExtension { extension } => {
                 vec!["gnome-extension".into(), extension.clone()]
             }
+            Self::GnomeDependencies => vec!["gnome-dependencies".into()],
+            Self::GnomeDockSettings => vec!["gnome-dock-settings".into()],
+            Self::GnomeRoundedCornersSettings => vec!["gnome-rounded-corners-settings".into()],
             Self::GnomeTerminal { terminal } => vec!["gnome-terminal".into(), terminal.clone()],
             Self::GoInstall { version, arch } => {
                 vec!["go-install".into(), version.clone(), arch.clone()]
             }
             Self::NerdFont { font } => vec!["nerdfont".into(), font.clone()],
+            Self::RepositoryKey { destination, .. } => {
+                vec!["repository-key".into(), destination.clone()]
+            }
+            Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
+            Self::CargoPackages { packages } => std::iter::once("cargo-packages".into())
+                .chain(packages.clone())
+                .collect(),
             Self::NodeInstall { version, npm } => std::iter::once("node-install".into())
                 .chain(std::iter::once(version.clone()))
                 .chain(npm.clone())
@@ -110,6 +136,7 @@ impl Operation {
 pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()> {
     let host = Host { env };
     match operation {
+        Operation::AptCodecs { package } => provisioning::apt_codecs(&host, package),
         Operation::Appimaged { arch } => appimaged::execute(&host, arch),
         Operation::DockerConfig { user } => apps::docker(&host, user),
         Operation::DownloadBinary {
@@ -119,9 +146,17 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
             pattern,
         } => downloads::binary(&host, name, url, repo, pattern),
         Operation::GnomeExtension { extension } => desktop::gnome_extension(&host, extension),
+        Operation::GnomeDependencies => provisioning::gnome_dependencies(&host),
+        Operation::GnomeDockSettings => provisioning::gnome_dock_settings(&host),
+        Operation::GnomeRoundedCornersSettings => provisioning::gnome_rounded_settings(&host),
         Operation::GnomeTerminal { terminal } => apps::gnome_terminal(&host, terminal),
         Operation::GoInstall { version, arch } => languages::go(&host, version, arch),
         Operation::NerdFont { font } => downloads::nerdfont(&host, font),
+        Operation::RepositoryKey { url, destination } => {
+            provisioning::repository_key(&host, url, destination)
+        }
+        Operation::RustupBootstrap => provisioning::rustup(&host),
+        Operation::CargoPackages { packages } => provisioning::cargo_packages(&host, packages),
         Operation::NodeInstall { version, npm } => languages::node(&host, version, npm),
         Operation::PyenvInstall {
             update,

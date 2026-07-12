@@ -1,4 +1,9 @@
-use cozydot::{config::Config, operations, planner, platform::Platform, runner::Step};
+use cozydot::{
+    config::Config,
+    operations, planner,
+    platform::Platform,
+    runner::{command_exists_in, Condition, Step},
+};
 use std::{
     fs,
     os::unix::fs::{symlink, PermissionsExt},
@@ -56,7 +61,7 @@ impl Host {
     }
 
     fn run(&self, step: &Step) -> std::process::Output {
-        if let Some(operation) = &step.operation {
+        if let Step::Workflow(operation) = step {
             let env = [
                 ("HOME".into(), self.home.as_os_str().to_owned()),
                 ("USER".into(), "tester".into()),
@@ -84,9 +89,16 @@ impl Host {
                 .output()
                 .unwrap();
         }
-        let mut command = Command::new(&step.program);
+        if let Step::Conditional { condition, action } = step {
+            if !self.condition_matches(condition) {
+                return Command::new("sh").args(["-c", "exit 0"]).output().unwrap();
+            }
+            return self.run(action);
+        }
+        let command_step = step.command().expect("command or shell step");
+        let mut command = Command::new(&command_step.program);
         command
-            .args(&step.args)
+            .args(&command_step.args)
             .env("HOME", &self.home)
             .env("USER", "tester")
             .env("LOG", &self.log)
@@ -96,6 +108,28 @@ impl Host {
             .env("XDG_DATA_HOME", self.home.join(".local/share"))
             .env_remove("CARGO_HOME");
         command.output().unwrap()
+    }
+
+    fn condition_matches(&self, condition: &Condition) -> bool {
+        let command = |program: &str, args: &[&str]| {
+            Command::new(self.bin.join(program))
+                .args(args)
+                .env("HOME", &self.home)
+                .env("USER", "tester")
+                .env("LOG", &self.log)
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        };
+        match condition {
+            Condition::CommandExists(name) => command_exists_in(name, self.bin.as_os_str()),
+            Condition::CommandMissing(name) => !command_exists_in(name, self.bin.as_os_str()),
+            Condition::PackageInstalled(name) => command("dpkg-query", &["-W", name]),
+            Condition::PackageMissing(name) => !command("dpkg-query", &["-W", name]),
+            Condition::FileExists(path) => path.exists(),
+            Condition::FileMissing(path) => !path.exists(),
+            other => panic!("condition not used by behavior harness: {other:?}"),
+        }
     }
 
     fn run_ok(&self, step: &Step) {
@@ -154,7 +188,7 @@ if [ "$1" = -C ]; then mkdir -p "$2/go/bin"; printf '#!/bin/sh\n' >"$2/go/bin/go
     host.logging_fake("sudo");
     let step = step_containing(
         &plans("configs/cli.yaml", "install", "ubuntu"),
-        "cozydot-operation go-install",
+        "workflow go-install",
     );
     host.run_ok(&step);
     let log = host.log();
@@ -192,7 +226,7 @@ INSTALL"#,
     );
     let step = step_containing(
         &plans("configs/cli.yaml", "install", "ubuntu"),
-        "cozydot-operation node-install",
+        "workflow node-install",
     );
     host.run_ok(&step);
     let log = host.log();
@@ -229,13 +263,13 @@ chmod +x "$HOME/.cargo/bin/rustup" "$HOME/.cargo/bin/cargo"
 INSTALL"#,
     );
     let steps = plans("configs/cli.yaml", "install", "ubuntu");
-    host.run_ok(&step_containing(&steps, "rustup.XXXXXX"));
+    host.run_ok(&step_containing(&steps, "workflow rustup-bootstrap"));
     assert!(
         host.home.join(".cargo/bin/cargo").is_file(),
         "rustup bootstrap did not create cargo; log: {}",
         host.log()
     );
-    host.run_ok(&step_containing(&steps, "cargo binstall --no-confirm"));
+    host.run_ok(&step_containing(&steps, "workflow cargo-packages"));
     let log = host.log();
     assert!(
         log.contains("cargo install cargo-binstall --locked"),
@@ -247,23 +281,21 @@ INSTALL"#,
 #[test]
 fn real_cli_check_disables_purge_after_fake_package_purge() {
     let host = Host::new();
-    let root = host.home.join("bundle");
-    fs::create_dir_all(root.join("configs")).unwrap();
+    let root = host.home.join(".config/cozydot");
     fs::create_dir_all(root.join("dotfiles/bash")).unwrap();
     fs::copy("dotfiles/bash/.bashrc", root.join("dotfiles/bash/.bashrc")).unwrap();
     let yaml = fs::read_to_string("configs/cli.yaml")
         .unwrap()
+        .replace("!enabled", "!disabled")
         .replace("purge: !disabled", "purge: !enabled")
         .replace("    - docker.io\n", "    - fake-package\n")
         .replace("distroCfg: true", "distroCfg: false")
-        .replace("deps: !enabled", "deps: !disabled")
         .replace("rustupCheck: true", "rustupCheck: false");
-    fs::write(root.join("configs/test.yaml"), yaml).unwrap();
+    fs::write(root.join("cozydot.yaml"), yaml).unwrap();
     host.fake("dpkg-query", "[ \"${1:-}\" = -W ]");
     host.logging_fake("sudo");
     let output = Command::new(assert_cmd::cargo::cargo_bin!("cozydot"))
-        .args(["-c", "test", "check"])
-        .env("COZYDOT_ROOT", &root)
+        .arg("apply")
         .env("HOME", &host.home)
         .env("USER", "tester")
         .env("LOG", &host.log)
@@ -275,7 +307,7 @@ fn real_cli_check_disables_purge_after_fake_package_purge() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let updated = fs::read_to_string(root.join("configs/test.yaml")).unwrap();
+    let updated = fs::read_to_string(root.join("cozydot.yaml")).unwrap();
     assert!(updated.contains("purge: !disabled"));
     assert!(updated.contains("fake-package"));
     assert!(host.log().contains("sudo apt-get purge -qq fake-package"));
@@ -294,7 +326,10 @@ fn bashrc_regular_file_is_replaced_but_symlink_is_preserved() {
         .into_iter()
         .next()
         .unwrap();
-    *step.args.last_mut().unwrap() = host.home.join(".bashrc").display().to_string();
+    let Step::Shell(command) = &mut step else {
+        panic!("expected shell bridge");
+    };
+    *command.args.last_mut().unwrap() = host.home.join(".bashrc").display().to_string();
     host.run_ok(&step);
     assert_eq!(
         fs::read_to_string(host.home.join(".bashrc")).unwrap(),
@@ -345,7 +380,7 @@ if [ -n "$out" ]; then printf '#!/bin/bash\nprintf "appimaged-run\\n" >>"$LOG"\n
         );
         let step = step_containing(
             &plans("configs/default.yaml", "check", "ubuntu"),
-            "cozydot-operation appimaged",
+            "workflow appimaged",
         );
         host.run_ok(&step);
         assert_eq!(host.log().contains("appimaged-run"), !active);
@@ -369,7 +404,7 @@ fi"#,
         }
         let step = step_containing(
             &plans("configs/default.yaml", "check", "ubuntu"),
-            "cozydot-operation snap-cleanup",
+            "workflow snap-cleanup",
         );
         host.run_ok(&step);
         let log = host.log();
@@ -408,7 +443,7 @@ fn group_membership_branches_only_modify_missing_membership() {
         host.logging_fake("newgrp");
         let step = step_containing(
             &plans("configs/full.yaml", "configure", "ubuntu"),
-            "cozydot-operation docker-config",
+            "workflow docker-config",
         );
         host.run_ok(&step);
         assert_eq!(
@@ -426,8 +461,11 @@ fn group_membership_branches_only_modify_missing_membership() {
 #[test]
 fn gnome_extension_present_enables_and_absent_installs() {
     let steps = plans("configs/full.yaml", "configure", "ubuntu");
-    let step = step_containing(&steps, "cozydot-operation gnome-extension");
-    let extension = step.args.last().unwrap().clone();
+    let step = step_containing(&steps, "workflow gnome-extension");
+    let Step::Workflow(operations::Operation::GnomeExtension { ref extension }) = step else {
+        panic!("expected GNOME extension workflow");
+    };
+    let extension = extension.clone();
     for present in [true, false] {
         let host = Host::new();
         host.fake(
@@ -489,7 +527,7 @@ esac"#
         );
         let step = step_containing(
             &plans("configs/cli.yaml", "install", "ubuntu"),
-            "cozydot-operation uv-install",
+            "workflow uv-install",
         );
         host.run_ok(&step);
         let log = host.log();
@@ -521,7 +559,7 @@ fn nerdfont_skips_present_font_and_refreshes_after_installing_absent_font() {
         );
         let step = step_containing(
             &plans("configs/default.yaml", "check", "ubuntu"),
-            "cozydot-operation nerdfont",
+            "workflow nerdfont",
         );
         host.run_ok(&step);
         assert_eq!(

@@ -1,4 +1,7 @@
+pub mod archive;
+pub mod assets;
 pub mod config;
+pub mod init;
 pub mod json_helpers;
 pub mod operations;
 pub mod planner;
