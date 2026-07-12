@@ -1,3 +1,4 @@
+use crate::operations::{self, Operation};
 use anyhow::{bail, Context, Result};
 use std::{ffi::OsString, process::Command};
 
@@ -6,6 +7,7 @@ pub struct Step {
     pub program: String,
     pub args: Vec<String>,
     pub stdin: Option<String>,
+    pub operation: Option<Operation>,
 }
 impl Step {
     pub fn new(program: impl Into<String>, args: &[&str]) -> Self {
@@ -13,6 +15,7 @@ impl Step {
             program: program.into(),
             args: args.iter().map(|s| (*s).into()).collect(),
             stdin: None,
+            operation: None,
         }
     }
     pub fn owned(program: impl Into<String>, args: Vec<String>) -> Self {
@@ -20,6 +23,7 @@ impl Step {
             program: program.into(),
             args,
             stdin: None,
+            operation: None,
         }
     }
     pub fn bash(script: impl Into<String>, args: Vec<String>) -> Self {
@@ -36,6 +40,14 @@ impl Step {
     pub fn input(mut self, s: String) -> Self {
         self.stdin = Some(s);
         self
+    }
+    pub fn operation(operation: Operation) -> Self {
+        Self {
+            program: "cozydot-operation".into(),
+            args: operation.display_args(),
+            stdin: None,
+            operation: Some(operation),
+        }
     }
     pub fn display(&self) -> String {
         std::iter::once(self.program.as_str())
@@ -65,6 +77,9 @@ impl Runner for ProcessRunner {
         println!("+ {}", step.display());
         if self.dry_run {
             return Ok(());
+        }
+        if let Some(operation) = &step.operation {
+            return operations::execute(operation, &[]);
         }
         let mut child = Command::new(&step.program)
             .args(step.args.iter().map(OsString::from))

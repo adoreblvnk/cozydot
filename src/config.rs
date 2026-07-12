@@ -213,10 +213,22 @@ impl Config {
             let name = field_string(binary, "name")
                 .ok_or_else(|| anyhow::anyhow!("{path}.name must be a string"))?;
             validate_binary_name(&name, &format!("{path}.name"))?;
-            validate_urlish(
-                field_string(binary, "url").as_deref(),
-                &format!("{path}.url"),
-            )?;
+            let url_path = format!("{path}.url");
+            let url = field(binary, "url").ok_or_else(|| anyhow::anyhow!("missing {url_path}"))?;
+            if let Some(url) = untag(url).as_str() {
+                validate_https(Some(url), &url_path)?;
+            } else {
+                let source = mapping(url, &url_path)?;
+                expect_keys(source, &url_path, &["repo", "asset"])?;
+                validate_github_repo(
+                    field_string(url, "repo").as_deref(),
+                    &format!("{url_path}.repo"),
+                )?;
+                validate_asset_pattern(
+                    field_string(url, "asset").as_deref(),
+                    &format!("{url_path}.asset"),
+                )?;
+            }
         }
         Ok(())
     }
@@ -254,8 +266,7 @@ impl Config {
         self.required_bool("update.flatpak")?;
         self.required_bool("update.cargo")?;
         let other = self.map_at("update.other")?;
-        expect_keys(other, "update.other", &["yq", "go", "node"])?;
-        self.required_bool("update.other.yq")?;
+        expect_keys(other, "update.other", &["go", "node"])?;
         self.required_bool("update.other.go")?;
         self.required_bool("update.other.node")?;
         Ok(())
@@ -533,14 +544,46 @@ fn validate_repo(value: Option<&str>, path: &str) -> Result<()> {
 }
 
 fn validate_urlish(value: Option<&str>, path: &str) -> Result<()> {
+    validate_https(value, path)
+}
+
+fn validate_https(value: Option<&str>, path: &str) -> Result<()> {
     let value = value.ok_or_else(|| anyhow::anyhow!("{path} must be a string"))?;
-    if value.starts_with("https://") {
-        return Ok(());
+    if value.starts_with("https://") && !value.contains(['\n', ';']) {
+        Ok(())
+    } else {
+        bail!("{path} must be an https URL")
     }
-    if value.starts_with("$(curl -sSL https://") && value.ends_with(')') && !value.contains('\n') {
-        return Ok(());
+}
+
+fn validate_github_repo(value: Option<&str>, path: &str) -> Result<()> {
+    let value = value.ok_or_else(|| anyhow::anyhow!("{path} must be a string"))?;
+    let parts = value.split('/').collect::<Vec<_>>();
+    if parts.len() == 2
+        && parts.iter().all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        })
+    {
+        Ok(())
+    } else {
+        bail!("{path} must be an owner/repository name")
     }
-    bail!("{path} must be an https URL or supported GitHub curl/yq lookup")
+}
+
+fn validate_asset_pattern(value: Option<&str>, path: &str) -> Result<()> {
+    let value = value.ok_or_else(|| anyhow::anyhow!("{path} must be a string"))?;
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-+._*${}".contains(&b))
+    {
+        Ok(())
+    } else {
+        bail!("{path} contains unsupported asset-pattern characters")
+    }
 }
 
 fn validate_version(value: &str, path: &str) -> Result<()> {

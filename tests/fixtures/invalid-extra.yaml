@@ -34,7 +34,6 @@ update:
   flatpak: false
   cargo: false
   other:
-    yq: false
     go: false
     node: false
 configure:

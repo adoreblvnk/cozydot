@@ -31,7 +31,7 @@ fn aliases_and_dry_run_work() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("npm install --global")
+            predicate::str::contains("cozydot-operation node-install")
                 .and(predicate::str::contains("latest opencode-ai")),
         );
 }

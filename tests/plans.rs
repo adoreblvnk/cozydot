@@ -25,11 +25,9 @@ fn install_order_and_integrations() {
     let boot = text.find("cargo install cargo-binstall").unwrap();
     let bins = text.find("cargo binstall").unwrap();
     assert!(boot < bins);
-    assert!(text.contains("fnm install --lts"));
-    assert!(text.contains("npm install --global"));
+    assert!(text.contains("cozydot-operation node-install latest"));
     assert!(text.contains("latest opencode-ai"));
     assert!(text.contains("${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"));
-    assert!(text.contains("export PATH=\"$fnm_path:$PATH\""));
     assert!(!text.contains("flatpak install"));
 }
 #[test]
@@ -100,11 +98,10 @@ fn binary_and_language_steps_are_state_aware() {
         .map(|x| x.display())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("command -v \"$cmd\""));
-    assert!(text.contains("mktemp"));
-    assert!(text.contains("tar -C \"$stage\" -xzf \"$tmp\""));
-    assert!(text.contains("uv self update"));
-    assert!(text.contains("pyenv update"));
+    assert!(text.contains("cozydot-operation download-binary"));
+    assert!(text.contains("cozydot-operation go-install"));
+    assert!(text.contains("cozydot-operation uv-install"));
+    assert!(text.contains("cozydot-operation pyenv-install"));
 }
 
 #[test]
@@ -116,10 +113,9 @@ fn configure_plan_contains_stateful_app_and_gnome_behavior() {
         .map(|x| x.display())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("command -v docker"));
-    assert!(text.contains(".log-driver"));
-    assert!(text.contains("code --list-extensions"));
-    assert!(text.contains("exec-arg"));
+    assert!(text.contains("cozydot-operation docker-config"));
+    assert!(text.contains("cozydot-operation vscode-extension"));
+    assert!(text.contains("cozydot-operation gnome-terminal"));
     assert!(text.contains("idle-dim"));
     assert!(text.contains("gnome-shell-extensions"));
     assert!(text.contains("require-pressure-to-show"));
@@ -198,7 +194,6 @@ update:
   flatpak: false
   cargo: false
   other:
-    yq: false
     go: false
     node: false
 configure:

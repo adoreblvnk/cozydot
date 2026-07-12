@@ -24,10 +24,10 @@ The planner covers the legacy host-facing flows from `3b98859:cozydot`:
 - apt purge/dependency installs, Rustup bootstrap, appimaged cleanup/install, dynamic FUSE package selection, and Nerd Font install;
 - third-party apt signing keys, repo files, exact pinning stdin, and package installs with per-package guards;
 - Flatpak, Cargo/cargo-binstall, release binaries, Go, FNM/Node, npm, pyenv update/pip, and uv self-update/managed-Python behavior;
-- apt/Flatpak/Rustup/Cargo/yq/Go/Node update behavior with command/state guards;
+- apt/Flatpak/Rustup/Cargo/Go/Node update behavior with command/state guards;
 - Stow override/backup, Docker daemon preservation, Docker/VirtualBox groups, VS Code extension idempotency, terminal selection, GNOME settings, extension install/enable, dock keys, and rounded-corner settings.
 
-Config-derived values are passed as process arguments or stdin to fixed command snippets. The remaining shell snippets are static and are used for state checks or tightly scoped workflows that need shell features; YAML values are not interpolated into generated shell source.
+Config-derived values are passed as process arguments or stdin to fixed command snippets. GitHub, Go, GNOME, and Docker JSON is parsed by internal Rust helpers; `yq` is not required. The remaining shell snippets are static and are used for state checks or tightly scoped workflows that need shell features; YAML values are not interpolated into generated shell source.
 
 ## Packaging
 

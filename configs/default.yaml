@@ -150,13 +150,19 @@ install:
     - opencode-ai
   binaries: !enabled
     - name: drawio.deb
-      url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq ".assets[].browser_download_url | select(. == \"*${GO_ARCH}*.deb\")")
+      url:
+        repo: jgraph/drawio-desktop
+        asset: "*${GO_ARCH}*.deb"
     - name: fastfetch.deb
       url: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-${LINUX_ARCH}.deb
     - name: git-credential-manager.deb
-      url: $(curl -sSL https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest | yq ".assets[].browser_download_url | select(. == \"*linux-${X64_ARCH}-*.deb\")")
+      url:
+        repo: git-ecosystem/git-credential-manager
+        asset: "*linux-${X64_ARCH}-*.deb"
     - name: Obsidian.AppImage
-      url: $(curl -sSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | yq ".assets[].browser_download_url | select(test(\"Obsidian-[0-9.]+${ARM64_SUFFIX}\\\\.AppImage$\"))")
+      url:
+        repo: obsidianmd/obsidian-releases
+        asset: "Obsidian-*${ARM64_SUFFIX}.AppImage"
     - name: zen.AppImage
       url: https://github.com/zen-browser/desktop/releases/latest/download/zen-${UNAME_ARCH}.AppImage
   languages:
@@ -175,7 +181,6 @@ update:
   flatpak: true
   cargo: false
   other:
-    yq: true
     go: false
     node: false
 configure:
