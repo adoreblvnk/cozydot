@@ -26,10 +26,6 @@ impl Config {
         Some(value)
     }
 
-    pub fn enabled(&self, path: &str) -> bool {
-        tag(self.at(path)).as_deref() != Some("!disabled")
-    }
-
     pub fn tagged_enabled(&self, path: &str) -> bool {
         tag(self.at(path)).as_deref() == Some("!enabled")
     }
@@ -41,11 +37,7 @@ impl Config {
     }
 
     pub fn string(&self, path: &str) -> Option<String> {
-        self.at(path).and_then(|v| match untag(v) {
-            Value::String(s) => Some(s.clone()),
-            Value::Number(n) => Some(n.to_string()),
-            _ => None,
-        })
+        self.at(path).and_then(value_string)
     }
 
     pub fn strings(&self, path: &str) -> Vec<String> {
@@ -397,13 +389,8 @@ impl Config {
     }
 
     fn required_tagged_string_sequence(&self, path: &str) -> Result<()> {
-        self.required_tagged_sequence(path)?;
-        for (i, v) in self.sequence(path).into_iter().enumerate() {
-            if untag(v).as_str().filter(|s| !s.trim().is_empty()).is_none() {
-                bail!("{path}[{i}] must be a non-empty string");
-            }
-        }
-        Ok(())
+        validate_tag(self.at(path), path)?;
+        self.required_string_sequence(path)
     }
 
     fn required_string_sequence(&self, path: &str) -> Result<()> {
@@ -445,11 +432,15 @@ pub fn field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
 }
 
 pub fn field_string(value: &Value, name: &str) -> Option<String> {
-    field(value, name).and_then(|v| match untag(v) {
+    field(value, name).and_then(value_string)
+}
+
+fn value_string(value: &Value) -> Option<String> {
+    match untag(value) {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
         _ => None,
-    })
+    }
 }
 
 fn mapping<'a>(value: &'a Value, path: &str) -> Result<&'a Mapping> {

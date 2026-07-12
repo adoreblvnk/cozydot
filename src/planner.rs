@@ -281,14 +281,32 @@ fn apt_owned(args: Vec<String>) -> Step {
     sudo(std::iter::once("apt-get".into()).chain(args).collect())
 }
 
-fn run_if(kind: &str, checked: impl Into<String>, command: Step) -> Step {
-    let mut args = vec![kind.into(), checked.into(), command.program];
-    args.extend(command.args);
-    Step::bash(RUN_IF, args)
+trait CheckedOperands {
+    fn append_to(self, args: &mut Vec<String>);
 }
 
-fn run_if2(kind: &str, a: impl Into<String>, b: impl Into<String>, command: Step) -> Step {
-    let mut args = vec![kind.into(), a.into(), b.into(), command.program];
+impl CheckedOperands for &str {
+    fn append_to(self, args: &mut Vec<String>) {
+        args.push(self.into());
+    }
+}
+
+impl CheckedOperands for String {
+    fn append_to(self, args: &mut Vec<String>) {
+        args.push(self);
+    }
+}
+
+impl<const N: usize> CheckedOperands for [String; N] {
+    fn append_to(self, args: &mut Vec<String>) {
+        args.extend(self);
+    }
+}
+
+fn run_if(kind: &str, checked: impl CheckedOperands, command: Step) -> Step {
+    let mut args = vec![kind.into()];
+    checked.append_to(&mut args);
+    args.push(command.program);
     args.extend(command.args);
     Step::bash(RUN_IF, args)
 }
@@ -346,10 +364,9 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
             )),
             "debian" => {
                 let user = user();
-                out.push(run_if2(
+                out.push(run_if(
                     "group-missing-user",
-                    "sudo",
-                    user.clone(),
+                    ["sudo".to_owned(), user.clone()],
                     Step::owned("adduser", vec![user, "sudo".into()]),
                 ));
                 out.push(

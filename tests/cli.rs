@@ -17,7 +17,10 @@ fn version_works() {
         .arg("-V")
         .assert()
         .success()
-        .stdout(predicate::str::contains("cozydot 0.0.1"));
+        .stdout(predicate::str::contains(format!(
+            "cozydot {}",
+            env!("CARGO_PKG_VERSION")
+        )));
 }
 #[test]
 fn aliases_and_dry_run_work() {
