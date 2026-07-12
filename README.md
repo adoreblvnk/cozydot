@@ -97,6 +97,7 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
   - **packages** `<list>`: List of packages to install from this source
 - **flatpak** `!enabled`: Install [Flatpak](https://flatpak.org) packages
 - **cargo** `!enabled`: Install [Cargo](https://crates.io) packages
+- **npm** `!enabled`: Install global [npm](https://www.npmjs.com) packages
 - **binaries** `!enabled`: Install binaries ([AppImage](https://appimage.org) / deb packages)
   - **name** `<string>`: Name of binary. File extension determines if package is an [AppImage](https://appimage.org) or binary (.deb)
   - **url** `<string>`: Package URL
@@ -150,7 +151,7 @@ Options:
 Commands:
      check     Purges bloat (disabled by default) & installs dependencies. Installs Python (via
                pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
-  i, install   Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
+  i, install   Installs all apt (& alternative sources), flatpak, cargo, npm, binary (AppImage)
                packages, & programming languages (node & golang)
   u, update    Updates & upgrades apt, flatpak, cargo packages. Updates other packages & clears
                Zellij cache (see ~/.cozydot/configs/default.yaml for details)
