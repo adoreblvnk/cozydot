@@ -78,6 +78,11 @@ impl Platform {
                 .replace(&format!("${k}"), v)
         })
     }
+
+    pub fn expand_shell_arch(&self, input: &str) -> String {
+        self.expand(input)
+            .replace("$(dpkg --print-architecture)", &self.go_arch)
+    }
 }
 fn upstream(id: &str) -> Result<&'static str> {
     match id {
