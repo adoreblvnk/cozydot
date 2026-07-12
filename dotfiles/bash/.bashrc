@@ -60,10 +60,10 @@ fi
 
 if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
 
-if [ -f ~/.nvm/nvm.sh ]; then
-  export NVM_DIR="$HOME/.nvm"
-  source "$NVM_DIR/nvm.sh"
-  source "$NVM_DIR/bash_completion"
+FNM_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/fnm"
+if [ -d "$FNM_PATH" ]; then
+  export PATH="$FNM_PATH:$PATH"
+  eval "$(fnm env --use-on-cd --shell bash)"
 fi
 
 if [ -d ~/.pyenv ]; then
