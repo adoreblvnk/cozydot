@@ -521,14 +521,17 @@ install() {
   # install cargo packages if cargo is installed
   if [[ $(yq '.install.cargo | tag' "$CONFIG") == "!enabled" ]] \
     && command -v cargo &>/dev/null; then
+    if ! command -v cargo-binstall &>/dev/null; then
+      _info_msg "Installing cargo-binstall"
+      cargo install cargo-binstall --locked
+      export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    fi
     _info_msg "Installing cargo packages"
     local rust_pkgs
     mapfile -t rust_pkgs < <(yq '.install.cargo[]' "$CONFIG")
     for pkg in "${rust_pkgs[@]}"; do
-      if ! cargo install --list | grep -q "$(cut -d ' ' -f 1 <<<"$pkg")"; then
-        # shellcheck disable=SC2086
-        cargo install $pkg
-      fi
+      # shellcheck disable=SC2086
+      cargo binstall --no-confirm $pkg
     done
   fi
 
@@ -682,12 +685,17 @@ update() {
     && command -v cargo &>/dev/null; then
     _info_msg "Updating rustup $(rustup -V 2>/dev/null | cut -d ' ' -f 2) & cargo $(cargo -V | cut -d ' ' -f 2) packages"
     rustup update 2>/dev/null
-    # install cargo-update package if not installed
-    if ! cargo install --list | grep -q ^cargo-update; then
-      _info_msg "Installing cargo-update required for updating rust packages"
-      cargo install cargo-update
+    if ! command -v cargo-binstall &>/dev/null; then
+      _info_msg "Installing cargo-binstall"
+      cargo install cargo-binstall --locked
+      export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
     fi
-    cargo install-update -a
+    local rust_pkgs
+    mapfile -t rust_pkgs < <(yq '.install.cargo[]' "$CONFIG")
+    for pkg in "${rust_pkgs[@]}"; do
+      # shellcheck disable=SC2086
+      cargo binstall --no-confirm --force $pkg
+    done
   fi
 
   # update yq
