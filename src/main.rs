@@ -38,7 +38,7 @@ enum Action {
 }
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = installation_root();
     if cli.list_configs {
         return list_configs(&root);
     }
@@ -65,6 +65,18 @@ fn main() -> Result<()> {
     println!("Finished cozydot {name}");
     Ok(())
 }
+fn installation_root() -> PathBuf {
+    std::env::var_os("COZYDOT_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
+                .filter(|p| p.join("configs").is_dir())
+        })
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 fn config_path(root: &Path, name: &str) -> PathBuf {
     let p = PathBuf::from(name);
     if p.extension().is_some() || p.components().count() > 1 {
