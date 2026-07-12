@@ -54,7 +54,7 @@ ${YELLOW}Options:${NC}
 ${YELLOW}Commands:${NC}
   ${GREEN}   check    ${NC} Purges bloat (disabled by default) & installs dependencies. Installs Python (via
                pyenv), Cargo (via rustup), appimaged (AppImage integration daemon), & Nerdfonts
-  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, binary (AppImage)
+  ${GREEN}i, install  ${NC} Installs all apt (& alternative sources), flatpak, cargo, npm, binary (AppImage)
                packages, & programming languages (node & golang)
   ${GREEN}u, update   ${NC} Updates & upgrades apt, flatpak, cargo packages. Updates other packages & other stuff
                (see ${BLUE}~/.cozydot/configs/default.yaml${NC} for details)
@@ -579,6 +579,15 @@ install() {
   # install fnm, node (& npm)
   if [[ $(yq '.install.languages.nodeVersion | tag' "$CONFIG") == "!enabled" ]]; then
     _dl_node "$(yq '.install.languages.nodeVersion' "$CONFIG")"
+  fi
+
+  # install npm packages if npm is installed
+  if [[ $(yq '.install.npm | tag' "$CONFIG") == "!enabled" ]] \
+    && command -v npm &>/dev/null; then
+    _info_msg "Installing npm packages"
+    local npm_pkgs
+    mapfile -t npm_pkgs < <(yq '.install.npm[]' "$CONFIG")
+    npm install --global "${npm_pkgs[@]}"
   fi
 
   # installs pyenv, installs python according to version specified in $CONFIG

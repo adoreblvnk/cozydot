@@ -146,6 +146,8 @@ install:
     - fd-find           # find alternative
     - starship --locked
     - tealdeer
+  npm: !enabled
+    - opencode-ai
   binaries: !enabled
     - name: drawio.deb
       url: $(curl -sSL https://api.github.com/repos/jgraph/drawio-desktop/releases/latest | yq ".assets[].browser_download_url | select(. == \"*${GO_ARCH}*.deb\")")
