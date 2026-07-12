@@ -96,18 +96,18 @@ fn step_containing(steps: &[Step], needle: &str) -> Step {
 }
 
 #[test]
-fn latest_go_ignores_prereleases_ahead_of_stable_fixture() {
+fn latest_go_ignores_prereleases_and_verifies_matching_stable_checksum() {
     let host = Host::new();
     let fixture = Path::new("tests/fixtures/go-releases-prerelease-first.json");
     host.fake(
         "curl",
         &format!(
             r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''
+out=''; url=''
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi
+  case "$1" in -o) out=$2; shift 2 ;; http*) url=$1; shift ;; *) shift ;; esac
 done
-cp '{}' "$out""#,
+if [[ "$url" == *'mode=json'* ]]; then cp '{}' "$out"; else printf archive >"$out"; fi"#,
             fixture.display()
         ),
     );
@@ -116,10 +116,18 @@ cp '{}' "$out""#,
         r#"printf 'yq %s\n' "$*" >>"$LOG"
 case "$1" in
   *'test("^go[0-9]+'*) printf 'go1.26.1\n' ;;
+  *'.sha256'*) printf 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n' ;;
   *) exit 44 ;;
 esac"#,
     );
-    host.fake("go", "printf 'go version go1.26.1 linux/amd64\n'");
+    host.fake("go", "printf 'go version go1.25.7 linux/amd64\n'");
+    host.fake("sha256sum", "input=$(cat); printf 'sha256sum %s\\n' \"$input\" >>\"$LOG\"; [[ \"$input\" == cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc* ]]");
+    host.fake(
+        "tar",
+        r#"printf 'tar %s\n' "$*" >>"$LOG"
+if [ "$1" = -C ]; then mkdir -p "$2/go/bin"; printf '#!/bin/sh\n' >"$2/go/bin/go"; chmod +x "$2/go/bin/go"; fi"#,
+    );
+    host.logging_fake("sudo");
     let step = step_containing(
         &plans("configs/cli.yaml", "install", "ubuntu"),
         "go-metadata",
@@ -128,6 +136,10 @@ esac"#,
     let log = host.log();
     assert!(log.contains("include=all"));
     assert!(log.contains("test(\"^go[0-9]+"));
+    assert!(log.contains("go1.26.1.linux-amd64.tar.gz"));
+    assert!(
+        log.contains("sha256sum cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+    );
     assert!(!log.contains("go1.27rc2.linux"));
 }
 
