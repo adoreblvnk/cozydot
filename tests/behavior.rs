@@ -1,0 +1,379 @@
+use cozydot::{config::Config, planner, platform::Platform, runner::Step};
+use std::{
+    fs,
+    os::unix::fs::{symlink, PermissionsExt},
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+fn platform(distro: &str) -> Platform {
+    Platform::from_parts(
+        distro.into(),
+        "ubuntu".into(),
+        "noble".into(),
+        "gnome".into(),
+        "x86_64",
+    )
+    .unwrap()
+}
+
+struct Host {
+    _dir: tempfile::TempDir,
+    home: PathBuf,
+    bin: PathBuf,
+    log: PathBuf,
+}
+
+impl Host {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let bin = dir.path().join("bin");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(dir.path().join("tmp")).unwrap();
+        Self {
+            log: dir.path().join("commands.log"),
+            _dir: dir,
+            home,
+            bin,
+        }
+    }
+
+    fn fake(&self, name: &str, body: &str) {
+        let path = self.bin.join(name);
+        fs::write(&path, format!("#!/bin/bash\nset -euo pipefail\n{body}\n")).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn logging_fake(&self, name: &str) {
+        self.fake(name, &format!("printf '%s %s\\n' {name} \"$*\" >>\"$LOG\""));
+    }
+
+    fn run(&self, step: &Step) -> std::process::Output {
+        let mut command = Command::new(&step.program);
+        command
+            .args(&step.args)
+            .env("HOME", &self.home)
+            .env("USER", "tester")
+            .env("LOG", &self.log)
+            .env("TMPDIR", self._dir.path().join("tmp"))
+            .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
+            .env("XDG_CONFIG_HOME", self.home.join(".config"))
+            .env("XDG_DATA_HOME", self.home.join(".local/share"))
+            .env_remove("CARGO_HOME");
+        command.output().unwrap()
+    }
+
+    fn run_ok(&self, step: &Step) {
+        let output = self.run(step);
+        assert!(
+            output.status.success(),
+            "{} failed\nstdout: {}\nstderr: {}\nlog: {}",
+            step.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            self.log()
+        );
+    }
+
+    fn log(&self) -> String {
+        fs::read_to_string(&self.log).unwrap_or_default()
+    }
+}
+
+fn plans(config: &str, command: &str, distro: &str) -> Vec<Step> {
+    let cfg = Config::load(Path::new(config)).unwrap();
+    planner::plan(command, &cfg, &platform(distro), Path::new(".")).unwrap()
+}
+
+fn step_containing(steps: &[Step], needle: &str) -> Step {
+    steps
+        .iter()
+        .find(|step| step.display().contains(needle))
+        .unwrap_or_else(|| panic!("no planned step contains {needle}"))
+        .clone()
+}
+
+#[test]
+fn latest_go_ignores_prereleases_ahead_of_stable_fixture() {
+    let host = Host::new();
+    let fixture = Path::new("tests/fixtures/go-releases-prerelease-first.json");
+    host.fake(
+        "curl",
+        &format!(
+            r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi
+done
+cp '{}' "$out""#,
+            fixture.display()
+        ),
+    );
+    host.fake(
+        "yq",
+        r#"printf 'yq %s\n' "$*" >>"$LOG"
+case "$1" in
+  *'test("^go[0-9]+'*) printf 'go1.26.1\n' ;;
+  *) exit 44 ;;
+esac"#,
+    );
+    host.fake("go", "printf 'go version go1.26.1 linux/amd64\n'");
+    let step = step_containing(
+        &plans("configs/cli.yaml", "install", "ubuntu"),
+        "go-metadata",
+    );
+    host.run_ok(&step);
+    let log = host.log();
+    assert!(log.contains("include=all"));
+    assert!(log.contains("test(\"^go[0-9]+"));
+    assert!(!log.contains("go1.27rc2.linux"));
+}
+
+#[test]
+fn fresh_fnm_bootstrap_exposes_npm_for_configured_packages_in_same_step() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+cat >"$out" <<'INSTALL'
+#!/bin/bash
+mkdir -p "$XDG_DATA_HOME/fnm"
+cat >"$XDG_DATA_HOME/fnm/fnm" <<'FNM'
+#!/bin/bash
+printf 'fnm %s\n' "$*" >>"$LOG"
+case "$1" in
+ env) printf 'export PATH="%s:$PATH"\n' "$XDG_DATA_HOME/fnm" ;;
+ current) printf 'v22.1.0\n' ;;
+esac
+FNM
+cat >"$XDG_DATA_HOME/fnm/npm" <<'NPM'
+#!/bin/bash
+printf 'npm %s\n' "$*" >>"$LOG"
+NPM
+chmod +x "$XDG_DATA_HOME/fnm/fnm" "$XDG_DATA_HOME/fnm/npm"
+INSTALL"#,
+    );
+    let step = step_containing(
+        &plans("configs/cli.yaml", "install", "ubuntu"),
+        "npm install --global",
+    );
+    host.run_ok(&step);
+    let log = host.log();
+    assert!(log.contains("fnm install --lts --use"));
+    assert!(log.contains("npm install --global"));
+    assert!(log.contains("opencode-ai"));
+}
+
+#[test]
+fn fresh_rustup_cargo_path_bootstraps_binstall_and_installs_packages() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+cat >"$out" <<'INSTALL'
+#!/bin/bash
+mkdir -p "$HOME/.cargo/bin"
+cat >"$HOME/.cargo/bin/rustup" <<'CMD'
+#!/bin/bash
+printf 'rustup %s\n' "$*" >>"$LOG"
+CMD
+cat >"$HOME/.cargo/bin/cargo" <<'CMD'
+#!/bin/bash
+printf 'cargo %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = install ] && [ "${2:-}" = cargo-binstall ]; then
+  cat >"$HOME/.cargo/bin/cargo-binstall" <<'BIN'
+#!/bin/bash
+printf 'cargo-binstall %s\n' "$*" >>"$LOG"
+BIN
+  chmod +x "$HOME/.cargo/bin/cargo-binstall"
+fi
+CMD
+chmod +x "$HOME/.cargo/bin/rustup" "$HOME/.cargo/bin/cargo"
+INSTALL"#,
+    );
+    let steps = plans("configs/cli.yaml", "install", "ubuntu");
+    host.run_ok(&step_containing(&steps, "rustup.XXXXXX"));
+    assert!(
+        host.home.join(".cargo/bin/cargo").is_file(),
+        "rustup bootstrap did not create cargo; log: {}",
+        host.log()
+    );
+    host.run_ok(&step_containing(&steps, "cargo binstall --no-confirm"));
+    let log = host.log();
+    assert!(
+        log.contains("cargo install cargo-binstall --locked"),
+        "{log}"
+    );
+    assert!(log.contains("cargo binstall --no-confirm"), "{log}");
+}
+
+#[test]
+fn real_cli_check_disables_purge_after_fake_package_purge() {
+    let host = Host::new();
+    let root = host.home.join("bundle");
+    fs::create_dir_all(root.join("configs")).unwrap();
+    fs::create_dir_all(root.join("dotfiles/bash")).unwrap();
+    fs::copy("dotfiles/bash/.bashrc", root.join("dotfiles/bash/.bashrc")).unwrap();
+    let yaml = fs::read_to_string("configs/cli.yaml")
+        .unwrap()
+        .replace("purge: !disabled", "purge: !enabled")
+        .replace("    - docker.io\n", "    - fake-package\n")
+        .replace("distroCfg: true", "distroCfg: false")
+        .replace("deps: !enabled", "deps: !disabled")
+        .replace("rustupCheck: true", "rustupCheck: false");
+    fs::write(root.join("configs/test.yaml"), yaml).unwrap();
+    host.fake("dpkg-query", "[ \"${1:-}\" = -W ]");
+    host.logging_fake("sudo");
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("cozydot"))
+        .args(["-c", "test", "check"])
+        .env("COZYDOT_ROOT", &root)
+        .env("HOME", &host.home)
+        .env("USER", "tester")
+        .env("LOG", &host.log)
+        .env("PATH", format!("{}:/usr/bin:/bin", host.bin.display()))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated = fs::read_to_string(root.join("configs/test.yaml")).unwrap();
+    assert!(updated.contains("purge: !disabled"));
+    assert!(updated.contains("fake-package"));
+    assert!(host.log().contains("sudo apt-get purge -qq fake-package"));
+}
+
+#[test]
+fn bashrc_regular_file_is_replaced_but_symlink_is_preserved() {
+    let host = Host::new();
+    let source = host.home.join("dotfiles/bash/.bashrc");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, "managed\n").unwrap();
+    fs::write(host.home.join(".bashrc"), "old\n").unwrap();
+    let cfg = Config::load(Path::new("configs/default.yaml")).unwrap();
+    let mut step = planner::plan("check", &cfg, &platform("ubuntu"), &host.home)
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    *step.args.last_mut().unwrap() = host.home.join(".bashrc").display().to_string();
+    host.run_ok(&step);
+    assert_eq!(
+        fs::read_to_string(host.home.join(".bashrc")).unwrap(),
+        "managed\n"
+    );
+    fs::remove_file(host.home.join(".bashrc")).unwrap();
+    let target = host.home.join("custom-bashrc");
+    fs::write(&target, "custom\n").unwrap();
+    symlink(&target, host.home.join(".bashrc")).unwrap();
+    host.run_ok(&step);
+    assert!(fs::symlink_metadata(host.home.join(".bashrc"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read_to_string(target).unwrap(), "custom\n");
+}
+
+#[test]
+fn ubuntu_and_mint_codecs_execute_apt_update_before_install() {
+    for (distro, package) in [
+        ("ubuntu", "ubuntu-restricted-extras"),
+        ("linuxmint", "mint-meta-codecs"),
+    ] {
+        let host = Host::new();
+        host.fake("dpkg-query", "exit 1");
+        host.logging_fake("sudo");
+        let step = step_containing(&plans("configs/default.yaml", "check", distro), package);
+        host.run_ok(&step);
+        let log = host.log();
+        let update = log.find("apt-get update -qq").unwrap();
+        let install = log.find(&format!("apt-get install -qq {package}")).unwrap();
+        assert!(update < install, "{log}");
+    }
+}
+
+#[test]
+fn appimaged_active_and_inactive_branches_execute_against_fake_state() {
+    for active in [true, false] {
+        let host = Host::new();
+        host.fake("systemctl", if active { "exit 0" } else { "exit 1" });
+        host.logging_fake("sudo");
+        host.fake("apt-cache", "exit 1");
+        host.fake("dpkg", "exit 0");
+        host.fake("yq", "printf 'https://example.test/appimaged.AppImage\n'");
+        host.fake(
+            "curl",
+            r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+if [ -n "$out" ]; then printf '#!/bin/bash\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; fi"#,
+        );
+        let step = step_containing(
+            &plans("configs/default.yaml", "check", "ubuntu"),
+            "appimaged.service",
+        );
+        host.run_ok(&step);
+        assert_eq!(host.log().contains("appimaged-run"), !active);
+    }
+}
+
+#[test]
+fn group_membership_branches_only_modify_missing_membership() {
+    for member in [true, false] {
+        let host = Host::new();
+        host.logging_fake("docker");
+        let planned_user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+        host.fake(
+            "getent",
+            &if member {
+                format!("printf 'docker:x:999:{planned_user}\\n'")
+            } else {
+                "printf 'docker:x:999:\\n'".into()
+            },
+        );
+        host.logging_fake("sudo");
+        host.logging_fake("newgrp");
+        host.fake("yq", "cat >/dev/null; printf 'local\\n'");
+        let step = step_containing(
+            &plans("configs/full.yaml", "configure", "ubuntu"),
+            ".log-driver",
+        );
+        host.run_ok(&step);
+        assert_eq!(
+            host.log().contains(&format!(
+                "usermod -aG docker {}",
+                std::env::var("USER").unwrap_or_else(|_| "user".into())
+            )),
+            !member,
+            "{}",
+            host.log()
+        );
+    }
+}
+
+#[test]
+fn gnome_extension_present_enables_and_absent_installs() {
+    let steps = plans("configs/full.yaml", "configure", "ubuntu");
+    let step = step_containing(&steps, "extension-info/?uuid");
+    let extension = step.args.last().unwrap().clone();
+    for present in [true, false] {
+        let host = Host::new();
+        host.fake(
+            "gnome-extensions",
+            &format!(
+                r#"printf 'gnome-extensions %s\n' "$*" >>"$LOG"
+if [ "${{1:-}}" = list ] && [ {present} = true ]; then printf '%s\n' '{extension}'; fi"#
+            ),
+        );
+        host.fake("yq", "cat >/dev/null; printf '42\\n'");
+        host.fake(
+            "curl",
+            r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{}\n'"#,
+        );
+        host.run_ok(&step);
+        let log = host.log();
+        assert_eq!(log.contains("gnome-extensions enable"), present);
+        assert_eq!(log.contains("gnome-extensions install --force"), !present);
+    }
+}

@@ -129,7 +129,10 @@ metadata=$(mktemp "${TMPDIR:-/tmp}/go-metadata.XXXXXX.json")
 trap 'rm -rf "$metadata" "${tmp:-}" "${stage:-}"' EXIT
 curl -fsSL -o "$metadata" "https://go.dev/dl/?mode=json&include=all"
 version=$requested
-if [ "$version" = latest ]; then version=$(yq '.[0].version' "$metadata" | cut -c 3-); fi
+if [ "$version" = latest ]; then
+  version=$(yq '[.[] | select(.version | test("^go[0-9]+\\.[0-9]+(\\.[0-9]+)?$"))][0].version' "$metadata" | cut -c 3-)
+fi
+[ -n "$version" ]
 if command -v go >/dev/null && [ "$(go version | cut -d ' ' -f 3)" = "go$version" ]; then exit 0; fi
 filename="go${version}.linux-${arch}.tar.gz"
 checksum=$(yq ".[] | select(.version == \"go${version}\") | .files[] | select(.filename == \"${filename}\") | .sha256" "$metadata")
