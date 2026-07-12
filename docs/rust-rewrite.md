@@ -4,13 +4,14 @@ cozydot is now a Rust binary; the legacy root Bash executable is not restored. T
 
 ## Compatibility
 
-The CLI keeps the original command-loop shape:
+The public CLI is intentionally small:
 
 - `-V` reports `cozydot 0.0.1`.
-- `--config <name>` selects `<root>/configs/<name>.yaml`; path-style config arguments are rejected.
-- `--list-configs` can be combined with other options.
-- Multiple commands can run sequentially, such as `cozydot check update`.
-- `--no-color` is accepted for compatibility; Rust output is plain by default.
+- `cozydot init` creates or safely refreshes the active config and bundled dotfiles.
+- `cozydot apply` applies `${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml`.
+- Preset selection, profile inheritance, planning, and multi-command execution are not public interfaces.
+
+`apply` intentionally runs the legacy install and configure phases, including their configured checks. The legacy update phase remains an internal planner path for compatibility testing and is not run by `apply`; recurring upgrades are therefore not an implicit side effect of provisioning.
 
 Tagged config values are validated before planning. Unknown fields, mistyped fields, unsafe paths, unsupported binary suffixes, malformed versions, and unsupported URL lookup forms fail with contextual errors instead of panics. `!enabled` executes a section and `!disabled` skips it while preserving the data.
 
@@ -31,17 +32,17 @@ Config-derived values are passed as process arguments or stdin to fixed command 
 
 ## Packaging
 
-`scripts/package-release.sh` builds `target/cozydot-0.0.1.tar.gz` with:
+`scripts/package-release.sh` builds a deterministic, checksummed architecture archive with:
 
 - `cozydot`
-- `configs/`
+- `configs/default.yaml`
 - `dotfiles/`
 
-At runtime the binary uses `COZYDOT_ROOT` when set, otherwise an adjacent `configs/` and `dotfiles/` directory, otherwise the source checkout path for development. CI and tests smoke the extracted layout.
+Source-checkout binaries use repository assets. An installed binary verifies a complete cached archive/checksum pair or downloads the archive matching its exact version, validates every member in Rust, and extracts assets into a temporary directory. `install.sh` independently verifies and validates the same archive before atomically replacing only `~/.local/bin/cozydot`.
 
 ## Safety and Testing
 
-Every side effect crosses the `Runner` trait. Production uses `ProcessRunner`; tests inspect plans, dry-run CLI output, validation errors, and packaged-layout behavior without invoking package managers.
+Provisioning side effects cross the existing `Runner` trait. Init uses typed Rust filesystem modules, SHA-256 ownership records, a minimal interruption journal, and symlink-ancestor checks.
 
 Development gates:
 

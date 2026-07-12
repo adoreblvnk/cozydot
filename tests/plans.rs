@@ -22,12 +22,11 @@ fn install_order_and_integrations() {
     let c = Config::load(Path::new("configs/cli.yaml")).unwrap();
     let s = planner::plan("install", &c, &platform(), Path::new(".")).unwrap();
     let text = s.iter().map(|x| x.display()).collect::<Vec<_>>().join("\n");
-    let boot = text.find("cargo install cargo-binstall").unwrap();
-    let bins = text.find("cargo binstall").unwrap();
-    assert!(boot < bins);
-    assert!(text.contains("cozydot-operation node-install latest"));
+    let cargo = text.find("workflow cargo-packages").unwrap();
+    let node = text.find("workflow node-install").unwrap();
+    assert!(cargo < node);
+    assert!(text.contains("workflow node-install latest"));
     assert!(text.contains("latest opencode-ai"));
-    assert!(text.contains("${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"));
     assert!(!text.contains("flatpak install"));
 }
 #[test]
@@ -50,13 +49,26 @@ fn configure_stow_precedes_desktop() {
 }
 
 #[test]
+fn apply_has_one_shared_check_and_no_internal_check_duplication() {
+    let c = Config::load(Path::new("configs/default.yaml")).unwrap();
+    let text = planner::plan_apply(&c, &platform(), Path::new("."))
+        .unwrap()
+        .iter()
+        .map(|step| step.display())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(text.matches("[ -L ").count(), 1, "{text}");
+    assert_eq!(text.matches("apt-get update -qq").count(), 3, "{text}");
+}
+
+#[test]
 fn repository_architecture_is_resolved_before_stdin_write() {
     let c = Config::load(Path::new("configs/full.yaml")).unwrap();
     let steps = planner::plan("install", &c, &platform(), Path::new(".")).unwrap();
     let repo_writes = steps
         .iter()
         .filter(|s| s.display().contains("/etc/apt/sources.list.d/"))
-        .filter_map(|s| s.stdin.as_deref())
+        .filter_map(|s| s.command().and_then(|command| command.stdin.as_deref()))
         .collect::<Vec<_>>();
     assert!(repo_writes.iter().any(|s| s.contains("arch=amd64")));
     assert!(repo_writes.iter().all(|s| !s.contains("$(")));
@@ -78,7 +90,7 @@ fn pinning_block_is_written_as_exact_stdin() {
         .find(|s| s.display().contains("/etc/apt/preferences.d/example"))
         .unwrap();
     assert_eq!(
-        pin.stdin.as_deref(),
+        pin.command().and_then(|command| command.stdin.as_deref()),
         Some("Package: foo\nPin: origin example\nPin-Priority: 1001\n")
     );
 }
@@ -98,10 +110,10 @@ fn binary_and_language_steps_are_state_aware() {
         .map(|x| x.display())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("cozydot-operation download-binary"));
-    assert!(text.contains("cozydot-operation go-install"));
-    assert!(text.contains("cozydot-operation uv-install"));
-    assert!(text.contains("cozydot-operation pyenv-install"));
+    assert!(text.contains("workflow download-binary"));
+    assert!(text.contains("workflow go-install"));
+    assert!(text.contains("workflow uv-install"));
+    assert!(text.contains("workflow pyenv-install"));
 }
 
 #[test]
@@ -113,14 +125,13 @@ fn configure_plan_contains_stateful_app_and_gnome_behavior() {
         .map(|x| x.display())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("cozydot-operation docker-config"));
-    assert!(text.contains("cozydot-operation vscode-extension"));
-    assert!(text.contains("cozydot-operation gnome-terminal"));
+    assert!(text.contains("workflow docker-config"));
+    assert!(text.contains("workflow vscode-extension"));
+    assert!(text.contains("workflow gnome-terminal"));
     assert!(text.contains("idle-dim"));
-    assert!(text.contains("gnome-shell-extensions"));
-    assert!(text.contains("require-pressure-to-show"));
-    assert!(text.contains("minimize-or-previews"));
-    assert!(text.contains("rounded-window-corners-reborn"));
+    assert!(text.contains("workflow gnome-dependencies"));
+    assert!(text.contains("workflow gnome-dock-settings"));
+    assert!(text.contains("workflow gnome-rounded-corners-settings"));
 }
 
 #[test]

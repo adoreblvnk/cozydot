@@ -2,26 +2,10 @@ use crate::{
     config::{field, field_string, untag, Config},
     operations::Operation,
     platform::Platform,
-    runner::Step,
+    runner::{Condition, Step},
 };
 use anyhow::{bail, Result};
 use std::path::Path;
-
-const RUN_IF: &str = r#"
-kind=$1; shift
-case "$kind" in
-  command) command -v "$1" >/dev/null || exit 0; shift; exec "$@" ;;
-  no-command) ! command -v "$1" >/dev/null || exit 0; shift; exec "$@" ;;
-  package-missing) ! dpkg-query -W "$1" >/dev/null 2>&1 || exit 0; shift; exec "$@" ;;
-  package-present) dpkg-query -W "$1" >/dev/null 2>&1 || exit 0; shift; exec "$@" ;;
-  service-active) systemctl -q is-active "$1" || exit 0; shift; exec "$@" ;;
-  user-service-inactive) ! systemctl --user -q is-active "$1" || exit 0; shift; exec "$@" ;;
-  group-missing-user) ! getent group "$1" | grep -Fq "$2" || exit 0; shift 2; exec "$@" ;;
-  file-absent) [ ! -e "$1" ] || exit 0; shift; exec "$@" ;;
-  file-present) [ -e "$1" ] || exit 0; shift; exec "$@" ;;
-  *) printf 'unsupported condition: %s\n' "$kind" >&2; exit 2 ;;
-esac
-"#;
 
 fn sudo(args: Vec<String>) -> Step {
     Step::owned("sudo", args)
@@ -39,38 +23,12 @@ fn apt_owned(args: Vec<String>) -> Step {
     sudo(std::iter::once("apt-get".into()).chain(args).collect())
 }
 
-trait CheckedOperands {
-    fn append_to(self, args: &mut Vec<String>);
-}
-
-impl CheckedOperands for &str {
-    fn append_to(self, args: &mut Vec<String>) {
-        args.push(self.into());
-    }
-}
-
-impl CheckedOperands for String {
-    fn append_to(self, args: &mut Vec<String>) {
-        args.push(self);
-    }
-}
-
-impl<const N: usize> CheckedOperands for [String; N] {
-    fn append_to(self, args: &mut Vec<String>) {
-        args.extend(self);
-    }
-}
-
-fn run_if(kind: &str, checked: impl CheckedOperands, command: Step) -> Step {
-    let mut args = vec![kind.into()];
-    checked.append_to(&mut args);
-    args.push(command.program);
-    args.extend(command.args);
-    Step::bash(RUN_IF, args)
+fn run_if(condition: Condition, action: Step) -> Step {
+    Step::conditional(condition, action)
 }
 
 fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
-    out.push(Step::bash(
+    out.push(Step::shell(
         "[ -L \"$2\" ] || cp \"$1\" \"$2\"",
         vec![
             root.join("dotfiles/bash/.bashrc").display().to_string(),
@@ -80,7 +38,7 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     if cfg.bool("check.distroCfg") {
         match p.distro.as_str() {
             "ubuntu" => {
-                out.push(Step::operation(Operation::SnapCleanup));
+                out.push(Step::workflow(Operation::SnapCleanup));
                 out.push(
                     sudo(vec![
                         "tee".into(),
@@ -89,16 +47,13 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                     .input("Package: snapd\nPin: release a=*\nPin-Priority: -10\n".into()),
                 );
                 out.push(run_if(
-                    "package-missing",
-                    "ubuntu-restricted-extras",
-                    Step::bash(
-                        "sudo apt-get update -qq; sudo apt-get install -qq ubuntu-restricted-extras",
-                        vec![],
-                    ),
+                    Condition::PackageMissing("ubuntu-restricted-extras".into()),
+                    Step::workflow(Operation::AptCodecs {
+                        package: "ubuntu-restricted-extras".into(),
+                    }),
                 ));
                 out.push(run_if(
-                    "command",
-                    "unattended-upgrades",
+                    Condition::CommandExists("unattended-upgrades".into()),
                     apt(&["purge", "-qq", "unattended-upgrades"]),
                 ));
                 out.push(
@@ -113,18 +68,18 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                 );
             }
             "linuxmint" => out.push(run_if(
-                "package-missing",
-                "mint-meta-codecs",
-                Step::bash(
-                    "sudo apt-get update -qq; sudo apt-get install -qq mint-meta-codecs",
-                    vec![],
-                ),
+                Condition::PackageMissing("mint-meta-codecs".into()),
+                Step::workflow(Operation::AptCodecs {
+                    package: "mint-meta-codecs".into(),
+                }),
             )),
             "debian" => {
                 let user = user();
                 out.push(run_if(
-                    "group-missing-user",
-                    ["sudo".to_owned(), user.clone()],
+                    Condition::GroupMissingUser {
+                        group: "sudo".into(),
+                        user: user.clone(),
+                    },
                     Step::owned("adduser", vec![user, "sudo".into()]),
                 ));
                 out.push(
@@ -138,8 +93,7 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("check.purge") {
         for pkg in cfg.strings("check.purge") {
             out.push(run_if(
-                "package-present",
-                pkg.clone(),
+                Condition::PackageInstalled(pkg.clone()),
                 apt_owned(vec!["purge".into(), "-qq".into(), pkg]),
             ));
         }
@@ -148,52 +102,57 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
         out.push(apt(&["update", "-qq"]));
         for pkg in cfg.strings("check.deps") {
             out.push(run_if(
-                "package-missing",
-                pkg.clone(),
+                Condition::PackageMissing(pkg.clone()),
                 apt_owned(vec!["install".into(), "-qq".into(), pkg]),
             ));
         }
     }
     if cfg.bool("check.rustupCheck") {
         out.push(run_if(
-            "no-command",
-            "rustup",
-            Step::bash(
-                "tmp=$(mktemp \"${TMPDIR:-/tmp}/rustup.XXXXXX\"); trap 'rm -f \"$tmp\"' EXIT; curl --proto '=https' --tlsv1.2 -sSf -o \"$tmp\" https://sh.rustup.rs; sh \"$tmp\" -y",
-                vec![],
-            ),
+            Condition::CommandMissing("rustup".into()),
+            Step::workflow(Operation::RustupBootstrap),
         ));
     }
     if cfg.bool("check.appimaged") {
-        out.push(Step::operation(Operation::Appimaged {
+        out.push(Step::workflow(Operation::Appimaged {
             arch: p.uname_arch.clone(),
         }));
     }
     if cfg.tagged_enabled("check.nerdfont") {
         if let Some(font) = cfg.string("check.nerdfont") {
-            out.push(Step::operation(Operation::NerdFont { font }));
+            out.push(Step::workflow(Operation::NerdFont { font }));
         }
     }
 }
 
 pub fn plan(command: &str, cfg: &Config, p: &Platform, root: &Path) -> Result<Vec<Step>> {
+    plan_with_check(command, cfg, p, root, true)
+}
+
+fn plan_with_check(
+    command: &str,
+    cfg: &Config,
+    p: &Platform,
+    root: &Path,
+    prepend_check: bool,
+) -> Result<Vec<Step>> {
     let mut out = vec![];
     match command {
         "check" => add_check(cfg, p, root, &mut out),
         "install" => {
-            if cfg.bool("install.check") {
+            if prepend_check && cfg.bool("install.check") {
                 add_check(cfg, p, root, &mut out)
             }
             install(cfg, p, &mut out)
         }
         "update" => {
-            if cfg.bool("update.check") {
+            if prepend_check && cfg.bool("update.check") {
                 add_check(cfg, p, root, &mut out)
             }
             update(cfg, p, &mut out)
         }
         "configure" => {
-            if cfg.bool("configure.check") {
+            if prepend_check && cfg.bool("configure.check") {
                 add_check(cfg, p, root, &mut out)
             }
             configure(cfg, p, root, &mut out)
@@ -203,13 +162,22 @@ pub fn plan(command: &str, cfg: &Config, p: &Platform, root: &Path) -> Result<Ve
     Ok(out)
 }
 
+pub fn plan_apply(cfg: &Config, p: &Platform, root: &Path) -> Result<Vec<Step>> {
+    let mut out = Vec::new();
+    if cfg.bool("install.check") || cfg.bool("configure.check") {
+        add_check(cfg, p, root, &mut out);
+    }
+    out.extend(plan_with_check("install", cfg, p, root, false)?);
+    out.extend(plan_with_check("configure", cfg, p, root, false)?);
+    Ok(out)
+}
+
 fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("install.apt") {
         out.push(apt(&["update", "-qq"]));
         for pkg in cfg.strings("install.apt") {
             out.push(run_if(
-                "package-missing",
-                pkg.clone(),
+                Condition::PackageMissing(pkg.clone()),
                 apt_owned(vec!["install".into(), "-qq".into(), pkg]),
             ));
         }
@@ -221,10 +189,10 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             let keypath = field_string(repo, "keyPath").expect("validated keyPath");
             let entry = p.expand_shell_arch(&field_string(repo, "repo").expect("validated repo"));
             if keypath.ends_with(".gpg") {
-                out.push(Step::bash(
-                    "curl -sSL \"$1\" | sudo gpg --dearmor --yes | sudo tee \"$2\" >/dev/null",
-                    vec![key, keypath.clone()],
-                ));
+                out.push(Step::workflow(Operation::RepositoryKey {
+                    url: key,
+                    destination: keypath.clone(),
+                }));
             } else {
                 out.push(sudo(vec![
                     "curl".into(),
@@ -253,16 +221,14 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         out.push(apt(&["update", "-qq"]));
         for pkg in repo_packages(cfg) {
             out.push(run_if(
-                "package-missing",
-                pkg.clone(),
+                Condition::PackageMissing(pkg.clone()),
                 apt_owned(vec!["install".into(), "-qq".into(), pkg]),
             ));
         }
     }
     if cfg.tagged_enabled("install.flatpak") {
         out.push(run_if(
-            "command",
-            "flatpak",
+            Condition::CommandExists("flatpak".into()),
             Step::new(
                 "flatpak",
                 &[
@@ -275,13 +241,15 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         ));
         let mut a = vec!["install".into(), "-y".into(), "flathub".into()];
         a.extend(cfg.strings("install.flatpak"));
-        out.push(run_if("command", "flatpak", Step::owned("flatpak", a)));
+        out.push(run_if(
+            Condition::CommandExists("flatpak".into()),
+            Step::owned("flatpak", a),
+        ));
     }
     if cfg.tagged_enabled("install.cargo") {
-        out.push(Step::bash(
-            "export PATH=\"${CARGO_HOME:-$HOME/.cargo}/bin:$PATH\"; command -v cargo >/dev/null || exit 0; command -v cargo-binstall >/dev/null || cargo install cargo-binstall --locked; for pkg in \"$@\"; do read -r -a parts <<<\"$pkg\"; cargo binstall --no-confirm \"${parts[@]}\"; done",
-            cfg.strings("install.cargo"),
-        ));
+        out.push(Step::workflow(Operation::CargoPackages {
+            packages: cfg.strings("install.cargo"),
+        }));
     }
     if cfg.tagged_enabled("install.binaries") {
         for b in cfg.sequence("install.binaries") {
@@ -294,7 +262,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
                 let pattern = p.expand(&field_string(url_value, "asset").expect("validated asset"));
                 (String::new(), repo, pattern)
             };
-            out.push(Step::operation(Operation::DownloadBinary {
+            out.push(Step::workflow(Operation::DownloadBinary {
                 name,
                 url,
                 repo,
@@ -303,7 +271,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         }
     }
     if cfg.tagged_enabled("install.languages.goVersion") {
-        out.push(Step::operation(Operation::GoInstall {
+        out.push(Step::workflow(Operation::GoInstall {
             version: cfg
                 .string("install.languages.goVersion")
                 .expect("validated goVersion"),
@@ -311,7 +279,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         }));
     }
     if cfg.tagged_enabled("install.languages.nodeVersion") {
-        out.push(Step::operation(Operation::NodeInstall {
+        out.push(Step::workflow(Operation::NodeInstall {
             version: cfg
                 .string("install.languages.nodeVersion")
                 .expect("validated nodeVersion"),
@@ -325,10 +293,13 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("install.npm") && !cfg.tagged_enabled("install.languages.nodeVersion") {
         let mut a = vec!["install".into(), "--global".into()];
         a.extend(cfg.strings("install.npm"));
-        out.push(run_if("command", "npm", Step::owned("npm", a)));
+        out.push(run_if(
+            Condition::CommandExists("npm".into()),
+            Step::owned("npm", a),
+        ));
     }
     if cfg.tagged_enabled("install.languages.pyenv") {
-        out.push(Step::operation(Operation::PyenvInstall {
+        out.push(Step::workflow(Operation::PyenvInstall {
             update: cfg.bool("install.languages.pyenv.update"),
             version: cfg
                 .string("install.languages.pyenv.version")
@@ -337,7 +308,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         }));
     }
     if cfg.tagged_enabled("install.languages.uv") {
-        out.push(Step::operation(Operation::UvInstall {
+        out.push(Step::workflow(Operation::UvInstall {
             version_enabled: cfg.tagged_enabled("install.languages.uv.version"),
             version: cfg
                 .string("install.languages.uv.version")
@@ -357,38 +328,39 @@ fn update(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     }
     if cfg.bool("update.flatpak") {
         out.push(run_if(
-            "command",
-            "flatpak",
+            Condition::CommandExists("flatpak".into()),
             Step::new("flatpak", &["update", "-y"]),
         ));
     }
     if cfg.bool("update.cargo") {
         out.push(run_if(
-            "command",
-            "rustup",
-            run_if("command", "cargo", Step::new("rustup", &["update"])),
+            Condition::CommandExists("rustup".into()),
+            run_if(
+                Condition::CommandExists("cargo".into()),
+                Step::new("rustup", &["update"]),
+            ),
         ));
         out.push(run_if(
-            "command",
-            "cargo",
+            Condition::CommandExists("cargo".into()),
             run_if(
-                "no-command",
-                "cargo-binstall",
+                Condition::CommandMissing("cargo-binstall".into()),
                 Step::new("cargo", &["install", "cargo-binstall", "--locked"]),
             ),
         ));
         for pkg in cfg.strings("install.cargo") {
             let mut a = vec!["binstall".into(), "--no-confirm".into(), "--force".into()];
             a.extend(pkg.split_whitespace().map(str::to_owned));
-            out.push(run_if("command", "cargo", Step::owned("cargo", a)));
+            out.push(run_if(
+                Condition::CommandExists("cargo".into()),
+                Step::owned("cargo", a),
+            ));
         }
     }
 
     if cfg.bool("update.other.go") {
         out.push(run_if(
-            "command",
-            "go",
-            Step::operation(Operation::GoInstall {
+            Condition::CommandExists("go".into()),
+            Step::workflow(Operation::GoInstall {
                 version: "latest".into(),
                 arch: p.go_arch.clone(),
             }),
@@ -396,9 +368,8 @@ fn update(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     }
     if cfg.bool("update.other.node") {
         out.push(run_if(
-            "command",
-            "fnm",
-            Step::operation(Operation::NodeInstall {
+            Condition::CommandExists("fnm".into()),
+            Step::workflow(Operation::NodeInstall {
                 version: "latest".into(),
                 npm: vec![],
             }),
@@ -411,8 +382,7 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
         for pkg in cfg.strings("configure.dotfiles.packages") {
             if cfg.string("configure.dotfiles.stowMode").as_deref() == Some("override") {
                 out.push(run_if(
-                    "command",
-                    "stow",
+                    Condition::CommandExists("stow".into()),
                     Step::owned(
                         "cp",
                         vec![
@@ -425,8 +395,7 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                 ));
             }
             out.push(run_if(
-                "command",
-                "stow",
+                Condition::CommandExists("stow".into()),
                 Step::owned(
                     "stow",
                     vec![
@@ -444,16 +413,16 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     }
     let user = user();
     if cfg.bool("configure.apps.docker") {
-        out.push(Step::operation(Operation::DockerConfig {
+        out.push(Step::workflow(Operation::DockerConfig {
             user: user.clone(),
         }));
     }
     if cfg.bool("configure.apps.virtualbox") {
-        out.push(Step::operation(Operation::VirtualBoxConfig { user }));
+        out.push(Step::workflow(Operation::VirtualBoxConfig { user }));
     }
     if cfg.tagged_enabled("configure.apps.vscodeExtensions") {
         for ext in cfg.strings("configure.apps.vscodeExtensions") {
-            out.push(Step::operation(Operation::VsCodeExtension {
+            out.push(Step::workflow(Operation::VsCodeExtension {
                 extension: ext,
             }));
         }
@@ -466,7 +435,7 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
             .string("configure.desktopEnvironment.common.defaultTerm")
             .expect("validated terminal");
         if p.desktop == "gnome" {
-            out.push(Step::operation(Operation::GnomeTerminal { terminal: term }));
+            out.push(Step::workflow(Operation::GnomeTerminal { terminal: term }));
         } else if p.desktop == "cinnamon" {
             out.push(Step::owned(
                 "gsettings",
@@ -513,35 +482,22 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                 ],
             ));
         }
-        out.push(Step::bash(
-            "if ! command -v gnome-tweaks >/dev/null || ! command -v gnome-extensions >/dev/null; then sudo apt-get update -qq; sudo apt-get install -qq gnome-tweaks gnome-shell-extensions; fi",
-            vec![],
-        ));
+        out.push(Step::workflow(Operation::GnomeDependencies));
         if cfg.tagged_enabled("configure.desktopEnvironment.gnome.extensions") {
             for ext in cfg.strings("configure.desktopEnvironment.gnome.extensions") {
-                out.push(Step::operation(Operation::GnomeExtension {
-                    extension: ext,
-                }));
+                out.push(Step::workflow(Operation::GnomeExtension { extension: ext }));
             }
         }
         if cfg.bool("configure.desktopEnvironment.gnome.MacOSDock") {
             out.push(run_if(
-                "command",
-                "gnome-extensions",
-                Step::bash(
-                    "gnome-extensions list | grep -Eq 'dash-to-dock|ubuntu-dock' || exit 0; dconf write /org/gnome/shell/extensions/dash-to-dock/dock-position \"'BOTTOM'\"; dconf write /org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size 32; dconf write /org/gnome/shell/extensions/dash-to-dock/dock-fixed false; dconf write /org/gnome/shell/extensions/dash-to-dock/autohide true; dconf write /org/gnome/shell/extensions/dash-to-dock/require-pressure-to-show false; dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide true; dconf write /org/gnome/shell/extensions/dash-to-dock/intellihide-mode \"'FOCUS_APPLICATION_WINDOWS'\"; dconf write /org/gnome/shell/extensions/dash-to-dock/extend-height false; dconf write /org/gnome/shell/extensions/dash-to-dock/click-action \"'minimize-or-previews'\"",
-                    vec![],
-                ),
+                Condition::CommandExists("gnome-extensions".into()),
+                Step::workflow(Operation::GnomeDockSettings),
             ));
         }
         if cfg.bool("configure.desktopEnvironment.gnome.smoothRoundedCorners") {
             out.push(run_if(
-                "command",
-                "gnome-extensions",
-                Step::bash(
-                    "gnome-extensions list | grep -q rounded-window-corners || exit 0; dconf write /org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings \"{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}\"",
-                    vec![],
-                ),
+                Condition::CommandExists("gnome-extensions".into()),
+                Step::workflow(Operation::GnomeRoundedCornersSettings),
             ));
         }
     }

@@ -1,8 +1,5 @@
 # if you see this file being updated, run:
 # git update-index --assume-unchanged dotfiles/bash/.gitconfig
-[user]
-    name =
-    email =
     signingkey =
 [core]
     autocrlf = input
