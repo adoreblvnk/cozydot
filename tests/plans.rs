@@ -1,5 +1,5 @@
 use cozydot::{config::Config, planner, platform::Platform};
-use std::path::Path;
+use std::{fs, path::Path};
 fn platform() -> Platform {
     Platform::from_parts(
         "ubuntu".into(),
@@ -46,4 +46,181 @@ fn configure_stow_precedes_desktop() {
     let s = planner::plan("configure", &c, &platform(), Path::new("/repo")).unwrap();
     let text = s.iter().map(|x| x.display()).collect::<Vec<_>>().join("\n");
     assert!(text.find("stow").unwrap() < text.find("gsettings").unwrap());
+}
+
+#[test]
+fn repository_architecture_is_resolved_before_stdin_write() {
+    let c = Config::load(Path::new("configs/full.yaml")).unwrap();
+    let steps = planner::plan("install", &c, &platform(), Path::new(".")).unwrap();
+    let repo_writes = steps
+        .iter()
+        .filter(|s| s.display().contains("/etc/apt/sources.list.d/"))
+        .filter_map(|s| s.stdin.as_deref())
+        .collect::<Vec<_>>();
+    assert!(repo_writes.iter().any(|s| s.contains("arch=amd64")));
+    assert!(repo_writes.iter().all(|s| !s.contains("$(")));
+}
+
+#[test]
+fn pinning_block_is_written_as_exact_stdin() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pin.yaml");
+    fs::write(
+        &path,
+        config_with_repo_pinning("Package: foo\nPin: origin example\nPin-Priority: 1001\n"),
+    )
+    .unwrap();
+    let c = Config::load(&path).unwrap();
+    let steps = planner::plan("install", &c, &platform(), Path::new(".")).unwrap();
+    let pin = steps
+        .iter()
+        .find(|s| s.display().contains("/etc/apt/preferences.d/example"))
+        .unwrap();
+    assert_eq!(
+        pin.stdin.as_deref(),
+        Some("Package: foo\nPin: origin example\nPin-Priority: 1001\n")
+    );
+}
+
+#[test]
+fn binary_and_language_steps_are_state_aware() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pyenv.yaml");
+    let yaml = fs::read_to_string("configs/full.yaml")
+        .unwrap()
+        .replace("pyenv: !disabled", "pyenv: !enabled");
+    fs::write(&path, yaml).unwrap();
+    let c = Config::load(&path).unwrap();
+    let text = planner::plan("install", &c, &platform(), Path::new("."))
+        .unwrap()
+        .iter()
+        .map(|x| x.display())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("command -v \"$cmd\""));
+    assert!(text.contains("mktemp"));
+    assert!(text.contains("tar -C \"$stage\" -xzf \"$tmp\""));
+    assert!(text.contains("uv self update"));
+    assert!(text.contains("pyenv update"));
+}
+
+#[test]
+fn configure_plan_contains_stateful_app_and_gnome_behavior() {
+    let c = Config::load(Path::new("configs/full.yaml")).unwrap();
+    let text = planner::plan("configure", &c, &platform(), Path::new("/repo"))
+        .unwrap()
+        .iter()
+        .map(|x| x.display())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("command -v docker"));
+    assert!(text.contains(".log-driver"));
+    assert!(text.contains("code --list-extensions"));
+    assert!(text.contains("exec-arg"));
+    assert!(text.contains("idle-dim"));
+    assert!(text.contains("gnome-shell-extensions"));
+    assert!(text.contains("require-pressure-to-show"));
+    assert!(text.contains("minimize-or-previews"));
+    assert!(text.contains("rounded-window-corners-reborn"));
+}
+
+#[test]
+fn malformed_config_values_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad.yaml");
+    let mut yaml = config_with_repo_pinning("false\n");
+    yaml = yaml.replace(
+        "nerdfont: !enabled GeistMono",
+        "nerdfont: !enabled \"bad'; touch /tmp/pwn\"",
+    );
+    fs::write(&path, yaml).unwrap();
+    let err = Config::load(&path).unwrap_err().to_string();
+    assert!(err.contains("validate"));
+}
+
+#[test]
+fn unsupported_binary_suffix_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad-bin.yaml");
+    let yaml = config_with_repo_pinning("false\n").replace("name: tool.deb", "name: tool.tar.gz");
+    fs::write(&path, yaml).unwrap();
+    let err = Config::load(&path).unwrap_err().to_string();
+    assert!(err.contains("validate"));
+}
+
+fn config_with_repo_pinning(pinning: &str) -> String {
+    format!(
+        r#"metadata:
+  description: test
+  distro: ubuntu
+  DE: gnome
+check:
+  distroCfg: false
+  purge: !disabled []
+  deps: !disabled []
+  rustupCheck: false
+  appimaged: false
+  nerdfont: !enabled GeistMono
+install:
+  check: false
+  apt: !disabled []
+  addRepos: !enabled
+    - sourceName: example
+      remoteKey: https://example.test/key.asc
+      keyPath: /etc/apt/keyrings/example.asc
+      repo: deb [arch=$(dpkg --print-architecture)] https://example.test stable main
+      pinning: |-
+{pinning_indented}
+      packages:
+        - example
+  flatpak: !disabled []
+  cargo: !disabled []
+  npm: !disabled []
+  binaries: !enabled
+    - name: tool.deb
+      url: https://example.test/tool.deb
+  languages:
+    goVersion: !disabled latest
+    nodeVersion: !disabled latest
+    pyenv: !disabled
+      update: false
+      version: 3
+      pip: false
+    uv: !disabled
+      version: !disabled 3.13
+update:
+  check: false
+  apt: !disabled
+    aptFull: false
+  flatpak: false
+  cargo: false
+  other:
+    yq: false
+    go: false
+    node: false
+configure:
+  check: false
+  dotfiles: !disabled
+    stowMode: backup
+    packages: []
+  apps:
+    docker: false
+    virtualbox: false
+    vscodeExtensions: !disabled []
+  desktopEnvironment: !disabled
+    common: !disabled
+      defaultTerm: !enabled wezterm
+    gnome: !disabled
+      settings: false
+      extensions: !disabled []
+      MacOSDock: false
+      smoothRoundedCorners: false
+    cinnamon: !disabled
+"#,
+        pinning_indented = pinning
+            .lines()
+            .map(|l| format!("        {l}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
