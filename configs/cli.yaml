@@ -48,11 +48,6 @@ check:
     - libjpeg-dev
     - libpng-dev
     - libtiff-dev
-    # cargo-update dependencies
-    - libgit2-dev
-    - libssh-dev
-    - libssl-dev
-    - pkgconf
   rustupCheck: true
   appimaged: false
   nerdfont: !enabled GeistMono
