@@ -101,7 +101,7 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
   - **name** `<string>`: Name of binary. File extension determines if package is an [AppImage](https://appimage.org) or binary (.deb)
   - **url** `<string>`: Package URL
 - **languages.goVersion** `latest | <major>.<minor>.<patch>`: Installs latest version of [Go](https://go.dev). Accepted version examples: latest, 1.23.5
-- **languages.nodeVersion** `latest | <major>[.<minor>[.<patch>]]`: Installs latest version of [Node](https://nodejs.org) via [NVM](https://github.com/nvm-sh/nvm). Accepted version examples: latest, 22, 22.13.0
+- **languages.nodeVersion** `latest | <major>[.<minor>[.<patch>]]`: Installs latest version of [Node](https://nodejs.org) via [FNM](https://github.com/Schniz/fnm). Accepted version examples: latest, 22, 22.13.0
 
 #### Update
 
@@ -112,7 +112,7 @@ git clone https://github.com/adoreblvnk/cozydot.git && ./cozydot/cozydot
 - **cargo** `false`
 - **other.yq** `true`: Updates [yq](https://github.com/mikefarah/yq) binary
 - **other.go** `false`: Updates [Go](https://go.dev) to the latest version
-- **other.node** `false`: Updates [Node](https://nodejs.org) to the latest version via [NVM](https://github.com/nvm-sh/nvm)
+- **other.node** `false`: Updates [Node](https://nodejs.org) to the latest version via [FNM](https://github.com/Schniz/fnm)
 - **other.zellij** `true`: Delete all other [Zellij](https://zellij.dev) sessions, including exited ones
 
 #### Configure
