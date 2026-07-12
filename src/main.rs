@@ -10,8 +10,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const VERSION: &str = "0.0.1";
-
 fn main() -> Result<()> {
     let root = installation_root();
     let mut config = "default".to_owned();
@@ -30,7 +28,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "-V" | "--version" => {
-                println!("cozydot {VERSION}");
+                println!("cozydot {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             "-n" | "--no-color" => {}

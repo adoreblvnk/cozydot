@@ -90,16 +90,6 @@ impl Runner for ProcessRunner {
         Ok(())
     }
 }
-#[derive(Default)]
-pub struct RecordingRunner {
-    pub steps: Vec<Step>,
-}
-impl Runner for RecordingRunner {
-    fn run(&mut self, step: &Step) -> Result<()> {
-        self.steps.push(step.clone());
-        Ok(())
-    }
-}
 pub fn execute(runner: &mut dyn Runner, steps: &[Step]) -> Result<()> {
     for step in steps {
         runner.run(step)?
