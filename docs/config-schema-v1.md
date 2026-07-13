@@ -166,8 +166,8 @@ Every `packages.repositories` item has exactly these fields:
 - `key`: required HTTPS URL for the repository signing key.
 - `source`: required mapping containing exactly `urls`, `suite`, and `components`.
 - `source.urls`: required map of HTTPS base URLs. Keys are `default` and/or supported distro IDs. Cozydot selects the detected distro key first, then `default`, and errors when neither exists.
-- `source.suite`: required scalar. The semantic literal `system` resolves internally to the detected distribution codename. Any other non-empty value is a fixed literal suite, such as `stable` or `squeeze`; it is never interpolated.
-- `source.components`: required non-empty sequence of literal APT components.
+- `source.suite`: required scalar. The semantic literal `system` resolves internally to the detected distribution codename, which must satisfy the same token grammar when consumed. Any other value is one lowercase APT source token: it starts with an ASCII letter or digit and then contains only lowercase ASCII letters, digits, `.`, `_`, `+`, or `-`. Exact-path suites ending in `/` are intentionally unsupported in schema v1 because components are required and exact-path syntax has different semantics.
+- `source.components`: required non-empty sequence of unique APT source tokens using the same grammar.
 - `packages`: required non-empty sequence of Debian package names installed from the repository, using the same grammar as `packages.apt`.
 
 Cozydot derives the repository filename stem by ASCII-lowercasing `name`, replacing each maximal run outside `[a-z0-9]` with one hyphen, and trimming leading and trailing hyphens. Validation rejects an empty result and rejects any two repository names that produce the same stem, preventing traversal and filename collisions. No key-path or sanitization fields are configurable.

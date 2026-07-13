@@ -158,7 +158,7 @@ impl Platform {
             distro,
             upstream,
             codename,
-            desktop,
+            desktop: normalize_desktop(&desktop),
             architecture,
         })
     }
@@ -205,16 +205,24 @@ fn upstream(id: &str) -> Result<&'static str> {
     }
 }
 fn desktop(s: &str) -> String {
-    if s.contains("GNOME") {
-        "gnome"
-    } else if s.contains("Cinnamon") {
-        "cinnamon"
-    } else if s.is_empty() {
-        "none"
-    } else {
-        s
-    }
-    .into()
+    normalize_desktop(s)
+}
+
+fn normalize_desktop(value: &str) -> String {
+    value
+        .split(':')
+        .find_map(|token| {
+            let token = token.to_ascii_lowercase();
+            if token.contains("gnome") {
+                Some("gnome")
+            } else if token.contains("cinnamon") {
+                Some("cinnamon")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("none")
+        .into()
 }
 fn parse_os_release(path: &Path) -> Result<BTreeMap<String, String>> {
     let text = fs::read_to_string(path).context("read os-release")?;
@@ -351,6 +359,38 @@ mod tests {
         assert!(Architecture::normalize("riscv64gc").is_err());
         assert!(Architecture::normalize("arm").is_err());
     }
+
+    #[test]
+    fn normalizes_desktop_to_supported_canonical_values() {
+        for (input, expected) in [
+            ("gnome", "gnome"),
+            ("GNOME", "gnome"),
+            ("ubuntu:GNOME", "gnome"),
+            ("X-Cinnamon", "cinnamon"),
+            ("plasma:X-Cinnamon:GNOME", "cinnamon"),
+            ("unknown:ubuntu-GNOME:X-Cinnamon", "gnome"),
+            ("KDE", "none"),
+            ("plasma", "none"),
+            ("arbitrary text", "none"),
+            ("", "none"),
+        ] {
+            assert_eq!(normalize_desktop(input), expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn from_parts_enforces_canonical_desktop_invariant() {
+        let platform = Platform::from_parts(
+            "ubuntu".into(),
+            "ubuntu".into(),
+            "noble".into(),
+            "KDE:ubuntu:GNOME".into(),
+            "amd64",
+        )
+        .unwrap();
+        assert_eq!(platform.desktop, "gnome");
+    }
+
     #[test]
     fn distro_map() {
         assert_eq!(upstream("linuxmint").unwrap(), "ubuntu");

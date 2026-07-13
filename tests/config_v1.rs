@@ -291,6 +291,63 @@ fn validates_repository_urls_content_and_selection() {
 }
 
 #[test]
+fn repository_source_tokens_use_one_canonical_apt_grammar() {
+    let repository = |suite: &str, components: &str| {
+        format!(
+            "schema: 1\npackages:\n  repositories:\n    - name: repo\n      key: https://example.com/key\n      source:\n        urls: {{ default: https://example.com/repo }}\n        suite: {suite}\n        components: [{components}]\n      packages: [pkg]"
+        )
+    };
+
+    for invalid in [
+        "'stable main'",
+        "'stable#comment'",
+        "'[arch=arm64] stable'",
+        "'[trusted=yes]'",
+        "Stable",
+        "'-stable'",
+        "'.stable'",
+        "'_stable'",
+        "'+stable'",
+        "'stable/'",
+        r"'stable\path'",
+        "'stable:next'",
+        r#""stable\tmain""#,
+        r#""stable\nmain""#,
+        r#""stable\u0001""#,
+        "' stable'",
+        "'stable '",
+        "'${CODENAME}'",
+        "''",
+    ] {
+        assert_rejected(
+            &repository(invalid, "main"),
+            "packages.repositories[0].source.suite",
+        );
+        assert_rejected(
+            &repository("stable", invalid),
+            "packages.repositories[0].source.components[0]",
+        );
+    }
+
+    assert_rejected(
+        &repository("stable", "main, main"),
+        "packages.repositories[0].source.components[1]: duplicate value",
+    );
+    assert_rejected(
+        &repository("stable", ""),
+        "packages.repositories[0].source.components: must be a non-empty sequence",
+    );
+
+    for suite in ["system", "stable", "noble", "bookworm-backports", "9stable"] {
+        ConfigV1::parse(&repository(
+            suite,
+            "main, stable, non-free-firmware, v1.2_rc+1-test",
+        ))
+        .unwrap();
+    }
+}
+
+#[test]
 fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
     let repository = |key: &str, url: &str| {
         format!(
@@ -860,4 +917,26 @@ fn explicit_platform_selections_must_match_while_auto_is_accepted() {
         .unwrap()
         .validate_for_platform(&resolved)
         .unwrap();
+
+    let unknown_desktop = Platform::from_parts(
+        "ubuntu".into(),
+        "ubuntu".into(),
+        "noble".into(),
+        "KDE".into(),
+        "amd64",
+    )
+    .unwrap();
+    assert_eq!(unknown_desktop.desktop, "none");
+    for yaml in ["schema: 1", "schema: 1\nsystem:\n  desktop: auto"] {
+        ConfigV1::parse(yaml)
+            .unwrap()
+            .validate_for_platform(&unknown_desktop)
+            .unwrap();
+    }
+    let explicit = ConfigV1::parse("schema: 1\nsystem:\n  desktop: gnome").unwrap();
+    assert!(explicit
+        .validate_for_platform(&unknown_desktop)
+        .unwrap_err()
+        .to_string()
+        .contains("system.desktop"));
 }

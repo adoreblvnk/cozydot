@@ -1,5 +1,5 @@
 use cozydot::{
-    config::v1::{ConfigV1, Theme},
+    config::v1::{AptSourceToken, ConfigV1, Theme},
     planner::v1::{
         plan, AptSourcesIntent, AptUpdatePolicy, AptUpdateTarget, DesktopAction, DesktopTarget,
         DotfilesConflictPolicy, ExistingProduct, FlatpakUpdateScope, GoSelector, IntegrationAction,
@@ -172,6 +172,16 @@ fn managed_sources_require_a_codename_and_unattended_both_states_are_consumers()
     assert!(error.contains("system.apt.sources"));
     assert!(error.contains("codename"));
 
+    let error = plan(
+        &managed,
+        &platform("ubuntu", "ubuntu", "Noble Main", "none", "amd64"),
+        Path::new("."),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("system.apt.sources"));
+    assert!(error.contains("valid platform codename"));
+
     for enabled in [true, false] {
         let actions = planned(
             &format!("schema: 1\nsystem:\n  apt:\n    unattended_upgrades: {enabled}"),
@@ -294,11 +304,18 @@ packages:
     assert_eq!(repository.source_url.as_str(), "https://ubuntu.example/apt");
     assert_eq!(
         repository.suite,
-        RepositorySuite::ResolvedSystem("noble".into())
+        RepositorySuite::ResolvedSystem(AptSourceToken::parse("noble").unwrap())
     );
     assert_eq!(repository.suite.value(), "noble");
     assert_eq!(repository.architecture, Architecture::Arm64);
-    assert_eq!(repository.components, ["stable", "main"]);
+    assert_eq!(
+        repository
+            .components
+            .iter()
+            .map(AptSourceToken::as_str)
+            .collect::<Vec<_>>(),
+        ["stable", "main"]
+    );
     assert_eq!(
         repository.keyring_path,
         PathBuf::from("/etc/apt/keyrings/cozydot-vendor-repo.gpg")
@@ -328,8 +345,49 @@ packages:
         repository.source_url.as_str(),
         "https://default.example/apt"
     );
-    assert_eq!(repository.suite, RepositorySuite::Fixed("stable".into()));
+    assert_eq!(
+        repository.suite,
+        RepositorySuite::Fixed(AptSourceToken::parse("stable").unwrap())
+    );
     assert_eq!(repository.architecture, Architecture::Amd64);
+}
+
+#[test]
+fn system_repository_suite_validates_consumed_codename_only() {
+    let system = ConfigV1::parse(
+        "schema: 1
+packages:
+  repositories:
+    - name: vendor
+      key: https://example.com/key
+      source: { urls: { default: https://example.com/repo }, suite: system, components: [main] }
+      packages: [vendor]",
+    )
+    .unwrap();
+    let malformed = platform("ubuntu", "ubuntu", "noble/", "none", "amd64");
+    let error = plan(&system, &malformed, Path::new("."))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("packages.repositories[0].source.suite"));
+    assert!(error.contains("system platform codename"));
+
+    let fixed = ConfigV1::parse(
+        "schema: 1
+packages:
+  repositories:
+    - name: vendor
+      key: https://example.com/key
+      source: { urls: { default: https://example.com/repo }, suite: stable, components: [main] }
+      packages: [vendor]",
+    )
+    .unwrap();
+    plan(&fixed, &malformed, Path::new(".")).unwrap();
+    plan(
+        &ConfigV1::parse(MINIMAL).unwrap(),
+        &platform("ubuntu", "ubuntu", "arbitrary codename", "none", "amd64"),
+        Path::new("."),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -381,6 +439,30 @@ desktop:
     assert!(!none
         .iter()
         .any(|action| matches!(action, PlannedAction::Desktop(_))));
+
+    for desktop in ["KDE", "plasma", "arbitrary text", ""] {
+        let resolved = platform("ubuntu", "ubuntu", "noble", desktop, "amd64");
+        assert_eq!(resolved.desktop, "none");
+        assert!(!planned(yaml, &resolved)
+            .iter()
+            .any(|action| matches!(action, PlannedAction::Desktop(_))));
+    }
+
+    let mixed = platform(
+        "ubuntu",
+        "ubuntu",
+        "noble",
+        "plasma:X-Cinnamon:GNOME",
+        "amd64",
+    );
+    assert_eq!(mixed.desktop, "cinnamon");
+    assert!(planned(yaml, &mixed).iter().any(|action| matches!(
+        action,
+        PlannedAction::Desktop(DesktopAction::Theme {
+            target: DesktopTarget::Cinnamon,
+            ..
+        })
+    )));
 }
 
 #[test]
