@@ -228,7 +228,8 @@ fn fresh_fnm_bootstrap_exposes_npm_for_configured_packages_in_same_step() {
     let host = Host::new();
     host.fake(
         "curl",
-        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+        r#"printf 'fnm-installer-download\n' >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
 cat >"$out" <<'INSTALL'
 #!/bin/bash
 mkdir -p "$XDG_DATA_HOME/fnm"
@@ -261,6 +262,7 @@ INSTALL"#,
     host.run_ok(&step);
     let log = host.log();
     assert!(log.contains("fnm install --lts --use"));
+    assert_eq!(log.matches("fnm-installer-download").count(), 1, "{log}");
     assert_eq!(log.matches("npm install --global").count(), 1, "{log}");
     assert!(log.contains("npm list --global --depth=0 opencode-ai"));
     assert!(log.contains("opencode-ai"));
