@@ -396,6 +396,32 @@ fn bashrc_regular_file_is_replaced_but_symlink_is_preserved() {
 }
 
 #[test]
+fn apt_packages_batch_only_missing_packages_into_one_install() {
+    let host = Host::new();
+    host.fake(
+        "dpkg-query",
+        r#"package=${!#}
+case "$package" in bash|curl) printf 'ii \n' ;; *) exit 1 ;; esac"#,
+    );
+    host.logging_fake("sudo");
+    let step = Step::workflow(operations::Operation::AptPackages {
+        packages: vec![
+            "bash".into(),
+            "missing-one".into(),
+            "curl".into(),
+            "missing-two".into(),
+        ],
+    });
+    host.run_ok(&step);
+    let log = host.log();
+    assert_eq!(log.matches("sudo apt-get install -qq").count(), 1, "{log}");
+    assert!(
+        log.contains("sudo apt-get install -qq missing-one missing-two"),
+        "{log}"
+    );
+}
+
+#[test]
 fn ubuntu_and_mint_codecs_execute_apt_update_before_install() {
     for (distro, package) in [
         ("ubuntu", "ubuntu-restricted-extras"),
