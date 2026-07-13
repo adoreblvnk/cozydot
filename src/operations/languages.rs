@@ -234,8 +234,12 @@ pub fn pyenv(host: &Host<'_>, update: bool, version: &str, pip: bool) -> Result<
 }
 
 pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
+    let install_dir = host.home().join(".local/bin");
+    let installed_uv = install_dir.join("uv");
     let uv = if host.command_exists("uv") {
         "uv".to_owned()
+    } else if executable_file(&installed_uv) {
+        installed_uv.to_string_lossy().into_owned()
     } else {
         let installer = TempPath::new(host, "uv-install")?;
         host.require(
@@ -248,7 +252,6 @@ pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
                 "https://astral.sh/uv/install.sh",
             ],
         )?;
-        let install_dir = host.home().join(".local/bin");
         std::fs::create_dir_all(&install_dir).context("uv install: create install directory")?;
         host.require(
             "uv install",
@@ -259,17 +262,19 @@ pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
                 installer.path().to_string_lossy().into_owned(),
             ],
         )?;
-        let installed = install_dir.join("uv");
-        if !executable_file(&installed) {
+        if !executable_file(&installed_uv) {
             bail!(
                 "uv install: installer did not create executable {}",
-                installed.display()
+                installed_uv.display()
             );
         }
-        installed.to_string_lossy().into_owned()
+        installed_uv.to_string_lossy().into_owned()
     };
     if version_enabled {
-        host.require("uv install", &uv, ["python", "install", version])?;
+        let installed = host.run(&uv, ["python", "find", version])?;
+        if !installed.status.success() {
+            host.require("uv install", &uv, ["python", "install", version])?;
+        }
     }
     Ok(())
 }
