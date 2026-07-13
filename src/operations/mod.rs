@@ -4,6 +4,7 @@ mod apt;
 mod desktop;
 mod direct;
 mod downloads;
+mod flatpak;
 mod languages;
 mod provisioning;
 mod repository;
@@ -37,6 +38,9 @@ const ETXTBSY_BACKOFFS: [Duration; 4] = [
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
+    AptBootstrapPackages {
+        packages: Vec<String>,
+    },
     AptMetadataRefresh,
     AptCodecs {
         package: String,
@@ -66,6 +70,13 @@ pub enum Operation {
         url: String,
         repo: String,
         pattern: String,
+    },
+    FlatpakEnsureFlathub,
+    FlatpakEnsureApps {
+        refs: Vec<String>,
+    },
+    FlatpakUpdateApps {
+        refs: Vec<String>,
     },
     GnomeExtension {
         extension: String,
@@ -121,6 +132,11 @@ pub enum Operation {
 impl Operation {
     pub fn display_args(&self) -> Vec<String> {
         match self {
+            Self::AptBootstrapPackages { packages } => {
+                std::iter::once("apt-bootstrap-packages".into())
+                    .chain(packages.clone())
+                    .collect()
+            }
             Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
             Self::AptCodecs { package } => vec!["apt-codecs".into(), package.clone()],
             Self::AptPackages { packages } => std::iter::once("apt-packages".into())
@@ -144,6 +160,13 @@ impl Operation {
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
             Self::DirectPackage(package) => package.display_args(),
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
+            Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
+            Self::FlatpakEnsureApps { refs } => std::iter::once("flatpak-ensure-apps".into())
+                .chain(refs.clone())
+                .collect(),
+            Self::FlatpakUpdateApps { refs } => std::iter::once("flatpak-update-apps".into())
+                .chain(refs.clone())
+                .collect(),
             Self::GnomeExtension { extension } => {
                 vec!["gnome-extension".into(), extension.clone()]
             }
@@ -212,6 +235,7 @@ impl Operation {
 pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()> {
     let host = Host { env };
     match operation {
+        Operation::AptBootstrapPackages { packages } => apt::bootstrap_packages(&host, packages),
         Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
         Operation::AptCodecs { package } => provisioning::apt_codecs(&host, package),
         Operation::AptPackages { packages } => apt::packages(&host, packages),
@@ -230,6 +254,9 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
             repo,
             pattern,
         } => downloads::binary(&host, name, url, repo, pattern),
+        Operation::FlatpakEnsureFlathub => flatpak::ensure_flathub(&host),
+        Operation::FlatpakEnsureApps { refs } => flatpak::ensure_apps(&host, refs),
+        Operation::FlatpakUpdateApps { refs } => flatpak::update_apps(&host, refs),
         Operation::GnomeExtension { extension } => desktop::gnome_extension(&host, extension),
         Operation::GnomeDependencies => provisioning::gnome_dependencies(&host),
         Operation::GnomeDockSettings => provisioning::gnome_dock_settings(&host),
