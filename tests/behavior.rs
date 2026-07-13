@@ -214,12 +214,14 @@ cat >"$XDG_DATA_HOME/fnm/fnm" <<'FNM'
 #!/bin/bash
 printf 'fnm %s\n' "$*" >>"$LOG"
 case "$1" in
- env) printf 'export PATH="%s:$PATH"\n' "$XDG_DATA_HOME/fnm" ;;
- current) printf 'v22.1.0\n' ;;
+ env) printf 'export FNM_MULTISHELL_PATH="%s/multishell"\nexport PATH="%s:$PATH"\n' "$XDG_DATA_HOME/fnm" "$XDG_DATA_HOME/fnm" ;;
+ install) [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; } ;;
+ current) [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }; printf 'v22.1.0\n' ;;
 esac
 FNM
 cat >"$XDG_DATA_HOME/fnm/npm" <<'NPM'
 #!/bin/bash
+[ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }
 printf 'npm %s\n' "$*" >>"$LOG"
 NPM
 chmod +x "$XDG_DATA_HOME/fnm/fnm" "$XDG_DATA_HOME/fnm/npm"
@@ -293,7 +295,10 @@ fn real_cli_check_disables_purge_after_fake_package_purge() {
         .replace("distroCfg: true", "distroCfg: false")
         .replace("rustupCheck: true", "rustupCheck: false");
     fs::write(root.join("cozydot.yaml"), yaml).unwrap();
-    host.fake("dpkg-query", "[ \"${1:-}\" = -W ]");
+    host.fake(
+        "dpkg-query",
+        "[ \"${1:-}\" = -W ] && [ \"${2:-}\" = '-f=${db:Status-Abbrev}' ] && printf 'ii '",
+    );
     host.logging_fake("sudo");
     let output = Command::new(assert_cmd::cargo::cargo_bin!("cozydot"))
         .arg("apply")

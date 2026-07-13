@@ -102,27 +102,31 @@ pub fn node(host: &Host<'_>, version: &str, npm: &[String]) -> Result<()> {
         }
         installed.to_string_lossy().into_owned()
     };
-    if version == "latest" {
-        host.require("node install", &fnm, ["install", "--lts", "--use"])?;
-    } else {
-        host.require("node install", &fnm, ["install", version, "--use"])?;
-    }
-    let current = host.require("node install", &fnm, ["current"])?;
-    let current = String::from_utf8(current.stdout)?.trim().to_owned();
-    host.require("node install", &fnm, ["default", &current])?;
-    if !npm.is_empty() {
-        let mut args = vec![
-            "-euo".to_owned(),
-            "pipefail".to_owned(),
-            "-c".to_owned(),
-            "eval \"$(\"$1\" env --shell bash)\"; shift; exec npm install --global \"$@\""
-                .to_owned(),
-            "--".to_owned(),
-            fnm,
-        ];
-        args.extend(npm.iter().cloned());
-        host.require("node npm install", "bash", args)?;
-    }
+    let mut args = vec![
+        "-euo".to_owned(),
+        "pipefail".to_owned(),
+        "-c".to_owned(),
+        r#"eval "$("$1" env --shell bash)"
+fnm=$1
+requested=$2
+shift 2
+if [ "$requested" = latest ]; then
+  "$fnm" install --lts --use
+else
+  "$fnm" install "$requested" --use
+fi
+current=$("$fnm" current)
+"$fnm" default "$current"
+if [ "$#" -gt 0 ]; then
+  npm install --global "$@"
+fi"#
+        .to_owned(),
+        "--".to_owned(),
+        fnm,
+        version.to_owned(),
+    ];
+    args.extend(npm.iter().cloned());
+    host.require("node install", "bash", args)?;
     Ok(())
 }
 
