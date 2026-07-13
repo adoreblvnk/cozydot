@@ -140,7 +140,6 @@ impl DirectPackageOperation {
 
 #[derive(Debug)]
 struct ReleaseAsset {
-    name: String,
     url: HttpsUrl,
     digest: Option<[u8; 32]>,
 }
@@ -176,6 +175,7 @@ fn install_deb(host: &Host<'_>, package: &DirectPackageOperation) -> Result<()> 
         "direct Debian install",
         "sudo",
         [
+            "DEBIAN_FRONTEND=noninteractive".as_ref(),
             "apt-get".as_ref(),
             "install".as_ref(),
             "-y".as_ref(),
@@ -255,24 +255,24 @@ fn select_asset(input: &str, package: &DirectPackageOperation) -> Result<Release
         .context("GitHub release JSON is missing assets")?
         .as_array()
         .context("GitHub release assets must be an array")?;
-    let mut matches = Vec::new();
+    let mut named_assets = Vec::with_capacity(assets.len());
     for (index, value) in assets.iter().enumerate() {
         let name = parse_asset_name(value, index)?;
-        if wildcard_match(&package.selector.include, name)
-            && !package
-                .selector
-                .excludes
-                .iter()
-                .any(|exclude| wildcard_match(exclude, name))
-        {
-            matches.push(parse_asset(value, index, name)?);
-        }
+        named_assets.push((index, value, name));
     }
+    let matches = named_assets
+        .into_iter()
+        .filter(|(_, _, name)| {
+            wildcard_match(&package.selector.include, name)
+                && !package
+                    .selector
+                    .excludes
+                    .iter()
+                    .any(|exclude| wildcard_match(exclude, name))
+        })
+        .collect::<Vec<_>>();
     if matches.len() != 1 {
-        let names = matches
-            .iter()
-            .map(|asset| asset.name.as_str())
-            .collect::<Vec<_>>();
+        let names = matches.iter().map(|(_, _, name)| *name).collect::<Vec<_>>();
         bail!(
             "direct package {:?} ({}) selector include {:?}, excludes {:?} matched {} assets: {:?}",
             package.name,
@@ -283,7 +283,8 @@ fn select_asset(input: &str, package: &DirectPackageOperation) -> Result<Release
             names
         );
     }
-    Ok(matches.remove(0))
+    let (index, value, _) = matches[0];
+    parse_asset(value, index)
 }
 
 fn parse_asset_name(value: &Value, index: usize) -> Result<&str> {
@@ -300,7 +301,7 @@ fn parse_asset_name(value: &Value, index: usize) -> Result<&str> {
     Ok(name)
 }
 
-fn parse_asset(value: &Value, index: usize, name: &str) -> Result<ReleaseAsset> {
+fn parse_asset(value: &Value, index: usize) -> Result<ReleaseAsset> {
     let asset = value
         .as_object()
         .with_context(|| format!("GitHub release asset {index} must be an object"))?;
@@ -322,11 +323,7 @@ fn parse_asset(value: &Value, index: usize, name: &str) -> Result<ReleaseAsset> 
         ),
         Some(_) => bail!("GitHub release asset {index} digest must be a string or null"),
     };
-    Ok(ReleaseAsset {
-        name: name.into(),
-        url,
-        digest,
-    })
+    Ok(ReleaseAsset { url, digest })
 }
 
 fn download(
@@ -674,8 +671,8 @@ mod tests {
             {"name":"sample-a.AppImage","browser_download_url":"https://example.test/a"}
         ]}"#;
         assert_eq!(
-            select_asset(json, &package).unwrap().name,
-            "sample-a.AppImage"
+            select_asset(json, &package).unwrap().url.as_str(),
+            "https://example.test/a"
         );
 
         let zero = select_asset(r#"{"assets":[]}"#, &package)
@@ -711,8 +708,11 @@ mod tests {
             {"name":"sample-é.AppImage","browser_download_url":"https://example.test/good"}
         ]}"#;
         assert_eq!(
-            select_asset(unicode, &unicode_package).unwrap().name,
-            "sample-é.AppImage"
+            select_asset(unicode, &unicode_package)
+                .unwrap()
+                .url
+                .as_str(),
+            "https://example.test/good"
         );
     }
 
@@ -768,6 +768,28 @@ mod tests {
     }
 
     #[test]
+    fn multiple_matches_are_reported_before_candidate_payload_validation() {
+        let package = package(Architecture::Amd64);
+        for malformed_payload in [
+            r#""browser_download_url":"http://example.test/a""#,
+            r#""browser_download_url":"https://example.test/a","digest":"SHA256:00""#,
+        ] {
+            let json = format!(
+                r#"{{"assets":[
+                    {{"name":"sample-a.AppImage",{malformed_payload}}},
+                    {{"name":"sample-b.AppImage","browser_download_url":"https://example.test/b"}}
+                ]}}"#
+            );
+            let error = select_asset(&json, &package).unwrap_err().to_string();
+            assert!(error.contains("matched 2 assets"), "{error}");
+            assert!(error.contains("sample-a.AppImage"), "{error}");
+            assert!(error.contains("sample-b.AppImage"), "{error}");
+            assert!(!error.contains("browser_download_url"), "{error}");
+            assert!(!error.contains("digest"), "{error}");
+        }
+    }
+
+    #[test]
     fn unrelated_asset_payload_is_ignored_but_every_name_is_validated() {
         let package = package(Architecture::Amd64);
         let selected = select_asset(
@@ -779,7 +801,7 @@ mod tests {
             &package,
         )
         .unwrap();
-        assert_eq!(selected.name, "sample-a.AppImage");
+        assert_eq!(selected.url.as_str(), "https://example.test/a");
 
         for (unrelated, expected) in [
             (r#"{}"#, "missing name"),
@@ -787,7 +809,7 @@ mod tests {
             (r#"{"name":"../unrelated.txt"}"#, "unsafe name"),
         ] {
             let json = format!(
-                r#"{{"assets":[{unrelated},{{"name":"sample-a.AppImage","browser_download_url":"https://example.test/a"}}]}}"#
+                r#"{{"assets":[{{"name":"sample-a.AppImage","browser_download_url":"https://example.test/a"}},{unrelated}]}}"#
             );
             let error = select_asset(&json, &package).unwrap_err().to_string();
             assert!(error.contains(expected), "{error}");
