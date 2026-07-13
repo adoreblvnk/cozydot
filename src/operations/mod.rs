@@ -64,6 +64,7 @@ pub enum Operation {
     NodeInstall {
         version: String,
         npm: Vec<String>,
+        update: bool,
     },
     PyenvInstall {
         update: bool,
@@ -116,10 +117,18 @@ impl Operation {
                 args.extend(packages.clone());
                 args
             }
-            Self::NodeInstall { version, npm } => std::iter::once("node-install".into())
-                .chain(std::iter::once(version.clone()))
-                .chain(npm.clone())
-                .collect(),
+            Self::NodeInstall {
+                version,
+                npm,
+                update,
+            } => {
+                let mut args = vec!["node-install".into(), version.clone()];
+                if *update {
+                    args.push("--update".into());
+                }
+                args.extend(npm.clone());
+                args
+            }
             Self::PyenvInstall {
                 update,
                 version,
@@ -174,7 +183,11 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
         Operation::CargoPackages { packages, force } => {
             provisioning::cargo_packages(&host, packages, *force)
         }
-        Operation::NodeInstall { version, npm } => languages::node(&host, version, npm),
+        Operation::NodeInstall {
+            version,
+            npm,
+            update,
+        } => languages::node(&host, version, npm, *update),
         Operation::PyenvInstall {
             update,
             version,

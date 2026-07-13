@@ -81,7 +81,7 @@ pub fn go(host: &Host<'_>, requested: &str, arch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn node(host: &Host<'_>, version: &str, npm: &[String]) -> Result<()> {
+pub fn node(host: &Host<'_>, version: &str, npm: &[String], update: bool) -> Result<()> {
     let fnm_dir = host
         .value("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -124,14 +124,33 @@ pub fn node(host: &Host<'_>, version: &str, npm: &[String]) -> Result<()> {
         r#"eval "$("$1" env --shell bash)"
 fnm=$1
 requested=$2
-shift 2
-if [ "$requested" = latest ]; then
+update=$3
+shift 3
+current=$("$fnm" current 2>/dev/null || true)
+default=$("$fnm" default 2>/dev/null || true)
+candidate=
+if [ "$update" != true ]; then
+  if [ "$requested" = latest ]; then
+    if [ -n "$current" ] && [ "$current" != none ]; then candidate=$current
+    elif [ -n "$default" ] && [ "$default" != none ]; then candidate=$default
+    fi
+  else
+    for installed in "$current" "$default"; do
+      case "${installed#v}" in
+        "$requested"|"$requested".*) candidate=$installed; break ;;
+      esac
+    done
+  fi
+fi
+if [ -n "$candidate" ]; then
+  "$fnm" use "$candidate"
+elif [ "$requested" = latest ]; then
   "$fnm" install --lts --use
 else
   "$fnm" install "$requested" --use
 fi
 current=$("$fnm" current)
-"$fnm" default "$current"
+if [ "$default" != "$current" ]; then "$fnm" default "$current"; fi
 if [ "$#" -gt 0 ]; then
   for package in "$@"; do
     if ! npm list --global --depth=0 "$package" >/dev/null 2>&1; then
@@ -143,6 +162,7 @@ fi"#
         "--".to_owned(),
         fnm,
         version.to_owned(),
+        update.to_string(),
     ];
     args.extend(npm.iter().cloned());
     host.require("node install", "bash", args)?;

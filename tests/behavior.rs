@@ -238,8 +238,10 @@ cat >"$XDG_DATA_HOME/fnm/fnm" <<'FNM'
 printf 'fnm %s\n' "$*" >>"$LOG"
 case "$1" in
  env) printf 'export FNM_MULTISHELL_PATH="%s/multishell"\nexport PATH="%s:$PATH"\n' "$XDG_DATA_HOME/fnm" "$XDG_DATA_HOME/fnm" ;;
- install) [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; } ;;
- current) [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }; printf 'v22.1.0\n' ;;
+ install) [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }; touch "$TMPDIR/fnm-node-installed" ;;
+ use) [ -f "$TMPDIR/fnm-node-installed" ] ;;
+ current) if [ -f "$TMPDIR/fnm-node-installed" ]; then printf 'v22.1.0\n'; else printf 'none\n'; fi ;;
+ default) if [ "$#" -gt 1 ]; then touch "$TMPDIR/fnm-default-set"; elif [ -f "$TMPDIR/fnm-default-set" ]; then printf 'v22.1.0\n'; fi ;;
 esac
 FNM
 cat >"$XDG_DATA_HOME/fnm/npm" <<'NPM'
@@ -261,7 +263,8 @@ INSTALL"#,
     host.run_ok(&step);
     host.run_ok(&step);
     let log = host.log();
-    assert!(log.contains("fnm install --lts --use"));
+    assert_eq!(log.matches("fnm install --lts --use").count(), 1, "{log}");
+    assert!(log.contains("fnm use v22.1.0"));
     assert_eq!(log.matches("fnm-installer-download").count(), 1, "{log}");
     assert_eq!(log.matches("npm install --global").count(), 1, "{log}");
     assert!(log.contains("npm list --global --depth=0 opencode-ai"));
