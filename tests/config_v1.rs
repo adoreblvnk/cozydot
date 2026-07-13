@@ -112,12 +112,14 @@ fn yaml_extension_preflight_rejects_tokens_not_literal_characters() {
     for (yaml, expected) in [
         (
             "%TAG !e! tag:example.com,2026:\n---\nschema: 1",
-            "YAML tags",
+            "YAML directives",
         ),
         (
             "%TAG !e! tag:example.com,2026:\n---\nschema: 1\nsystem: !e!enabled {}",
-            "YAML tags",
+            "YAML directives",
         ),
+        ("%YAML 1.1\n---\nschema: 1", "YAML directives"),
+        ("%YAML 1.2\n---\nschema: 1", "YAML directives"),
         (
             r#"{schema: 1, fonts: {nerd: ["Name\\"]}, system: &shared {}, desktop: *shared}"#,
             "YAML anchors",
@@ -145,7 +147,7 @@ fn yaml_extension_preflight_rejects_tokens_not_literal_characters() {
         "schema: 1\nfonts:\n  nerd:\n    - plain-value # !tag &anchor *alias\n",
         "schema: 1 # %TAG !e! tag:example.com &anchor *alias\n",
         "schema: 1\nfonts:\n  nerd:\n    - '%TAG !e! tag:example.com &anchor *alias'\n",
-        "%YAML 1.2\n---\nschema: 1\nfonts:\n  nerd:\n    - >-\n      literal %TAG ! & *\n",
+        "schema: 1 # %YAML 1.2\nfonts:\n  nerd:\n    - '%YAML 1.1 and %TAG are text'\n    - >-\n      literal %YAML 1.2 and %TAG ! & *\n",
     ] {
         ConfigV1::parse(yaml).unwrap_or_else(|error| panic!("YAML {yaml:?}: {error}"));
     }
@@ -295,6 +297,16 @@ fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
             "schema: 1\npackages:\n  repositories:\n    - name: repo\n      key: {key:?}\n      source: {{ urls: {{ default: {url:?} }}, suite: stable, components: [main] }}\n      packages: [pkg]"
         )
     };
+    assert_rejected(
+        &repository("https://example.com/key", "https://example.com/repo")
+            .replace("\"https://example.com/key\"", "1"),
+        ".key",
+    );
+    assert_rejected(
+        &repository("https://example.com/key", "https://example.com/repo")
+            .replace("\"https://example.com/repo\"", "true"),
+        ".source.urls.default",
+    );
     for invalid in [
         "http://example.com/key",
         "ftp://example.com/key",
@@ -307,6 +319,12 @@ fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
         "https://-example.com",
         "https://example-.com",
         "https://example.com\\evil",
+        "https://%65xample.com/key",
+        "https://example.com:/key",
+        "https://2130706433/key",
+        "https://127.1/key",
+        "https://0177.0.0.1/key",
+        "https://0x7f000001/key",
         &format!("https://{}.example", "a".repeat(64)),
         "https://@:443/key",
         "https://user@example.com/key",
@@ -335,6 +353,40 @@ fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
     ] {
         ConfigV1::parse(&repository(valid, valid)).unwrap();
     }
+
+    let label63 = "a".repeat(63);
+    let domain253 = format!("{label63}.{label63}.{label63}.{}", "a".repeat(61));
+    let domain254 = format!("{label63}.{label63}.{label63}.{}", "a".repeat(62));
+    let domain255 = format!("{label63}.{label63}.{label63}.{label63}");
+    assert_eq!(domain253.len(), 253);
+    assert_eq!(domain254.len(), 254);
+    assert_eq!(domain255.len(), 255);
+    ConfigV1::parse(&repository(
+        &format!("https://{domain253}/key"),
+        "https://example.com/repo",
+    ))
+    .unwrap();
+    for domain in [domain254, domain255] {
+        assert_rejected(
+            &repository(&format!("https://{domain}/key"), "https://example.com/repo"),
+            ".key",
+        );
+    }
+
+    let canonical = ConfigV1::parse(&repository(
+        "https://münchen.example/key?q=1",
+        "https://münchen.example/path?channel=stable",
+    ))
+    .unwrap();
+    let repository = &canonical.packages.unwrap().repositories.unwrap()[0];
+    assert_eq!(
+        repository.key.as_str(),
+        "https://xn--mnchen-3ya.example/key?q=1"
+    );
+    assert_eq!(
+        repository.source.urls.select("debian").unwrap(),
+        "https://xn--mnchen-3ya.example/path?channel=stable"
+    );
 }
 
 #[test]
@@ -540,6 +592,36 @@ fn validates_direct_package_shape_coordinates_and_selectors() {
         (direct(&base("          amd64: { include: 'app-*.deb', exclude: ['app-?.deb', 'app-?.deb'] }\n")), "duplicate value"),
     ] {
         assert_rejected(&yaml, expected);
+    }
+
+    for coordinate in [
+        "./..",
+        "owner/.",
+        "owner/..",
+        "-owner/repo",
+        "owner-/repo",
+        "own_er/repo",
+        "owner/repo/extra",
+    ] {
+        assert_rejected(
+            &direct(
+                &base("          amd64: { include: 'app-*.deb', exclude: [] }\n")
+                    .replace("owner/repo", coordinate),
+            ),
+            "source.repository",
+        );
+    }
+
+    for coordinate in [
+        "obsidianmd/obsidian-releases",
+        "rust-lang/rust",
+        "owner/.github",
+    ] {
+        ConfigV1::parse(&direct(
+            &base("          amd64: { include: 'app-*.deb', exclude: [] }\n")
+                .replace("owner/repo", coordinate),
+        ))
+        .unwrap();
     }
 
     let duplicate = direct(

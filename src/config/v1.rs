@@ -429,8 +429,7 @@ impl Packages {
 pub struct Repository {
     #[serde(deserialize_with = "deserialize_string")]
     pub name: String,
-    #[serde(deserialize_with = "deserialize_string")]
-    pub key: String,
+    pub key: HttpsUrl,
     pub source: RepositorySource,
     #[serde(deserialize_with = "deserialize_strings")]
     pub packages: Vec<String>,
@@ -456,7 +455,6 @@ impl Repository {
 
     fn validate(&self, path: &str) -> Result<()> {
         validate_literal(&self.name, &format!("{path}.name"))?;
-        validate_https(&self.key, &format!("{path}.key"))?;
         self.source.validate(&format!("{path}.source"))?;
         validate_required_unique_strings(&self.packages, &format!("{path}.packages"))?;
         for (index, package) in self.packages.iter().enumerate() {
@@ -487,67 +485,130 @@ impl RepositorySource {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepositoryUrls {
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub default: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub ubuntu: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub linuxmint: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub pop: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub zorin: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub deepin: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub debian: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub kali: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub tails: Option<String>,
+    #[serde(default)]
+    pub default: Option<HttpsUrl>,
+    #[serde(default)]
+    pub ubuntu: Option<HttpsUrl>,
+    #[serde(default)]
+    pub linuxmint: Option<HttpsUrl>,
+    #[serde(default)]
+    pub pop: Option<HttpsUrl>,
+    #[serde(default)]
+    pub zorin: Option<HttpsUrl>,
+    #[serde(default)]
+    pub deepin: Option<HttpsUrl>,
+    #[serde(default)]
+    pub debian: Option<HttpsUrl>,
+    #[serde(default)]
+    pub kali: Option<HttpsUrl>,
+    #[serde(default)]
+    pub tails: Option<HttpsUrl>,
 }
 
 impl RepositoryUrls {
     pub fn select(&self, distro: &str) -> Result<&str> {
         let selected = match distro {
-            "ubuntu" => self.ubuntu.as_deref(),
-            "linuxmint" => self.linuxmint.as_deref(),
-            "pop" => self.pop.as_deref(),
-            "zorin" => self.zorin.as_deref(),
-            "deepin" => self.deepin.as_deref(),
-            "debian" => self.debian.as_deref(),
-            "kali" => self.kali.as_deref(),
-            "tails" => self.tails.as_deref(),
+            "ubuntu" => self.ubuntu.as_ref(),
+            "linuxmint" => self.linuxmint.as_ref(),
+            "pop" => self.pop.as_ref(),
+            "zorin" => self.zorin.as_ref(),
+            "deepin" => self.deepin.as_ref(),
+            "debian" => self.debian.as_ref(),
+            "kali" => self.kali.as_ref(),
+            "tails" => self.tails.as_ref(),
             _ => bail!("repository source URL selection: unsupported distro {distro:?}"),
         };
-        selected.or(self.default.as_deref()).ok_or_else(|| {
-            anyhow::anyhow!(
-                "repository source URL selection: no URL for distro {distro:?} and no default URL"
-            )
-        })
+        selected
+            .or(self.default.as_ref())
+            .map(HttpsUrl::as_str)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "repository source URL selection: no URL for distro {distro:?} and no default URL"
+                )
+            })
     }
 
     fn validate(&self, path: &str) -> Result<()> {
         let urls = [
-            ("default", self.default.as_deref()),
-            ("ubuntu", self.ubuntu.as_deref()),
-            ("linuxmint", self.linuxmint.as_deref()),
-            ("pop", self.pop.as_deref()),
-            ("zorin", self.zorin.as_deref()),
-            ("deepin", self.deepin.as_deref()),
-            ("debian", self.debian.as_deref()),
-            ("kali", self.kali.as_deref()),
-            ("tails", self.tails.as_deref()),
+            self.default.as_ref(),
+            self.ubuntu.as_ref(),
+            self.linuxmint.as_ref(),
+            self.pop.as_ref(),
+            self.zorin.as_ref(),
+            self.deepin.as_ref(),
+            self.debian.as_ref(),
+            self.kali.as_ref(),
+            self.tails.as_ref(),
         ];
-        if urls.iter().all(|(_, value)| value.is_none()) {
+        if urls.iter().all(|value| value.is_none()) {
             bail!("{path}: must contain default and/or a supported distro key");
         }
-        for (key, value) in urls {
-            if let Some(value) = value {
-                validate_https(value, &format!("{path}.{key}"))?;
-            }
-        }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpsUrl(Url);
+
+impl HttpsUrl {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        validate_non_empty(value, "URL")?;
+        if value.chars().any(char::is_whitespace)
+            || value.chars().any(char::is_control)
+            || value.contains('\\')
+            || has_substitution(value)
+        {
+            bail!("must be a literal HTTPS URL without whitespace or substitutions");
+        }
+        let parsed = Url::parse(value).context("must be a valid absolute HTTPS URL")?;
+        let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
+        let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+        let host_port = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        let (raw_host, empty_port) = if let Some(rest) = host_port.strip_prefix('[') {
+            let closing = rest.find(']').map(|index| index + 1);
+            let raw_host = closing.map_or(host_port, |index| &host_port[..=index]);
+            let suffix = closing.map_or("", |index| &host_port[index + 1..]);
+            (raw_host, suffix == ":")
+        } else if let Some((host, port)) = host_port.rsplit_once(':') {
+            (host, port.is_empty())
+        } else {
+            (host_port, false)
+        };
+        let invalid_host = parsed.host().is_none_or(|host| match host {
+            Host::Ipv4(address) => raw_host != address.to_string(),
+            Host::Ipv6(_) => false,
+            Host::Domain(domain) => !valid_domain_host(domain),
+        });
+        if raw_scheme != "https"
+            || parsed.scheme() != "https"
+            || authority.is_empty()
+            || authority.contains('%')
+            || empty_port
+            || invalid_host
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || authority.contains('@')
+            || parsed.fragment().is_some()
+        {
+            bail!("must use HTTPS with a non-empty host and no credentials or fragment");
+        }
+        Ok(Self(parsed))
+    }
+}
+
+impl<'de> Deserialize<'de> for HttpsUrl {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = deserialize_string(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
     }
 }
 
@@ -1003,7 +1064,10 @@ impl<'de> de::DeserializeSeed<'de> for StrictStringSeed {
 fn reject_yaml_extensions(text: &str) -> Result<()> {
     for token in Scanner::new(text.chars()) {
         let extension = match token.1 {
-            TokenType::TagDirective(..) | TokenType::Tag(..) => Some("YAML tags"),
+            TokenType::VersionDirective(..) | TokenType::TagDirective(..) => {
+                Some("YAML directives")
+            }
+            TokenType::Tag(..) => Some("YAML tags"),
             TokenType::Anchor(..) => Some("YAML anchors"),
             TokenType::Alias(..) => Some("YAML aliases"),
             _ => None,
@@ -1110,38 +1174,9 @@ where
     Ok(())
 }
 
-fn validate_https(value: &str, path: &str) -> Result<()> {
-    validate_non_empty(value, path)?;
-    if value.chars().any(char::is_whitespace)
-        || value.chars().any(char::is_control)
-        || value.contains('\\')
-        || has_substitution(value)
-    {
-        bail!("{path}: must be a literal HTTPS URL without whitespace or substitutions");
-    }
-    let parsed =
-        Url::parse(value).with_context(|| format!("{path}: must be a valid absolute HTTPS URL"))?;
-    let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
-    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
-    if raw_scheme != "https"
-        || parsed.scheme() != "https"
-        || authority.is_empty()
-        || parsed.host().is_none_or(|host| match host {
-            Host::Ipv4(_) | Host::Ipv6(_) => false,
-            Host::Domain(domain) => !valid_domain_host(domain),
-        })
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || authority.contains('@')
-        || parsed.fragment().is_some()
-    {
-        bail!("{path}: must use HTTPS with a non-empty host and no credentials or fragment");
-    }
-    Ok(())
-}
-
 fn valid_domain_host(domain: &str) -> bool {
     !domain.is_empty()
+        && domain.len() <= 253
         && domain.split('.').all(|label| {
             label.len() <= 63
                 && label
@@ -1162,18 +1197,38 @@ fn validate_github_repository(value: &str, path: &str) -> Result<()> {
     let mut parts = value.split('/');
     let owner = parts.next().unwrap_or_default();
     let repository = parts.next().unwrap_or_default();
-    if parts.next().is_some() || !valid_coordinate_part(owner) || !valid_coordinate_part(repository)
+    if parts.next().is_some()
+        || !valid_github_owner(owner)
+        || !valid_github_repository_name(repository)
     {
         bail!("{path}: must be an owner/repository coordinate");
     }
     Ok(())
 }
 
-fn valid_coordinate_part(value: &str) -> bool {
+fn valid_github_owner(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn valid_github_repository_name(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        && value
+            .bytes()
+            .any(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
 }
 
 fn validate_wildcard(value: &str, path: &str) -> Result<()> {
@@ -1429,10 +1484,10 @@ mod tests {
     fn repository_stem_uses_contract_sanitization() {
         let repository = Repository {
             name: "--GitHub__CLI!!".into(),
-            key: "https://example.com/key".into(),
+            key: HttpsUrl::parse("https://example.com/key").unwrap(),
             source: RepositorySource {
                 urls: RepositoryUrls {
-                    default: Some("https://example.com/repo".into()),
+                    default: Some(HttpsUrl::parse("https://example.com/repo").unwrap()),
                     ubuntu: None,
                     linuxmint: None,
                     pop: None,
@@ -1453,8 +1508,8 @@ mod tests {
     #[test]
     fn distro_url_precedes_default() {
         let urls = RepositoryUrls {
-            default: Some("https://default.example".into()),
-            ubuntu: Some("https://ubuntu.example".into()),
+            default: Some(HttpsUrl::parse("https://default.example").unwrap()),
+            ubuntu: Some(HttpsUrl::parse("https://ubuntu.example").unwrap()),
             linuxmint: None,
             pop: None,
             zorin: None,
@@ -1463,7 +1518,7 @@ mod tests {
             kali: None,
             tails: None,
         };
-        assert_eq!(urls.select("ubuntu").unwrap(), "https://ubuntu.example");
-        assert_eq!(urls.select("debian").unwrap(), "https://default.example");
+        assert_eq!(urls.select("ubuntu").unwrap(), "https://ubuntu.example/");
+        assert_eq!(urls.select("debian").unwrap(), "https://default.example/");
     }
 }
