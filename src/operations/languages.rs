@@ -87,8 +87,11 @@ pub fn node(host: &Host<'_>, version: &str, npm: &[String]) -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| host.home().join(".local/share"))
         .join("fnm");
+    let installed_fnm = fnm_dir.join("fnm");
     let fnm = if host.command_exists("fnm") {
         "fnm".to_owned()
+    } else if executable_file(&installed_fnm) {
+        installed_fnm.to_string_lossy().into_owned()
     } else {
         let installer = TempPath::new(host, "fnm-install")?;
         host.require(
@@ -106,14 +109,13 @@ pub fn node(host: &Host<'_>, version: &str, npm: &[String]) -> Result<()> {
             "bash",
             [&installer.path().to_string_lossy(), "--skip-shell"],
         )?;
-        let installed = fnm_dir.join("fnm");
-        if !executable_file(&installed) {
+        if !executable_file(&installed_fnm) {
             bail!(
                 "node install: fnm installer did not create {}",
-                installed.display()
+                installed_fnm.display()
             );
         }
-        installed.to_string_lossy().into_owned()
+        installed_fnm.to_string_lossy().into_owned()
     };
     let mut args = vec![
         "-euo".to_owned(),
