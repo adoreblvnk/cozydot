@@ -13,20 +13,41 @@ pub fn metadata_refresh(host: &Host<'_>) -> Result<()> {
     Ok(())
 }
 
+pub fn bootstrap_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
+    if packages.is_empty() {
+        anyhow::bail!("APT bootstrap package sequence must not be empty");
+    }
+    let missing = select_packages(host, packages, false)?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+    host.require(
+        "APT bootstrap metadata refresh",
+        "sudo",
+        ["apt-get", "update", "-qq"],
+    )?;
+    install(host, "APT bootstrap package installation", missing)
+}
+
 pub fn packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
     let missing = select_packages(host, packages, false)?;
     if missing.is_empty() {
         return Ok(());
     }
+    install(host, "APT package installation", missing)
+}
+
+fn install(host: &Host<'_>, operation: &str, packages: Vec<String>) -> Result<()> {
     let mut args = vec![
+        "DEBIAN_FRONTEND=noninteractive".to_owned(),
         "apt-get".to_owned(),
         "install".into(),
         "-y".into(),
         "-qq".into(),
         "--".into(),
     ];
-    args.extend(missing);
-    host.require("APT package installation", "sudo", args)?;
+    args.extend(packages);
+    host.require(operation, "sudo", args)?;
     Ok(())
 }
 
@@ -36,6 +57,7 @@ pub fn purge(host: &Host<'_>, packages: &[String]) -> Result<()> {
         return Ok(());
     }
     let mut args = vec![
+        "DEBIAN_FRONTEND=noninteractive".to_owned(),
         "apt-get".to_owned(),
         "purge".into(),
         "-y".into(),
@@ -53,19 +75,41 @@ pub fn upgrade(host: &Host<'_>, policy: AptUpgradePolicy) -> Result<()> {
             host.require(
                 "APT standard upgrade",
                 "sudo",
-                ["apt-get", "upgrade", "-y", "-qq"],
+                [
+                    "DEBIAN_FRONTEND=noninteractive",
+                    "apt-get",
+                    "upgrade",
+                    "-y",
+                    "-qq",
+                    "--",
+                ],
             )?;
         }
         AptUpgradePolicy::Full => {
             host.require(
                 "APT full upgrade",
                 "sudo",
-                ["apt-get", "full-upgrade", "-y", "-qq"],
+                [
+                    "DEBIAN_FRONTEND=noninteractive",
+                    "apt-get",
+                    "full-upgrade",
+                    "-y",
+                    "-qq",
+                    "--",
+                ],
             )?;
             host.require(
                 "APT purge autoremove",
                 "sudo",
-                ["apt-get", "autoremove", "--purge", "-y", "-qq"],
+                [
+                    "DEBIAN_FRONTEND=noninteractive",
+                    "apt-get",
+                    "autoremove",
+                    "--purge",
+                    "-y",
+                    "-qq",
+                    "--",
+                ],
             )?;
         }
     }
@@ -82,6 +126,7 @@ fn select_packages(
     }
     let mut requested = BTreeSet::new();
     for package in packages {
+        validate_package_name(package)?;
         if !requested.insert(package.as_str()) {
             anyhow::bail!("APT package state query has duplicate requested package: {package:?}");
         }
@@ -106,6 +151,20 @@ fn select_packages(
         .filter(|package| installed.contains(package.as_str()) == select_installed)
         .cloned()
         .collect())
+}
+
+fn validate_package_name(package: &str) -> Result<()> {
+    let mut bytes = package.bytes();
+    let valid = bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'+' | b'.' | b'-')
+        });
+    if !valid {
+        anyhow::bail!("invalid canonical Debian package name: {package:?}");
+    }
+    Ok(())
 }
 
 fn installed_packages<'a>(
