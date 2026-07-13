@@ -214,8 +214,8 @@ fn inspect(condition: &Condition) -> Result<bool> {
         Condition::CommandMissing(name) => {
             inspect(&Condition::CommandExists(name.clone())).map(|v| !v)
         }
-        Condition::PackageInstalled(name) => status("dpkg-query", &["-W", name]),
-        Condition::PackageMissing(name) => status("dpkg-query", &["-W", name]).map(|v| !v),
+        Condition::PackageInstalled(name) => package_is_installed(name),
+        Condition::PackageMissing(name) => package_is_installed(name).map(|installed| !installed),
         Condition::ServiceActive(name) => status("systemctl", &["-q", "is-active", name]),
         Condition::UserServiceInactive(name) => {
             status("systemctl", &["--user", "-q", "is-active", name]).map(|v| !v)
@@ -230,6 +230,17 @@ fn inspect(condition: &Condition) -> Result<bool> {
         Condition::FileExists(path) => Ok(path.exists()),
         Condition::FileMissing(path) => Ok(!path.exists()),
     }
+}
+
+fn package_is_installed(name: &str) -> Result<bool> {
+    let output = Command::new("dpkg-query")
+        .args(["-W", "-f=${db:Status-Abbrev}", name])
+        .output()?;
+    Ok(output.status.success() && package_status_is_installed(&output.stdout))
+}
+
+fn package_status_is_installed(status: &[u8]) -> bool {
+    status.starts_with(b"ii")
 }
 
 pub fn command_exists_in(name: &str, path: &OsStr) -> bool {
@@ -308,5 +319,12 @@ mod tests {
         assert!(command_exists_in("linked-tool", dir.path().as_os_str()));
         symlink(dir.path(), dir.path().join("directory-tool")).unwrap();
         assert!(!command_exists_in("directory-tool", dir.path().as_os_str()));
+    }
+
+    #[test]
+    fn residual_config_package_status_is_not_installed() {
+        assert!(package_status_is_installed(b"ii "));
+        assert!(!package_status_is_installed(b"rc "));
+        assert!(!package_status_is_installed(b""));
     }
 }
