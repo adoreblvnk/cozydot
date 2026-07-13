@@ -1,7 +1,7 @@
 use crate::{
     config::v1::{
-        AptComponent, AptSources, AptUpdate, AssetSelector, ConfigV1, DirectFormat, DirectPackage,
-        HttpsUrl, Theme,
+        AptComponent, AptSourceToken, AptSources, AptUpdate, AssetSelector, ConfigV1,
+        ConfiguredRepositorySuite, DirectFormat, DirectPackage, HttpsUrl, Theme,
     },
     platform::{Architecture, Platform},
 };
@@ -73,7 +73,7 @@ pub enum AptSourcesIntent {
     Managed {
         distro: String,
         upstream: String,
-        codename: String,
+        codename: AptSourceToken,
         components: Option<Vec<AptComponent>>,
     },
 }
@@ -84,7 +84,7 @@ pub struct AptRepository {
     pub key_url: HttpsUrl,
     pub source_url: HttpsUrl,
     pub suite: RepositorySuite,
-    pub components: Vec<String>,
+    pub components: Vec<AptSourceToken>,
     pub architecture: Architecture,
     pub keyring_path: PathBuf,
     pub source_list_path: PathBuf,
@@ -92,14 +92,14 @@ pub struct AptRepository {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepositorySuite {
-    ResolvedSystem(String),
-    Fixed(String),
+    ResolvedSystem(AptSourceToken),
+    Fixed(AptSourceToken),
 }
 
 impl RepositorySuite {
     pub fn value(&self) -> &str {
         match self {
-            Self::ResolvedSystem(value) | Self::Fixed(value) => value,
+            Self::ResolvedSystem(value) | Self::Fixed(value) => value.as_str(),
         }
     }
 }
@@ -361,13 +361,13 @@ pub fn plan(config: &ConfigV1, platform: &Platform, dotfiles_root: &Path) -> Res
                 .urls
                 .select_url(&platform.distro)
                 .with_context(|| format!("packages.repositories[{index}].source.urls"))?;
-            let suite = if repository.source.suite == "system" {
-                if platform.codename.trim().is_empty() {
-                    bail!("packages.repositories[{index}].source.suite: system requires a non-empty platform codename");
-                }
-                RepositorySuite::ResolvedSystem(platform.codename.clone())
-            } else {
-                RepositorySuite::Fixed(repository.source.suite.clone())
+            let suite = match &repository.source.suite {
+                ConfiguredRepositorySuite::System => RepositorySuite::ResolvedSystem(
+                    AptSourceToken::parse(&platform.codename).with_context(|| {
+                        format!("packages.repositories[{index}].source.suite: invalid system platform codename")
+                    })?,
+                ),
+                ConfiguredRepositorySuite::Fixed(suite) => RepositorySuite::Fixed(suite.clone()),
             };
             let stem = repository.sanitized_name();
             sources.push(PlannedAction::Repository(AptRepository {
@@ -494,14 +494,13 @@ fn plan_system(
     }
     if let Some(apt) = &system.apt {
         if matches!(apt.sources, Some(AptSources::Managed)) {
-            if platform.codename.trim().is_empty() {
-                bail!("system.apt.sources: managed requires a non-empty platform codename");
-            }
+            let codename = AptSourceToken::parse(&platform.codename)
+                .context("system.apt.sources: managed requires a valid platform codename")?;
             sources.push(PlannedAction::System(SystemAction::AptSources(
                 AptSourcesIntent::Managed {
                     distro: platform.distro.clone(),
                     upstream: platform.upstream.clone(),
-                    codename: platform.codename.clone(),
+                    codename,
                     components: apt.components.clone(),
                 },
             )));

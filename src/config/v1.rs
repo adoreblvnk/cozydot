@@ -518,17 +518,85 @@ impl Repository {
 #[serde(deny_unknown_fields)]
 pub struct RepositorySource {
     pub urls: RepositoryUrls,
-    #[serde(deserialize_with = "deserialize_string")]
-    pub suite: String,
-    #[serde(deserialize_with = "deserialize_strings")]
-    pub components: Vec<String>,
+    pub suite: ConfiguredRepositorySuite,
+    pub components: Vec<AptSourceToken>,
 }
 
 impl RepositorySource {
     fn validate(&self, path: &str) -> Result<()> {
         self.urls.validate(&format!("{path}.urls"))?;
-        validate_literal(&self.suite, &format!("{path}.suite"))?;
-        validate_required_unique_strings(&self.components, &format!("{path}.components"))
+        validate_required_unique_apt_source_tokens(&self.components, &format!("{path}.components"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AptSourceToken(String);
+
+impl AptSourceToken {
+    pub fn parse(value: &str) -> Result<Self> {
+        let mut bytes = value.bytes();
+        let valid = bytes
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+            && bytes.all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'.' | b'_' | b'+' | b'-')
+            });
+        if !valid {
+            bail!(
+                "must be one lowercase APT source token starting with a letter or digit and containing only letters, digits, '.', '_', '+', or '-'"
+            );
+        }
+        Ok(Self(value.into()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AptSourceToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl AsRef<str> for AptSourceToken {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl<'de> Deserialize<'de> for AptSourceToken {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = deserialize_string(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfiguredRepositorySuite {
+    System,
+    Fixed(AptSourceToken),
+}
+
+impl<'de> Deserialize<'de> for ConfiguredRepositorySuite {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = deserialize_string(deserializer)?;
+        if value == "system" {
+            Ok(Self::System)
+        } else {
+            AptSourceToken::parse(&value)
+                .map(Self::Fixed)
+                .map_err(de::Error::custom)
+        }
     }
 }
 
@@ -1211,6 +1279,19 @@ fn validate_required_unique_strings(values: &[String], path: &str) -> Result<()>
     validate_unique_strings(Some(values), path)
 }
 
+fn validate_required_unique_apt_source_tokens(values: &[AptSourceToken], path: &str) -> Result<()> {
+    if values.is_empty() {
+        bail!("{path}: must be a non-empty sequence");
+    }
+    let mut seen = HashSet::new();
+    for (index, value) in values.iter().enumerate() {
+        if !seen.insert(value) {
+            bail!("{path}[{index}]: duplicate value {value:?}");
+        }
+    }
+    Ok(())
+}
+
 fn validate_unique_by<T, F>(values: &[T], path: &str, key: F) -> Result<()>
 where
     F: Fn(&T) -> &'static str,
@@ -1548,8 +1629,8 @@ mod tests {
                     kali: None,
                     tails: None,
                 },
-                suite: "stable".into(),
-                components: vec!["main".into()],
+                suite: ConfiguredRepositorySuite::Fixed(AptSourceToken::parse("stable").unwrap()),
+                components: vec![AptSourceToken::parse("main").unwrap()],
             },
             packages: vec!["gh".into()],
         };
