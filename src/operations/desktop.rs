@@ -40,9 +40,10 @@ pub fn gnome_extension(host: &Host<'_>, extension: &str) -> Result<()> {
         .lines()
         .any(|installed| installed == extension)
     {
-        bail!(
-            "gnome extension: {extension} was installed, but GNOME has not loaded it yet; log out and back in, then rerun `cozydot apply`"
+        eprintln!(
+            "cozydot: installed GNOME extension {extension}; after this apply completes, log out and back in once, then rerun `cozydot apply` to enable all newly installed extensions"
         );
+        return Ok(());
     }
     host.require("gnome extension", "gnome-extensions", ["enable", extension])?;
     Ok(())
