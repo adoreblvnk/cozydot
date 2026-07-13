@@ -1,7 +1,7 @@
 use crate::{
     config::v1::{
         AptComponent, AptSources, AptUpdate, AssetSelector, ConfigV1, DirectFormat, DirectPackage,
-        Theme,
+        HttpsUrl, Theme,
     },
     platform::{Architecture, Platform},
 };
@@ -18,10 +18,12 @@ pub struct PlanV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlannedAction {
-    Prepare(Preparation),
+    Bootstrap(Bootstrap),
     System(SystemAction),
+    AptMetadataRefresh,
     RemovePackages(Vec<String>),
     Repository(AptRepository),
+    RepositoryPackages(AptRepositoryPackages),
     AptPackages(Vec<String>),
     Flatpak(FlatpakInstall),
     Tool(ToolInstall),
@@ -36,17 +38,17 @@ pub enum PlannedAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Preparation {
+pub struct Bootstrap {
     pub prerequisites: BTreeSet<Prerequisite>,
-    pub apt_metadata: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Prerequisite {
-    NetworkDownload,
-    AptRepositorySupport,
+    HttpsDownloader,
+    OpenPgpRepositorySupport,
     FlatpakFlathub,
-    RustupCargoBinstall,
+    Rustup,
+    CargoBinstall,
     GoArchives,
     FnmNpm,
     Uv,
@@ -54,16 +56,13 @@ pub enum Prerequisite {
     DirectDeb,
     DirectAppImage,
     NerdFonts,
-    DockerIntegration,
-    VirtualBoxIntegration,
-    VsCodeIntegration,
     GnomeTools,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SystemAction {
     AptSources(AptSourcesIntent),
-    EnsureAdmin { enabled: bool },
+    EnsureAdmin,
     UnattendedUpgrades { enabled: bool },
     UbuntuSnap { enabled: bool },
     UbuntuCodecs,
@@ -71,7 +70,6 @@ pub enum SystemAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AptSourcesIntent {
-    Preserve,
     Managed {
         distro: String,
         upstream: String,
@@ -83,13 +81,32 @@ pub enum AptSourcesIntent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AptRepository {
     pub name: String,
-    pub key_url: String,
-    pub source_url: String,
-    pub suite: String,
+    pub key_url: HttpsUrl,
+    pub source_url: HttpsUrl,
+    pub suite: RepositorySuite,
     pub components: Vec<String>,
-    pub architecture: String,
+    pub architecture: Architecture,
     pub keyring_path: PathBuf,
     pub source_list_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepositorySuite {
+    ResolvedSystem(String),
+    Fixed(String),
+}
+
+impl RepositorySuite {
+    pub fn value(&self) -> &str {
+        match self {
+            Self::ResolvedSystem(value) | Self::Fixed(value) => value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AptRepositoryPackages {
+    pub repository: String,
     pub packages: Vec<String>,
 }
 
@@ -108,11 +125,11 @@ pub enum FlatpakRemote {
 pub enum ToolInstall {
     Rust {
         selector: RustSelector,
-        target: String,
+        architecture: Architecture,
     },
     Go {
         selector: GoSelector,
-        archive_architecture: String,
+        architecture: Architecture,
     },
     Node {
         selector: NodeSelector,
@@ -203,15 +220,50 @@ pub enum IntegrationAction {
     VsCodeExtensions(Vec<String>),
 }
 
+impl IntegrationAction {
+    pub fn required_product(&self) -> ExistingProduct {
+        match self {
+            Self::DockerGroup | Self::DockerLocalLog { .. } => ExistingProduct::Docker,
+            Self::VirtualBoxGroup => ExistingProduct::VirtualBox,
+            Self::VsCodeExtensions(_) => ExistingProduct::VsCode,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExistingProduct {
+    Docker,
+    VirtualBox,
+    VsCode,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopAction {
-    Theme(Theme),
-    Terminal(String),
-    IdleTimeout(String),
-    IdleDim { enabled: bool },
+    Theme {
+        target: DesktopTarget,
+        theme: Theme,
+    },
+    Terminal {
+        target: DesktopTarget,
+        executable: String,
+    },
+    IdleTimeout {
+        target: DesktopTarget,
+        timeout: String,
+    },
+    IdleDim {
+        target: DesktopTarget,
+        enabled: bool,
+    },
     GnomeExtensions(Vec<String>),
     GnomeDock,
     GnomeRoundedCorners,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopTarget {
+    Gnome,
+    Cinnamon,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,11 +308,11 @@ pub enum FlatpakUpdateScope {
 pub enum ToolUpdate {
     Rust {
         selector: RustSelector,
-        target: String,
+        architecture: Architecture,
     },
     Go {
         selector: GoSelector,
-        archive_architecture: String,
+        architecture: Architecture,
     },
     Node {
         selector: NodeSelector,
@@ -280,79 +332,94 @@ pub fn plan(config: &ConfigV1, platform: &Platform, dotfiles_root: &Path) -> Res
         bail!("packages.npm: requires tools.node");
     }
 
-    let mut actions = Vec::new();
     let mut prerequisites = BTreeSet::new();
-    let mut apt_metadata = false;
+    let mut preparation = Vec::new();
+    let mut sources = Vec::new();
+    let mut apt_consumers = Vec::new();
+    let mut repository_consumers = Vec::new();
+    let mut remaining = Vec::new();
+    let mut updates = Vec::new();
+    let mut needs_apt_metadata = false;
 
-    plan_system(config, platform, &mut actions, &mut apt_metadata)?;
-
-    if let Some(remove) = non_empty(packages.and_then(|packages| packages.remove.as_ref())) {
-        apt_metadata = true;
-        actions.push(PlannedAction::RemovePackages(remove.clone()));
-    }
+    plan_system(
+        config,
+        platform,
+        &mut preparation,
+        &mut sources,
+        &mut apt_consumers,
+        &mut needs_apt_metadata,
+    )?;
 
     if let Some(repositories) = packages.and_then(|packages| packages.repositories.as_ref()) {
         for (index, repository) in repositories.iter().enumerate() {
             prerequisites.extend([
-                Prerequisite::NetworkDownload,
-                Prerequisite::AptRepositorySupport,
+                Prerequisite::HttpsDownloader,
+                Prerequisite::OpenPgpRepositorySupport,
             ]);
-            apt_metadata = true;
             let source_url = repository
                 .source
                 .urls
-                .select(&platform.distro)
+                .select_url(&platform.distro)
                 .with_context(|| format!("packages.repositories[{index}].source.urls"))?;
             let suite = if repository.source.suite == "system" {
                 if platform.codename.trim().is_empty() {
                     bail!("packages.repositories[{index}].source.suite: system requires a non-empty platform codename");
                 }
-                platform.codename.clone()
+                RepositorySuite::ResolvedSystem(platform.codename.clone())
             } else {
-                repository.source.suite.clone()
+                RepositorySuite::Fixed(repository.source.suite.clone())
             };
             let stem = repository.sanitized_name();
-            actions.push(PlannedAction::Repository(AptRepository {
+            sources.push(PlannedAction::Repository(AptRepository {
                 name: repository.name.clone(),
-                key_url: repository.key.as_str().to_owned(),
-                source_url: source_url.to_owned(),
+                key_url: repository.key.clone(),
+                source_url: source_url.clone(),
                 suite,
                 components: repository.source.components.clone(),
-                architecture: platform.architecture.debian().into(),
+                architecture: platform.architecture,
                 keyring_path: PathBuf::from(format!("/etc/apt/keyrings/cozydot-{stem}.gpg")),
                 source_list_path: PathBuf::from(format!(
                     "/etc/apt/sources.list.d/cozydot-{stem}.list"
                 )),
+            }));
+            repository_consumers.push(PlannedAction::RepositoryPackages(AptRepositoryPackages {
+                repository: repository.name.clone(),
                 packages: repository.packages.clone(),
             }));
+            needs_apt_metadata = true;
         }
     }
+    if let Some(remove) = non_empty(packages.and_then(|packages| packages.remove.as_ref())) {
+        apt_consumers.push(PlannedAction::RemovePackages(remove.clone()));
+        needs_apt_metadata = true;
+    }
+    apt_consumers.append(&mut repository_consumers);
     if let Some(apt) = non_empty(packages.and_then(|packages| packages.apt.as_ref())) {
-        prerequisites.insert(Prerequisite::NetworkDownload);
-        apt_metadata = true;
-        actions.push(PlannedAction::AptPackages(apt.clone()));
+        apt_consumers.push(PlannedAction::AptPackages(apt.clone()));
+        needs_apt_metadata = true;
     }
 
     if let Some(refs) = non_empty(packages.and_then(|packages| packages.flatpak.as_ref())) {
-        prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::FlatpakFlathub]);
-        actions.push(PlannedAction::Flatpak(FlatpakInstall {
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FlatpakFlathub]);
+        remaining.push(PlannedAction::Flatpak(FlatpakInstall {
             remote: FlatpakRemote::Flathub,
             refs: refs.clone(),
         }));
     }
 
-    plan_tools(tools, platform, &mut actions, &mut prerequisites);
+    plan_tools(tools, platform, &mut remaining, &mut prerequisites);
 
     if let Some(cargo) = non_empty(packages.and_then(|packages| packages.cargo.as_ref())) {
         prerequisites.extend([
-            Prerequisite::NetworkDownload,
-            Prerequisite::RustupCargoBinstall,
+            Prerequisite::HttpsDownloader,
+            Prerequisite::Rustup,
+            Prerequisite::CargoBinstall,
         ]);
-        actions.push(PlannedAction::CargoPackages(cargo.clone()));
+        remaining.push(PlannedAction::CargoPackages(cargo.clone()));
     }
     if !npm.is_empty() {
-        prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::FnmNpm]);
-        actions.push(PlannedAction::NpmPackages(npm.to_vec()));
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FnmNpm]);
+        remaining.push(PlannedAction::NpmPackages(npm.to_vec()));
     }
 
     let direct = packages
@@ -363,101 +430,98 @@ pub fn plan(config: &ConfigV1, platform: &Platform, dotfiles_root: &Path) -> Res
         .map(|package| direct_intent(package, platform.architecture))
         .collect::<Result<Vec<_>>>()?;
     for (package, intent) in direct.iter().zip(direct_intents.iter()) {
-        prerequisites.insert(Prerequisite::NetworkDownload);
+        prerequisites.insert(Prerequisite::HttpsDownloader);
         prerequisites.insert(match package.format {
             DirectFormat::Deb => Prerequisite::DirectDeb,
             DirectFormat::Appimage => Prerequisite::DirectAppImage,
         });
-        actions.push(PlannedAction::DirectPackage(intent.clone()));
+        remaining.push(PlannedAction::DirectPackage(intent.clone()));
     }
 
     if let Some(fonts) = non_empty(config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref())) {
-        prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::NerdFonts]);
-        actions.push(PlannedAction::NerdFonts(fonts.clone()));
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::NerdFonts]);
+        remaining.push(PlannedAction::NerdFonts(fonts.clone()));
     }
 
     if let Some(dotfiles) = &config.dotfiles {
         prerequisites.insert(Prerequisite::Stow);
-        actions.push(PlannedAction::Dotfiles(DotfilesIntent {
+        remaining.push(PlannedAction::Dotfiles(DotfilesIntent {
             root: dotfiles_root.to_path_buf(),
             packages: dotfiles.packages.clone(),
             conflict_policy: DotfilesConflictPolicy::BackupBeforeStow,
         }));
     }
 
-    plan_integrations(config, &mut actions, &mut prerequisites);
-    plan_desktop(config, platform, &mut actions, &mut prerequisites);
+    plan_integrations(config, &mut remaining);
+    plan_desktop(config, platform, &mut remaining, &mut prerequisites);
     plan_updates(
         config,
         platform,
         &direct_intents,
-        &mut actions,
+        &mut updates,
         &mut prerequisites,
-        &mut apt_metadata,
+        &mut needs_apt_metadata,
     );
 
+    let mut actions = Vec::new();
     if !prerequisites.is_empty() {
-        apt_metadata = true;
+        actions.push(PlannedAction::Bootstrap(Bootstrap { prerequisites }));
     }
-    if apt_metadata || !prerequisites.is_empty() {
-        actions.insert(
-            0,
-            PlannedAction::Prepare(Preparation {
-                prerequisites,
-                apt_metadata,
-            }),
-        );
+    actions.append(&mut preparation);
+    actions.append(&mut sources);
+    if needs_apt_metadata {
+        actions.push(PlannedAction::AptMetadataRefresh);
     }
+    actions.append(&mut apt_consumers);
+    actions.append(&mut remaining);
+    actions.append(&mut updates);
     Ok(PlanV1 { actions })
 }
 
 fn plan_system(
     config: &ConfigV1,
     platform: &Platform,
-    actions: &mut Vec<PlannedAction>,
-    apt_metadata: &mut bool,
+    preparation: &mut Vec<PlannedAction>,
+    sources: &mut Vec<PlannedAction>,
+    apt_consumers: &mut Vec<PlannedAction>,
+    needs_apt_metadata: &mut bool,
 ) -> Result<()> {
     let Some(system) = &config.system else {
         return Ok(());
     };
+    if system.ensure_admin == Some(true) {
+        preparation.push(PlannedAction::System(SystemAction::EnsureAdmin));
+    }
     if let Some(apt) = &system.apt {
-        if let Some(sources) = &apt.sources {
-            let intent = match sources {
-                AptSources::Preserve => AptSourcesIntent::Preserve,
-                AptSources::Managed => {
-                    if platform.codename.trim().is_empty() {
-                        bail!("system.apt.sources: managed requires a non-empty platform codename");
-                    }
-                    *apt_metadata = true;
-                    AptSourcesIntent::Managed {
-                        distro: platform.distro.clone(),
-                        upstream: platform.upstream.clone(),
-                        codename: platform.codename.clone(),
-                        components: apt.components.clone(),
-                    }
-                }
-            };
-            actions.push(PlannedAction::System(SystemAction::AptSources(intent)));
+        if matches!(apt.sources, Some(AptSources::Managed)) {
+            if platform.codename.trim().is_empty() {
+                bail!("system.apt.sources: managed requires a non-empty platform codename");
+            }
+            sources.push(PlannedAction::System(SystemAction::AptSources(
+                AptSourcesIntent::Managed {
+                    distro: platform.distro.clone(),
+                    upstream: platform.upstream.clone(),
+                    codename: platform.codename.clone(),
+                    components: apt.components.clone(),
+                },
+            )));
         }
-    }
-    if let Some(enabled) = system.ensure_admin {
-        actions.push(PlannedAction::System(SystemAction::EnsureAdmin { enabled }));
-    }
-    if let Some(enabled) = system.apt.as_ref().and_then(|apt| apt.unattended_upgrades) {
-        *apt_metadata = true;
-        actions.push(PlannedAction::System(SystemAction::UnattendedUpgrades {
-            enabled,
-        }));
+        if let Some(enabled) = apt.unattended_upgrades {
+            *needs_apt_metadata = true;
+            apt_consumers.push(PlannedAction::System(SystemAction::UnattendedUpgrades {
+                enabled,
+            }));
+        }
     }
     if platform.upstream == "ubuntu" {
         if let Some(ubuntu) = &system.ubuntu {
             if let Some(enabled) = ubuntu.snap {
-                *apt_metadata = true;
-                actions.push(PlannedAction::System(SystemAction::UbuntuSnap { enabled }));
+                *needs_apt_metadata = true;
+                apt_consumers.push(PlannedAction::System(SystemAction::UbuntuSnap { enabled }));
             }
             if ubuntu.codecs == Some(true) {
-                *apt_metadata = true;
-                actions.push(PlannedAction::System(SystemAction::UbuntuCodecs));
+                *needs_apt_metadata = true;
+                apt_consumers.push(PlannedAction::System(SystemAction::UbuntuCodecs));
             }
         }
     }
@@ -472,30 +536,27 @@ fn plan_tools(
 ) {
     let Some(tools) = tools else { return };
     if let Some(selector) = tools.rust.as_deref() {
-        prerequisites.extend([
-            Prerequisite::NetworkDownload,
-            Prerequisite::RustupCargoBinstall,
-        ]);
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::Rustup]);
         actions.push(PlannedAction::Tool(ToolInstall::Rust {
             selector: rust_selector(selector),
-            target: platform.architecture.rust_target().into(),
+            architecture: platform.architecture,
         }));
     }
     if let Some(selector) = tools.go.as_deref() {
-        prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::GoArchives]);
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::GoArchives]);
         actions.push(PlannedAction::Tool(ToolInstall::Go {
             selector: go_selector(selector),
-            archive_architecture: platform.architecture.go_archive().into(),
+            architecture: platform.architecture,
         }));
     }
     if let Some(selector) = tools.node.as_deref() {
-        prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::FnmNpm]);
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FnmNpm]);
         actions.push(PlannedAction::Tool(ToolInstall::Node {
             selector: node_selector(selector),
         }));
     }
     if let Some(version) = tools.python.as_ref() {
-        prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::Uv]);
+        prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::Uv]);
         actions.push(PlannedAction::Tool(ToolInstall::Python {
             version: version.clone(),
         }));
@@ -526,21 +587,15 @@ fn direct_intent(
     })
 }
 
-fn plan_integrations(
-    config: &ConfigV1,
-    actions: &mut Vec<PlannedAction>,
-    prerequisites: &mut BTreeSet<Prerequisite>,
-) {
+fn plan_integrations(config: &ConfigV1, actions: &mut Vec<PlannedAction>) {
     let Some(integrations) = &config.integrations else {
         return;
     };
     if let Some(docker) = &integrations.docker {
         if docker.add_user_to_group == Some(true) {
-            prerequisites.insert(Prerequisite::DockerIntegration);
             actions.push(PlannedAction::Integration(IntegrationAction::DockerGroup));
         }
         if docker.local_log_driver == Some(true) {
-            prerequisites.insert(Prerequisite::DockerIntegration);
             actions.push(PlannedAction::Integration(
                 IntegrationAction::DockerLocalLog {
                     max_size: docker.max_log_size.clone(),
@@ -553,7 +608,6 @@ fn plan_integrations(
         .as_ref()
         .is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true))
     {
-        prerequisites.insert(Prerequisite::VirtualBoxIntegration);
         actions.push(PlannedAction::Integration(
             IntegrationAction::VirtualBoxGroup,
         ));
@@ -564,7 +618,6 @@ fn plan_integrations(
             .as_ref()
             .and_then(|vscode| vscode.extensions.as_ref()),
     ) {
-        prerequisites.insert(Prerequisite::VsCodeIntegration);
         actions.push(PlannedAction::Integration(
             IntegrationAction::VsCodeExtensions(extensions.clone()),
         ));
@@ -580,26 +633,36 @@ fn plan_desktop(
     let Some(desktop) = &config.desktop else {
         return;
     };
-    if !matches!(platform.desktop.as_str(), "gnome" | "cinnamon") {
-        return;
-    }
+    let target = match platform.desktop.as_str() {
+        "gnome" => DesktopTarget::Gnome,
+        "cinnamon" => DesktopTarget::Cinnamon,
+        _ => return,
+    };
     let start = actions.len();
     if let Some(theme) = &desktop.theme {
-        actions.push(PlannedAction::Desktop(DesktopAction::Theme(theme.clone())));
+        actions.push(PlannedAction::Desktop(DesktopAction::Theme {
+            target,
+            theme: theme.clone(),
+        }));
     }
     if let Some(terminal) = &desktop.terminal {
-        actions.push(PlannedAction::Desktop(DesktopAction::Terminal(
-            terminal.clone(),
-        )));
+        actions.push(PlannedAction::Desktop(DesktopAction::Terminal {
+            target,
+            executable: terminal.clone(),
+        }));
     }
     if let Some(idle) = &desktop.idle {
         if let Some(timeout) = &idle.timeout {
-            actions.push(PlannedAction::Desktop(DesktopAction::IdleTimeout(
-                timeout.clone(),
-            )));
+            actions.push(PlannedAction::Desktop(DesktopAction::IdleTimeout {
+                target,
+                timeout: timeout.clone(),
+            }));
         }
         if let Some(enabled) = idle.dim {
-            actions.push(PlannedAction::Desktop(DesktopAction::IdleDim { enabled }));
+            actions.push(PlannedAction::Desktop(DesktopAction::IdleDim {
+                target,
+                enabled,
+            }));
         }
     }
     if platform.desktop == "gnome" {
@@ -636,7 +699,6 @@ fn plan_updates(
     match updates.apt {
         Some(AptUpdate::Standard) => {
             *apt_metadata = true;
-            prerequisites.insert(Prerequisite::NetworkDownload);
             actions.push(PlannedAction::Update(UpdateAction::Apt {
                 policy: AptUpdatePolicy::Standard,
                 target: AptUpdateTarget::SystemPackages,
@@ -644,7 +706,6 @@ fn plan_updates(
         }
         Some(AptUpdate::Full) => {
             *apt_metadata = true;
-            prerequisites.insert(Prerequisite::NetworkDownload);
             actions.push(PlannedAction::Update(UpdateAction::Apt {
                 policy: AptUpdatePolicy::Full,
                 target: AptUpdateTarget::SystemPackages,
@@ -657,7 +718,7 @@ fn plan_updates(
     let tools = config.tools.as_ref();
     if updates.flatpak == Some(true) {
         if let Some(refs) = non_empty(packages.and_then(|packages| packages.flatpak.as_ref())) {
-            prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::FlatpakFlathub]);
+            prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FlatpakFlathub]);
             actions.push(PlannedAction::Update(UpdateAction::Flatpak {
                 refs: refs.clone(),
                 scope: FlatpakUpdateScope::ConfiguredRefsAndRequiredRuntimes,
@@ -667,30 +728,27 @@ fn plan_updates(
     if let Some(tool_updates) = &updates.tools {
         if tool_updates.rust == Some(true) {
             if let Some(selector) = tools.and_then(|tools| tools.rust.as_deref()) {
-                prerequisites.extend([
-                    Prerequisite::NetworkDownload,
-                    Prerequisite::RustupCargoBinstall,
-                ]);
+                prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::Rustup]);
                 actions.push(PlannedAction::Update(UpdateAction::Tool(
                     ToolUpdate::Rust {
                         selector: rust_selector(selector),
-                        target: platform.architecture.rust_target().into(),
+                        architecture: platform.architecture,
                     },
                 )));
             }
         }
         if tool_updates.go == Some(true) {
             if let Some(selector) = tools.and_then(|tools| tools.go.as_deref()) {
-                prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::GoArchives]);
+                prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::GoArchives]);
                 actions.push(PlannedAction::Update(UpdateAction::Tool(ToolUpdate::Go {
                     selector: go_selector(selector),
-                    archive_architecture: platform.architecture.go_archive().into(),
+                    architecture: platform.architecture,
                 })));
             }
         }
         if tool_updates.node == Some(true) {
             if let Some(selector) = tools.and_then(|tools| tools.node.as_deref()) {
-                prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::FnmNpm]);
+                prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FnmNpm]);
                 actions.push(PlannedAction::Update(UpdateAction::Tool(
                     ToolUpdate::Node {
                         selector: node_selector(selector),
@@ -704,8 +762,9 @@ fn plan_updates(
             if let Some(packages) = non_empty(packages.and_then(|packages| packages.cargo.as_ref()))
             {
                 prerequisites.extend([
-                    Prerequisite::NetworkDownload,
-                    Prerequisite::RustupCargoBinstall,
+                    Prerequisite::HttpsDownloader,
+                    Prerequisite::Rustup,
+                    Prerequisite::CargoBinstall,
                 ]);
                 actions.push(PlannedAction::Update(UpdateAction::Cargo {
                     packages: packages.clone(),
@@ -714,14 +773,14 @@ fn plan_updates(
         }
         if package_updates.npm == Some(true) {
             if let Some(packages) = non_empty(packages.and_then(|packages| packages.npm.as_ref())) {
-                prerequisites.extend([Prerequisite::NetworkDownload, Prerequisite::FnmNpm]);
+                prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FnmNpm]);
                 actions.push(PlannedAction::Update(UpdateAction::Npm {
                     packages: packages.clone(),
                 }));
             }
         }
         if package_updates.direct == Some(true) && !direct.is_empty() {
-            prerequisites.insert(Prerequisite::NetworkDownload);
+            prerequisites.insert(Prerequisite::HttpsDownloader);
             actions.push(PlannedAction::Update(UpdateAction::Direct {
                 packages: direct.to_vec(),
             }));

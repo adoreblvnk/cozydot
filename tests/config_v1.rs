@@ -464,7 +464,7 @@ fn rejects_duplicate_and_empty_package_list_entries() {
 #[test]
 fn validates_manager_specific_package_identifier_grammars() {
     ConfigV1::parse(
-        "schema: 1\npackages:\n  remove: [libc6]\n  apt: [g++, libssl3, foo.bar]\n  cargo: [serde-json, Cargo_Edit]\n  npm: [opencode-ai, '@scope/package_name']\n  flatpak: [com.bitwarden.desktop, org.gnome.Builder]",
+        "schema: 1\npackages:\n  remove: [libc6]\n  apt: [g++, libssl3, foo.bar]\n  cargo: [serde-json, Cargo_Edit]\n  npm: [opencode-ai, '@scope/package_name']\n  flatpak: [com.bitwarden.desktop, org.gnome.Builder]\ntools:\n  node: lts",
     )
     .unwrap();
 
@@ -525,7 +525,7 @@ fn validates_manager_specific_package_identifier_grammars() {
         "package name",
     ] {
         assert_rejected(
-            &format!("schema: 1\npackages:\n  npm: [{value:?}]"),
+            &format!("schema: 1\npackages:\n  npm: [{value:?}]\ntools:\n  node: lts"),
             "packages.npm[0]",
         );
     }
@@ -819,4 +819,45 @@ fn update_prerequisite_and_empty_list_cases_are_valid_no_op_intent() {
         "schema: 1\npackages:\n  flatpak: []\n  cargo: []\n  npm: []\n  direct: []\nupdates:\n  flatpak: true\n  tools: { rust: true, go: true, node: true }\n  packages: { cargo: true, npm: true, direct: true }",
     )
     .unwrap();
+}
+
+#[test]
+fn non_empty_npm_requires_node_during_config_validation() {
+    assert_eq!(
+        error("schema: 1\npackages:\n  npm: [package]"),
+        "packages.npm: requires tools.node"
+    );
+    ConfigV1::parse("schema: 1\npackages:\n  npm: []").unwrap();
+    ConfigV1::parse("schema: 1\npackages:\n  npm: [package]\ntools:\n  node: lts").unwrap();
+}
+
+#[test]
+fn explicit_platform_selections_must_match_while_auto_is_accepted() {
+    let resolved = Platform::from_parts(
+        "ubuntu".into(),
+        "ubuntu".into(),
+        "noble".into(),
+        "gnome".into(),
+        "amd64",
+    )
+    .unwrap();
+
+    let distro = ConfigV1::parse("schema: 1\nsystem:\n  distro: debian").unwrap();
+    assert!(distro
+        .validate_for_platform(&resolved)
+        .unwrap_err()
+        .to_string()
+        .contains("system.distro"));
+
+    let desktop = ConfigV1::parse("schema: 1\nsystem:\n  desktop: cinnamon").unwrap();
+    assert!(desktop
+        .validate_for_platform(&resolved)
+        .unwrap_err()
+        .to_string()
+        .contains("system.desktop"));
+
+    ConfigV1::parse("schema: 1\nsystem:\n  distro: auto\n  desktop: auto")
+        .unwrap()
+        .validate_for_platform(&resolved)
+        .unwrap();
 }
