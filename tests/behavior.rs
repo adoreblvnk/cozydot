@@ -260,6 +260,8 @@ if [ "${1:-}" = install ] && [ "${2:-}" = cargo-binstall ]; then
 printf 'cargo-binstall %s\n' "$*" >>"$LOG"
 BIN
   chmod +x "$HOME/.cargo/bin/cargo-binstall"
+elif [ "${1:-}" = binstall ]; then
+  command cargo-binstall "${@:2}"
 fi
 CMD
 chmod +x "$HOME/.cargo/bin/rustup" "$HOME/.cargo/bin/cargo"
@@ -278,7 +280,7 @@ INSTALL"#,
         log.contains("cargo install cargo-binstall --locked"),
         "{log}"
     );
-    assert!(log.contains("cargo binstall --no-confirm"), "{log}");
+    assert!(log.contains("cargo-binstall --no-confirm"), "{log}");
 }
 
 #[test]
@@ -297,7 +299,7 @@ fn real_cli_check_disables_purge_after_fake_package_purge() {
     fs::write(root.join("cozydot.yaml"), yaml).unwrap();
     host.fake(
         "dpkg-query",
-        "[ \"${1:-}\" = -W ] && [ \"${2:-}\" = '-f=${db:Status-Abbrev}' ] && printf 'ii '",
+        r#"[ "${1:-}" = -W ] && [ "${2:-}" = '-f=${db:Status-Abbrev}\n' ] && printf 'ii \n'"#,
     );
     host.logging_fake("sudo");
     let output = Command::new(assert_cmd::cargo::cargo_bin!("cozydot"))
@@ -377,13 +379,17 @@ fn appimaged_active_and_inactive_branches_execute_against_fake_state() {
     for active in [true, false] {
         let host = Host::new();
         host.fake("systemctl", if active { "exit 0" } else { "exit 1" });
-        host.logging_fake("sudo");
+        host.fake(
+            "sudo",
+            r#"printf 'sudo %s\n' "$*" >>"$LOG"
+if [ "$*" = 'apt-get install -qq libfuse2' ]; then touch "$TMPDIR/fuse-installed"; fi"#,
+        );
         host.fake("apt-cache", "exit 1");
-        host.fake("dpkg", "exit 0");
+        host.fake("dpkg", if active { "exit 0" } else { "exit 1" });
         host.fake(
             "curl",
             r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-if [ -n "$out" ]; then printf '#!/bin/bash\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; else printf '{"assets":[{"name":"appimaged-x86_64.AppImage","browser_download_url":"https://example.test/appimaged.AppImage"}]}\n'; fi"#,
+if [ -n "$out" ]; then printf '#!/bin/bash\n[ -f "$TMPDIR/fuse-installed" ] || exit 42\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; else printf '{"assets":[{"name":"appimaged-x86_64.AppImage","browser_download_url":"https://example.test/appimaged.AppImage"}]}\n'; fi"#,
         );
         let step = step_containing(
             &plans("configs/default.yaml", "check", "ubuntu"),
@@ -488,14 +494,19 @@ fn gnome_extension_present_enables_and_absent_installs() {
 if [ "${{1:-}}" = list ] && [ {present} = true ]; then printf '%s\n' '{extension}'; fi"#
             ),
         );
+        host.fake("gnome-shell", "printf 'GNOME Shell 48.4\\n'");
         host.fake(
             "curl",
-            r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{"shell_version_map":{"45":{"version":42}}}\n'"#,
+            r#"printf 'curl %s\n' "$*" >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{"shell_version_map":{"48":{"version":13},"50":{"version":23}}}\n'"#,
         );
         host.run_ok(&step);
         let log = host.log();
-        assert_eq!(log.contains("gnome-extensions enable"), present);
+        assert!(log.contains("gnome-extensions enable"), "{log}");
         assert_eq!(log.contains("gnome-extensions install --force"), !present);
+        if !present {
+            assert!(log.contains(".v13.shell-extension.zip"), "{log}");
+            assert!(!log.contains(".v23.shell-extension.zip"), "{log}");
+        }
     }
 }
 
@@ -525,31 +536,18 @@ if [ -n "$out" ]; then printf appimage >"$out"; else printf '{"assets":[{"name":
 }
 
 #[test]
-fn uv_existing_runtime_updates_and_only_installs_missing_python() {
-    for current in ["3.13.2", "3.13.1"] {
-        let host = Host::new();
-        host.fake(
-            "uv",
-            &format!(
-                r#"printf 'uv %s\n' "$*" >>"$LOG"
-case "$*" in
-  'python find --managed-python --show-version 3.13') printf '{current}\n' ;;
-  'python list 3.13') printf '3.13.2 available\n' ;;
-esac"#
-            ),
-        );
-        let step = step_containing(
-            &plans("configs/cli.yaml", "install", "ubuntu"),
-            "workflow uv-install",
-        );
-        host.run_ok(&step);
-        let log = host.log();
-        assert!(log.contains("uv self update -q"), "{log}");
-        assert_eq!(
-            log.contains("uv python install 3.13.2"),
-            current != "3.13.2"
-        );
-    }
+fn uv_installs_the_requested_python_series_without_parsing_display_output() {
+    let host = Host::new();
+    host.logging_fake("uv");
+    let step = step_containing(
+        &plans("configs/cli.yaml", "install", "ubuntu"),
+        "workflow uv-install",
+    );
+    host.run_ok(&step);
+    let log = host.log();
+    assert!(log.contains("uv self update -q"), "{log}");
+    assert!(log.contains("uv python install 3.13"), "{log}");
+    assert!(!log.contains("uv python list"), "{log}");
 }
 
 #[test]

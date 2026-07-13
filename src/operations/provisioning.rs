@@ -65,17 +65,25 @@ pub fn cargo_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
     } else {
         return Ok(());
     };
-    if !cargo_home.join("cargo-binstall").is_file() && !host.command_exists("cargo-binstall") {
+    let binstall_path = cargo_home.join("cargo-binstall");
+    if !binstall_path.is_file() && !host.command_exists("cargo-binstall") {
         host.require(
             "cargo package installation",
             &cargo,
             ["install", "cargo-binstall", "--locked"],
         )?;
     }
+    let binstall = if binstall_path.is_file() {
+        binstall_path.to_string_lossy().into_owned()
+    } else if host.command_exists("cargo-binstall") {
+        "cargo-binstall".into()
+    } else {
+        bail!("cargo package installation: cargo-binstall was not installed")
+    };
     for package in packages {
-        let mut args = vec!["binstall", "--no-confirm"];
+        let mut args = vec!["--no-confirm"];
         args.extend(package.split_whitespace());
-        host.require("cargo package installation", &cargo, args)?;
+        host.require("cargo package installation", &binstall, args)?;
     }
     Ok(())
 }

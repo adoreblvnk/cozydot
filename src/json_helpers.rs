@@ -51,15 +51,40 @@ pub fn latest_go(input: &str, requested: &str, arch: &str) -> Result<(String, St
     Ok((version.to_owned(), filename, checksum.to_owned()))
 }
 
-pub fn gnome_version(input: &str) -> Result<u64> {
+pub fn gnome_version(input: &str, shell_version: &str) -> Result<u64> {
     let value: Value = serde_json::from_str(input).context("parse GNOME extension JSON")?;
-    value["shell_version_map"]
+    let versions = value["shell_version_map"]
         .as_object()
-        .context("GNOME response has no shell_version_map")?
-        .values()
-        .filter_map(|entry| entry["version"].as_u64())
-        .max()
-        .context("GNOME response has no extension version")
+        .context("GNOME response has no shell_version_map")?;
+    let mut candidate = shell_version;
+    loop {
+        if let Some(version) = versions
+            .get(candidate)
+            .and_then(|entry| entry["version"].as_u64())
+        {
+            return Ok(version);
+        }
+        let Some((parent, _)) = candidate.rsplit_once('.') else {
+            bail!("GNOME response has no extension version for shell {shell_version}");
+        };
+        candidate = parent;
+    }
+}
+
+pub fn gnome_shell_version(input: &str) -> Result<String> {
+    input
+        .split_whitespace()
+        .map(|part| {
+            part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.')
+        })
+        .find(|part| {
+            !part.is_empty()
+                && part.split('.').all(|component| {
+                    !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
+                })
+        })
+        .map(str::to_owned)
+        .context("GNOME Shell version output has no numeric version")
 }
 
 fn stable_go_version(value: &str) -> bool {
@@ -113,5 +138,14 @@ mod tests {
     fn stable_go_versions_exclude_prereleases() {
         assert!(stable_go_version("go1.26.1"));
         assert!(!stable_go_version("go1.27rc2"));
+    }
+
+    #[test]
+    fn gnome_extension_version_matches_the_running_shell() {
+        let metadata = r#"{"shell_version_map":{"48":{"version":13},"50":{"version":23}}}"#;
+        let shell = gnome_shell_version("GNOME Shell 48.4\n").unwrap();
+        assert_eq!(shell, "48.4");
+        assert_eq!(gnome_version(metadata, &shell).unwrap(), 13);
+        assert!(gnome_version(metadata, "47.2").is_err());
     }
 }

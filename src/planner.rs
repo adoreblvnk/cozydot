@@ -80,7 +80,7 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                         group: "sudo".into(),
                         user: user.clone(),
                     },
-                    Step::owned("adduser", vec![user, "sudo".into()]),
+                    sudo(vec!["adduser".into(), user, "sudo".into()]),
                 ));
                 out.push(
                     sudo(vec!["tee".into(), "/etc/apt/sources.list".into()])
