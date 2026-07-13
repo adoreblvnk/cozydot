@@ -2,6 +2,8 @@ use anyhow::{bail, Context, Result};
 use serde_yaml::{Mapping, Value};
 use std::{fs, path::Path};
 
+pub mod v1;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     root: Value,

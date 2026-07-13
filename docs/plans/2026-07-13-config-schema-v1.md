@@ -42,7 +42,6 @@ Affected paths:
 
 - `src/config.rs` or a replacement `src/config/` module
 - `src/lib.rs`
-- `src/main.rs`
 - `tests/fixtures/`
 - new focused configuration tests under `tests/`
 
@@ -54,22 +53,23 @@ Work:
 - Validate names, URLs, versions, duration strings, duplicate entries, managed APT components, repository URL selection, `system` suite resolution, direct-asset selector mappings, and cross-field requirements.
 - Derive repository filename stems by the contract's fixed sanitization algorithm; reject empty stems and collisions before planning.
 - Return field-path errors before platform mutation or command execution.
-- Delete tag handling, string-path lookup, purge-tag mutation, and legacy validation after all callers use typed values.
+- Retain the legacy production parser unchanged for its current `main`, planner, and embedded-preset callers. The v1 parser is exercised directly by fixtures and tests in this milestone; this is temporary development sequencing, not runtime dual-schema detection, fallback, conversion, or a public compatibility adapter.
+- Delete tag handling, string-path lookup, purge-tag mutation, and legacy validation only in the atomic integration milestone after all production callers and embedded presets move to typed values.
 
 TDD gate:
 
 - Start with one minimal valid fixture and one complete valid fixture.
 - Add one negative test for each unknown field, wrong type, enum, URL, duplicate, missing required child, schema version, invalid component, invalid duration string, invalid wildcard pattern, invalid field dependency, and native-asset failure class. Prove numeric YAML values are invalid for `desktop.idle.timeout`.
-- Validate and plan the canonical full reference on amd64 and arm64 fixtures. Assert clear missing-native-selector failures on arm32 and riscv64; do not add unsupported Obsidian selectors.
+- Validate the canonical full reference on amd64 and arm64 fixtures. Assert clear missing-native-selector failures on arm32 and riscv64; do not add unsupported Obsidian selectors. Planner coverage begins after its typed-input migration.
 - Assert omission and `null` preservation, meaningful explicit `false` host-state controls, enable-only `false`, and empty-collection behavior for their respective fields.
 - Reject every removed system, dotfile, integration, and desktop form, plus boolean or nested `updates.apt` values, scalar `provides`, scalar asset selectors, selectors missing `include` or `exclude`, and architecture interpolation or substitution.
-- `cargo test --all-targets --all-features` passes with no legacy fixture dependency.
+- `cargo test --all-targets --all-features` passes; v1 parser tests use only v1 fixtures, while unchanged production tests and presets remain legacy until the atomic integration switch.
 
 Exit criteria:
 
-- Runtime accepts schema v1 only.
-- Invalid input never reaches the planner.
-- No generic `serde_yaml::Value` path access remains in production configuration code.
+- A complete typed v1 parser and validator exists alongside the temporarily retained legacy production parser.
+- V1 fixtures are rejected before any planner or operation call, with field-path errors and no generic `serde_yaml::Value` in the v1 model or validation path.
+- `main`, `apply`, the planner, and embedded presets remain legacy-only; there is no runtime v1 auto-detection, fallback, or conversion.
 
 ### 3. Replace planner inputs with typed intent
 
@@ -207,8 +207,8 @@ Exit criteria:
 
 1. Land milestone 1 without changing embedded preset bytes.
 2. Build typed v1 parsing and validation against test fixtures not used by production init.
-3. Move planner and operation callers to typed configuration while the embedded preset remains legacy only on the pre-migration branch; do not merge a revision in which production `apply` cannot parse its embedded default.
-4. In one integration change, switch `main`, all presets, init expectations, and planner tests to v1 and delete the legacy parser.
+3. Build and test typed planner and operation integration without switching production `main`/`apply` or shipping mismatched embedded presets; do not expose runtime dual-schema selection or merge a revision in which production `apply` cannot parse its embedded default.
+4. In one atomic integration change, switch `main`/`apply`, all presets, init expectations, planner tests, and production planner callers to v1, then delete the legacy parser. V1 becomes the sole runtime parser at this point.
 5. Complete fixed-manager behavior and update tests before broadening release testing.
 6. Run release/VM acceptance, remove remaining dead legacy material, and publish the breaking release.
 

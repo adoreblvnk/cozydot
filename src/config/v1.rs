@@ -1,0 +1,1276 @@
+use crate::platform::Architecture;
+use anyhow::{bail, Context, Result};
+use serde::{de, Deserialize, Deserializer};
+use std::{collections::HashSet, fmt, fs, path::Path};
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigV1 {
+    #[serde(deserialize_with = "deserialize_schema")]
+    pub schema: u8,
+    pub system: Option<System>,
+    pub packages: Option<Packages>,
+    pub tools: Option<Tools>,
+    pub fonts: Option<Fonts>,
+    pub dotfiles: Option<Dotfiles>,
+    pub integrations: Option<Integrations>,
+    pub desktop: Option<Desktop>,
+    pub updates: Option<Updates>,
+}
+
+impl ConfigV1 {
+    pub fn parse(text: &str) -> Result<Self> {
+        reject_yaml_extensions(text)?;
+        let deserializer = serde_yaml::Deserializer::from_str(text);
+        let config: Self = serde_path_to_error::deserialize(deserializer).map_err(|error| {
+            let path = error.path().to_string();
+            let path = if path == "." { "config" } else { path.as_str() };
+            anyhow::anyhow!("{path}: {}", error.inner())
+        })?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        Self::parse(&text).with_context(|| format!("validate {}", path.display()))
+    }
+
+    pub fn validate_for_architecture(&self, architecture: Architecture) -> Result<()> {
+        if let Some(packages) = &self.packages {
+            packages.validate_native_selectors(architecture)?;
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_distro(&self, distro: &str) -> Result<()> {
+        let upstream = upstream_for_distro(distro)?;
+        if let Some(apt) = self.system.as_ref().and_then(|system| system.apt.as_ref()) {
+            apt.validate(Some(upstream))?;
+        }
+        if let Some(packages) = &self.packages {
+            packages.validate_repository_urls_for_distro(distro)?;
+        }
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<()> {
+        if let Some(system) = &self.system {
+            system.validate()?;
+        }
+        if let Some(packages) = &self.packages {
+            let distro = self
+                .system
+                .as_ref()
+                .and_then(|system| system.distro.as_ref())
+                .and_then(Distro::configured_id);
+            packages.validate(distro)?;
+        }
+        if let Some(tools) = &self.tools {
+            tools.validate()?;
+        }
+        if let Some(fonts) = &self.fonts {
+            validate_unique_strings(fonts.nerd.as_deref(), "fonts.nerd")?;
+        }
+        if let Some(dotfiles) = &self.dotfiles {
+            validate_required_unique_strings(&dotfiles.packages, "dotfiles.packages")?;
+            for (index, package) in dotfiles.packages.iter().enumerate() {
+                validate_directory_name(package, &format!("dotfiles.packages[{index}]"))?;
+            }
+        }
+        if let Some(integrations) = &self.integrations {
+            integrations.validate()?;
+        }
+        if let Some(desktop) = &self.desktop {
+            desktop.validate()?;
+        }
+        Ok(())
+    }
+}
+
+fn deserialize_schema<'de, D>(deserializer: D) -> std::result::Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct SchemaVisitor;
+
+    impl de::Visitor<'_> for SchemaVisitor {
+        type Value = u8;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(
+                "integer 1 (legacy configurations must be rewritten; run 'cozydot init' to re-initialize)",
+            )
+        }
+
+        fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value == 1 {
+                Ok(1)
+            } else {
+                Err(E::custom(format!(
+                    "unsupported schema version {value}; only schema 1 is supported; rewrite legacy configurations or run 'cozydot init'"
+                )))
+            }
+        }
+
+        fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value == 1 {
+                Ok(1)
+            } else {
+                Err(E::custom(format!(
+                    "unsupported schema version {value}; only schema 1 is supported; rewrite legacy configurations or run 'cozydot init'"
+                )))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(SchemaVisitor)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Distro {
+    Auto,
+    Ubuntu,
+    Linuxmint,
+    Pop,
+    Zorin,
+    Deepin,
+    Debian,
+    Kali,
+    Tails,
+}
+
+impl Distro {
+    fn upstream(&self) -> Option<Upstream> {
+        match self {
+            Self::Auto => None,
+            Self::Ubuntu | Self::Linuxmint | Self::Pop | Self::Zorin | Self::Deepin => {
+                Some(Upstream::Ubuntu)
+            }
+            Self::Debian | Self::Kali | Self::Tails => Some(Upstream::Debian),
+        }
+    }
+
+    fn configured_id(&self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::Ubuntu => Some("ubuntu"),
+            Self::Linuxmint => Some("linuxmint"),
+            Self::Pop => Some("pop"),
+            Self::Zorin => Some("zorin"),
+            Self::Deepin => Some("deepin"),
+            Self::Debian => Some("debian"),
+            Self::Kali => Some("kali"),
+            Self::Tails => Some("tails"),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Upstream {
+    Ubuntu,
+    Debian,
+}
+
+fn upstream_for_distro(distro: &str) -> Result<Upstream> {
+    match distro {
+        "ubuntu" | "linuxmint" | "pop" | "zorin" | "deepin" => Ok(Upstream::Ubuntu),
+        "debian" | "kali" | "tails" => Ok(Upstream::Debian),
+        _ => bail!(
+            "system.distro: unsupported detected distribution {distro:?}; supported distributions are ubuntu, linuxmint, pop, zorin, deepin, debian, kali, and tails"
+        ),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopKind {
+    Auto,
+    None,
+    Gnome,
+    Cinnamon,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct System {
+    pub distro: Option<Distro>,
+    pub desktop: Option<DesktopKind>,
+    pub ensure_admin: Option<bool>,
+    pub apt: Option<SystemApt>,
+    pub ubuntu: Option<UbuntuSystem>,
+}
+
+impl System {
+    fn validate(&self) -> Result<()> {
+        if let Some(apt) = &self.apt {
+            apt.validate(self.distro.as_ref().and_then(Distro::upstream))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AptSources {
+    Preserve,
+    Managed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AptComponent {
+    Main,
+    Contrib,
+    NonFree,
+    NonFreeFirmware,
+    Restricted,
+    Universe,
+    Multiverse,
+}
+
+impl AptComponent {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Contrib => "contrib",
+            Self::NonFree => "non-free",
+            Self::NonFreeFirmware => "non-free-firmware",
+            Self::Restricted => "restricted",
+            Self::Universe => "universe",
+            Self::Multiverse => "multiverse",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemApt {
+    pub sources: Option<AptSources>,
+    pub components: Option<Vec<AptComponent>>,
+    pub unattended_upgrades: Option<bool>,
+}
+
+impl SystemApt {
+    fn validate(&self, upstream: Option<Upstream>) -> Result<()> {
+        let Some(components) = &self.components else {
+            return Ok(());
+        };
+        if !matches!(self.sources, Some(AptSources::Managed)) {
+            bail!("system.apt.components: valid only with system.apt.sources: managed");
+        }
+        if components.is_empty() {
+            bail!("system.apt.components: must be a non-empty sequence");
+        }
+        validate_unique_by(components, "system.apt.components", AptComponent::name)?;
+        let supported: &[&str] = match upstream {
+            Some(Upstream::Ubuntu) => &["main", "restricted", "universe", "multiverse"],
+            Some(Upstream::Debian) => &["main", "contrib", "non-free", "non-free-firmware"],
+            None => return Ok(()),
+        };
+        for (index, component) in components.iter().enumerate() {
+            if !supported.contains(&component.name()) {
+                bail!(
+                    "system.apt.components[{index}]: component {:?} is unsupported by the configured distribution family",
+                    component.name()
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UbuntuSystem {
+    pub snap: Option<bool>,
+    pub codecs: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Packages {
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub remove: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub apt: Option<Vec<String>>,
+    pub repositories: Option<Vec<Repository>>,
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub flatpak: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub cargo: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub npm: Option<Vec<String>>,
+    pub direct: Option<Vec<DirectPackage>>,
+}
+
+impl Packages {
+    fn validate(&self, distro: Option<&str>) -> Result<()> {
+        for (values, path) in [
+            (self.remove.as_deref(), "packages.remove"),
+            (self.apt.as_deref(), "packages.apt"),
+            (self.flatpak.as_deref(), "packages.flatpak"),
+            (self.cargo.as_deref(), "packages.cargo"),
+            (self.npm.as_deref(), "packages.npm"),
+        ] {
+            validate_unique_strings(values, path)?;
+            for (index, value) in values.into_iter().flatten().enumerate() {
+                validate_package_identifier(value, &format!("{path}[{index}]"))?;
+            }
+        }
+        self.validate_repositories()?;
+        if let Some(distro) = distro {
+            self.validate_repository_urls_for_distro(distro)?;
+        }
+        self.validate_direct()?;
+        Ok(())
+    }
+
+    fn validate_repository_urls_for_distro(&self, distro: &str) -> Result<()> {
+        for (index, repository) in self.repositories.iter().flatten().enumerate() {
+            repository
+                .source
+                .urls
+                .select(distro)
+                .with_context(|| format!("packages.repositories[{index}].source.urls"))?;
+        }
+        Ok(())
+    }
+
+    fn validate_repositories(&self) -> Result<()> {
+        let Some(repositories) = &self.repositories else {
+            return Ok(());
+        };
+        let mut names = HashSet::new();
+        let mut stems = HashSet::new();
+        for (index, repository) in repositories.iter().enumerate() {
+            let path = format!("packages.repositories[{index}]");
+            repository.validate(&path)?;
+            if !names.insert(repository.name.as_str()) {
+                bail!(
+                    "{path}.name: duplicate repository name {:?}",
+                    repository.name
+                );
+            }
+            let stem = repository.sanitized_name();
+            if stem.is_empty() {
+                bail!("{path}.name: produces an empty repository filename stem");
+            }
+            if !stems.insert(stem.clone()) {
+                bail!("{path}.name: sanitized repository filename stem {stem:?} collides with an earlier repository");
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_direct(&self) -> Result<()> {
+        let Some(packages) = &self.direct else {
+            return Ok(());
+        };
+        let mut names = HashSet::new();
+        for (index, package) in packages.iter().enumerate() {
+            let path = format!("packages.direct[{index}]");
+            package.validate(&path)?;
+            if !names.insert(package.name.as_str()) {
+                bail!(
+                    "{path}.name: duplicate direct-package name {:?}",
+                    package.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_native_selectors(&self, architecture: Architecture) -> Result<()> {
+        for (index, package) in self.direct.iter().flatten().enumerate() {
+            if package.source.assets.get(architecture).is_none() {
+                bail!(
+                    "packages.direct[{index}].source.assets.{}: missing native asset selector for package {:?}",
+                    architecture.canonical(),
+                    package.name
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Repository {
+    #[serde(deserialize_with = "deserialize_string")]
+    pub name: String,
+    #[serde(deserialize_with = "deserialize_string")]
+    pub key: String,
+    pub source: RepositorySource,
+    #[serde(deserialize_with = "deserialize_strings")]
+    pub packages: Vec<String>,
+}
+
+impl Repository {
+    pub fn sanitized_name(&self) -> String {
+        let mut stem = String::new();
+        let mut separator = false;
+        for byte in self.name.bytes() {
+            if byte.is_ascii_alphanumeric() {
+                if separator && !stem.is_empty() {
+                    stem.push('-');
+                }
+                stem.push((byte as char).to_ascii_lowercase());
+                separator = false;
+            } else {
+                separator = true;
+            }
+        }
+        stem
+    }
+
+    fn validate(&self, path: &str) -> Result<()> {
+        validate_non_empty(&self.name, &format!("{path}.name"))?;
+        validate_https(&self.key, &format!("{path}.key"))?;
+        self.source.validate(&format!("{path}.source"))?;
+        validate_required_unique_strings(&self.packages, &format!("{path}.packages"))?;
+        for (index, package) in self.packages.iter().enumerate() {
+            validate_package_identifier(package, &format!("{path}.packages[{index}]"))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepositorySource {
+    pub urls: RepositoryUrls,
+    #[serde(deserialize_with = "deserialize_string")]
+    pub suite: String,
+    #[serde(deserialize_with = "deserialize_strings")]
+    pub components: Vec<String>,
+}
+
+impl RepositorySource {
+    fn validate(&self, path: &str) -> Result<()> {
+        self.urls.validate(&format!("{path}.urls"))?;
+        validate_literal(&self.suite, &format!("{path}.suite"))?;
+        validate_required_unique_strings(&self.components, &format!("{path}.components"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepositoryUrls {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub default: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub ubuntu: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub linuxmint: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub pop: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub zorin: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub deepin: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub debian: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub kali: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub tails: Option<String>,
+}
+
+impl RepositoryUrls {
+    pub fn select(&self, distro: &str) -> Result<&str> {
+        let selected = match distro {
+            "ubuntu" => self.ubuntu.as_deref(),
+            "linuxmint" => self.linuxmint.as_deref(),
+            "pop" => self.pop.as_deref(),
+            "zorin" => self.zorin.as_deref(),
+            "deepin" => self.deepin.as_deref(),
+            "debian" => self.debian.as_deref(),
+            "kali" => self.kali.as_deref(),
+            "tails" => self.tails.as_deref(),
+            _ => bail!("repository source URL selection: unsupported distro {distro:?}"),
+        };
+        selected.or(self.default.as_deref()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "repository source URL selection: no URL for distro {distro:?} and no default URL"
+            )
+        })
+    }
+
+    fn validate(&self, path: &str) -> Result<()> {
+        let urls = [
+            ("default", self.default.as_deref()),
+            ("ubuntu", self.ubuntu.as_deref()),
+            ("linuxmint", self.linuxmint.as_deref()),
+            ("pop", self.pop.as_deref()),
+            ("zorin", self.zorin.as_deref()),
+            ("deepin", self.deepin.as_deref()),
+            ("debian", self.debian.as_deref()),
+            ("kali", self.kali.as_deref()),
+            ("tails", self.tails.as_deref()),
+        ];
+        if urls.iter().all(|(_, value)| value.is_none()) {
+            bail!("{path}: must contain default and/or a supported distro key");
+        }
+        for (key, value) in urls {
+            if let Some(value) = value {
+                validate_https(value, &format!("{path}.{key}"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectFormat {
+    Deb,
+    Appimage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectPackage {
+    #[serde(deserialize_with = "deserialize_string")]
+    pub name: String,
+    pub format: DirectFormat,
+    #[serde(deserialize_with = "deserialize_strings")]
+    pub provides: Vec<String>,
+    pub source: GithubSource,
+}
+
+impl DirectPackage {
+    fn validate(&self, path: &str) -> Result<()> {
+        validate_literal(&self.name, &format!("{path}.name"))?;
+        validate_required_unique_strings(&self.provides, &format!("{path}.provides"))?;
+        for (index, executable) in self.provides.iter().enumerate() {
+            validate_executable(executable, &format!("{path}.provides[{index}]"))?;
+        }
+        self.source.validate(&format!("{path}.source"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GithubSource {
+    #[serde(rename = "type")]
+    pub kind: GithubSourceType,
+    #[serde(deserialize_with = "deserialize_string")]
+    pub repository: String,
+    pub assets: AssetSelectors,
+}
+
+impl GithubSource {
+    fn validate(&self, path: &str) -> Result<()> {
+        validate_github_repository(&self.repository, &format!("{path}.repository"))?;
+        self.assets.validate(&format!("{path}.assets"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubSourceType {
+    Github,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetSelectors {
+    pub amd64: Option<AssetSelector>,
+    pub arm64: Option<AssetSelector>,
+    pub arm32: Option<AssetSelector>,
+    pub riscv64: Option<AssetSelector>,
+}
+
+impl AssetSelectors {
+    pub fn get(&self, architecture: Architecture) -> Option<&AssetSelector> {
+        match architecture {
+            Architecture::Amd64 => self.amd64.as_ref(),
+            Architecture::Arm64 => self.arm64.as_ref(),
+            Architecture::Arm32 => self.arm32.as_ref(),
+            Architecture::Riscv64 => self.riscv64.as_ref(),
+        }
+    }
+
+    fn validate(&self, path: &str) -> Result<()> {
+        let selectors = [
+            ("amd64", self.amd64.as_ref()),
+            ("arm64", self.arm64.as_ref()),
+            ("arm32", self.arm32.as_ref()),
+            ("riscv64", self.riscv64.as_ref()),
+        ];
+        if selectors.iter().all(|(_, selector)| selector.is_none()) {
+            bail!("{path}: must contain at least one canonical architecture selector");
+        }
+        for (architecture, selector) in selectors {
+            if let Some(selector) = selector {
+                selector.validate(&format!("{path}.{architecture}"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetSelector {
+    #[serde(deserialize_with = "deserialize_string")]
+    pub include: String,
+    #[serde(deserialize_with = "deserialize_strings")]
+    pub exclude: Vec<String>,
+}
+
+impl AssetSelector {
+    fn validate(&self, path: &str) -> Result<()> {
+        validate_wildcard(&self.include, &format!("{path}.include"))?;
+        for (index, pattern) in self.exclude.iter().enumerate() {
+            validate_wildcard(pattern, &format!("{path}.exclude[{index}]"))?;
+        }
+        validate_unique_strings(Some(&self.exclude), &format!("{path}.exclude"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tools {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub rust: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub go: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub node: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub python: Option<String>,
+}
+
+impl Tools {
+    fn validate(&self) -> Result<()> {
+        if let Some(version) = &self.rust {
+            validate_rust_version(version, "tools.rust")?;
+        }
+        if let Some(version) = &self.go {
+            if version != "latest" {
+                validate_numeric_version(version, "tools.go", 2, 3)?;
+            }
+        }
+        if let Some(version) = &self.node {
+            if version != "latest" && version != "lts" {
+                validate_numeric_version(version, "tools.node", 1, 3)?;
+            }
+        }
+        if let Some(version) = &self.python {
+            validate_numeric_version(version, "tools.python", 2, 3)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Fonts {
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub nerd: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dotfiles {
+    #[serde(deserialize_with = "deserialize_strings")]
+    pub packages: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Integrations {
+    pub docker: Option<DockerIntegration>,
+    pub virtualbox: Option<VirtualBoxIntegration>,
+    pub vscode: Option<VsCodeIntegration>,
+}
+
+impl Integrations {
+    fn validate(&self) -> Result<()> {
+        if let Some(docker) = &self.docker {
+            docker.validate()?;
+        }
+        if let Some(vscode) = &self.vscode {
+            validate_unique_strings(
+                vscode.extensions.as_deref(),
+                "integrations.vscode.extensions",
+            )?;
+            for (index, extension) in vscode.extensions.iter().flatten().enumerate() {
+                validate_vscode_extension(
+                    extension,
+                    &format!("integrations.vscode.extensions[{index}]"),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DockerIntegration {
+    pub add_user_to_group: Option<bool>,
+    pub local_log_driver: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub max_log_size: Option<String>,
+}
+
+impl DockerIntegration {
+    fn validate(&self) -> Result<()> {
+        if let Some(size) = &self.max_log_size {
+            if self.local_log_driver != Some(true) {
+                bail!("integrations.docker.max_log_size: requires integrations.docker.local_log_driver: true");
+            }
+            validate_positive_size(size, "integrations.docker.max_log_size")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VirtualBoxIntegration {
+    pub add_user_to_group: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VsCodeIntegration {
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub extensions: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Desktop {
+    pub theme: Option<Theme>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub terminal: Option<String>,
+    pub idle: Option<Idle>,
+    pub gnome: Option<Gnome>,
+}
+
+impl Desktop {
+    fn validate(&self) -> Result<()> {
+        if let Some(terminal) = &self.terminal {
+            validate_executable(terminal, "desktop.terminal")?;
+        }
+        if let Some(idle) = &self.idle {
+            if let Some(timeout) = &idle.timeout {
+                validate_duration(timeout, "desktop.idle.timeout")?;
+            }
+        }
+        if let Some(gnome) = &self.gnome {
+            validate_unique_strings(gnome.extensions.as_deref(), "desktop.gnome.extensions")?;
+            for (index, extension) in gnome.extensions.iter().flatten().enumerate() {
+                validate_gnome_uuid(extension, &format!("desktop.gnome.extensions[{index}]"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Idle {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub timeout: Option<String>,
+    pub dim: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Gnome {
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    pub extensions: Option<Vec<String>>,
+    pub dock: Option<bool>,
+    pub rounded_corners: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Updates {
+    pub apt: Option<AptUpdate>,
+    pub flatpak: Option<bool>,
+    pub tools: Option<ToolUpdates>,
+    pub packages: Option<PackageUpdates>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AptUpdate {
+    Off,
+    Standard,
+    Full,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolUpdates {
+    pub rust: Option<bool>,
+    pub go: Option<bool>,
+    pub node: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageUpdates {
+    pub cargo: Option<bool>,
+    pub npm: Option<bool>,
+    pub direct: Option<bool>,
+}
+
+fn validate_non_empty(value: &str, path: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("{path}: must be a non-empty string");
+    }
+    Ok(())
+}
+
+fn deserialize_string<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserializer.deserialize_any(StrictStringVisitor)
+}
+
+fn deserialize_optional_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptionalStringVisitor;
+
+    impl<'de> de::Visitor<'de> for OptionalStringVisitor {
+        type Value = Option<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a YAML string or null")
+        }
+
+        fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserialize_string(deserializer).map(Some)
+        }
+    }
+
+    deserializer.deserialize_option(OptionalStringVisitor)
+}
+
+fn deserialize_strings<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StringsVisitor;
+
+    impl<'de> de::Visitor<'de> for StringsVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a sequence of YAML strings")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
+            while let Some(value) = sequence.next_element_seed(StrictStringSeed)? {
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_seq(StringsVisitor)
+}
+
+fn deserialize_optional_strings<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptionalStringsVisitor;
+
+    impl<'de> de::Visitor<'de> for OptionalStringsVisitor {
+        type Value = Option<Vec<String>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a sequence of YAML strings or null")
+        }
+
+        fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserialize_strings(deserializer).map(Some)
+        }
+    }
+
+    deserializer.deserialize_option(OptionalStringsVisitor)
+}
+
+struct StrictStringVisitor;
+
+impl de::Visitor<'_> for StrictStringVisitor {
+    type Value = String;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a YAML string")
+    }
+
+    fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
+        Ok(value.to_owned())
+    }
+
+    fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E> {
+        Ok(value)
+    }
+}
+
+struct StrictStringSeed;
+
+impl<'de> de::DeserializeSeed<'de> for StrictStringSeed {
+    type Value = String;
+
+    fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize_string(deserializer)
+    }
+}
+
+fn reject_yaml_extensions(text: &str) -> Result<()> {
+    for (line_index, line) in text.lines().enumerate() {
+        let mut single_quoted = false;
+        let mut double_quoted = false;
+        let mut previous = None;
+        for (column, character) in line.char_indices() {
+            if character == '#' && !single_quoted && !double_quoted {
+                break;
+            }
+            if character == '\'' && !double_quoted {
+                single_quoted = !single_quoted;
+            } else if character == '"' && !single_quoted && previous != Some('\\') {
+                double_quoted = !double_quoted;
+            } else if matches!(character, '!' | '&' | '*')
+                && !single_quoted
+                && !double_quoted
+                && previous.is_none_or(|value: char| {
+                    value.is_whitespace() || matches!(value, ':' | '[' | '{' | ',')
+                })
+            {
+                let extension = match character {
+                    '!' => "tags",
+                    '&' => "anchors",
+                    '*' => "aliases",
+                    _ => unreachable!(),
+                };
+                bail!(
+                    "line {}, column {}: YAML {extension} are not supported by schema v1",
+                    line_index + 1,
+                    column + 1
+                );
+            }
+            previous = Some(character);
+        }
+    }
+    Ok(())
+}
+
+fn validate_literal(value: &str, path: &str) -> Result<()> {
+    validate_non_empty(value, path)?;
+    if value.contains(['\n', '\r']) || has_substitution(value) {
+        bail!("{path}: must be a literal value without interpolation or substitution");
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(values: Option<&[String]>, path: &str) -> Result<()> {
+    let Some(values) = values else {
+        return Ok(());
+    };
+    let mut seen = HashSet::new();
+    for (index, value) in values.iter().enumerate() {
+        validate_literal(value, &format!("{path}[{index}]"))?;
+        if !seen.insert(value.as_str()) {
+            bail!("{path}[{index}]: duplicate value {value:?}");
+        }
+    }
+    Ok(())
+}
+
+fn validate_required_unique_strings(values: &[String], path: &str) -> Result<()> {
+    if values.is_empty() {
+        bail!("{path}: must be a non-empty sequence");
+    }
+    validate_unique_strings(Some(values), path)
+}
+
+fn validate_unique_by<T, F>(values: &[T], path: &str, key: F) -> Result<()>
+where
+    F: Fn(&T) -> &'static str,
+{
+    let mut seen = HashSet::new();
+    for (index, value) in values.iter().enumerate() {
+        let value = key(value);
+        if !seen.insert(value) {
+            bail!("{path}[{index}]: duplicate value {value:?}");
+        }
+    }
+    Ok(())
+}
+
+fn validate_https(value: &str, path: &str) -> Result<()> {
+    validate_non_empty(value, path)?;
+    let authority = value
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next())
+        .unwrap_or_default();
+    if authority.is_empty()
+        || authority.chars().any(char::is_whitespace)
+        || value.chars().any(char::is_control)
+        || has_substitution(value)
+    {
+        bail!("{path}: must be a literal HTTPS URL with a non-empty host");
+    }
+    Ok(())
+}
+
+fn validate_github_repository(value: &str, path: &str) -> Result<()> {
+    let mut parts = value.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let repository = parts.next().unwrap_or_default();
+    if parts.next().is_some() || !valid_coordinate_part(owner) || !valid_coordinate_part(repository)
+    {
+        bail!("{path}: must be an owner/repository coordinate");
+    }
+    Ok(())
+}
+
+fn valid_coordinate_part(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+}
+
+fn validate_wildcard(value: &str, path: &str) -> Result<()> {
+    validate_non_empty(value, path)?;
+    if !value.contains(['*', '?'])
+        || value.contains(['/', '\\', '[', ']', '{', '}', '$', '(', ')', '`'])
+        || value.chars().any(char::is_control)
+        || has_substitution(value)
+    {
+        bail!("{path}: must be an anchored filename wildcard using only '*' and '?' operators, without paths or substitutions");
+    }
+    Ok(())
+}
+
+fn validate_rust_version(value: &str, path: &str) -> Result<()> {
+    if matches!(value, "stable" | "beta" | "nightly") {
+        return Ok(());
+    }
+    if let Some(date) = value.strip_prefix("nightly-") {
+        let parts = date.split('-').collect::<Vec<_>>();
+        if parts.len() == 3
+            && parts[0].len() == 4
+            && parts[1].len() == 2
+            && parts[2].len() == 2
+            && parts
+                .iter()
+                .all(|part| part.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return Ok(());
+        }
+    }
+    validate_numeric_version(value, path, 2, 3)
+}
+
+fn validate_numeric_version(
+    value: &str,
+    path: &str,
+    min_parts: usize,
+    max_parts: usize,
+) -> Result<()> {
+    let parts = value.split('.').collect::<Vec<_>>();
+    if !(min_parts..=max_parts).contains(&parts.len())
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        bail!("{path}: has an invalid version; expected {min_parts} to {max_parts} numeric components");
+    }
+    Ok(())
+}
+
+fn validate_positive_size(value: &str, path: &str) -> Result<()> {
+    let number = value
+        .strip_suffix('k')
+        .or_else(|| value.strip_suffix('m'))
+        .or_else(|| value.strip_suffix('g'));
+    if number.is_none_or(|number| {
+        number.is_empty()
+            || !number.bytes().all(|byte| byte.is_ascii_digit())
+            || number.bytes().all(|byte| byte == b'0')
+    }) {
+        bail!("{path}: must be a positive integer followed by k, m, or g");
+    }
+    Ok(())
+}
+
+fn validate_duration(value: &str, path: &str) -> Result<()> {
+    let number = value
+        .strip_suffix('s')
+        .or_else(|| value.strip_suffix('m'))
+        .or_else(|| value.strip_suffix('h'));
+    if number
+        .is_none_or(|number| number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        bail!("{path}: must be a non-negative integer followed by exactly one of s, m, or h");
+    }
+    Ok(())
+}
+
+fn validate_executable(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    if value.contains(['/', '\\']) || value.chars().any(char::is_whitespace) {
+        bail!("{path}: must be an executable name, not a path or command line");
+    }
+    Ok(())
+}
+
+fn validate_package_identifier(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    if value.chars().any(char::is_whitespace) || value.contains([';', '`']) {
+        bail!("{path}: must be a package identifier, not a command-line fragment");
+    }
+    Ok(())
+}
+
+fn validate_directory_name(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    if matches!(value, "." | "..") || value.contains(['/', '\\']) {
+        bail!("{path}: must be one directory name below the dotfiles root, not a path");
+    }
+    Ok(())
+}
+
+fn validate_vscode_extension(value: &str, path: &str) -> Result<()> {
+    let mut parts = value.split('.');
+    if !valid_identifier(parts.next().unwrap_or_default())
+        || !valid_identifier(parts.next().unwrap_or_default())
+        || parts.next().is_some()
+    {
+        bail!("{path}: must be a publisher.extension identifier");
+    }
+    Ok(())
+}
+
+fn validate_gnome_uuid(value: &str, path: &str) -> Result<()> {
+    let mut parts = value.split('@');
+    if !valid_identifier(parts.next().unwrap_or_default())
+        || !valid_identifier(parts.next().unwrap_or_default())
+        || parts.next().is_some()
+    {
+        bail!("{path}: must be an exact GNOME extension UUID containing one '@'");
+    }
+    Ok(())
+}
+
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_ .".contains(&byte))
+        && !value.contains(' ')
+}
+
+fn has_substitution(value: &str) -> bool {
+    value.contains('$') || value.contains("{{") || value.contains("{%")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repository_stem_uses_contract_sanitization() {
+        let repository = Repository {
+            name: "--GitHub__CLI!!".into(),
+            key: "https://example.com/key".into(),
+            source: RepositorySource {
+                urls: RepositoryUrls {
+                    default: Some("https://example.com/repo".into()),
+                    ubuntu: None,
+                    linuxmint: None,
+                    pop: None,
+                    zorin: None,
+                    deepin: None,
+                    debian: None,
+                    kali: None,
+                    tails: None,
+                },
+                suite: "stable".into(),
+                components: vec!["main".into()],
+            },
+            packages: vec!["gh".into()],
+        };
+        assert_eq!(repository.sanitized_name(), "github-cli");
+    }
+
+    #[test]
+    fn distro_url_precedes_default() {
+        let urls = RepositoryUrls {
+            default: Some("https://default.example".into()),
+            ubuntu: Some("https://ubuntu.example".into()),
+            linuxmint: None,
+            pop: None,
+            zorin: None,
+            deepin: None,
+            debian: None,
+            kali: None,
+            tails: None,
+        };
+        assert_eq!(urls.select("ubuntu").unwrap(), "https://ubuntu.example");
+        assert_eq!(urls.select("debian").unwrap(), "https://default.example");
+    }
+}
