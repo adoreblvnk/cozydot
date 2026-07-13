@@ -6,6 +6,7 @@ use cozydot::{
 };
 use std::{
     fs,
+    io::Write,
     os::unix::fs::{symlink, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
@@ -56,8 +57,13 @@ impl Host {
 
     fn fake(&self, name: &str, body: &str) {
         let path = self.bin.join(name);
-        fs::write(&path, format!("#!/bin/bash\nset -euo pipefail\n{body}\n")).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut temporary = tempfile::NamedTempFile::new_in(&self.bin).unwrap();
+        write!(temporary, "#!/bin/bash\nset -euo pipefail\n{body}\n").unwrap();
+        temporary.flush().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        temporary.as_file().sync_all().unwrap();
+        temporary.into_temp_path().persist(path).unwrap();
+        fs::File::open(&self.bin).unwrap().sync_all().unwrap();
     }
 
     fn logging_fake(&self, name: &str) {
@@ -512,7 +518,7 @@ exit "$status""#,
     );
     assert!(
         log.contains(
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- missing-one missing-two"
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- missing-one+ missing-two+"
         ),
         "{log}"
     );
@@ -567,7 +573,7 @@ exit "$status""#,
     host.fake(
         "sudo",
         r#"printf 'sudo %s\n' "$*" >>"$LOG"
-if [ "$*" = 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- curl gnupg flatpak' ]; then
+if [ "$*" = 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- curl+ gnupg+ flatpak+' ]; then
   touch "$TMPDIR/bootstrapped"
 fi"#,
     );
@@ -586,7 +592,7 @@ fi"#,
     assert_eq!(log.matches("sudo apt-get update -qq\n").count(), 1, "{log}");
     assert_eq!(
         log.matches(
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- curl gnupg flatpak\n"
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- curl+ gnupg+ flatpak+\n"
         )
         .count(),
         1,
@@ -620,7 +626,7 @@ fn apt_bootstrap_stops_on_query_refresh_and_install_failures() {
                 r#"printf 'sudo %s\n' "$*" >>"$LOG"
 case {failure} in
   refresh) [ "$*" != 'apt-get update -qq' ] ;;
-  install) [ "$*" != 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- curl' ] ;;
+  install) [ "$*" != 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- curl+' ] ;;
   *) {body} ;;
 esac"#
             ),
@@ -703,7 +709,7 @@ exit "$status""#,
     );
     assert!(
         log.contains(
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- residual absent\n"
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- residual+ absent+\n"
         ),
         "{log}"
     );
@@ -732,7 +738,7 @@ exit "$status""#,
     host.fake(
         "sudo",
         r#"printf 'sudo %s\n' "$*" >>"$LOG"
-[ "$*" = 'DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- installed held' ] && touch "$TMPDIR/purged""#,
+[ "$*" = 'DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- installed- held-' ] && touch "$TMPDIR/purged""#,
     );
     let step = Step::workflow(operations::Operation::AptPurge {
         packages: vec![
@@ -758,7 +764,7 @@ exit "$status""#,
     );
     assert!(
         log.contains(
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- installed held\n"
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- installed- held-\n"
         ),
         "{log}"
     );
@@ -937,9 +943,9 @@ exit 1"#,
         let log = host.log();
         let expected = match operation {
             "install" => {
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- residual absent\n"
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- residual+ absent+\n"
             }
-            "purge" => "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- installed\n",
+            "purge" => "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- installed-\n",
             _ => unreachable!(),
         };
         assert!(log.contains(expected), "{operation}: {log}");
@@ -970,7 +976,7 @@ exit 1"#,
         match operation {
             "install" => assert!(
                 log.contains(
-                    "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- first second\n"
+                    "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- first+ second+\n"
                 ),
                 "{log}"
             ),
@@ -978,6 +984,57 @@ exit 1"#,
             _ => unreachable!(),
         }
     }
+}
+
+#[test]
+fn apt_mutations_force_actions_for_ordinary_plus_and_minus_package_names() {
+    let packages = vec!["ordinary".into(), "name+".into(), "name-".into()];
+
+    for operation in ["install", "bootstrap"] {
+        let host = Host::new();
+        host.fake(
+            "dpkg-query",
+            "printf 'dpkg-query %s\\n' \"$*\" >>\"$LOG\"; exit 1",
+        );
+        host.logging_fake("sudo");
+        let step = match operation {
+            "install" => Step::workflow(operations::Operation::AptPackages {
+                packages: packages.clone(),
+            }),
+            "bootstrap" => Step::workflow(operations::Operation::AptBootstrapPackages {
+                packages: packages.clone(),
+            }),
+            _ => unreachable!(),
+        };
+        host.run_ok(&step);
+        let refresh = if operation == "bootstrap" {
+            "sudo apt-get update -qq\n"
+        } else {
+            ""
+        };
+        assert_eq!(
+            host.log(),
+            format!(
+                "dpkg-query -W -f=${{Package}}\\t${{db:Status-Abbrev}}\\n -- ordinary name+ name-\n{refresh}sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- ordinary+ name++ name-+\n"
+            )
+        );
+    }
+
+    let host = Host::new();
+    host.fake(
+        "dpkg-query",
+        r#"printf 'dpkg-query %s\n' "$*" >>"$LOG"
+shift 3
+for package in "$@"; do printf '%s\tii \n' "$package"; done"#,
+    );
+    host.logging_fake("sudo");
+    host.run_ok(&Step::workflow(operations::Operation::AptPurge {
+        packages,
+    }));
+    assert_eq!(
+        host.log(),
+        "dpkg-query -W -f=${Package}\\t${db:Status-Abbrev}\\n -- ordinary name+ name-\nsudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -- ordinary- name+- name--\n"
+    );
 }
 
 #[test]
@@ -1020,20 +1077,119 @@ fn apt_upgrade_policies_have_fixed_order_and_stop_on_failure() {
 }
 
 #[test]
-fn flatpak_flathub_remote_has_one_fixed_per_user_command_and_propagates_errors() {
-    let success = Host::new();
-    success.logging_fake("flatpak");
-    success.run_ok(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
-    assert_eq!(
-        success.log(),
-        "flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n"
+fn flatpak_flathub_absent_adds_fixed_remote_and_second_apply_is_query_only() {
+    let host = Host::new();
+    host.fake(
+        "flatpak",
+        r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options')
+    [ ! -f "$TMPDIR/flathub-added" ] || printf 'flathub\thttps://dl.flathub.org/repo/\t\n'
+    ;;
+  '--user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo')
+    touch "$TMPDIR/flathub-added"
+    ;;
+  *) exit 42 ;;
+esac"#,
     );
+    let step = Step::workflow(operations::Operation::FlatpakEnsureFlathub);
+    host.run_ok(&step);
+    host.run_ok(&step);
+    assert_eq!(
+        host.log(),
+        "flatpak --user remotes --show-disabled --columns=name,url,options\nflatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\nflatpak --user remotes --show-disabled --columns=name,url,options\n"
+    );
+}
 
-    let failure = Host::new();
-    failure.fake("flatpak", "printf 'remote failed\\n' >&2; exit 41");
-    let output = failure.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("remote failed"));
+#[test]
+fn flatpak_flathub_canonical_usable_remote_is_query_only() {
+    let host = Host::new();
+    host.fake(
+        "flatpak",
+        r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+printf 'flathub\thttps://dl.flathub.org/repo/\tgpg-verify-summary,collection-id=org.flathub.Stable\n'"#,
+    );
+    host.run_ok(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+    assert_eq!(
+        host.log(),
+        "flatpak --user remotes --show-disabled --columns=name,url,options\n"
+    );
+}
+
+#[test]
+fn flatpak_flathub_rejects_wrong_identity_and_unusable_options() {
+    for (name, record) in [
+        ("wrong-url", "flathub\thttps://example.invalid/repo\t"),
+        (
+            "disabled",
+            "flathub\thttps://dl.flathub.org/repo/\tdisabled",
+        ),
+        (
+            "no-gpg-verification",
+            "flathub\thttps://dl.flathub.org/repo/\tno-gpg-verify",
+        ),
+        (
+            "no-enumeration",
+            "flathub\thttps://dl.flathub.org/repo/\tno-enumerate",
+        ),
+        (
+            "no-dependencies",
+            "flathub\thttps://dl.flathub.org/repo/\tno-deps",
+        ),
+        (
+            "no-use-for-dependencies",
+            "flathub\thttps://dl.flathub.org/repo/\tno-use-for-deps",
+        ),
+    ] {
+        let host = Host::new();
+        host.fake("flatpak", &format!("printf '{record}\\n'"));
+        let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+        assert!(!output.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Flathub remote mismatch"),
+            "{name}: {stderr}"
+        );
+        assert!(stderr.contains("Repair or remove"), "{name}: {stderr}");
+    }
+}
+
+#[test]
+fn flatpak_flathub_fails_closed_on_query_and_malformed_remote_state() {
+    for (name, body, error) in [
+        (
+            "fatal",
+            "printf 'remote query failed\\n' >&2; exit 43",
+            "remote query failed",
+        ),
+        (
+            "non-UTF-8",
+            "printf '\\377'",
+            "non-UTF-8 per-user remote state",
+        ),
+        (
+            "missing-column",
+            "printf 'flathub\\thttps://dl.flathub.org/repo/\\n'",
+            "malformed per-user remote state",
+        ),
+        (
+            "blank-record",
+            "printf 'other\\thttps://example.test/repo\\t\\n\\nflathub\\thttps://dl.flathub.org/repo/\\t\\n'",
+            "malformed per-user remote state",
+        ),
+        (
+            "duplicate-name",
+            "printf 'flathub\\thttps://dl.flathub.org/repo/\\t\\nflathub\\thttps://dl.flathub.org/repo/\\t\\n'",
+            "duplicate per-user remote name",
+        ),
+    ] {
+        let host = Host::new();
+        host.fake("flatpak", body);
+        let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+        assert!(!output.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(error), "{name}: {stderr}");
+    }
 }
 
 #[test]
@@ -1047,7 +1203,7 @@ case "$*" in
     printf 'org.example.Installed\n'
     [ ! -f "$TMPDIR/flatpak-installed" ] || printf 'com.example.First\nio.example.Second\n'
     ;;
-  '--user install --noninteractive -y flathub -- com.example.First io.example.Second')
+  '--user install --app --noninteractive -y flathub -- com.example.First io.example.Second')
     touch "$TMPDIR/flatpak-installed"
     ;;
   *) exit 42 ;;
@@ -1070,7 +1226,7 @@ esac"#,
         "{log}"
     );
     assert_eq!(
-        log.matches("flatpak --user install --noninteractive -y flathub -- com.example.First io.example.Second\n")
+        log.matches("flatpak --user install --app --noninteractive -y flathub -- com.example.First io.example.Second\n")
             .count(),
         1,
         "{log}"
@@ -1078,12 +1234,12 @@ esac"#,
 }
 
 #[test]
-fn flatpak_ensure_apps_all_present_is_a_single_inspection_noop() {
+fn flatpak_repeated_branch_and_architecture_ids_count_as_installed() {
     let host = Host::new();
     host.fake(
         "flatpak",
         r#"printf 'flatpak %s\n' "$*" >>"$LOG"
-printf 'com.example.First\norg.example.Second\n'"#,
+printf 'com.example.First\ncom.example.First\norg.example.Second\norg.example.Second\n'"#,
     );
     host.run_ok(&Step::workflow(operations::Operation::FlatpakEnsureApps {
         refs: vec!["com.example.First".into(), "org.example.Second".into()],
@@ -1113,9 +1269,9 @@ fn flatpak_ensure_apps_fails_closed_on_list_errors_and_malformed_state() {
             "malformed installed application ID",
         ),
         (
-            "duplicate",
-            "printf 'com.example.App\\ncom.example.App\\n'",
-            "duplicate installed application ID",
+            "blank-interior-record",
+            "printf 'com.example.App\\n\\norg.example.Other\\n'",
+            "malformed installed application ID",
         ),
     ] {
         let host = Host::new();
@@ -1161,12 +1317,12 @@ fn flatpak_operations_reject_empty_duplicate_and_invalid_refs_before_execution()
 }
 
 #[test]
-fn flatpak_update_always_targets_exact_configured_refs_and_required_dependencies() {
+fn flatpak_update_targets_configured_apps_with_dependencies_and_eol_replacements_allowed() {
     let host = Host::new();
     host.fake(
         "flatpak",
         r#"printf 'flatpak %s\n' "$*" >>"$LOG"
-[ "$*" = '--user update --noninteractive -y -- org.example.First com.example.Second' ]"#,
+[ "$*" = '--user update --app --noninteractive -y -- org.example.First com.example.Second' ]"#,
     );
     let step = Step::workflow(operations::Operation::FlatpakUpdateApps {
         refs: vec!["org.example.First".into(), "com.example.Second".into()],
@@ -1175,7 +1331,7 @@ fn flatpak_update_always_targets_exact_configured_refs_and_required_dependencies
     host.run_ok(&step);
     assert_eq!(
         host.log(),
-        "flatpak --user update --noninteractive -y -- org.example.First com.example.Second\nflatpak --user update --noninteractive -y -- org.example.First com.example.Second\n"
+        "flatpak --user update --app --noninteractive -y -- org.example.First com.example.Second\nflatpak --user update --app --noninteractive -y -- org.example.First com.example.Second\n"
     );
 }
 

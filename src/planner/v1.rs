@@ -301,7 +301,7 @@ pub enum AptUpdateTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlatpakUpdateScope {
-    ConfiguredRefsAndRequiredRuntimes,
+    ConfiguredAppsRequiredRuntimesRelatedRefsAndEolReplacements,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -720,7 +720,8 @@ fn plan_updates(
             prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FlatpakFlathub]);
             actions.push(PlannedAction::Update(UpdateAction::Flatpak {
                 refs: refs.clone(),
-                scope: FlatpakUpdateScope::ConfiguredRefsAndRequiredRuntimes,
+                scope:
+                    FlatpakUpdateScope::ConfiguredAppsRequiredRuntimesRelatedRefsAndEolReplacements,
             }));
         }
     }
