@@ -74,48 +74,48 @@ Exit criteria:
 - V1 fixtures are rejected before any planner or operation call, with field-path errors and no generic `serde_yaml::Value` in the v1 model or validation path.
 - `main`, `apply`, the planner, and embedded presets remain legacy-only; there is no runtime v1 auto-detection, fallback, or conversion.
 
-### 3. Replace planner inputs with typed intent
+### 3. Build the typed intent planner
 
 Affected paths:
 
 - `src/planner.rs`
-- `src/operations/mod.rs`
-- `src/runner.rs` where typed steps require adjustment
-- `tests/plans.rs`
-- `tests/behavior.rs`
+- `src/planner/v1.rs`
+- focused typed planner tests under `tests/`
 
 Work:
 
-- Plan in contract order: explicit system controls, removals, repositories/APT, Flatpak, tools, Cargo/NPM/direct packages, fonts, dotfiles, integrations, desktop, then enabled granular updates.
+- Build a dedicated equality-testable `PlanV1`/`PlannedAction` model from `ConfigV1` and resolved `Platform`; do not lower it to executable `Operation` or `Step` values in this milestone.
+- Plan in contract order: inferred/shared preparation, explicit system controls, removals, repositories/APT, Flatpak, tools, Cargo/NPM/direct packages, fonts, dotfiles, integrations, desktop, then enabled granular updates.
 - Infer prerequisites from enabled features and coalesce APT metadata refresh/install work.
 - Generate managed distribution sources from detected platform data and configured components. Generate third-party APT source entries from typed fields, the selected distro URL, `system` codename resolution or fixed literal suite, derived key path, and `Architecture::debian()`.
-- Derive every repository `signed-by` path from its validated sanitized name. Plan the fixed HTTPS-download, batch-GPG/dearmor validation, and privileged atomic publication of canonical binary bytes at the root-owned mode-`0644` keyring path; never expose key handling fields.
-- Select one direct-package asset selector by canonical architecture, match its required anchored `include`, remove matches for its required `exclude` sequence, require exactly one remaining latest-release asset, and use the fixed format handler.
+- Derive every repository `signed-by` path from its validated sanitized name. Retain the canonical key URL and sole derived root-owned mode-`0644` keyring destination needed for milestone 4's fixed HTTPS-download, batch-GPG/dearmor validation, and privileged atomic publication; never expose key handling fields.
+- Select and retain one direct-package asset selector by canonical architecture without resolving live release metadata. Retain its required anchored `include`, ordered `exclude` sequence, format, source coordinate, `provides`, and definition name for milestone 4 lowering.
 - Plan fixed backup-before-adoption dotfile behavior and the canonical Docker, VirtualBox, VS Code, theme, terminal, idle, and GNOME controls independently.
+- Omit desktop actions that do not apply to the resolved desktop; do not emit another desktop's controls or emulate them.
 - Translate `updates.apt` over the system APT package set according to its scalar policy. Update only configured Flatpak refs plus required runtimes, configured Cargo/NPM names, and configured direct definitions; never update unrelated installed packages. Require declared Node for NPM updates and each corresponding `tools.*` declaration for tool updates, producing no step when prerequisites or required non-empty lists are absent.
-- Resolve moving Rust `stable`, Go `latest`, and Node `latest`/`lts` targets when their update leaf is enabled. Keep exact Rust/Go/Node versions pinned, verifying or reinstalling only that exact version when needed. Treat unversioned Cargo and NPM schema entries as manager-current when enabled.
-- Remove interpolation expansion and every raw legacy repository/binary planning path.
-- Keep config-derived values as process arguments or stdin to fixed operations; never generate arbitrary shell source.
+- Mark moving Rust channels, Go `latest`, and Node `latest`/`lts` selectors as moving typed values. Retain exact Rust/Go/Node selectors as pinned typed values; target resolution, verification, and installation belong to milestone 4. Treat unversioned Cargo and NPM schema entries as manager-current intents when enabled.
+- Keep interpolation expansion and every raw repository/binary representation out of the v1 planner. The temporarily retained legacy planner remains unchanged until the atomic integration milestone.
+- Emit domain values only, not process arguments, command lines, operations, or arbitrary shell source.
 
 TDD gate:
 
 - Snapshot or exact-step tests cover minimal, complete, disabled, and mixed configurations.
 - Ordering tests prove prerequisites precede consumers and each shared refresh/bootstrap occurs once.
-- System tests cover preserve/managed APT sources, component compatibility, admin membership, unattended upgrades, every supported lowercase distro ID, and Ubuntu Snap/codecs controls on the Ubuntu upstream family including supported derivatives and their non-Ubuntu-family skip behavior, without an opaque preparation path.
+- System intent tests cover preserve/managed APT sources, component compatibility, explicit admin and unattended-upgrade states, every supported lowercase distro ID, and Ubuntu Snap/codecs controls on the Ubuntu upstream family including supported derivatives and their non-Ubuntu-family skip behavior, without an opaque preparation path.
 - Repository planner tests cover distro URL precedence, default fallback, codename-appropriate `system` resolution, the GitHub CLI fixed `stable` suite, derived signed-by output, sanitized-name rejection/collision, and native architecture.
-- Direct-package tests cover all canonical architecture keys, absent-native-selector failure, required `include` and `exclude` children, exclusion of overlapping architecture assets, one-remaining-asset selection, and clear zero/multiple-remaining-asset failures. They reject paths, substitutions, and invalid wildcard syntax.
-- Dotfile tests prove every conflict is backed up before Stow and that backup failure prevents adoption.
-- Integration and desktop tests cover each child independently, accept `desktop.idle.timeout` duration strings including disabling `0s`, and reject numeric idle values plus boolean or legacy shorthand forms.
+- Direct-package planner tests cover canonical architecture selection, absent-native-selector failure, retained required `include` and ordered `exclude` children, paths, substitutions, and invalid wildcard syntax. Include-then-exclude matching and zero/one/multiple-result behavior belong to milestone 4 operation tests.
+- Dotfile planner tests prove every package carries the sole backup-before-Stow policy. Backup execution and failure behavior belong to milestone 4 operation tests.
+- Integration and desktop intent tests cover each child independently, including `desktop.idle.timeout: 0s` and the documented desktop-mismatch omission rule; parser tests retain wrong-type and shorthand rejection coverage.
 - Exact planner tests prove APT targets the system package set for `off`/`standard`/`full`; Flatpak targets only configured refs and required runtimes; Cargo and NPM target only their configured names; direct updates target only configured definitions and latest-release selectors; unrelated installed entries never appear. They prove every empty or missing prerequisite produces no step, including Flatpak without refs, NPM without Node or packages, and tool leaves without matching declarations.
-- Behavior tests prove moving Rust `stable`, Go `latest`, and Node `latest`/`lts` selectors resolve their current targets, while exact versions remain pinned and are only verified or reinstalled when absent or invalid. They prove unversioned Cargo/NPM entries resolve manager-current versions. Update tests also reject boolean APT policies and cover every granular sibling without cross-enablement; omitted and `null` APT behave as `off`.
-- Existing operation behavior tests are migrated rather than duplicated.
+- Typed planner tests distinguish moving Rust channels, Go `latest`, and Node `latest`/`lts` selectors from exact pinned versions. Target resolution, verification/reinstallation, and manager-current Cargo/NPM behavior belong to milestone 4 behavior tests. Update tests reject boolean APT policies and cover every granular sibling without cross-enablement; omitted and `null` APT behave as `off`.
+- Existing legacy operation behavior tests remain unchanged until typed lowering replaces them in milestone 4.
 
 Exit criteria:
 
-- Planner has no dotted string lookups, YAML tags, raw repository lines, public interpolation, or user-selectable conflict/manager algorithms. Direct-package wildcard matching is confined to latest-release asset selection.
+- V1 planner has no dotted string lookups, YAML tags, raw repository lines, public interpolation, command representation, or user-selectable conflict/manager algorithms. It retains direct-package wildcards as typed selectors but performs no release lookup or matching.
 - Every installation is sourced from `packages` or inferred as an internal prerequisite.
 
-### 4. Complete fixed-manager operations
+### 4. Lower typed intents into complete fixed-manager operations
 
 Affected paths:
 
@@ -126,7 +126,8 @@ Affected paths:
 
 Work:
 
-- Ensure Rustup, cargo-binstall, official Go archives, FNM, NPM, UV, APT, Flatpak, and Stow are the only manager implementations.
+- Lower every executable `PlannedAction` into fixed `Operation`/`Step` values, then ensure Rustup, cargo-binstall, official Go archives, FNM, NPM, UV, APT, Flatpak, and Stow are the only manager implementations.
+- Resolve moving tool targets and direct-package latest-release metadata during lowering/execution, never in the planner.
 - Add Rust toolchain selection and canonical Rust target use where host targeting is required.
 - Implement deterministic latest-GitHub-release selector matching in include-then-exclude order, with exactly one remaining asset and fixed `deb`/`appimage` installation.
 - Implement repository key handling exactly once: download to temporary storage; validate and normalize armored or binary OpenPGP through batch GPG/dearmor; require non-empty output; then use a privileged fixed operation to atomically replace the derived root-owned mode-`0644` keyring. Conversion or publication failure must preserve the previous keyring.
@@ -210,9 +211,9 @@ Exit criteria:
 
 1. Land milestone 1 without changing embedded preset bytes.
 2. Build typed v1 parsing and validation against test fixtures not used by production init.
-3. Build and test typed planner and operation integration without switching production `main`/`apply` or shipping mismatched embedded presets; do not expose runtime dual-schema selection or merge a revision in which production `apply` cannot parse its embedded default.
-4. In one atomic integration change, switch `main`/`apply`, all presets, init expectations, planner tests, and production planner callers to v1, then delete the legacy parser. V1 becomes the sole runtime parser at this point.
-5. Complete fixed-manager behavior and update tests before broadening release testing.
+3. Build and test the typed v1 intent planner without operation lowering, production `main`/`apply` switching, or runtime dual-schema selection.
+4. Lower typed intents into fixed-manager operations and complete operation behavior tests while production and embedded presets remain legacy-only.
+5. In one atomic integration change, switch `main`/`apply`, all presets, init expectations, planner tests, and production planner callers to v1, then delete the legacy parser and planner. V1 becomes the sole runtime schema at this point.
 6. Run release/VM acceptance, remove remaining dead legacy material, and publish the breaking release.
 
 The integration change in step 4 must be atomic. If milestones are split across branches, rebase them before merge so the main branch always has a matching parser and embedded default.

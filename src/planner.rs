@@ -7,6 +7,9 @@ use crate::{
 use anyhow::{bail, Result};
 use std::path::Path;
 
+#[path = "planner/v1.rs"]
+pub mod v1;
+
 fn sudo(args: Vec<String>) -> Step {
     Step::owned("sudo", args)
 }
