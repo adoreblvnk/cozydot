@@ -1,4 +1,4 @@
-use super::{Host, TempPath};
+use super::{publish_file, Host, TempPath};
 use crate::json_helpers;
 use anyhow::{bail, Context, Result};
 use std::{fs, os::unix::fs::PermissionsExt};
@@ -80,12 +80,9 @@ pub fn binary(host: &Host<'_>, name: &str, url: &str, repo: &str, pattern: &str)
         ],
     )?;
     if name.ends_with(".AppImage") {
-        let mut permissions = fs::metadata(temporary.path())?.permissions();
-        permissions.set_mode(permissions.mode() | 0o111);
-        fs::set_permissions(temporary.path(), permissions)?;
-        fs::rename(temporary.path(), destination)?;
+        publish_file(temporary.path(), &destination, 0o755)?;
     } else if name.ends_with(".deb") {
-        fs::rename(temporary.path(), &destination)?;
+        publish_file(temporary.path(), &destination, 0o644)?;
         let result = host.require(
             "download binary",
             "sudo",

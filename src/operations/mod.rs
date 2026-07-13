@@ -9,7 +9,9 @@ mod snap_cleanup;
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
+    fs,
     io::Write,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -312,6 +314,30 @@ impl Drop for TempDir {
     }
 }
 
+fn publish_file(source: &Path, destination: &Path, mode: u32) -> Result<()> {
+    let parent = destination
+        .parent()
+        .context("downloaded file destination has no parent")?;
+    fs::create_dir_all(parent).context("create downloaded file destination directory")?;
+    let mut source_file = fs::File::open(source).context("open downloaded file")?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)
+        .context("stage downloaded file on destination filesystem")?;
+    std::io::copy(&mut source_file, staged.as_file_mut()).context("copy downloaded file")?;
+    staged
+        .as_file_mut()
+        .set_permissions(fs::Permissions::from_mode(mode))
+        .context("set downloaded file permissions")?;
+    staged
+        .as_file_mut()
+        .sync_all()
+        .context("sync downloaded file")?;
+    staged
+        .persist(destination)
+        .map_err(|error| error.error)
+        .context("publish downloaded file")?;
+    Ok(())
+}
+
 pub(crate) struct TempPath(PathBuf);
 
 impl TempPath {
@@ -350,4 +376,35 @@ fn display(program: &str, args: &[OsString]) -> String {
         .map(|part| part.to_string_lossy())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::publish_file;
+    use std::{fs, os::unix::fs::MetadataExt};
+
+    #[test]
+    fn downloaded_files_publish_across_filesystems() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let Ok(destination_dir) = tempfile::tempdir_in("/dev/shm") else {
+            return;
+        };
+        if fs::metadata(source_dir.path()).unwrap().dev()
+            == fs::metadata(destination_dir.path()).unwrap().dev()
+        {
+            return;
+        }
+        let source = source_dir.path().join("download");
+        let destination = destination_dir.path().join("installed");
+        fs::write(&source, b"complete artifact").unwrap();
+        assert_eq!(
+            fs::rename(&source, &destination)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(18)
+        );
+
+        publish_file(&source, &destination, 0o755).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"complete artifact");
+    }
 }
