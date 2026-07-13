@@ -245,6 +245,10 @@ cat >"$XDG_DATA_HOME/fnm/npm" <<'NPM'
 #!/bin/bash
 [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }
 printf 'npm %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = list ]; then
+  [ -f "$TMPDIR/npm-opencode-installed" ] || exit 1
+fi
+if [ "${1:-}" = install ]; then touch "$TMPDIR/npm-opencode-installed"; fi
 NPM
 chmod +x "$XDG_DATA_HOME/fnm/fnm" "$XDG_DATA_HOME/fnm/npm"
 INSTALL"#,
@@ -254,9 +258,11 @@ INSTALL"#,
         "workflow node-install",
     );
     host.run_ok(&step);
+    host.run_ok(&step);
     let log = host.log();
     assert!(log.contains("fnm install --lts --use"));
-    assert!(log.contains("npm install --global"));
+    assert_eq!(log.matches("npm install --global").count(), 1, "{log}");
+    assert!(log.contains("npm list --global --depth=0 opencode-ai"));
     assert!(log.contains("opencode-ai"));
 }
 

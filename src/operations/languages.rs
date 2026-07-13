@@ -131,7 +131,11 @@ fi
 current=$("$fnm" current)
 "$fnm" default "$current"
 if [ "$#" -gt 0 ]; then
-  npm install --global "$@"
+  for package in "$@"; do
+    if ! npm list --global --depth=0 "$package" >/dev/null 2>&1; then
+      npm install --global "$package"
+    fi
+  done
 fi"#
         .to_owned(),
         "--".to_owned(),
