@@ -1077,18 +1077,19 @@ fn apt_upgrade_policies_have_fixed_order_and_stop_on_failure() {
 }
 
 #[test]
-fn flatpak_flathub_absent_adds_fixed_remote_and_second_apply_is_query_only() {
+fn flatpak_flathub_absent_converges_and_second_apply_does_not_add_again() {
     let host = Host::new();
     host.fake(
         "flatpak",
         r#"printf 'flatpak %s\n' "$*" >>"$LOG"
 case "$*" in
-  '--user remotes --show-disabled --columns=name,url,options')
-    [ ! -f "$TMPDIR/flathub-added" ] || printf 'flathub\thttps://dl.flathub.org/repo/\t\n'
+  '--user remotes --show-disabled --columns=name,url,options,filter')
+    [ ! -f "$TMPDIR/flathub-added" ] || printf 'flathub\thttps://dl.flathub.org/repo/\tcollection-id=org.flathub.Stable\t-\n'
     ;;
-  '--user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo')
+  '--user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo')
     touch "$TMPDIR/flathub-added"
     ;;
+  '--user remote-modify --use-for-deps flathub') ;;
   *) exit 42 ;;
 esac"#,
     );
@@ -1097,52 +1098,69 @@ esac"#,
     host.run_ok(&step);
     assert_eq!(
         host.log(),
-        "flatpak --user remotes --show-disabled --columns=name,url,options\nflatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\nflatpak --user remotes --show-disabled --columns=name,url,options\n"
+        "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-modify --use-for-deps flathub\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-modify --use-for-deps flathub\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\n"
     );
+    assert_eq!(host.log().matches(" remote-add ").count(), 1);
 }
 
 #[test]
-fn flatpak_flathub_canonical_usable_remote_is_query_only() {
+fn flatpak_flathub_existing_remote_explicitly_enables_dependency_use() {
     let host = Host::new();
     host.fake(
         "flatpak",
         r#"printf 'flatpak %s\n' "$*" >>"$LOG"
-printf 'flathub\thttps://dl.flathub.org/repo/\tgpg-verify-summary,collection-id=org.flathub.Stable\n'"#,
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter')
+    printf 'flathub\thttps://dl.flathub.org/repo/\tgpg-verify-summary,collection-id=org.flathub.Stable\t-\n'
+    ;;
+  '--user remote-modify --use-for-deps flathub') ;;
+  *) exit 42 ;;
+esac"#,
     );
     host.run_ok(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
     assert_eq!(
         host.log(),
-        "flatpak --user remotes --show-disabled --columns=name,url,options\n"
+        "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-modify --use-for-deps flathub\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\n"
     );
 }
 
 #[test]
-fn flatpak_flathub_rejects_wrong_identity_and_unusable_options() {
+fn flatpak_flathub_validates_state_immediately_after_add() {
     for (name, record) in [
-        ("wrong-url", "flathub\thttps://example.invalid/repo\t"),
+        ("wrong-url", "flathub\thttps://example.invalid/repo\t\t-"),
         (
             "disabled",
-            "flathub\thttps://dl.flathub.org/repo/\tdisabled",
+            "flathub\thttps://dl.flathub.org/repo/\tdisabled\t-",
         ),
         (
             "no-gpg-verification",
-            "flathub\thttps://dl.flathub.org/repo/\tno-gpg-verify",
+            "flathub\thttps://dl.flathub.org/repo/\tno-gpg-verify\t-",
         ),
         (
             "no-enumeration",
-            "flathub\thttps://dl.flathub.org/repo/\tno-enumerate",
+            "flathub\thttps://dl.flathub.org/repo/\tno-enumerate\t-",
         ),
         (
-            "no-dependencies",
-            "flathub\thttps://dl.flathub.org/repo/\tno-deps",
-        ),
-        (
-            "no-use-for-dependencies",
-            "flathub\thttps://dl.flathub.org/repo/\tno-use-for-deps",
+            "filtered",
+            "flathub\thttps://dl.flathub.org/repo/\t\t/etc/flatpak/flathub.filter",
         ),
     ] {
         let host = Host::new();
-        host.fake("flatpak", &format!("printf '{record}\\n'"));
+        host.fake(
+            "flatpak",
+            &format!(
+                r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter')
+    [ ! -f "$TMPDIR/flathub-added" ] || printf '{record}\n'
+    ;;
+  '--user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo')
+    touch "$TMPDIR/flathub-added"
+    ;;
+  *) exit 42 ;;
+esac"#
+            ),
+        );
         let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
         assert!(!output.status.success(), "{name}");
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1151,11 +1169,126 @@ fn flatpak_flathub_rejects_wrong_identity_and_unusable_options() {
             "{name}: {stderr}"
         );
         assert!(stderr.contains("Repair or remove"), "{name}: {stderr}");
+        assert_eq!(
+            host.log(),
+            "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\n",
+            "{name}"
+        );
     }
 }
 
 #[test]
-fn flatpak_flathub_fails_closed_on_query_and_malformed_remote_state() {
+fn flatpak_flathub_add_success_without_publication_fails_before_modify() {
+    let host = Host::new();
+    host.fake(
+        "flatpak",
+        r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter') ;;
+  '--user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo') ;;
+  *) exit 42 ;;
+esac"#,
+    );
+    let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("to exist after mutation"));
+    assert_eq!(
+        host.log(),
+        "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\n"
+    );
+}
+
+#[test]
+fn flatpak_flathub_concurrent_creation_fails_closed_at_add() {
+    let host = Host::new();
+    host.fake(
+        "flatpak",
+        r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter') ;;
+  '--user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo') exit 43 ;;
+  *) exit 42 ;;
+esac"#,
+    );
+    let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Flathub remote ensure"));
+    assert_eq!(
+        host.log(),
+        "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n"
+    );
+}
+
+#[test]
+fn flatpak_flathub_remote_modify_failure_propagates_without_final_query() {
+    let host = Host::new();
+    host.fake(
+        "flatpak",
+        r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter')
+    printf 'flathub\thttps://dl.flathub.org/repo/\t\t-\n'
+    ;;
+  '--user remote-modify --use-for-deps flathub') exit 44 ;;
+  *) exit 42 ;;
+esac"#,
+    );
+    let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("dependency use enablement"));
+    assert_eq!(
+        host.log(),
+        "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-modify --use-for-deps flathub\n"
+    );
+}
+
+#[test]
+fn flatpak_flathub_final_query_must_revalidate_the_remote() {
+    for (name, final_query, error) in [
+        ("absent", "true", "to exist after mutation"),
+        (
+            "wrong",
+            "printf 'flathub\\thttps://example.invalid/repo\\t\\t-\\n'",
+            "Flathub remote mismatch",
+        ),
+        (
+            "fatal",
+            "printf 'final query failed\\n' >&2; exit 45",
+            "final query failed",
+        ),
+    ] {
+        let host = Host::new();
+        host.fake(
+            "flatpak",
+            &format!(
+                r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter')
+    if [ ! -f "$TMPDIR/modified" ]; then
+      printf 'flathub\thttps://dl.flathub.org/repo/\t\t-\n'
+    else
+      {final_query}
+    fi
+    ;;
+  '--user remote-modify --use-for-deps flathub') touch "$TMPDIR/modified" ;;
+  *) exit 42 ;;
+esac"#
+            ),
+        );
+        let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+        assert!(!output.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(error), "{name}: {stderr}");
+        assert_eq!(
+            host.log(),
+            "flatpak --user remotes --show-disabled --columns=name,url,options,filter\nflatpak --user remote-modify --use-for-deps flathub\nflatpak --user remotes --show-disabled --columns=name,url,options,filter\n",
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn flatpak_flathub_fails_before_mutation_on_bad_pre_query_state() {
     for (name, body, error) in [
         (
             "fatal",
@@ -1169,26 +1302,44 @@ fn flatpak_flathub_fails_closed_on_query_and_malformed_remote_state() {
         ),
         (
             "missing-column",
-            "printf 'flathub\\thttps://dl.flathub.org/repo/\\n'",
+            "printf 'flathub\\thttps://dl.flathub.org/repo/\\t-\\n'",
             "malformed per-user remote state",
         ),
         (
             "blank-record",
-            "printf 'other\\thttps://example.test/repo\\t\\n\\nflathub\\thttps://dl.flathub.org/repo/\\t\\n'",
+            "printf 'other\\thttps://example.test/repo\\t\\t-\\n\\nflathub\\thttps://dl.flathub.org/repo/\\t\\t-\\n'",
             "malformed per-user remote state",
         ),
         (
             "duplicate-name",
-            "printf 'flathub\\thttps://dl.flathub.org/repo/\\t\\nflathub\\thttps://dl.flathub.org/repo/\\t\\n'",
+            "printf 'flathub\\thttps://dl.flathub.org/repo/\\t\\t-\\nflathub\\thttps://dl.flathub.org/repo/\\t\\t-\\n'",
             "duplicate per-user remote name",
+        ),
+        (
+            "duplicate-option",
+            "printf 'other\\thttps://example.test/repo\\tdisabled,disabled\\t-\\n'",
+            "malformed per-user remote state",
+        ),
+        (
+            "invalid-url",
+            "printf 'other\\tnot-a-url\\t\\t-\\n'",
+            "malformed per-user remote state",
         ),
     ] {
         let host = Host::new();
-        host.fake("flatpak", body);
+        host.fake(
+            "flatpak",
+            &format!("printf 'flatpak %s\\n' \"$*\" >>\"$LOG\"\n{body}"),
+        );
         let output = host.run(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
         assert!(!output.status.success(), "{name}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(error), "{name}: {stderr}");
+        assert_eq!(
+            host.log(),
+            "flatpak --user remotes --show-disabled --columns=name,url,options,filter\n",
+            "{name}"
+        );
     }
 }
 
