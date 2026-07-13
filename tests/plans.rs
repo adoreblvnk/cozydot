@@ -38,6 +38,19 @@ fn debian_group_bootstrap_uses_privilege_escalation() {
 }
 
 #[test]
+fn vm_preset_does_not_configure_uninstalled_terminal_or_dock() {
+    let config = Config::load(Path::new("configs/vm.yaml")).unwrap();
+    let text = planner::plan("configure", &config, &platform(), Path::new("."))
+        .unwrap()
+        .iter()
+        .map(|step| step.display())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!text.contains("workflow gnome-terminal"), "{text}");
+    assert!(!text.contains("workflow gnome-dock-settings"), "{text}");
+}
+
+#[test]
 fn install_order_and_integrations() {
     let c = Config::load(Path::new("configs/cli.yaml")).unwrap();
     let s = planner::plan("install", &c, &platform(), Path::new(".")).unwrap();
@@ -58,7 +71,7 @@ fn update_uses_binstall_force() {
         .map(|x| x.display())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("binstall --no-confirm --force"));
+    assert!(text.contains("workflow cargo-packages --force"), "{text}");
 }
 #[test]
 fn configure_stow_precedes_desktop() {
@@ -66,6 +79,7 @@ fn configure_stow_precedes_desktop() {
     let s = planner::plan("configure", &c, &platform(), Path::new("/repo")).unwrap();
     let text = s.iter().map(|x| x.display()).collect::<Vec<_>>().join("\n");
     assert!(text.find("stow").unwrap() < text.find("gsettings").unwrap());
+    assert!(!text.contains("if command-exists stow"), "{text}");
 }
 
 #[test]
@@ -78,7 +92,8 @@ fn apply_has_one_shared_check_and_no_internal_check_duplication() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(text.matches("[ -L ").count(), 1, "{text}");
-    assert_eq!(text.matches("apt-get update -qq").count(), 3, "{text}");
+    assert_eq!(text.matches("apt-get update -qq").count(), 4, "{text}");
+    assert!(text.contains("apt-get upgrade -qq"), "{text}");
 }
 
 #[test]

@@ -164,10 +164,11 @@ fn plan_with_check(
 
 pub fn plan_apply(cfg: &Config, p: &Platform, root: &Path) -> Result<Vec<Step>> {
     let mut out = Vec::new();
-    if cfg.bool("install.check") || cfg.bool("configure.check") {
+    if cfg.bool("install.check") || cfg.bool("update.check") || cfg.bool("configure.check") {
         add_check(cfg, p, root, &mut out);
     }
     out.extend(plan_with_check("install", cfg, p, root, false)?);
+    out.extend(plan_with_check("update", cfg, p, root, false)?);
     out.extend(plan_with_check("configure", cfg, p, root, false)?);
     Ok(out)
 }
@@ -249,6 +250,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("install.cargo") {
         out.push(Step::workflow(Operation::CargoPackages {
             packages: cfg.strings("install.cargo"),
+            force: false,
         }));
     }
     if cfg.tagged_enabled("install.binaries") {
@@ -335,26 +337,12 @@ fn update(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     if cfg.bool("update.cargo") {
         out.push(run_if(
             Condition::CommandExists("rustup".into()),
-            run_if(
-                Condition::CommandExists("cargo".into()),
-                Step::new("rustup", &["update"]),
-            ),
+            Step::new("rustup", &["update"]),
         ));
-        out.push(run_if(
-            Condition::CommandExists("cargo".into()),
-            run_if(
-                Condition::CommandMissing("cargo-binstall".into()),
-                Step::new("cargo", &["install", "cargo-binstall", "--locked"]),
-            ),
-        ));
-        for pkg in cfg.strings("install.cargo") {
-            let mut a = vec!["binstall".into(), "--no-confirm".into(), "--force".into()];
-            a.extend(pkg.split_whitespace().map(str::to_owned));
-            out.push(run_if(
-                Condition::CommandExists("cargo".into()),
-                Step::owned("cargo", a),
-            ));
-        }
+        out.push(Step::workflow(Operation::CargoPackages {
+            packages: cfg.strings("install.cargo"),
+            force: true,
+        }));
     }
 
     if cfg.bool("update.other.go") {
@@ -381,33 +369,27 @@ fn configure(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("configure.dotfiles") {
         for pkg in cfg.strings("configure.dotfiles.packages") {
             if cfg.string("configure.dotfiles.stowMode").as_deref() == Some("override") {
-                out.push(run_if(
-                    Condition::CommandExists("stow".into()),
-                    Step::owned(
-                        "cp",
-                        vec![
-                            "-rT".into(),
-                            "--remove-destination".into(),
-                            root.join("dotfiles").join(&pkg).display().to_string(),
-                            home(),
-                        ],
-                    ),
+                out.push(Step::owned(
+                    "cp",
+                    vec![
+                        "-rT".into(),
+                        "--remove-destination".into(),
+                        root.join("dotfiles").join(&pkg).display().to_string(),
+                        home(),
+                    ],
                 ));
             }
-            out.push(run_if(
-                Condition::CommandExists("stow".into()),
-                Step::owned(
-                    "stow",
-                    vec![
-                        "--no-folding".into(),
-                        "--adopt".into(),
-                        "-d".into(),
-                        root.join("dotfiles").display().to_string(),
-                        "-t".into(),
-                        home(),
-                        pkg,
-                    ],
-                ),
+            out.push(Step::owned(
+                "stow",
+                vec![
+                    "--no-folding".into(),
+                    "--adopt".into(),
+                    "-d".into(),
+                    root.join("dotfiles").display().to_string(),
+                    "-t".into(),
+                    home(),
+                    pkg,
+                ],
             ));
         }
     }

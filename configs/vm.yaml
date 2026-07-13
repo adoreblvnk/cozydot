@@ -129,6 +129,6 @@ configure:
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
         - rounded-window-corners@fxgn
-      MacOSDock: true
+      MacOSDock: false
       smoothRoundedCorners: true
     cinnamon: !enabled
