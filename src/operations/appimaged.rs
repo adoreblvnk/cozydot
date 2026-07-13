@@ -1,7 +1,7 @@
-use super::{Host, TempPath};
+use super::{publish_file, Host, TempPath};
 use crate::json_helpers;
 use anyhow::{Context, Result};
-use std::{fs, os::unix::fs::PermissionsExt};
+use std::fs;
 
 const RELEASE_API: &str =
     "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
@@ -78,9 +78,9 @@ pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
             "curl",
             ["-fL", "-o", &temporary.path().to_string_lossy(), &url],
         )?;
-        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755))?;
         let destination = destination_dir.join("appimaged.AppImage");
-        fs::rename(temporary.path(), &destination).context("appimaged: install AppImage")?;
+        publish_file(temporary.path(), &destination, 0o755)
+            .context("appimaged: install AppImage")?;
         host.require(
             "appimaged",
             destination.to_string_lossy().as_ref(),
