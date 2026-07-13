@@ -1,10 +1,14 @@
 mod appimaged;
 mod apps;
+mod apt;
 mod desktop;
 mod downloads;
 mod languages;
 mod provisioning;
+mod repository;
 mod snap_cleanup;
+
+pub use apt::AptUpgradePolicy;
 
 use anyhow::{bail, Context, Result};
 use std::{
@@ -18,11 +22,22 @@ use std::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
+    AptMetadataRefresh,
     AptCodecs {
         package: String,
     },
     AptPackages {
         packages: Vec<String>,
+    },
+    AptPurge {
+        packages: Vec<String>,
+    },
+    AptUpgrade {
+        policy: AptUpgradePolicy,
+    },
+    AptSource {
+        destination: String,
+        contents: String,
     },
     Appimaged {
         arch: String,
@@ -90,10 +105,25 @@ pub enum Operation {
 impl Operation {
     pub fn display_args(&self) -> Vec<String> {
         match self {
+            Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
             Self::AptCodecs { package } => vec!["apt-codecs".into(), package.clone()],
             Self::AptPackages { packages } => std::iter::once("apt-packages".into())
                 .chain(packages.clone())
                 .collect(),
+            Self::AptPurge { packages } => std::iter::once("apt-purge".into())
+                .chain(packages.clone())
+                .collect(),
+            Self::AptUpgrade { policy } => vec![
+                "apt-upgrade".into(),
+                match policy {
+                    AptUpgradePolicy::Standard => "standard",
+                    AptUpgradePolicy::Full => "full",
+                }
+                .into(),
+            ],
+            Self::AptSource { destination, .. } => {
+                vec!["apt-source".into(), destination.clone()]
+            }
             Self::Appimaged { arch } => vec!["appimaged".into(), arch.clone()],
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
@@ -165,8 +195,15 @@ impl Operation {
 pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()> {
     let host = Host { env };
     match operation {
+        Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
         Operation::AptCodecs { package } => provisioning::apt_codecs(&host, package),
-        Operation::AptPackages { packages } => provisioning::apt_packages(&host, packages),
+        Operation::AptPackages { packages } => apt::packages(&host, packages),
+        Operation::AptPurge { packages } => apt::purge(&host, packages),
+        Operation::AptUpgrade { policy } => apt::upgrade(&host, *policy),
+        Operation::AptSource {
+            destination,
+            contents,
+        } => repository::source(&host, destination, contents),
         Operation::Appimaged { arch } => appimaged::execute(&host, arch),
         Operation::DockerConfig { user } => apps::docker(&host, user),
         Operation::DownloadBinary {
@@ -182,9 +219,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
         Operation::GnomeTerminal { terminal } => apps::gnome_terminal(&host, terminal),
         Operation::GoInstall { version, arch } => languages::go(&host, version, arch),
         Operation::NerdFont { font } => downloads::nerdfont(&host, font),
-        Operation::RepositoryKey { url, destination } => {
-            provisioning::repository_key(&host, url, destination)
-        }
+        Operation::RepositoryKey { url, destination } => repository::key(&host, url, destination),
         Operation::RustupBootstrap => provisioning::rustup(&host),
         Operation::CargoPackages { packages, force } => {
             provisioning::cargo_packages(&host, packages, *force)
