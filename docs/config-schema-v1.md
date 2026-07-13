@@ -193,7 +193,7 @@ Every `packages.direct` item has exactly these fields:
 
 - `name`: required safe ASCII identifier used for state and update tracking. It starts with an ASCII alphanumeric and then contains only ASCII alphanumerics, `.`, `_`, or `-`.
 - `format`: required scalar, either `deb` or `appimage` in schema v1.
-- `provides`: required non-empty sequence of unique executable names used together to determine whether the package is present. A package may expose more than one executable, so a scalar form is invalid.
+- `provides`: required non-empty sequence of unique executable basenames used together to determine whether the package is present. Each starts with an ASCII alphanumeric and then contains only ASCII alphanumerics, `.`, `_`, `+`, or `-`. A package may expose more than one executable, so a scalar form is invalid.
 - `source`: required source mapping. Schema v1 supports only the GitHub source below.
 
 A GitHub `source` has exactly these fields:
@@ -241,7 +241,7 @@ Integrations configure installed software; they do not implicitly add the associ
 ## `desktop`
 
 - `theme` is either `light` or `dark` and applies the corresponding supported desktop color preference. Omission or `null` preserves the current preference.
-- `terminal` is a non-empty executable name configured as the default terminal on supported desktops. It is not restricted to a package catalogue. Omission or `null` preserves the current default.
+- `terminal` is an executable basename configured as the default terminal on supported desktops, using the same grammar as direct-package `provides`: it starts with an ASCII alphanumeric and then contains only ASCII alphanumerics, `.`, `_`, `+`, or `-`. It is not restricted to a package catalogue. Omission or `null` preserves the current default.
 - `idle` is a mapping containing only `timeout` and `dim`.
 - `idle.timeout` is a scalar duration string consisting of a non-negative integer followed by exactly one unit: `s`, `m`, or `h`. For example, `15m` sets a fifteen-minute timeout and `0s` disables it. Numeric YAML values, negative values, multiple units, and other duration forms are invalid. Omission or `null` preserves the current timeout.
 - `idle.dim` is a boolean host-state control. `true` enables dimming when idle and `false` disables it. Omission or `null` preserves the current setting.

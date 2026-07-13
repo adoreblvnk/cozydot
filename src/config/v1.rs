@@ -2,10 +2,10 @@ use crate::platform::{Architecture, Platform};
 use anyhow::{bail, Context, Result};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::HashSet, fmt, fs, path::Path};
-use url::Url;
+use url::{Host, Url};
 use yaml_rust2::{
     parser::{Event, MarkedEventReceiver, Parser},
-    scanner::Marker,
+    scanner::{Marker, Scanner, TokenType},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1001,6 +1001,22 @@ impl<'de> de::DeserializeSeed<'de> for StrictStringSeed {
 }
 
 fn reject_yaml_extensions(text: &str) -> Result<()> {
+    for token in Scanner::new(text.chars()) {
+        let extension = match token.1 {
+            TokenType::TagDirective(..) | TokenType::Tag(..) => Some("YAML tags"),
+            TokenType::Anchor(..) => Some("YAML anchors"),
+            TokenType::Alias(..) => Some("YAML aliases"),
+            _ => None,
+        };
+        if let Some(extension) = extension {
+            bail!(
+                "line {}, column {}: {extension} are not supported by schema v1",
+                token.0.line() + 1,
+                token.0.col() + 1
+            );
+        }
+    }
+
     #[derive(Default)]
     struct ExtensionReceiver {
         documents: usize,
@@ -1098,6 +1114,7 @@ fn validate_https(value: &str, path: &str) -> Result<()> {
     validate_non_empty(value, path)?;
     if value.chars().any(char::is_whitespace)
         || value.chars().any(char::is_control)
+        || value.contains('\\')
         || has_substitution(value)
     {
         bail!("{path}: must be a literal HTTPS URL without whitespace or substitutions");
@@ -1109,7 +1126,10 @@ fn validate_https(value: &str, path: &str) -> Result<()> {
     if raw_scheme != "https"
         || parsed.scheme() != "https"
         || authority.is_empty()
-        || parsed.host_str().is_none_or(str::is_empty)
+        || parsed.host().is_none_or(|host| match host {
+            Host::Ipv4(_) | Host::Ipv6(_) => false,
+            Host::Domain(domain) => !valid_domain_host(domain),
+        })
         || !parsed.username().is_empty()
         || parsed.password().is_some()
         || authority.contains('@')
@@ -1118,6 +1138,24 @@ fn validate_https(value: &str, path: &str) -> Result<()> {
         bail!("{path}: must use HTTPS with a non-empty host and no credentials or fragment");
     }
     Ok(())
+}
+
+fn valid_domain_host(domain: &str) -> bool {
+    !domain.is_empty()
+        && domain.split('.').all(|label| {
+            label.len() <= 63
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
 }
 
 fn validate_github_repository(value: &str, path: &str) -> Result<()> {
@@ -1238,9 +1276,13 @@ fn validate_duration(value: &str, path: &str) -> Result<()> {
 }
 
 fn validate_executable(value: &str, path: &str) -> Result<()> {
-    validate_literal(value, path)?;
-    if value.contains(['/', '\\']) || value.chars().any(char::is_whitespace) {
-        bail!("{path}: must be an executable name, not a path or command line");
+    let mut bytes = value.bytes();
+    if bytes
+        .next()
+        .is_none_or(|byte| !byte.is_ascii_alphanumeric())
+        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte))
+    {
+        bail!("{path}: must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'");
     }
     Ok(())
 }

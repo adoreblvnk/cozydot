@@ -55,6 +55,7 @@ Work:
 - Expose one unified platform-validation method that checks all distribution/upstream and architecture-dependent constraints before planning or mutation.
 - Derive repository filename stems by the contract's fixed sanitization algorithm; reject empty stems and collisions before planning.
 - Return field-path errors before platform mutation or command execution.
+- Reviewed parser findings may tighten malformed-input grammars without adding alternate public forms.
 - Retain the legacy production parser unchanged for its current `main`, planner, and embedded-preset callers. The v1 parser is exercised directly by fixtures and tests in this milestone; this is temporary development sequencing, not runtime dual-schema detection, fallback, conversion, or a public compatibility adapter.
 - Delete tag handling, string-path lookup, purge-tag mutation, and legacy validation only in the atomic integration milestone after all production callers and embedded presets move to typed values.
 

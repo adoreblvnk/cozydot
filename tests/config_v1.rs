@@ -108,8 +108,16 @@ fn rejects_unknown_fields_and_wrong_yaml_shapes_with_paths() {
 }
 
 #[test]
-fn yaml_extension_preflight_uses_parsed_events_not_source_characters() {
+fn yaml_extension_preflight_rejects_tokens_not_literal_characters() {
     for (yaml, expected) in [
+        (
+            "%TAG !e! tag:example.com,2026:\n---\nschema: 1",
+            "YAML tags",
+        ),
+        (
+            "%TAG !e! tag:example.com,2026:\n---\nschema: 1\nsystem: !e!enabled {}",
+            "YAML tags",
+        ),
         (
             r#"{schema: 1, fonts: {nerd: ["Name\\"]}, system: &shared {}, desktop: *shared}"#,
             "YAML anchors",
@@ -118,6 +126,12 @@ fn yaml_extension_preflight_uses_parsed_events_not_source_characters() {
             "schema: 1\nsystem: &shared\n  ensure_admin: true\ndesktop: *shared",
             "YAML anchors",
         ),
+        (
+            "schema: 1\nsystem: {ensure_admin: &enabled true}\ndesktop: {gnome: {dock: *enabled}}",
+            "YAML anchors",
+        ),
+        ("schema: 1\nsystem: *shared", "YAML aliases"),
+        ("{schema: 1, system: *shared}", "YAML aliases"),
         ("schema: 1\nfonts:\n  nerd: [!custom Name]", "YAML tags"),
         ("schema: 1\n---\nschema: 1", "multiple YAML documents"),
     ] {
@@ -129,6 +143,9 @@ fn yaml_extension_preflight_uses_parsed_events_not_source_characters() {
         "schema: 1\nfonts:\n  nerd:\n    - '!tag &anchor *alias' # !comment &ignored *ignored",
         "schema: 1\nfonts:\n  nerd:\n    - >-\n      literal !tag\n      second &anchor and *alias\n",
         "schema: 1\nfonts:\n  nerd:\n    - plain-value # !tag &anchor *alias\n",
+        "schema: 1 # %TAG !e! tag:example.com &anchor *alias\n",
+        "schema: 1\nfonts:\n  nerd:\n    - '%TAG !e! tag:example.com &anchor *alias'\n",
+        "%YAML 1.2\n---\nschema: 1\nfonts:\n  nerd:\n    - >-\n      literal %TAG ! & *\n",
     ] {
         ConfigV1::parse(yaml).unwrap_or_else(|error| panic!("YAML {yaml:?}: {error}"));
     }
@@ -282,6 +299,15 @@ fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
         "http://example.com/key",
         "ftp://example.com/key",
         "https:///key",
+        "https://.",
+        "https://..",
+        "https://-",
+        "https://_bad.example",
+        "https://example..com",
+        "https://-example.com",
+        "https://example-.com",
+        "https://example.com\\evil",
+        &format!("https://{}.example", "a".repeat(64)),
         "https://@:443/key",
         "https://user@example.com/key",
         "https://user:pass@example.com/key",
@@ -298,6 +324,12 @@ fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
     }
 
     for valid in [
+        "https://example.com",
+        "https://registry",
+        "https://xn--mnchen-3ya.example",
+        "https://münchen.example",
+        "https://192.0.2.1",
+        "https://[2001:db8::1]",
         "https://example.com/path/to/key?format=gpg",
         "https://[2001:db8::1]:8443/repository?channel=stable",
     ] {
@@ -493,7 +525,7 @@ fn validates_direct_package_shape_coordinates_and_selectors() {
         ),
         (
             direct("    - name: app\n      format: deb\n      provides: [/usr/bin/app]\n      source: { type: github, repository: owner/repo, assets: { amd64: { include: 'app-*.deb', exclude: [] } } }\n"),
-            "not a path or command line",
+            "must start with an ASCII alphanumeric",
         ),
         (direct(&base("          amd64: { include: 'app-*.deb', exclude: [] }\n").replace("owner/repo", "owner/repo/extra")), "source.repository"),
         (direct(&base("          x86_64: { include: 'app-*.deb', exclude: [] }\n")), "unknown field `x86_64`"),
@@ -621,6 +653,47 @@ fn validates_durations_docker_sizes_integrations_and_desktop_ids() {
         ),
     ] {
         assert_rejected(yaml, expected);
+    }
+}
+
+#[test]
+fn executable_names_use_one_safe_ascii_basename_grammar() {
+    let direct = |executable: &str| {
+        format!(
+            "schema: 1\npackages:\n  direct:\n    - name: app\n      format: deb\n      provides: [{executable:?}]\n      source: {{ type: github, repository: owner/repo, assets: {{ amd64: {{ include: 'app-*.deb', exclude: [] }} }} }}"
+        )
+    };
+
+    for valid in ["wezterm", "cargo-binstall", "c++", "app.image_1"] {
+        ConfigV1::parse(&format!("schema: 1\ndesktop:\n  terminal: {valid:?}")).unwrap();
+        ConfigV1::parse(&direct(valid)).unwrap();
+    }
+
+    for invalid in [
+        "",
+        ";",
+        "app;rm",
+        "app|less",
+        "app&bg",
+        "app>file",
+        "app<input",
+        "`app`",
+        "$(app)",
+        "/usr/bin/app",
+        "dir/app",
+        "dir\\app",
+        "app name",
+        "app\tname",
+        ".app",
+        "-app",
+        "_app",
+        "+app",
+    ] {
+        assert_rejected(
+            &format!("schema: 1\ndesktop:\n  terminal: {invalid:?}"),
+            "desktop.terminal",
+        );
+        assert_rejected(&direct(invalid), "packages.direct[0].provides[0]");
     }
 }
 
