@@ -1,7 +1,12 @@
-use crate::platform::Architecture;
+use crate::platform::{Architecture, Platform};
 use anyhow::{bail, Context, Result};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::HashSet, fmt, fs, path::Path};
+use url::Url;
+use yaml_rust2::{
+    parser::{Event, MarkedEventReceiver, Parser},
+    scanner::Marker,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,20 +41,22 @@ impl ConfigV1 {
         Self::parse(&text).with_context(|| format!("validate {}", path.display()))
     }
 
-    pub fn validate_for_architecture(&self, architecture: Architecture) -> Result<()> {
-        if let Some(packages) = &self.packages {
-            packages.validate_native_selectors(architecture)?;
+    pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
+        let upstream = upstream_for_distro(&platform.distro)?;
+        let detected_upstream = upstream_from_id(&platform.upstream)?;
+        if upstream != detected_upstream {
+            bail!(
+                "system.distro: platform distro {:?} does not belong to upstream family {:?}",
+                platform.distro,
+                platform.upstream
+            );
         }
-        Ok(())
-    }
-
-    pub fn validate_for_distro(&self, distro: &str) -> Result<()> {
-        let upstream = upstream_for_distro(distro)?;
         if let Some(apt) = self.system.as_ref().and_then(|system| system.apt.as_ref()) {
             apt.validate(Some(upstream))?;
         }
         if let Some(packages) = &self.packages {
-            packages.validate_repository_urls_for_distro(distro)?;
+            packages.validate_repository_urls_for_distro(&platform.distro)?;
+            packages.validate_native_selectors(platform.architecture)?;
         }
         Ok(())
     }
@@ -173,7 +180,7 @@ impl Distro {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Upstream {
     Ubuntu,
     Debian,
@@ -185,6 +192,16 @@ fn upstream_for_distro(distro: &str) -> Result<Upstream> {
         "debian" | "kali" | "tails" => Ok(Upstream::Debian),
         _ => bail!(
             "system.distro: unsupported detected distribution {distro:?}; supported distributions are ubuntu, linuxmint, pop, zorin, deepin, debian, kali, and tails"
+        ),
+    }
+}
+
+fn upstream_from_id(upstream: &str) -> Result<Upstream> {
+    match upstream {
+        "ubuntu" => Ok(Upstream::Ubuntu),
+        "debian" => Ok(Upstream::Debian),
+        _ => bail!(
+            "system.distro: unsupported platform upstream family {upstream:?}; supported families are ubuntu and debian"
         ),
     }
 }
@@ -313,18 +330,23 @@ pub struct Packages {
 
 impl Packages {
     fn validate(&self, distro: Option<&str>) -> Result<()> {
-        for (values, path) in [
-            (self.remove.as_deref(), "packages.remove"),
-            (self.apt.as_deref(), "packages.apt"),
-            (self.flatpak.as_deref(), "packages.flatpak"),
-            (self.cargo.as_deref(), "packages.cargo"),
-            (self.npm.as_deref(), "packages.npm"),
-        ] {
-            validate_unique_strings(values, path)?;
-            for (index, value) in values.into_iter().flatten().enumerate() {
-                validate_package_identifier(value, &format!("{path}[{index}]"))?;
-            }
-        }
+        validate_package_list(
+            self.remove.as_deref(),
+            "packages.remove",
+            validate_debian_package,
+        )?;
+        validate_package_list(self.apt.as_deref(), "packages.apt", validate_debian_package)?;
+        validate_package_list(
+            self.flatpak.as_deref(),
+            "packages.flatpak",
+            validate_flatpak_id,
+        )?;
+        validate_package_list(
+            self.cargo.as_deref(),
+            "packages.cargo",
+            validate_cargo_package,
+        )?;
+        validate_package_list(self.npm.as_deref(), "packages.npm", validate_npm_package)?;
         self.validate_repositories()?;
         if let Some(distro) = distro {
             self.validate_repository_urls_for_distro(distro)?;
@@ -433,12 +455,12 @@ impl Repository {
     }
 
     fn validate(&self, path: &str) -> Result<()> {
-        validate_non_empty(&self.name, &format!("{path}.name"))?;
+        validate_literal(&self.name, &format!("{path}.name"))?;
         validate_https(&self.key, &format!("{path}.key"))?;
         self.source.validate(&format!("{path}.source"))?;
         validate_required_unique_strings(&self.packages, &format!("{path}.packages"))?;
         for (index, package) in self.packages.iter().enumerate() {
-            validate_package_identifier(package, &format!("{path}.packages[{index}]"))?;
+            validate_debian_package(package, &format!("{path}.packages[{index}]"))?;
         }
         Ok(())
     }
@@ -549,7 +571,7 @@ pub struct DirectPackage {
 
 impl DirectPackage {
     fn validate(&self, path: &str) -> Result<()> {
-        validate_literal(&self.name, &format!("{path}.name"))?;
+        validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_required_unique_strings(&self.provides, &format!("{path}.provides"))?;
         for (index, executable) in self.provides.iter().enumerate() {
             validate_executable(executable, &format!("{path}.provides[{index}]"))?;
@@ -979,39 +1001,52 @@ impl<'de> de::DeserializeSeed<'de> for StrictStringSeed {
 }
 
 fn reject_yaml_extensions(text: &str) -> Result<()> {
-    for (line_index, line) in text.lines().enumerate() {
-        let mut single_quoted = false;
-        let mut double_quoted = false;
-        let mut previous = None;
-        for (column, character) in line.char_indices() {
-            if character == '#' && !single_quoted && !double_quoted {
-                break;
+    #[derive(Default)]
+    struct ExtensionReceiver {
+        documents: usize,
+        error: Option<anyhow::Error>,
+    }
+
+    impl MarkedEventReceiver for ExtensionReceiver {
+        fn on_event(&mut self, event: Event, marker: Marker) {
+            if self.error.is_some() {
+                return;
             }
-            if character == '\'' && !double_quoted {
-                single_quoted = !single_quoted;
-            } else if character == '"' && !single_quoted && previous != Some('\\') {
-                double_quoted = !double_quoted;
-            } else if matches!(character, '!' | '&' | '*')
-                && !single_quoted
-                && !double_quoted
-                && previous.is_none_or(|value: char| {
-                    value.is_whitespace() || matches!(value, ':' | '[' | '{' | ',')
-                })
-            {
-                let extension = match character {
-                    '!' => "tags",
-                    '&' => "anchors",
-                    '*' => "aliases",
-                    _ => unreachable!(),
-                };
-                bail!(
-                    "line {}, column {}: YAML {extension} are not supported by schema v1",
-                    line_index + 1,
-                    column + 1
-                );
+            let extension = match event {
+                Event::DocumentStart => {
+                    self.documents += 1;
+                    (self.documents > 1).then_some("multiple YAML documents")
+                }
+                Event::Alias(_) => Some("YAML aliases"),
+                Event::Scalar(_, _, anchor, tag)
+                | Event::SequenceStart(anchor, tag)
+                | Event::MappingStart(anchor, tag) => {
+                    if anchor != 0 {
+                        Some("YAML anchors")
+                    } else if tag.is_some() {
+                        Some("YAML tags")
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(extension) = extension {
+                self.error = Some(anyhow::anyhow!(
+                    "line {}, column {}: {extension} are not supported by schema v1",
+                    marker.line() + 1,
+                    marker.col() + 1
+                ));
             }
-            previous = Some(character);
         }
+    }
+
+    let mut receiver = ExtensionReceiver::default();
+    Parser::new_from_str(text)
+        .load(&mut receiver, true)
+        .context("parse YAML extension preflight")?;
+    if let Some(error) = receiver.error {
+        return Err(error);
     }
     Ok(())
 }
@@ -1061,16 +1096,26 @@ where
 
 fn validate_https(value: &str, path: &str) -> Result<()> {
     validate_non_empty(value, path)?;
-    let authority = value
-        .strip_prefix("https://")
-        .and_then(|rest| rest.split(['/', '?', '#']).next())
-        .unwrap_or_default();
-    if authority.is_empty()
-        || authority.chars().any(char::is_whitespace)
+    if value.chars().any(char::is_whitespace)
         || value.chars().any(char::is_control)
         || has_substitution(value)
     {
-        bail!("{path}: must be a literal HTTPS URL with a non-empty host");
+        bail!("{path}: must be a literal HTTPS URL without whitespace or substitutions");
+    }
+    let parsed =
+        Url::parse(value).with_context(|| format!("{path}: must be a valid absolute HTTPS URL"))?;
+    let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+    if raw_scheme != "https"
+        || parsed.scheme() != "https"
+        || authority.is_empty()
+        || parsed.host_str().is_none_or(str::is_empty)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || authority.contains('@')
+        || parsed.fragment().is_some()
+    {
+        bail!("{path}: must use HTTPS with a non-empty host and no credentials or fragment");
     }
     Ok(())
 }
@@ -1118,11 +1163,33 @@ fn validate_rust_version(value: &str, path: &str) -> Result<()> {
             && parts
                 .iter()
                 .all(|part| part.bytes().all(|byte| byte.is_ascii_digit()))
+            && valid_calendar_date(&parts)
         {
             return Ok(());
         }
     }
     validate_numeric_version(value, path, 2, 3)
+}
+
+fn valid_calendar_date(parts: &[&str]) -> bool {
+    let Ok(year) = parts[0].parse::<u16>() else {
+        return false;
+    };
+    let Ok(month) = parts[1].parse::<u8>() else {
+        return false;
+    };
+    let Ok(day) = parts[2].parse::<u8>() else {
+        return false;
+    };
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    year != 0 && (1..=days).contains(&day)
 }
 
 fn validate_numeric_version(
@@ -1178,10 +1245,94 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_package_identifier(value: &str, path: &str) -> Result<()> {
+fn validate_definition_name(value: &str, path: &str) -> Result<()> {
     validate_literal(value, path)?;
-    if value.chars().any(char::is_whitespace) || value.contains([';', '`']) {
-        bail!("{path}: must be a package identifier, not a command-line fragment");
+    let mut bytes = value.bytes();
+    if bytes
+        .next()
+        .is_none_or(|byte| !byte.is_ascii_alphanumeric())
+        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        bail!("{path}: must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', or '-'");
+    }
+    Ok(())
+}
+
+fn validate_package_list(
+    values: Option<&[String]>,
+    path: &str,
+    validate_entry: fn(&str, &str) -> Result<()>,
+) -> Result<()> {
+    validate_unique_strings(values, path)?;
+    for (index, value) in values.into_iter().flatten().enumerate() {
+        validate_entry(value, &format!("{path}[{index}]"))?;
+    }
+    Ok(())
+}
+
+fn validate_debian_package(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    let mut bytes = value.bytes();
+    if bytes
+        .next()
+        .is_none_or(|byte| !byte.is_ascii_lowercase() && !byte.is_ascii_digit())
+        || !bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"+.-".contains(&byte)
+        })
+    {
+        bail!("{path}: must be a Debian package name starting with a lowercase ASCII letter or digit and containing only lowercase ASCII letters, digits, '+', '.', or '-'");
+    }
+    Ok(())
+}
+
+fn validate_cargo_package(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    let mut bytes = value.bytes();
+    if bytes
+        .next()
+        .is_none_or(|byte| !byte.is_ascii_alphanumeric())
+        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+    {
+        bail!("{path}: must be an unversioned Cargo package name containing only ASCII alphanumerics, '_', or '-' and starting alphanumeric");
+    }
+    Ok(())
+}
+
+fn validate_npm_package(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    let valid_part = |part: &str| {
+        let mut bytes = part.bytes();
+        bytes
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+            && bytes.all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+            })
+    };
+    let valid = if let Some(scoped) = value.strip_prefix('@') {
+        let mut parts = scoped.split('/');
+        valid_part(parts.next().unwrap_or_default())
+            && valid_part(parts.next().unwrap_or_default())
+            && parts.next().is_none()
+    } else {
+        !value.contains('/') && valid_part(value)
+    };
+    if !valid {
+        bail!("{path}: must be an unversioned lowercase npm name or @scope/name");
+    }
+    Ok(())
+}
+
+fn validate_flatpak_id(value: &str, path: &str) -> Result<()> {
+    validate_literal(value, path)?;
+    let segments = value.split('.').collect::<Vec<_>>();
+    let valid_segment = |segment: &&str| {
+        let mut bytes = segment.bytes();
+        bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+            && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    };
+    if segments.len() < 3 || !segments.iter().all(valid_segment) {
+        bail!("{path}: must be a canonical Flatpak ID with at least three dot-separated ASCII identifier segments");
     }
     Ok(())
 }

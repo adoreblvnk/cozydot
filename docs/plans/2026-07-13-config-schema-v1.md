@@ -50,7 +50,9 @@ Work:
 - Define Serde-backed structs and enums matching only the authoritative contract.
 - Require integer `schema: 1`; deny unknown fields recursively.
 - Preserve the contract's distinction between omitted/`null` host-state controls and an explicit `false`; do not create alternate public forms while normalizing enable-only controls and empty collections.
-- Validate names, URLs, versions, duration strings, duplicate entries, managed APT components, repository URL selection, `system` suite resolution, direct-asset selector mappings, and cross-field requirements.
+- Validate literal repository names, safe direct-package definition names, manager-specific package identifiers, parsed HTTPS URLs, versions, duration strings, duplicate entries, managed APT components, repository URL selection, `system` suite resolution, direct-asset selector mappings, and cross-field requirements.
+- Restrict Rust declarations to `stable`, `beta`, `nightly`, dated nightly channels, or numeric two- or three-component versions. Keep host-target selection internal and reject target-qualified Rustup toolchain names.
+- Expose one unified platform-validation method that checks all distribution/upstream and architecture-dependent constraints before planning or mutation.
 - Derive repository filename stems by the contract's fixed sanitization algorithm; reject empty stems and collisions before planning.
 - Return field-path errors before platform mutation or command execution.
 - Retain the legacy production parser unchanged for its current `main`, planner, and embedded-preset callers. The v1 parser is exercised directly by fixtures and tests in this milestone; this is temporary development sequencing, not runtime dual-schema detection, fallback, conversion, or a public compatibility adapter.
