@@ -35,6 +35,15 @@ pub fn gnome_extension(host: &Host<'_>, extension: &str) -> Result<()> {
         "gnome-extensions",
         ["install", "--force", &archive.path().to_string_lossy()],
     )?;
+    let installed = host.require("gnome extension", "gnome-extensions", ["list"])?;
+    if !String::from_utf8_lossy(&installed.stdout)
+        .lines()
+        .any(|installed| installed == extension)
+    {
+        bail!(
+            "gnome extension: {extension} was installed, but GNOME has not loaded it yet; log out and back in, then rerun `cozydot apply`"
+        );
+    }
     host.require("gnome extension", "gnome-extensions", ["enable", extension])?;
     Ok(())
 }
