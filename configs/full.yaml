@@ -27,7 +27,6 @@ check:
     - flatpak
     - git
     - pinentry-tty
-    - software-properties-common
     - stow
     - ttf-mscorefonts-installer
     - unzip
