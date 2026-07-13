@@ -38,6 +38,28 @@ fn debian_group_bootstrap_uses_privilege_escalation() {
 }
 
 #[test]
+fn debian_presets_avoid_removed_software_properties_package() {
+    for path in [
+        "configs/default.yaml",
+        "configs/cli.yaml",
+        "configs/vm.yaml",
+        "configs/full.yaml",
+    ] {
+        let config = Config::load(Path::new(path)).unwrap();
+        let text = planner::plan("check", &config, &platform(), Path::new("."))
+            .unwrap()
+            .iter()
+            .map(|step| step.display())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !text.contains("software-properties-common"),
+            "{path}: {text}"
+        );
+    }
+}
+
+#[test]
 fn vm_preset_does_not_configure_uninstalled_terminal_or_dock() {
     let config = Config::load(Path::new("configs/vm.yaml")).unwrap();
     let text = planner::plan("configure", &config, &platform(), Path::new("."))
