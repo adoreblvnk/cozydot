@@ -1462,12 +1462,17 @@ fn direct_appimage_ensure_skips_network_but_update_forces_resolution() {
     let artifact = host
         .home
         .join(".local/share/cozydot/direct/sample.AppImage");
-    let link = host.home.join(".local/bin/sample");
+    let links = [
+        host.home.join(".local/bin/sample"),
+        host.home.join(".local/bin/sample-cli"),
+    ];
     fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    fs::create_dir_all(links[0].parent().unwrap()).unwrap();
     fs::write(&artifact, b"\x7fELFold").unwrap();
     fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-    symlink(&artifact, &link).unwrap();
+    for link in &links {
+        symlink(&artifact, link).unwrap();
+    }
     host.fake(
         "curl",
         r#"printf 'curl %s\n' "$*" >>"$LOG"
@@ -1477,21 +1482,131 @@ if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"na
 
     host.run_ok(&direct_step(
         operations::DirectPackageFormat::AppImage,
-        &["sample"],
+        &["sample", "sample-cli"],
         operations::DirectPackageMode::EnsurePresent,
     ));
     assert!(host.log().is_empty());
 
     host.run_ok(&direct_step(
         operations::DirectPackageFormat::AppImage,
-        &["sample"],
+        &["sample", "sample-cli"],
         operations::DirectPackageMode::Update,
     ));
     assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFnew");
+    for link in &links {
+        assert_eq!(fs::read_link(link).unwrap(), artifact);
+    }
     let log = host.log();
     assert!(log.contains("api.github.com/repos/owner/repo/releases/latest"));
     assert!(log.contains("--proto =https"), "{log}");
     assert!(log.contains("User-Agent: cozydot/0.0.1"), "{log}");
+}
+
+#[test]
+fn direct_appimage_ensure_repairs_missing_managed_link_despite_path_executable() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    let link = host.home.join(".local/bin/sample");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::write(&artifact, b"\x7fELFold").unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+    host.fake("sample", "exit 0");
+    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
+
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+
+    assert_eq!(fs::read_link(link).unwrap(), artifact);
+    assert!(host.log().is_empty());
+}
+
+#[test]
+fn direct_appimage_ensure_restores_all_missing_managed_links_without_network() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::write(&artifact, b"\x7fELFold").unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
+
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample", "sample-cli"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+
+    for provide in ["sample", "sample-cli"] {
+        assert_eq!(
+            fs::read_link(host.home.join(".local/bin").join(provide)).unwrap(),
+            artifact
+        );
+    }
+    assert!(host.log().is_empty());
+}
+
+#[test]
+fn direct_appimage_ensure_repairs_only_missing_managed_link_without_network() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    let existing = host.home.join(".local/bin/sample");
+    let missing = host.home.join(".local/bin/sample-cli");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::create_dir_all(existing.parent().unwrap()).unwrap();
+    fs::write(&artifact, b"\x7fELFold").unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+    symlink(&artifact, &existing).unwrap();
+    let existing_inode = fs::symlink_metadata(&existing).unwrap().ino();
+    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
+
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample", "sample-cli"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+
+    assert_eq!(
+        fs::symlink_metadata(&existing).unwrap().ino(),
+        existing_inode
+    );
+    assert_eq!(fs::read_link(&existing).unwrap(), artifact);
+    assert_eq!(fs::read_link(&missing).unwrap(), artifact);
+    assert!(host.log().is_empty());
+}
+
+#[test]
+fn direct_appimage_ensure_rejects_foreign_link_despite_path_executable() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    let link = host.home.join(".local/bin/sample");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    fs::write(&artifact, b"\x7fELFold").unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+    symlink("/foreign", &link).unwrap();
+    host.fake("sample", "exit 0");
+    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
+
+    let output = host.run(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("link conflict"));
+    assert_eq!(fs::read_link(link).unwrap(), Path::new("/foreign"));
+    assert!(host.log().is_empty());
 }
 
 #[test]

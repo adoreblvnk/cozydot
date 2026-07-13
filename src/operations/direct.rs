@@ -194,13 +194,15 @@ fn install_appimage(host: &Host<'_>, package: &DirectPackageOperation) -> Result
         .iter()
         .map(|provide| host.home().join(".local/bin").join(provide))
         .collect::<Vec<_>>();
-    if package.mode == DirectPackageMode::EnsurePresent
-        && valid_managed_artifact(&artifact)
-        && package.provides.iter().zip(&links).all(|(provide, link)| {
-            executable_on_path(host, provide) || managed_link(link, &artifact)
-        })
-    {
-        return Ok(());
+    if package.mode == DirectPackageMode::EnsurePresent && valid_managed_artifact(&artifact) {
+        if links.iter().all(|link| managed_link(link, &artifact)) {
+            return Ok(());
+        }
+        preflight_links(&links, &artifact)?;
+        for link in &links {
+            publish_link(link, &artifact)?;
+        }
+        return verify_appimage(&artifact, &links, package);
     }
 
     preflight_links(&links, &artifact)?;
