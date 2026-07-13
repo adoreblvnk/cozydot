@@ -46,7 +46,7 @@ fn install(host: &Host<'_>, operation: &str, packages: Vec<String>) -> Result<()
         "-qq".into(),
         "--".into(),
     ];
-    args.extend(packages);
+    args.extend(packages.into_iter().map(|package| format!("{package}+")));
     host.require(operation, "sudo", args)?;
     Ok(())
 }
@@ -64,7 +64,7 @@ pub fn purge(host: &Host<'_>, packages: &[String]) -> Result<()> {
         "-qq".into(),
         "--".into(),
     ];
-    args.extend(installed);
+    args.extend(installed.into_iter().map(|package| format!("{package}-")));
     host.require("APT package purge", "sudo", args)?;
     Ok(())
 }

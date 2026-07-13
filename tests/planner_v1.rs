@@ -656,7 +656,7 @@ updates:
     }));
     assert!(updates.contains(&&UpdateAction::Flatpak {
         refs: vec!["com.example.App".into()],
-        scope: FlatpakUpdateScope::ConfiguredRefsAndRequiredRuntimes,
+        scope: FlatpakUpdateScope::ConfiguredAppsRequiredRuntimesRelatedRefsAndEolReplacements,
     }));
     assert!(updates.contains(&&UpdateAction::Tool(ToolUpdate::Rust {
         selector: RustSelector::Version("1.85.0".into()),
