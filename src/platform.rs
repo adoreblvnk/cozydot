@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path, process::Command};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
@@ -12,10 +12,10 @@ pub enum Architecture {
 impl Architecture {
     pub fn normalize(value: &str) -> Result<Self> {
         match value {
-            "x86_64" | "amd64" | "x64" => Ok(Self::Amd64),
+            "x86_64" | "amd64" => Ok(Self::Amd64),
             "aarch64" | "arm64" => Ok(Self::Arm64),
             "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
-            "riscv64" | "riscv64gc" => Ok(Self::Riscv64),
+            "riscv64" => Ok(Self::Riscv64),
             _ => bail!(
                 "unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32, riscv64"
             ),
@@ -119,6 +119,11 @@ pub struct Platform {
 impl Platform {
     pub fn detect(config_distro: &str, config_desktop: &str) -> Result<Self> {
         let os = parse_os_release(Path::new("/etc/os-release"))?;
+        let uname = Command::new("uname")
+            .arg("-m")
+            .output()
+            .context("run uname -m")?;
+        let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
         let distro = if config_distro == "auto" {
             os.get("ID").cloned().unwrap_or_default()
         } else {
@@ -139,7 +144,7 @@ impl Platform {
         } else {
             config_desktop.into()
         };
-        Self::from_parts(distro, upstream, codename, desktop, std::env::consts::ARCH)
+        Self::from_parts(distro, upstream, codename, desktop, &arch)
     }
     pub fn from_parts(
         distro: String,
@@ -180,6 +185,18 @@ impl Platform {
             .replace("$(dpkg --print-architecture)", self.architecture.debian())
     }
 }
+fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
+    if !success {
+        bail!("uname -m failed");
+    }
+    let machine = std::str::from_utf8(stdout)
+        .context("uname -m output is not UTF-8")?
+        .trim();
+    if machine.is_empty() {
+        bail!("uname -m returned an empty machine architecture");
+    }
+    Ok(machine.into())
+}
 fn upstream(id: &str) -> Result<&'static str> {
     match id {
         "ubuntu" | "linuxmint" | "pop" | "zorin" | "deepin" => Ok("ubuntu"),
@@ -213,11 +230,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalizes_host_and_release_aliases() {
+    fn normalizes_supported_host_labels() {
         for (input, expected) in [
             ("x86_64", Architecture::Amd64),
             ("amd64", Architecture::Amd64),
-            ("x64", Architecture::Amd64),
             ("aarch64", Architecture::Arm64),
             ("arm64", Architecture::Arm64),
             ("arm32", Architecture::Arm32),
@@ -285,14 +301,30 @@ mod tests {
         ];
         for &(architecture, aliases) in cases {
             assert_eq!(architecture.release_asset_aliases(), aliases);
-            for alias in architecture.release_asset_aliases() {
-                assert_eq!(
-                    Architecture::normalize(alias).unwrap(),
-                    architecture,
-                    "{alias}"
-                );
-            }
         }
+    }
+
+    #[test]
+    fn parses_trimmed_uname_machine_output() {
+        assert_eq!(parse_uname_machine(true, b" armv7l\n").unwrap(), "armv7l");
+    }
+
+    #[test]
+    fn rejects_failed_empty_or_non_utf8_uname_output() {
+        assert_eq!(
+            parse_uname_machine(false, b"x86_64\n")
+                .unwrap_err()
+                .to_string(),
+            "uname -m failed"
+        );
+        assert_eq!(
+            parse_uname_machine(true, b" \n").unwrap_err().to_string(),
+            "uname -m returned an empty machine architecture"
+        );
+        assert_eq!(
+            parse_uname_machine(true, &[0xff]).unwrap_err().to_string(),
+            "uname -m output is not UTF-8"
+        );
     }
 
     #[test]
@@ -311,6 +343,13 @@ mod tests {
             error,
             "unsupported architecture \"armv6l\"; supported architectures: amd64, arm64, arm32, riscv64"
         );
+    }
+
+    #[test]
+    fn rejects_release_only_aliases_as_host_labels() {
+        assert!(Architecture::normalize("x64").is_err());
+        assert!(Architecture::normalize("riscv64gc").is_err());
+        assert!(Architecture::normalize("arm").is_err());
     }
     #[test]
     fn distro_map() {

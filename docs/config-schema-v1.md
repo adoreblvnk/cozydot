@@ -33,7 +33,7 @@ packages:
       source:
         urls:
           default: https://cli.github.com/packages
-        suite: system
+        suite: stable
         components:
           - main
       packages:
@@ -113,7 +113,7 @@ updates:
     direct: true
 ```
 
-The reference demonstrates every field. It is one configuration, not a promise that every listed package or asset is available on every supported distribution or architecture.
+The reference demonstrates every field. It is intentionally an amd64/arm64 reference because the selected Obsidian release provides only those native selectors. It must validate and plan with amd64 and arm64 platform fixtures. On arm32 or riscv64 it must fail clearly during native-selector validation; that package limitation is not a claim that Cozydot cannot run on those architectures.
 
 ## Global rules
 
@@ -122,7 +122,7 @@ The reference demonstrates every field. It is one configuration, not a promise t
 - Omission or `null` leaves the corresponding host feature unchanged unless a field documents a detection default. Empty collections schedule no entries. Boolean `false` is meaningful for controls that explicitly manage an on/off host state and otherwise schedules no action; each field below states its behavior. `schema` cannot be omitted or disabled.
 - YAML tags, profiles, inheritance, templates, arbitrary shell commands, and public interpolation variables are invalid. Strings are literal values.
 - Each concept has only the representation shown here. A scalar cannot replace a sequence or mapping, and a mapping cannot replace a scalar.
-- Cozydot detects its native architecture once and translates it internally. Schema v1 supports amd64, arm64, Armv7/armhf, and riscv64 hosts. The Armv7/armhf family accepts machine values `arm32`, `armv7`, `armv7l`, and `armhf`, but not `armv6l`; Go's official `armv6l` archive name remains an internal output translation. Architecture aliases are not configuration fields or interpolation variables.
+- Cozydot detects its native architecture once by running `uname -m`, requiring successful, non-empty UTF-8 output, trimming it, and normalizing that machine label. Schema v1 supports amd64, arm64, Armv7/armhf, and riscv64 hosts. Host aliases are source-specific: normalization accepts `x86_64`/`amd64`, `aarch64`/`arm64`, `arm32`/`armv7`/`armv7l`/`armhf`, and `riscv64`. It rejects ambiguous `arm`, Armv6 label `armv6l`, and release-only aliases such as `x64` and `riscv64gc`. Go's official `armv6l` archive name, Rust's `riscv64gc` target spelling, and release-asset aliases remain output translations rather than host inputs. Architecture aliases are not configuration fields or interpolation variables.
 - Cozydot infers and installs internal prerequisites for enabled features. Users do not configure prerequisite package lists or select package managers.
 - Sequences preserve user order. Duplicate entries in a package sequence or duplicate `name` values in definition sequences are validation errors.
 - All names, package identifiers, versions, URLs, repository coordinates, extension IDs, and asset patterns must be non-empty strings. URLs must use HTTPS.
@@ -170,7 +170,22 @@ Every `packages.repositories` item has exactly these fields:
 - `source.components`: required non-empty sequence of literal APT components.
 - `packages`: required non-empty sequence of package names installed from the repository.
 
-Cozydot writes the `signed-by` path and detected native Debian architecture into the source entry. Architecture fields, raw `deb` lines, key paths, pinning blocks, and variable substitution are not accepted.
+Cozydot derives the repository filename stem by ASCII-lowercasing `name`, replacing each maximal run outside `[a-z0-9]` with one hyphen, and trimming leading and trailing hyphens. Validation rejects an empty result and rejects any two repository names that produce the same stem, preventing traversal and filename collisions. No key-path or sanitization fields are configurable.
+
+For every repository, Cozydot downloads the HTTPS key to temporary storage, then runs `gpg --batch --yes --dearmor --output <converted-temp> <download-temp>`. Both armored and binary OpenPGP material must validate and produce non-empty canonical binary keyring bytes. Only after successful conversion does one privileged fixed operation atomically publish those bytes as root-owned mode `0644` at `/etc/apt/keyrings/cozydot-<sanitized-name>.gpg`. Publication uses a temporary file in the destination directory followed by an atomic replacement, so failed downloads, malformed keys, conversion failures, and interrupted conversion leave any previous keyring intact. Source entries always use that exact derived `signed-by` path and the detected native Debian architecture.
+
+The semantic suite `system` is for repositories that track the host codename. For example, an Ubuntu Docker repository can use this source while the GitHub CLI repository in the canonical reference correctly uses its fixed `stable` suite:
+
+```yaml
+source:
+  urls:
+    ubuntu: https://download.docker.com/linux/ubuntu
+  suite: system
+  components:
+    - stable
+```
+
+Architecture fields, raw `deb` lines, key paths, pinning blocks, and variable substitution are not accepted.
 
 ### Direct packages
 
@@ -241,12 +256,14 @@ Desktop behavior that does not match the detected desktop is skipped, not emulat
 
 `updates` controls update actions independently of initial installation. The leaves remain granular; enabling one does not enable its siblings.
 
-- `apt` is one scalar string policy: `off`, `standard`, or `full`. `off` is the explicit disabled value; omission or `null` is equivalent to `off` and schedules no APT update. `standard` runs metadata refresh followed by the normal upgrade. `full` runs those steps followed by full upgrade and purge-autoremove. YAML booleans, mappings, and other scalar values are invalid.
-- `flatpak` is a boolean enabling Flatpak updates.
-- `tools.rust`, `tools.go`, and `tools.node` are booleans enabling updates through Rustup, official Go archives, and FNM respectively.
-- `packages.cargo`, `packages.npm`, and `packages.direct` are booleans enabling updates of the corresponding configured package sets.
+- `apt` is one scalar string policy operating on the system APT package set, not only `packages.apt`. `off` is the explicit disabled value; omission or `null` is equivalent to `off` and schedules no APT update. `standard` runs metadata refresh followed by the normal upgrade. `full` runs those steps followed by full upgrade and purge-autoremove. YAML booleans, mappings, and other scalar values are invalid.
+- `flatpak: true` updates only refs declared in `packages.flatpak` and runtimes required by those refs, never unrelated installed Flatpaks. It requires a non-empty configured Flatpak list; otherwise it produces no step.
+- `tools.rust`, `tools.go`, and `tools.node` require their corresponding `tools.*` declaration; otherwise they produce no step. For Rust `stable`, Go `latest`, and Node `latest` or `lts`, an enabled update resolves and selects the current moving target. An exact Rust, Go, or Node version stays pinned: its enabled update verifies or reinstalls that exact version when absent or invalid and never selects a newer version.
+- `packages.cargo: true` updates only names declared in `packages.cargo`. Schema v1 Cargo entries are unversioned, so each resolves to the manager-current version. An empty configured list produces no step.
+- `packages.npm: true` updates only names declared in `packages.npm` under the environment selected by `tools.node`. Schema v1 NPM entries are unversioned, so each resolves to the manager-current version. It requires a configured Node declaration and a non-empty configured NPM list; otherwise it produces no step.
+- `packages.direct: true` updates only definitions in `packages.direct` by resolving each definition's latest-release selectors. An empty configured list produces no step.
 
-An update flag only acts on its corresponding configured or installed set. It never enables installation declarations and never selects a different manager.
+An update flag never enables an installation declaration, broadens its exact target, or selects a different manager.
 
 ## Validation boundary
 
