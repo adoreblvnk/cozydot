@@ -1,17 +1,120 @@
 use anyhow::{bail, Context, Result};
 use std::{collections::BTreeMap, fs, path::Path};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Architecture {
+    Amd64,
+    Arm64,
+    Arm32,
+    Riscv64,
+}
+
+impl Architecture {
+    pub fn normalize(value: &str) -> Result<Self> {
+        match value {
+            "x86_64" | "amd64" | "x64" => Ok(Self::Amd64),
+            "aarch64" | "arm64" => Ok(Self::Arm64),
+            "arm32" | "armv6l" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
+            "riscv64" | "riscv64gc" => Ok(Self::Riscv64),
+            _ => bail!(
+                "unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32, riscv64"
+            ),
+        }
+    }
+
+    pub fn canonical(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+            Self::Arm32 => "arm32",
+            Self::Riscv64 => "riscv64",
+        }
+    }
+
+    pub fn debian(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+            Self::Arm32 => "armhf",
+            Self::Riscv64 => "riscv64",
+        }
+    }
+
+    pub fn go(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+            Self::Arm32 => "arm",
+            Self::Riscv64 => "riscv64",
+        }
+    }
+
+    pub fn go_archive(self) -> &'static str {
+        match self {
+            Self::Arm32 => "armv6l",
+            other => other.go(),
+        }
+    }
+
+    pub fn rust_target(self) -> &'static str {
+        match self {
+            Self::Amd64 => "x86_64-unknown-linux-gnu",
+            Self::Arm64 => "aarch64-unknown-linux-gnu",
+            Self::Arm32 => "armv7-unknown-linux-gnueabihf",
+            Self::Riscv64 => "riscv64gc-unknown-linux-gnu",
+        }
+    }
+
+    pub fn release_asset_aliases(self) -> &'static [&'static str] {
+        match self {
+            Self::Amd64 => &["amd64", "x86_64", "x64"],
+            Self::Arm64 => &["arm64", "aarch64"],
+            Self::Arm32 => &["arm32", "armv7", "armv7l", "armhf"],
+            Self::Riscv64 => &["riscv64", "riscv64gc"],
+        }
+    }
+
+    pub fn uname(self) -> &'static str {
+        match self {
+            Self::Amd64 => "x86_64",
+            Self::Arm64 => "aarch64",
+            Self::Arm32 => "armv7l",
+            Self::Riscv64 => "riscv64",
+        }
+    }
+
+    fn linux_release(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "aarch64",
+            Self::Arm32 => "armv7l",
+            Self::Riscv64 => "riscv64",
+        }
+    }
+
+    fn x64_release(self) -> &'static str {
+        match self {
+            Self::Amd64 => "x64",
+            other => other.canonical(),
+        }
+    }
+
+    fn arm64_suffix(self) -> &'static str {
+        if self == Self::Arm64 {
+            "-arm64"
+        } else {
+            ""
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Platform {
     pub distro: String,
     pub upstream: String,
     pub codename: String,
     pub desktop: String,
-    pub uname_arch: String,
-    pub go_arch: String,
-    pub linux_arch: String,
-    pub x64_arch: String,
-    pub arm64_suffix: String,
+    pub architecture: Architecture,
 }
 impl Platform {
     pub fn detect(config_distro: &str, config_desktop: &str) -> Result<Self> {
@@ -45,32 +148,25 @@ impl Platform {
         desktop: String,
         arch: &str,
     ) -> Result<Self> {
-        let (uname_arch, go_arch, linux_arch, x64_arch, arm64_suffix) = match arch {
-            "x86_64" => ("x86_64", "amd64", "amd64", "x64", ""),
-            "aarch64" => ("aarch64", "arm64", "aarch64", "arm64", "-arm64"),
-            _ => bail!("unsupported architecture: {arch}"),
-        };
+        let architecture = Architecture::normalize(arch)?;
         Ok(Self {
             distro,
             upstream,
             codename,
             desktop,
-            uname_arch: uname_arch.into(),
-            go_arch: go_arch.into(),
-            linux_arch: linux_arch.into(),
-            x64_arch: x64_arch.into(),
-            arm64_suffix: arm64_suffix.into(),
+            architecture,
         })
     }
     pub fn expand(&self, input: &str) -> String {
+        let architecture = self.architecture;
         [
-            ("UPSTREAM_DISTRO", &self.upstream),
-            ("VERSION_CODENAME", &self.codename),
-            ("UNAME_ARCH", &self.uname_arch),
-            ("GO_ARCH", &self.go_arch),
-            ("LINUX_ARCH", &self.linux_arch),
-            ("X64_ARCH", &self.x64_arch),
-            ("ARM64_SUFFIX", &self.arm64_suffix),
+            ("UPSTREAM_DISTRO", self.upstream.as_str()),
+            ("VERSION_CODENAME", self.codename.as_str()),
+            ("UNAME_ARCH", architecture.uname()),
+            ("GO_ARCH", architecture.go_archive()),
+            ("LINUX_ARCH", architecture.linux_release()),
+            ("X64_ARCH", architecture.x64_release()),
+            ("ARM64_SUFFIX", architecture.arm64_suffix()),
         ]
         .into_iter()
         .fold(input.to_owned(), |s, (k, v)| {
@@ -81,7 +177,7 @@ impl Platform {
 
     pub fn expand_shell_arch(&self, input: &str) -> String {
         self.expand(input)
-            .replace("$(dpkg --print-architecture)", &self.go_arch)
+            .replace("$(dpkg --print-architecture)", self.architecture.debian())
     }
 }
 fn upstream(id: &str) -> Result<&'static str> {
@@ -115,23 +211,95 @@ fn parse_os_release(path: &Path) -> Result<BTreeMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn mappings() {
-        let p = Platform::from_parts(
-            "ubuntu".into(),
-            "ubuntu".into(),
-            "noble".into(),
-            "gnome".into(),
-            "aarch64",
-        )
-        .unwrap();
-        assert_eq!(
+    fn normalizes_host_and_release_aliases() {
+        for (input, expected) in [
+            ("x86_64", Architecture::Amd64),
+            ("amd64", Architecture::Amd64),
+            ("x64", Architecture::Amd64),
+            ("aarch64", Architecture::Arm64),
+            ("arm64", Architecture::Arm64),
+            ("arm32", Architecture::Arm32),
+            ("armv7l", Architecture::Arm32),
+            ("armhf", Architecture::Arm32),
+            ("riscv64", Architecture::Riscv64),
+        ] {
+            assert_eq!(Architecture::normalize(input).unwrap(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn translates_ecosystem_architectures() {
+        let cases = [
             (
-                p.go_arch.as_str(),
-                p.x64_arch.as_str(),
-                p.arm64_suffix.as_str()
+                Architecture::Amd64,
+                "amd64",
+                "amd64",
+                "amd64",
+                "amd64",
+                "x86_64-unknown-linux-gnu",
             ),
-            ("arm64", "arm64", "-arm64")
+            (
+                Architecture::Arm64,
+                "arm64",
+                "arm64",
+                "arm64",
+                "arm64",
+                "aarch64-unknown-linux-gnu",
+            ),
+            (
+                Architecture::Arm32,
+                "arm32",
+                "armhf",
+                "arm",
+                "armv6l",
+                "armv7-unknown-linux-gnueabihf",
+            ),
+            (
+                Architecture::Riscv64,
+                "riscv64",
+                "riscv64",
+                "riscv64",
+                "riscv64",
+                "riscv64gc-unknown-linux-gnu",
+            ),
+        ];
+        for (architecture, canonical, debian, go, go_archive, rust_target) in cases {
+            assert_eq!(architecture.canonical(), canonical);
+            assert_eq!(architecture.debian(), debian);
+            assert_eq!(architecture.go(), go);
+            assert_eq!(architecture.go_archive(), go_archive);
+            assert_eq!(architecture.rust_target(), rust_target);
+        }
+    }
+
+    #[test]
+    fn exposes_common_release_asset_aliases() {
+        let cases: &[(Architecture, &[&str])] = &[
+            (Architecture::Amd64, &["amd64", "x86_64", "x64"]),
+            (Architecture::Arm64, &["arm64", "aarch64"]),
+            (Architecture::Arm32, &["arm32", "armv7", "armv7l", "armhf"]),
+            (Architecture::Riscv64, &["riscv64", "riscv64gc"]),
+        ];
+        for &(architecture, aliases) in cases {
+            assert_eq!(architecture.release_asset_aliases(), aliases);
+            for alias in architecture.release_asset_aliases() {
+                assert_eq!(
+                    Architecture::normalize(alias).unwrap(),
+                    architecture,
+                    "{alias}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_architectures_with_supported_values() {
+        let error = Architecture::normalize("sparc64").unwrap_err().to_string();
+        assert_eq!(
+            error,
+            "unsupported architecture \"sparc64\"; supported architectures: amd64, arm64, arm32, riscv64"
         );
     }
     #[test]
