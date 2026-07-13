@@ -32,13 +32,11 @@ Config-derived values are passed as process arguments or stdin to fixed command 
 
 ## Packaging
 
-`scripts/package-release.sh` builds a deterministic, checksummed architecture archive with:
+`scripts/package-release.sh` builds a deterministic architecture archive containing only:
 
 - `cozydot`
-- `configs/default.yaml`
-- `dotfiles/`
 
-Source-checkout binaries use repository assets. An installed binary verifies a complete cached archive/checksum pair or downloads the archive matching its exact version, validates every member in Rust, and extracts assets into a temporary directory. `install.sh` independently verifies and validates the same archive before atomically replacing only `~/.local/bin/cozydot`.
+The checksum is published separately. At build time, `configs/default.yaml` and all regular files below `dotfiles/` are sorted, validated, and embedded. Shebang scripts materialize as `0755`; every other asset uses `0644`, so build output does not depend on filesystem-only mode changes. `cozydot init` materializes that immutable snapshot without a checkout, network, archive, or cache. `install.sh` verifies the transport archive, rejects every member except one regular `cozydot`, and atomically replaces only `~/.local/bin/cozydot`; it never provisions user state.
 
 ## Safety and Testing
 

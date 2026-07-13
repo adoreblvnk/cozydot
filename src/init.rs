@@ -1,35 +1,34 @@
-use crate::assets::{hash_file, Assets};
+use crate::bundle::{self, Record};
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     env,
     fs::{self, File},
     io::{self, Write},
+    os::unix::fs::PermissionsExt,
     path::{Component, Path, PathBuf},
 };
 
 pub fn run() -> Result<PathBuf> {
-    let assets = Assets::discover()?;
     let root = config_root()?;
-    sync(&root, &assets.config(), &assets.dotfiles())?;
+    sync(&root, bundle::records())?;
     Ok(root)
 }
 
-fn sync(root: &Path, config: &Path, dotfiles: &Path) -> Result<()> {
+fn sync(root: &Path, records: &[Record]) -> Result<()> {
     ensure_directory_path(root, Path::new(""))?;
     let manifest_path = root.join(".managed-files");
     let pending_path = root.join(".managed-files.pending");
     let mut managed = read_manifest(&manifest_path)?;
     recover_pending(root, &pending_path, &mut managed)?;
 
-    let mut sources = vec![(config.to_path_buf(), PathBuf::from("cozydot.yaml"))];
-    collect_files(dotfiles, Path::new("dotfiles"), &mut sources)?;
-    sources.sort_by(|a, b| a.1.cmp(&b.1));
     let mut installs = 0usize;
-    for (source, relative) in sources {
+    for record in records {
+        let relative = PathBuf::from(record.path);
         validate_relative(&relative)?;
         let destination = root.join(&relative);
-        let new_hash = hash_file(&source)?;
+        let new_hash = hash_bytes(record.bytes);
         let old_hash = managed.get(&relative).cloned();
         let install = match fs::symlink_metadata(&destination) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => true,
@@ -43,7 +42,7 @@ fn sync(root: &Path, config: &Path, dotfiles: &Path) -> Result<()> {
             continue;
         }
         append_pending(&pending_path, old_hash.as_deref(), &new_hash, &relative)?;
-        install_file(root, &source, &relative)?;
+        install_file(root, record, &relative)?;
         managed.insert(relative.clone(), new_hash);
         installs += 1;
         if env::var_os("COZYDOT_TEST_FAIL_AFTER_RELATIVE").as_deref() == Some(relative.as_os_str())
@@ -65,24 +64,7 @@ pub fn config_root() -> Result<PathBuf> {
     Ok(PathBuf::from(env::var_os("HOME").context("HOME is not set")?).join(".config/cozydot"))
 }
 
-fn collect_files(dir: &Path, relative: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> Result<()> {
-    let mut entries = fs::read_dir(dir)?.collect::<io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let kind = entry.file_type()?;
-        let child = relative.join(entry.file_name());
-        if kind.is_dir() {
-            collect_files(&entry.path(), &child, out)?;
-        } else if kind.is_file() {
-            out.push((entry.path(), child));
-        } else {
-            bail!("bundled asset is not a regular file: {}", child.display());
-        }
-    }
-    Ok(())
-}
-
-fn install_file(root: &Path, source: &Path, relative: &Path) -> Result<()> {
+fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     let parent = relative.parent().unwrap_or(Path::new(""));
     ensure_directory_path(root, parent)?;
     let destination = root.join(relative);
@@ -96,11 +78,11 @@ fn install_file(root: &Path, source: &Path, relative: &Path) -> Result<()> {
     {
         bail!("injected copy failure");
     }
-    io::copy(&mut File::open(source)?, &mut temporary)?;
+    temporary.write_all(record.bytes)?;
     temporary.as_file_mut().sync_all()?;
     temporary
         .as_file_mut()
-        .set_permissions(fs::metadata(source)?.permissions())?;
+        .set_permissions(fs::Permissions::from_mode(record.mode))?;
     if env::var("COZYDOT_TEST_FAIL_MANAGED_FILE_AT")
         .ok()
         .as_deref()
@@ -279,6 +261,12 @@ fn validate_hash(hash: &str) -> Result<()> {
     }
     Ok(())
 }
+fn hash_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+fn hash_file(path: &Path) -> Result<String> {
+    Ok(hash_bytes(&fs::read(path)?))
+}
 fn validate_relative(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty()
         || path
@@ -301,28 +289,46 @@ fn remove_if_exists(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{symlink, PermissionsExt};
 
-    fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+    const FILE: &str = "dotfiles/pkg/.config/app/file with spaces";
+
+    fn records(config: &'static [u8], include_new: bool) -> Vec<Record> {
+        let mut records = vec![
+            Record {
+                path: "cozydot.yaml",
+                bytes: config,
+                mode: 0o644,
+            },
+            Record {
+                path: FILE,
+                bytes: b"v1\n",
+                mode: 0o755,
+            },
+        ];
+        if include_new {
+            records.push(Record {
+                path: "dotfiles/pkg/.config/app/new",
+                bytes: b"new\n",
+                mode: 0o644,
+            });
+        }
+        records
+    }
+
+    fn fixture() -> (tempfile::TempDir, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("config/cozydot");
-        let config = temp.path().join("assets/default.yaml");
-        let dotfiles = temp.path().join("assets/dotfiles");
-        fs::create_dir_all(dotfiles.join("pkg/.config/app")).unwrap();
-        fs::write(&config, "config v1\n").unwrap();
-        fs::write(dotfiles.join("pkg/.config/app/file with spaces"), "v1\n").unwrap();
-        (temp, root, config, dotfiles)
+        (temp, root)
     }
 
     #[test]
     fn ownership_refreshes_only_unchanged_files_and_preserves_obsolete() {
-        let (_temp, root, config, dotfiles) = fixture();
-        sync(&root, &config, &dotfiles).unwrap();
-        let managed_file = root.join("dotfiles/pkg/.config/app/file with spaces");
-        fs::write(&config, "config v2\n").unwrap();
+        let (_temp, root) = fixture();
+        sync(&root, &records(b"config v1\n", false)).unwrap();
+        let managed_file = root.join(FILE);
         fs::write(&managed_file, "user edit\n").unwrap();
-        fs::write(dotfiles.join("pkg/.config/app/new"), "new\n").unwrap();
-        sync(&root, &config, &dotfiles).unwrap();
+        sync(&root, &records(b"config v2\n", true)).unwrap();
         assert_eq!(
             fs::read_to_string(root.join("cozydot.yaml")).unwrap(),
             "config v2\n"
@@ -332,33 +338,35 @@ mod tests {
             fs::read_to_string(root.join("dotfiles/pkg/.config/app/new")).unwrap(),
             "new\n"
         );
-        fs::remove_file(dotfiles.join("pkg/.config/app/new")).unwrap();
-        sync(&root, &config, &dotfiles).unwrap();
+        sync(&root, &records(b"config v2\n", false)).unwrap();
         assert!(root.join("dotfiles/pkg/.config/app/new").is_file());
+        assert_eq!(
+            fs::metadata(&managed_file).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
     }
 
     #[test]
     fn rejects_symlink_and_dangling_ancestors() {
         for dangling in [false, true] {
-            let (temp, root, config, dotfiles) = fixture();
+            let (temp, root) = fixture();
             fs::create_dir_all(root.join("dotfiles")).unwrap();
             let target = temp.path().join("outside");
             if !dangling {
                 fs::create_dir(&target).unwrap();
             }
             symlink(&target, root.join("dotfiles/pkg")).unwrap();
-            assert!(sync(&root, &config, &dotfiles).is_err());
+            assert!(sync(&root, &records(b"config v1\n", false)).is_err());
             assert!(!target.join(".config").exists());
         }
     }
 
     #[test]
     fn pending_recovery_does_not_claim_post_crash_edits() {
-        let (_temp, root, config, dotfiles) = fixture();
+        let (_temp, root) = fixture();
         fs::create_dir_all(&root).unwrap();
-        let source = dotfiles.join("pkg/.config/app/file with spaces");
-        let relative = Path::new("dotfiles/pkg/.config/app/file with spaces");
-        let new_hash = hash_file(&source).unwrap();
+        let relative = Path::new(FILE);
+        let new_hash = hash_bytes(b"v1\n");
         append_pending(
             &root.join(".managed-files.pending"),
             None,
@@ -368,7 +376,7 @@ mod tests {
         .unwrap();
         ensure_directory_path(&root, relative.parent().unwrap()).unwrap();
         fs::write(root.join(relative), "post-crash edit\n").unwrap();
-        sync(&root, &config, &dotfiles).unwrap();
+        sync(&root, &records(b"config v1\n", false)).unwrap();
         assert_eq!(
             fs::read_to_string(root.join(relative)).unwrap(),
             "post-crash edit\n"
@@ -381,10 +389,10 @@ mod tests {
 
     #[test]
     fn missing_managed_destination_is_reinstalled() {
-        let (_temp, root, config, dotfiles) = fixture();
-        sync(&root, &config, &dotfiles).unwrap();
+        let (_temp, root) = fixture();
+        sync(&root, &records(b"config v1\n", false)).unwrap();
         fs::remove_file(root.join("cozydot.yaml")).unwrap();
-        sync(&root, &config, &dotfiles).unwrap();
+        sync(&root, &records(b"config v1\n", false)).unwrap();
         assert_eq!(
             fs::read_to_string(root.join("cozydot.yaml")).unwrap(),
             "config v1\n"
@@ -393,12 +401,11 @@ mod tests {
 
     #[test]
     fn refreshed_file_edited_after_crash_is_not_claimed() {
-        let (_temp, root, config, dotfiles) = fixture();
-        sync(&root, &config, &dotfiles).unwrap();
+        let (_temp, root) = fixture();
+        sync(&root, &records(b"config v1\n", false)).unwrap();
         let relative = Path::new("cozydot.yaml");
         let old_hash = hash_file(&root.join(relative)).unwrap();
-        fs::write(&config, "config v2\n").unwrap();
-        let new_hash = hash_file(&config).unwrap();
+        let new_hash = hash_bytes(b"config v2\n");
         append_pending(
             &root.join(".managed-files.pending"),
             Some(&old_hash),
@@ -407,7 +414,7 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join(relative), "user edit\n").unwrap();
-        sync(&root, &config, &dotfiles).unwrap();
+        sync(&root, &records(b"config v2\n", false)).unwrap();
         assert_eq!(
             fs::read_to_string(root.join(relative)).unwrap(),
             "user edit\n"
@@ -423,20 +430,20 @@ mod tests {
             (".managed-files", "not-a-record\n"),
             (".managed-files.pending", "too\tfew\n"),
         ] {
-            let (_temp, root, config, dotfiles) = fixture();
+            let (_temp, root) = fixture();
             fs::create_dir_all(&root).unwrap();
             fs::write(root.join(name), contents).unwrap();
-            assert!(sync(&root, &config, &dotfiles).is_err());
+            assert!(sync(&root, &records(b"config v1\n", false)).is_err());
         }
     }
 
     #[test]
     fn pending_publication_failures_leave_recoverable_journals() {
         for failure in ["pre-publish", "post-publish"] {
-            let (_temp, root, config, dotfiles) = fixture();
+            let (_temp, root) = fixture();
             fs::create_dir_all(&root).unwrap();
             let relative = Path::new("cozydot.yaml");
-            let new_hash = hash_file(&config).unwrap();
+            let new_hash = hash_bytes(b"config v1\n");
             let pending = root.join(".managed-files.pending");
             let result =
                 append_pending_with_failure(&pending, None, &new_hash, relative, Some(failure));
@@ -446,7 +453,7 @@ mod tests {
             } else {
                 assert!(fs::read_to_string(&pending).unwrap().ends_with('\n'));
             }
-            sync(&root, &config, &dotfiles).unwrap();
+            sync(&root, &records(b"config v1\n", false)).unwrap();
             assert!(!pending.exists());
             assert_eq!(
                 fs::read_to_string(root.join(relative)).unwrap(),

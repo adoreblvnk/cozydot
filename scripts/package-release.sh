@@ -12,11 +12,9 @@ trap cleanup EXIT
 
 cargo build --release --locked --manifest-path "$ROOT/Cargo.toml"
 install -Dm755 "$ROOT/target/release/cozydot" "$STAGE/cozydot"
-install -Dm644 "$ROOT/configs/default.yaml" "$STAGE/configs/default.yaml"
-cp -R "$ROOT/dotfiles" "$STAGE/dotfiles"
 find "$STAGE" -exec touch -h -d '@0' {} +
 mkdir -p "$OUTPUT"
 tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-  -C "$STAGE" -cf - cozydot configs/default.yaml dotfiles | gzip -n >"$OUTPUT/$ASSET"
+  -C "$STAGE" -cf - cozydot | gzip -n >"$OUTPUT/$ASSET"
 (cd "$OUTPUT" && sha256sum "$ASSET" >"$ASSET.sha256")
 printf '%s\n' "$OUTPUT/$ASSET"
