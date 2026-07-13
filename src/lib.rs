@@ -1,5 +1,4 @@
-pub mod archive;
-pub mod assets;
+pub mod bundle;
 pub mod config;
 pub mod init;
 pub mod json_helpers;

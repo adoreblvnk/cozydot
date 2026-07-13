@@ -18,16 +18,23 @@ jobs:
           archive="$(COZYDOT_ARCH=amd64 scripts/package-release.sh 0.0.1 target)"
           test "$archive" = "target/cozydot-0.0.1-linux-amd64.tar.gz"
           (cd target && sha256sum -c cozydot-0.0.1-linux-amd64.tar.gz.sha256)
+          test "$(tar -tzf "$archive")" = cozydot
       - name: Smoke-test installed release
         run: |
           root="$(mktemp -d)"
-          mkdir -p "$root/mirror/download/v0.0.1" "$root/bin"
+          mkdir -p "$root/mirror/download/v0.0.1" "$root/bin" "$root/elsewhere"
           cp target/cozydot-0.0.1-linux-amd64.tar.gz* "$root/mirror/download/v0.0.1/"
           HOME="$root/home" XDG_BIN_HOME="$root/bin" XDG_CACHE_HOME="$root/cache" \
             COZYDOT_RELEASE_BASE_URL="file://$root/mirror" bash install.sh
+          test ! -e "$root/config"
+          test ! -e "$root/cache"
+          rm -rf "$root/mirror"
+          cd "$root/elsewhere"
           HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_CACHE_HOME="$root/cache" \
-            COZYDOT_RELEASE_BASE_URL="file://$root/mirror" "$root/bin/cozydot" init
+            COZYDOT_RELEASE_BASE_URL="file:///does/not/exist" "$root/bin/cozydot" init
           test -f "$root/config/cozydot/cozydot.yaml"
           test -f "$root/config/cozydot/dotfiles/bash/.bashrc"
+          test -x "$root/config/cozydot/dotfiles/bin/.local/bin/round"
+          test ! -e "$root/cache"
           "$root/bin/cozydot" --version
       - run: bash -n install.sh scripts/package-release.sh dotfiles/bash/.bashrc
