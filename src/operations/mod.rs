@@ -552,6 +552,7 @@ mod tests {
     use super::{output_retrying_etxtbsy, publish_file, ETXTBSY};
     use std::{
         fs::{self, OpenOptions},
+        io::Write,
         os::unix::fs::{MetadataExt, PermissionsExt},
         process::Command,
         thread,
@@ -560,8 +561,13 @@ mod tests {
 
     fn executable(directory: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
         let path = directory.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut temporary = tempfile::NamedTempFile::new_in(directory).unwrap();
+        write!(temporary, "#!/bin/sh\n{body}\n").unwrap();
+        temporary.flush().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        temporary.as_file().sync_all().unwrap();
+        temporary.into_temp_path().persist(&path).unwrap();
+        fs::File::open(directory).unwrap().sync_all().unwrap();
         path
     }
 
