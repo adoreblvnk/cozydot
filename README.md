@@ -20,9 +20,7 @@ $EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
 cozydot apply
 ```
 
-`init` materializes the defaults embedded at build time into the XDG config directory. It needs no repository checkout, network, release archive, or cache. Files unchanged since cozydot last installed them are refreshed; modified, unmanaged, and obsolete files are preserved. `apply` runs the existing provisioning engine using that active configuration.
-
-`apply` provisions configured software and settings; it does not run the legacy recurring-update phase.
+`init` materializes the defaults embedded at build time into the XDG config directory. It needs no repository checkout, network, release archive, or cache. Files unchanged since cozydot last installed them are refreshed; modified, unmanaged, and obsolete files are preserved. `apply` runs the enabled check, install, update, and configure sections from the active configuration in order.
 
 ## Development
 
