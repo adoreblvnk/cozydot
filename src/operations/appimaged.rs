@@ -27,7 +27,17 @@ pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
         .success();
     if !active {
         let _ = host.run("systemctl", ["--user", "stop", "appimaged.service"])?;
-        let _ = host.run("sudo", ["apt-get", "remove", "-qy", "appimagelauncher"])?;
+        if host
+            .run("dpkg", ["-s", "appimagelauncher"])?
+            .status
+            .success()
+        {
+            host.require(
+                "appimaged",
+                "sudo",
+                ["apt-get", "remove", "-qy", "appimagelauncher"],
+            )?;
+        }
 
         let home = host.home();
         let service =
@@ -36,6 +46,7 @@ pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
             fs::remove_file(&service)
                 .with_context(|| format!("appimaged: remove {}", service.display()))?;
         }
+        host.require("appimaged", "systemctl", ["--user", "daemon-reload"])?;
         let applications = home.join(".local/share/applications");
         if let Ok(entries) = fs::read_dir(&applications) {
             for entry in entries {
@@ -74,6 +85,11 @@ pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
             "appimaged",
             destination.to_string_lossy().as_ref(),
             std::iter::empty::<&str>(),
+        )?;
+        host.require(
+            "appimaged readiness",
+            "systemctl",
+            ["--user", "-q", "is-active", "appimaged"],
         )?;
     }
     Ok(())

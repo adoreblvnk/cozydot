@@ -1,9 +1,22 @@
 use super::{Host, TempDir, TempPath};
 use crate::json_helpers;
 use anyhow::{bail, Context, Result};
-use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 
 pub fn go(host: &Host<'_>, requested: &str, arch: &str) -> Result<()> {
+    if requested != "latest" && host.command_exists("go") {
+        let output = host.require("go install", "go", ["version"])?;
+        if String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .nth(2)
+            == Some(&format!("go{requested}"))
+        {
+            return Ok(());
+        }
+    }
     let metadata = host.require(
         "go install",
         "curl",
@@ -94,7 +107,7 @@ pub fn node(host: &Host<'_>, version: &str, npm: &[String]) -> Result<()> {
             [&installer.path().to_string_lossy(), "--skip-shell"],
         )?;
         let installed = fnm_dir.join("fnm");
-        if !installed.is_file() {
+        if !executable_file(&installed) {
             bail!(
                 "node install: fnm installer did not create {}",
                 installed.display()
@@ -182,7 +195,6 @@ pub fn pyenv(host: &Host<'_>, update: bool, version: &str, pip: bool) -> Result<
 
 pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
     let uv = if host.command_exists("uv") {
-        host.require("uv install", "uv", ["self", "update", "-q"])?;
         "uv".to_owned()
     } else {
         let installer = TempPath::new(host, "uv-install")?;
@@ -196,14 +208,33 @@ pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
                 "https://astral.sh/uv/install.sh",
             ],
         )?;
-        host.require("uv install", "sh", [installer.path()])?;
-        host.home()
-            .join(".local/bin/uv")
-            .to_string_lossy()
-            .into_owned()
+        let install_dir = host.home().join(".local/bin");
+        std::fs::create_dir_all(&install_dir).context("uv install: create install directory")?;
+        host.require(
+            "uv install",
+            "env",
+            vec![
+                format!("UV_UNMANAGED_INSTALL={}", install_dir.display()),
+                "sh".into(),
+                installer.path().to_string_lossy().into_owned(),
+            ],
+        )?;
+        let installed = install_dir.join("uv");
+        if !executable_file(&installed) {
+            bail!(
+                "uv install: installer did not create executable {}",
+                installed.display()
+            );
+        }
+        installed.to_string_lossy().into_owned()
     };
     if version_enabled {
         host.require("uv install", &uv, ["python", "install", version])?;
     }
     Ok(())
+}
+
+fn executable_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }

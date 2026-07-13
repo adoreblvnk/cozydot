@@ -4,37 +4,36 @@ use anyhow::{bail, Context, Result};
 use std::{fs, os::unix::fs::PermissionsExt};
 
 pub fn nerdfont(host: &Host<'_>, font: &str) -> Result<()> {
-    let family = format!(":family={font} NF");
+    let family = format!(":family={font} Nerd Font");
     if host
         .require("nerdfont", "fc-list", [&family])?
         .stdout
         .is_empty()
     {
         let destination = format!("/usr/share/fonts/{font}");
-        if !std::path::Path::new(&destination).is_dir() {
-            host.require("nerdfont", "sudo", ["mkdir", "-p", &destination])?;
-            let archive = TempPath::new(host, "font.tar.xz")?;
-            let url = format!(
-                "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{font}.tar.xz"
-            );
-            host.require(
-                "nerdfont",
-                "curl",
-                ["-fL", "-o", &archive.path().to_string_lossy(), &url],
-            )?;
-            host.require(
-                "nerdfont",
-                "sudo",
-                [
-                    "tar",
-                    "-xJ",
-                    "-C",
-                    &destination,
-                    "-f",
-                    &archive.path().to_string_lossy(),
-                ],
-            )?;
-        }
+        let archive = TempPath::new(host, "font.tar.xz")?;
+        let url = format!(
+            "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{font}.tar.xz"
+        );
+        host.require(
+            "nerdfont",
+            "curl",
+            ["-fL", "-o", &archive.path().to_string_lossy(), &url],
+        )?;
+        host.require("nerdfont", "sudo", ["rm", "-rf", &destination])?;
+        host.require("nerdfont", "sudo", ["mkdir", "-p", &destination])?;
+        host.require(
+            "nerdfont",
+            "sudo",
+            [
+                "tar",
+                "-xJ",
+                "-C",
+                &destination,
+                "-f",
+                &archive.path().to_string_lossy(),
+            ],
+        )?;
         host.require("nerdfont", "fc-cache", ["-f"])?;
     }
     Ok(())
@@ -42,11 +41,20 @@ pub fn nerdfont(host: &Host<'_>, font: &str) -> Result<()> {
 
 pub fn binary(host: &Host<'_>, name: &str, url: &str, repo: &str, pattern: &str) -> Result<()> {
     let destination = host.home().join("Applications").join(name);
-    if destination.is_file() {
-        return Ok(());
-    }
-    if name.ends_with(".deb") && host.command_exists(name.trim_end_matches(".deb")) {
-        return Ok(());
+    if name.ends_with(".deb") {
+        if host.command_exists(name.trim_end_matches(".deb")) {
+            return Ok(());
+        }
+        if destination.exists() {
+            fs::remove_file(&destination).context("remove incomplete Debian package")?;
+        }
+    } else if name.ends_with(".AppImage") {
+        if executable_nonempty_file(&destination) {
+            return Ok(());
+        }
+        if destination.exists() {
+            fs::remove_file(&destination).context("remove incomplete AppImage")?;
+        }
     }
     fs::create_dir_all(
         destination
@@ -89,4 +97,10 @@ pub fn binary(host: &Host<'_>, name: &str, url: &str, repo: &str, pattern: &str)
         bail!("download binary: unsupported package {name}");
     }
     Ok(())
+}
+
+fn executable_nonempty_file(path: &std::path::Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| {
+        metadata.is_file() && metadata.len() > 0 && metadata.permissions().mode() & 0o111 != 0
+    })
 }

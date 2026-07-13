@@ -1,5 +1,5 @@
 use super::Host;
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 pub(super) fn docker(host: &Host<'_>, user: &str) -> Result<()> {
     if !host.command_exists("docker") {
@@ -38,7 +38,7 @@ pub(super) fn virtualbox(host: &Host<'_>, user: &str) -> Result<()> {
 
 pub(super) fn vscode_extension(host: &Host<'_>, extension: &str) -> Result<()> {
     if !host.command_exists("code") {
-        return Ok(());
+        bail!("VS Code extension: code is unavailable after installation");
     }
     let installed = host.require("VS Code extension", "code", ["--list-extensions"])?;
     if !String::from_utf8_lossy(&installed.stdout)
@@ -55,6 +55,9 @@ pub(super) fn vscode_extension(host: &Host<'_>, extension: &str) -> Result<()> {
 }
 
 pub(super) fn gnome_terminal(host: &Host<'_>, terminal: &str) -> Result<()> {
+    if !host.command_exists(terminal) {
+        bail!("GNOME terminal: configured command {terminal} is unavailable");
+    }
     if host
         .run(
             "gsettings",

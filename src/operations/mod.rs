@@ -54,6 +54,7 @@ pub enum Operation {
     RustupBootstrap,
     CargoPackages {
         packages: Vec<String>,
+        force: bool,
     },
     NodeInstall {
         version: String,
@@ -99,9 +100,14 @@ impl Operation {
                 vec!["repository-key".into(), destination.clone()]
             }
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
-            Self::CargoPackages { packages } => std::iter::once("cargo-packages".into())
-                .chain(packages.clone())
-                .collect(),
+            Self::CargoPackages { packages, force } => {
+                let mut args = vec!["cargo-packages".into()];
+                if *force {
+                    args.push("--force".into());
+                }
+                args.extend(packages.clone());
+                args
+            }
             Self::NodeInstall { version, npm } => std::iter::once("node-install".into())
                 .chain(std::iter::once(version.clone()))
                 .chain(npm.clone())
@@ -156,7 +162,9 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
             provisioning::repository_key(&host, url, destination)
         }
         Operation::RustupBootstrap => provisioning::rustup(&host),
-        Operation::CargoPackages { packages } => provisioning::cargo_packages(&host, packages),
+        Operation::CargoPackages { packages, force } => {
+            provisioning::cargo_packages(&host, packages, *force)
+        }
         Operation::NodeInstall { version, npm } => languages::node(&host, version, npm),
         Operation::PyenvInstall {
             update,

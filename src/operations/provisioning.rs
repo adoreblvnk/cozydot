@@ -1,5 +1,6 @@
 use super::{Host, TempPath};
 use anyhow::{bail, Result};
+use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 
 pub fn apt_codecs(host: &Host<'_>, package: &str) -> Result<()> {
     host.require("codec installation", "sudo", ["apt-get", "update", "-qq"])?;
@@ -56,24 +57,32 @@ pub fn repository_key(host: &Host<'_>, url: &str, destination: &str) -> Result<(
     Ok(())
 }
 
-pub fn cargo_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
-    let cargo_home = host.home().join(".cargo/bin");
-    let cargo = if cargo_home.join("cargo").is_file() {
-        cargo_home.join("cargo").to_string_lossy().into_owned()
+pub fn cargo_packages(host: &Host<'_>, packages: &[String], force: bool) -> Result<()> {
+    if packages.is_empty() {
+        return Ok(());
+    }
+    let cargo_root = host
+        .value("CARGO_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| host.home().join(".cargo"));
+    let cargo_bin = cargo_root.join("bin");
+    let cargo_path = cargo_bin.join("cargo");
+    let cargo = if executable_file(&cargo_path) {
+        cargo_path.to_string_lossy().into_owned()
     } else if host.command_exists("cargo") {
         "cargo".into()
     } else {
-        return Ok(());
+        bail!("cargo package installation: cargo is not available after bootstrap")
     };
-    let binstall_path = cargo_home.join("cargo-binstall");
-    if !binstall_path.is_file() && !host.command_exists("cargo-binstall") {
+    let binstall_path = cargo_bin.join("cargo-binstall");
+    if !executable_file(&binstall_path) && !host.command_exists("cargo-binstall") {
         host.require(
             "cargo package installation",
             &cargo,
             ["install", "cargo-binstall", "--locked"],
         )?;
     }
-    let binstall = if binstall_path.is_file() {
+    let binstall = if executable_file(&binstall_path) {
         binstall_path.to_string_lossy().into_owned()
     } else if host.command_exists("cargo-binstall") {
         "cargo-binstall".into()
@@ -81,15 +90,26 @@ pub fn cargo_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
         bail!("cargo package installation: cargo-binstall was not installed")
     };
     for package in packages {
-        let mut args = vec!["--no-confirm"];
-        args.extend(package.split_whitespace());
+        let mut args = vec!["--no-confirm".to_owned()];
+        if force {
+            args.push("--force".into());
+        }
+        args.extend(package.split_whitespace().map(str::to_owned));
         host.require("cargo package installation", &binstall, args)?;
     }
     Ok(())
 }
 
+fn executable_file(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
 pub fn gnome_dependencies(host: &Host<'_>) -> Result<()> {
-    if host.command_exists("gnome-tweaks") && host.command_exists("gnome-extensions") {
+    if host.command_exists("gnome-tweaks")
+        && host.command_exists("gnome-extensions")
+        && host.command_exists("dconf")
+    {
         return Ok(());
     }
     host.require("GNOME dependencies", "sudo", ["apt-get", "update", "-qq"])?;
@@ -102,6 +122,7 @@ pub fn gnome_dependencies(host: &Host<'_>) -> Result<()> {
             "-qq",
             "gnome-tweaks",
             "gnome-shell-extensions",
+            "dconf-cli",
         ],
     )?;
     Ok(())

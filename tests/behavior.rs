@@ -68,6 +68,10 @@ impl Host {
         if let Step::Workflow(operation) = step {
             let env = [
                 ("HOME".into(), self.home.as_os_str().to_owned()),
+                (
+                    "CARGO_HOME".into(),
+                    self.home.join(".cargo").into_os_string(),
+                ),
                 ("USER".into(), "tester".into()),
                 ("LOG".into(), self.log.as_os_str().to_owned()),
                 (
@@ -202,6 +206,19 @@ if [ "$1" = -C ]; then mkdir -p "$2/go/bin"; printf '#!/bin/sh\n' >"$2/go/bin/go
 }
 
 #[test]
+fn exact_go_version_reruns_without_release_metadata() {
+    let host = Host::new();
+    host.fake("go", "printf 'go version go1.26.1 linux/amd64\\n'");
+    host.fake("curl", "printf 'unexpected curl\\n' >>\"$LOG\"; exit 42");
+    let step = Step::workflow(operations::Operation::GoInstall {
+        version: "1.26.1".into(),
+        arch: "amd64".into(),
+    });
+    host.run_ok(&step);
+    assert!(!host.log().contains("unexpected curl"), "{}", host.log());
+}
+
+#[test]
 fn fresh_fnm_bootstrap_exposes_npm_for_configured_packages_in_same_step() {
     let host = Host::new();
     host.fake(
@@ -284,6 +301,16 @@ INSTALL"#,
 }
 
 #[test]
+fn configured_cargo_packages_fail_when_bootstrap_did_not_create_cargo() {
+    let host = Host::new();
+    let step = Step::workflow(operations::Operation::CargoPackages {
+        packages: vec!["bat --locked".into()],
+        force: false,
+    });
+    assert!(!host.run(&step).status.success());
+}
+
+#[test]
 fn real_cli_check_disables_purge_after_fake_package_purge() {
     let host = Host::new();
     let root = host.home.join(".config/cozydot");
@@ -295,7 +322,8 @@ fn real_cli_check_disables_purge_after_fake_package_purge() {
         .replace("purge: !disabled", "purge: !enabled")
         .replace("    - docker.io\n", "    - fake-package\n")
         .replace("distroCfg: true", "distroCfg: false")
-        .replace("rustupCheck: true", "rustupCheck: false");
+        .replace("rustupCheck: true", "rustupCheck: false")
+        .replace("  cargo: true", "  cargo: false");
     fs::write(root.join("cozydot.yaml"), yaml).unwrap();
     host.fake(
         "dpkg-query",
@@ -378,7 +406,15 @@ fn ubuntu_and_mint_codecs_execute_apt_update_before_install() {
 fn appimaged_active_and_inactive_branches_execute_against_fake_state() {
     for active in [true, false] {
         let host = Host::new();
-        host.fake("systemctl", if active { "exit 0" } else { "exit 1" });
+        host.fake(
+            "systemctl",
+            if active {
+                "printf 'systemctl %s\\n' \"$*\" >>\"$LOG\"; exit 0"
+            } else {
+                r#"printf 'systemctl %s\n' "$*" >>"$LOG"
+if [ "$*" = '--user -q is-active appimaged' ]; then [ -f "$TMPDIR/appimaged-active" ]; fi"#
+            },
+        );
         host.fake(
             "sudo",
             r#"printf 'sudo %s\n' "$*" >>"$LOG"
@@ -389,14 +425,23 @@ if [ "$*" = 'apt-get install -qq libfuse2' ]; then touch "$TMPDIR/fuse-installed
         host.fake(
             "curl",
             r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-if [ -n "$out" ]; then printf '#!/bin/bash\n[ -f "$TMPDIR/fuse-installed" ] || exit 42\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; else printf '{"assets":[{"name":"appimaged-x86_64.AppImage","browser_download_url":"https://example.test/appimaged.AppImage"}]}\n'; fi"#,
+if [ -n "$out" ]; then printf '#!/bin/bash\n[ -f "$TMPDIR/fuse-installed" ] || exit 42\ntouch "$TMPDIR/appimaged-active"\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; else printf '{"assets":[{"name":"appimaged-x86_64.AppImage","browser_download_url":"https://example.test/appimaged.AppImage"}]}\n'; fi"#,
         );
         let step = step_containing(
             &plans("configs/default.yaml", "check", "ubuntu"),
             "workflow appimaged",
         );
         host.run_ok(&step);
-        assert_eq!(host.log().contains("appimaged-run"), !active);
+        let log = host.log();
+        assert_eq!(log.contains("appimaged-run"), !active);
+        if !active {
+            assert!(log.contains("systemctl --user daemon-reload"), "{log}");
+            assert_eq!(
+                log.matches("systemctl --user -q is-active appimaged")
+                    .count(),
+                2
+            );
+        }
     }
 }
 
@@ -478,6 +523,27 @@ fn group_membership_branches_only_modify_missing_membership() {
 }
 
 #[test]
+fn enabled_desktop_integrations_fail_or_install_dependencies_instead_of_silently_skipping() {
+    let host = Host::new();
+    host.logging_fake("sudo");
+    host.run_ok(&Step::workflow(operations::Operation::GnomeDependencies));
+    assert!(host.log().contains("dconf-cli"), "{}", host.log());
+
+    let extension = Step::workflow(operations::Operation::GnomeExtension {
+        extension: "example@test".into(),
+    });
+    assert!(!host.run(&extension).status.success());
+    let vscode = Step::workflow(operations::Operation::VsCodeExtension {
+        extension: "example.test".into(),
+    });
+    assert!(!host.run(&vscode).status.success());
+    let terminal = Step::workflow(operations::Operation::GnomeTerminal {
+        terminal: "definitely-missing-terminal".into(),
+    });
+    assert!(!host.run(&terminal).status.success());
+}
+
+#[test]
 fn gnome_extension_present_enables_and_absent_installs() {
     let steps = plans("configs/full.yaml", "configure", "ubuntu");
     let step = step_containing(&steps, "workflow gnome-extension");
@@ -533,6 +599,38 @@ if [ -n "$out" ]; then printf appimage >"$out"; else printf '{"assets":[{"name":
     let first_log = host.log();
     host.run_ok(&step);
     assert_eq!(host.log(), first_log);
+
+    fs::write(&destination, []).unwrap();
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o644)).unwrap();
+    host.run_ok(&step);
+    assert_ne!(host.log(), first_log);
+    let repaired = fs::metadata(&destination).unwrap();
+    assert!(repaired.len() > 0);
+    assert_ne!(repaired.permissions().mode() & 0o111, 0);
+}
+
+#[test]
+fn orphaned_debian_package_is_retried_instead_of_treated_as_installed() {
+    let host = Host::new();
+    let destination = host.home.join("Applications/git-credential-manager.deb");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, "stale").unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+if [ -n "$out" ]; then printf new-deb >"$out"; else printf '{"assets":[{"name":"gcm-linux-x64-1.deb","browser_download_url":"https://example.test/gcm.deb"}]}'; fi"#,
+    );
+    host.logging_fake("sudo");
+    let step = step_containing(
+        &plans("configs/vm.yaml", "install", "debian"),
+        "download-binary git-credential-manager.deb",
+    );
+    host.run_ok(&step);
+    let log = host.log();
+    assert!(log.contains("https://example.test/gcm.deb"), "{log}");
+    assert!(log.contains("apt-get install -qq"), "{log}");
+    assert!(!destination.exists());
 }
 
 #[test]
@@ -545,9 +643,40 @@ fn uv_installs_the_requested_python_series_without_parsing_display_output() {
     );
     host.run_ok(&step);
     let log = host.log();
-    assert!(log.contains("uv self update -q"), "{log}");
+    assert!(!log.contains("uv self update"), "{log}");
     assert!(log.contains("uv python install 3.13"), "{log}");
     assert!(!log.contains("uv python list"), "{log}");
+}
+
+#[test]
+fn fresh_uv_install_uses_a_deterministic_verified_destination() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+cat >"$out" <<'INSTALL'
+#!/bin/sh
+mkdir -p "$UV_UNMANAGED_INSTALL"
+cat >"$UV_UNMANAGED_INSTALL/uv" <<'UV'
+#!/bin/sh
+printf 'uv %s\n' "$*" >>"$LOG"
+UV
+chmod +x "$UV_UNMANAGED_INSTALL/uv"
+INSTALL"#,
+    );
+    let step = step_containing(
+        &plans("configs/cli.yaml", "install", "ubuntu"),
+        "workflow uv-install",
+    );
+    host.run_ok(&step);
+    let uv = host.home.join(".local/bin/uv");
+    assert!(uv.is_file());
+    assert_ne!(fs::metadata(uv).unwrap().permissions().mode() & 0o111, 0);
+    assert!(
+        host.log().contains("uv python install 3.13"),
+        "{}",
+        host.log()
+    );
 }
 
 #[test]
@@ -557,9 +686,10 @@ fn nerdfont_skips_present_font_and_refreshes_after_installing_absent_font() {
         host.fake(
             "fc-list",
             if present {
-                "printf 'GeistMono NF\n'"
+                r#"printf 'fc-list %s\n' "$*" >>"$LOG"
+[ "$*" = ':family=GeistMono Nerd Font' ] && printf 'GeistMono Nerd Font\n'"#
             } else {
-                "exit 0"
+                r#"printf 'fc-list %s\n' "$*" >>"$LOG""#
             },
         );
         host.logging_fake("fc-cache");
@@ -573,11 +703,20 @@ fn nerdfont_skips_present_font_and_refreshes_after_installing_absent_font() {
             "workflow nerdfont",
         );
         host.run_ok(&step);
-        assert_eq!(
-            host.log().contains("fc-cache -f"),
-            !present,
-            "{}",
-            host.log()
-        );
+        let log = host.log();
+        assert_eq!(log.contains("fc-cache -f"), !present, "{log}");
+        if !present {
+            assert!(
+                log.contains("sudo rm -rf /usr/share/fonts/GeistMono"),
+                "{log}"
+            );
+            host.run_ok(&step);
+            assert_eq!(
+                host.log()
+                    .matches("sudo rm -rf /usr/share/fonts/GeistMono")
+                    .count(),
+                2
+            );
+        }
     }
 }

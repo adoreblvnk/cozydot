@@ -1,10 +1,10 @@
 use super::{Host, TempPath};
 use crate::json_helpers;
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 pub fn gnome_extension(host: &Host<'_>, extension: &str) -> Result<()> {
     if !host.command_exists("gnome-extensions") {
-        return Ok(());
+        bail!("gnome extension: gnome-extensions is unavailable after dependency installation");
     }
     let output = host.require("gnome extension", "gnome-extensions", ["list"])?;
     if String::from_utf8_lossy(&output.stdout)
