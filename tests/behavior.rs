@@ -1495,6 +1495,97 @@ if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"na
 }
 
 #[test]
+fn direct_appimage_ensure_replaces_symlink_and_non_elf_artifacts() {
+    for state in ["elf-symlink", "non-elf-symlink", "regular-non-elf", "fifo"] {
+        let host = Host::new();
+        let artifact = host
+            .home
+            .join(".local/share/cozydot/direct/sample.AppImage");
+        let link = host.home.join(".local/bin/sample");
+        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        match state {
+            "elf-symlink" | "non-elf-symlink" => {
+                let target = host.home.join(format!("{state}.target"));
+                fs::write(
+                    &target,
+                    if state == "elf-symlink" {
+                        b"\x7fELFold".as_slice()
+                    } else {
+                        b"not-elf".as_slice()
+                    },
+                )
+                .unwrap();
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+                symlink(target, &artifact).unwrap();
+            }
+            "regular-non-elf" => {
+                fs::write(&artifact, b"not-elf").unwrap();
+                fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            "fifo" => {
+                assert!(Command::new("mkfifo")
+                    .arg(&artifact)
+                    .status()
+                    .unwrap()
+                    .success());
+            }
+            _ => unreachable!(),
+        }
+        symlink(&artifact, &link).unwrap();
+        host.fake(
+            "curl",
+            r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
+        );
+
+        host.run_ok(&direct_step(
+            operations::DirectPackageFormat::AppImage,
+            &["sample"],
+            operations::DirectPackageMode::EnsurePresent,
+        ));
+        assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFnew", "{state}");
+        assert!(
+            fs::symlink_metadata(&artifact)
+                .unwrap()
+                .file_type()
+                .is_file(),
+            "{state}"
+        );
+        assert!(!host.log().is_empty(), "{state}");
+    }
+}
+
+#[test]
+fn direct_appimage_directory_artifact_does_not_satisfy_managed_state() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    let link = host.home.join(".local/bin/sample");
+    fs::create_dir_all(&artifact).unwrap();
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    symlink(&artifact, &link).unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
+    );
+
+    let output = host.run(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+    assert!(!output.status.success());
+    assert!(artifact.is_dir());
+    assert!(!host.log().is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("publish direct AppImage"));
+}
+
+#[test]
 fn direct_appimage_failed_downloads_preserve_old_artifact_and_links() {
     for failure in ["interrupted", "empty", "checksum"] {
         let host = Host::new();
