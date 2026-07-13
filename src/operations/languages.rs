@@ -169,6 +169,20 @@ fi"#
     Ok(())
 }
 
+pub fn npm_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
+    for package in packages {
+        let installed = host.run("npm", ["list", "--global", "--depth=0", package])?;
+        if !installed.status.success() {
+            host.require(
+                "npm package installation",
+                "npm",
+                ["install", "--global", package],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub fn pyenv(host: &Host<'_>, update: bool, version: &str, pip: bool) -> Result<()> {
     let root = host.home().join(".pyenv");
     let pyenv = if host.command_exists("pyenv") {
