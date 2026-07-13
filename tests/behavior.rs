@@ -89,10 +89,15 @@ impl Host {
                 ),
             ];
             let result = operations::execute(operation, &env);
-            return Command::new("sh")
-                .args(["-c", if result.is_ok() { "exit 0" } else { "exit 1" }])
-                .output()
-                .unwrap();
+            let mut command = Command::new("sh");
+            if let Err(error) = result {
+                command
+                    .args(["-c", "printf '%s\\n' \"$ERROR\" >&2; exit 1"])
+                    .env("ERROR", format!("{error:#}"));
+            } else {
+                command.args(["-c", "exit 0"]);
+            }
+            return command.output().unwrap();
         }
         if let Step::Conditional { condition, action } = step {
             if !self.condition_matches(condition) {
@@ -557,7 +562,8 @@ fn gnome_extension_present_enables_and_absent_installs() {
             "gnome-extensions",
             &format!(
                 r#"printf 'gnome-extensions %s\n' "$*" >>"$LOG"
-if [ "${{1:-}}" = list ] && [ {present} = true ]; then printf '%s\n' '{extension}'; fi"#
+if [ "${{1:-}}" = install ]; then touch "$TMPDIR/gnome-extension-loaded"; fi
+if [ "${{1:-}}" = list ] && {{ [ {present} = true ] || [ -f "$TMPDIR/gnome-extension-loaded" ]; }}; then printf '%s\n' '{extension}'; fi"#
             ),
         );
         host.fake("gnome-shell", "printf 'GNOME Shell 48.4\\n'");
@@ -574,6 +580,26 @@ if [ "${{1:-}}" = list ] && [ {present} = true ]; then printf '%s\n' '{extension
             assert!(!log.contains(".v23.shell-extension.zip"), "{log}");
         }
     }
+}
+
+#[test]
+fn newly_installed_gnome_extension_requests_session_reload_when_not_visible() {
+    let steps = plans("configs/full.yaml", "configure", "ubuntu");
+    let step = step_containing(&steps, "workflow gnome-extension");
+    let host = Host::new();
+    host.logging_fake("gnome-extensions");
+    host.fake("gnome-shell", "printf 'GNOME Shell 48.4\\n'");
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{"shell_version_map":{"48":{"version":13}}}\n'"#,
+    );
+
+    let output = host.run(&step);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("log out and back in"), "{error}");
+    assert!(error.contains("cozydot apply"), "{error}");
+    assert!(!host.log().contains("gnome-extensions enable"));
 }
 
 #[test]
