@@ -29,7 +29,6 @@ check:
     - pinentry-tty
     - software-properties-common
     - stow
-    - ttf-mscorefonts-installer
     - unzip
     # pyenv dependencies
     - libbz2-dev
@@ -115,15 +114,14 @@ configure:
       - fastfetch
       - starship
       - vscode
-      - wezterm
   apps:
     docker: false
     virtualbox: false
     vscodeExtensions: !enabled
       - catppuccin.catppuccin-vsc
   desktopEnvironment: !enabled
-    common: !enabled
-      defaultTerm: !enabled wezterm
+    common: !disabled
+      defaultTerm: !disabled wezterm
     gnome: !enabled
       settings: true
       extensions: !enabled

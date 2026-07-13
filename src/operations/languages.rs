@@ -202,39 +202,8 @@ pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
             .to_string_lossy()
             .into_owned()
     };
-    if !version_enabled {
-        return Ok(());
-    }
-    let local = host.run(
-        &uv,
-        [
-            "python",
-            "find",
-            "--managed-python",
-            "--show-version",
-            version,
-        ],
-    )?;
-    let local = if local.status.success() {
-        String::from_utf8(local.stdout)?.trim().to_owned()
-    } else {
-        String::new()
-    };
-    let available = host.require("uv install", &uv, ["python", "list", version])?;
-    let latest = String::from_utf8(available.stdout)?
-        .split_whitespace()
-        .find(|part| is_patch_version(part))
-        .map(str::to_owned);
-    if let Some(latest) = latest.filter(|latest| latest != &local) {
-        host.require("uv install", &uv, ["python", "install", &latest])?;
+    if version_enabled {
+        host.require("uv install", &uv, ["python", "install", version])?;
     }
     Ok(())
-}
-
-fn is_patch_version(value: &str) -> bool {
-    let parts = value.split('.').collect::<Vec<_>>();
-    parts.len() == 3
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }

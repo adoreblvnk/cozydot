@@ -7,6 +7,20 @@ const RELEASE_API: &str =
     "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
 pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
+    let fuse = if host
+        .run("apt-cache", ["show", "libfuse2t64"])?
+        .status
+        .success()
+    {
+        "libfuse2t64"
+    } else {
+        "libfuse2"
+    };
+    if !host.run("dpkg", ["-s", fuse])?.status.success() {
+        host.require("appimaged", "sudo", ["apt-get", "update", "-qq"])?;
+        host.require("appimaged", "sudo", ["apt-get", "install", "-qq", fuse])?;
+    }
+
     let active = host
         .run("systemctl", ["--user", "-q", "is-active", "appimaged"])?
         .status
@@ -61,20 +75,6 @@ pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
             destination.to_string_lossy().as_ref(),
             std::iter::empty::<&str>(),
         )?;
-    }
-
-    let fuse = if host
-        .run("apt-cache", ["show", "libfuse2t64"])?
-        .status
-        .success()
-    {
-        "libfuse2t64"
-    } else {
-        "libfuse2"
-    };
-    if !host.run("dpkg", ["-s", fuse])?.status.success() {
-        host.require("appimaged", "sudo", ["apt-get", "update", "-qq"])?;
-        host.require("appimaged", "sudo", ["apt-get", "install", "-qq", fuse])?;
     }
     Ok(())
 }

@@ -234,13 +234,15 @@ fn inspect(condition: &Condition) -> Result<bool> {
 
 fn package_is_installed(name: &str) -> Result<bool> {
     let output = Command::new("dpkg-query")
-        .args(["-W", "-f=${db:Status-Abbrev}", name])
+        .args(["-W", "-f=${db:Status-Abbrev}\\n", name])
         .output()?;
     Ok(output.status.success() && package_status_is_installed(&output.stdout))
 }
 
 fn package_status_is_installed(status: &[u8]) -> bool {
-    status.starts_with(b"ii")
+    status
+        .split(|byte| *byte == b'\n')
+        .any(|line| line.get(1) == Some(&b'i'))
 }
 
 pub fn command_exists_in(name: &str, path: &OsStr) -> bool {
@@ -322,9 +324,11 @@ mod tests {
     }
 
     #[test]
-    fn residual_config_package_status_is_not_installed() {
-        assert!(package_status_is_installed(b"ii "));
-        assert!(!package_status_is_installed(b"rc "));
+    fn package_status_distinguishes_installed_held_and_residual_entries() {
+        assert!(package_status_is_installed(b"ii \n"));
+        assert!(package_status_is_installed(b"hi \n"));
+        assert!(package_status_is_installed(b"rc \nii \n"));
+        assert!(!package_status_is_installed(b"rc \n"));
         assert!(!package_status_is_installed(b""));
     }
 }

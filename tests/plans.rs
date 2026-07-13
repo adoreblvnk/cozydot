@@ -18,6 +18,26 @@ fn parses_every_preset() {
     }
 }
 #[test]
+fn debian_group_bootstrap_uses_privilege_escalation() {
+    let config = Config::load(Path::new("configs/vm.yaml")).unwrap();
+    let debian = Platform::from_parts(
+        "debian".into(),
+        "debian".into(),
+        "trixie".into(),
+        "gnome".into(),
+        "x86_64",
+    )
+    .unwrap();
+    let text = planner::plan("check", &config, &debian, Path::new("."))
+        .unwrap()
+        .iter()
+        .map(|step| step.display())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("then sudo adduser"), "{text}");
+}
+
+#[test]
 fn install_order_and_integrations() {
     let c = Config::load(Path::new("configs/cli.yaml")).unwrap();
     let s = planner::plan("install", &c, &platform(), Path::new(".")).unwrap();
