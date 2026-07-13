@@ -18,7 +18,13 @@ pub fn packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
     if missing.is_empty() {
         return Ok(());
     }
-    let mut args = vec!["apt-get".to_owned(), "install".into(), "-qq".into()];
+    let mut args = vec![
+        "apt-get".to_owned(),
+        "install".into(),
+        "-y".into(),
+        "-qq".into(),
+        "--".into(),
+    ];
     args.extend(missing);
     host.require("APT package installation", "sudo", args)?;
     Ok(())
@@ -34,6 +40,7 @@ pub fn purge(host: &Host<'_>, packages: &[String]) -> Result<()> {
         "purge".into(),
         "-y".into(),
         "-qq".into(),
+        "--".into(),
     ];
     args.extend(installed);
     host.require("APT package purge", "sudo", args)?;
@@ -76,9 +83,17 @@ fn select_packages(
     let mut args = vec![
         "-W".to_owned(),
         "-f=${Package}\\t${db:Status-Abbrev}\\n".into(),
+        "--".into(),
     ];
     args.extend(packages.iter().cloned());
     let output = host.run("dpkg-query", args)?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        anyhow::bail!(
+            "APT package state query: dpkg-query failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
     let installed = installed_packages(&output.stdout)?;
     Ok(packages
         .iter()
@@ -90,13 +105,19 @@ fn select_packages(
 fn installed_packages(output: &[u8]) -> Result<BTreeSet<&str>> {
     let output =
         std::str::from_utf8(output).context("dpkg-query returned non-UTF-8 package state")?;
-    Ok(output
-        .lines()
-        .filter_map(|line| {
-            let (package, status) = line.split_once('\t')?;
-            (status.as_bytes().get(1) == Some(&b'i')).then_some(package)
-        })
-        .collect())
+    let mut installed = BTreeSet::new();
+    for line in output.lines().filter(|line| !line.is_empty()) {
+        let Some((package, status)) = line.split_once('\t') else {
+            anyhow::bail!("dpkg-query returned malformed package state: {line:?}");
+        };
+        if package.is_empty() || status.len() < 2 || status.contains('\t') {
+            anyhow::bail!("dpkg-query returned malformed package state: {line:?}");
+        }
+        if status.as_bytes()[1] == b'i' {
+            installed.insert(package);
+        }
+    }
+    Ok(installed)
 }
 
 #[cfg(test)]
