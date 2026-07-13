@@ -2,6 +2,28 @@ use super::{Host, TempPath};
 use anyhow::{bail, Result};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 
+pub fn apt_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
+    let mut missing = Vec::new();
+    for package in packages {
+        let output = host.run("dpkg-query", ["-W", "-f=${db:Status-Abbrev}\\n", package])?;
+        let installed = output.status.success()
+            && output
+                .stdout
+                .split(|byte| *byte == b'\n')
+                .any(|line| line.get(1) == Some(&b'i'));
+        if !installed {
+            missing.push(package.clone());
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["apt-get".to_owned(), "install".into(), "-qq".into()];
+    args.extend(missing);
+    host.require("APT package installation", "sudo", args)?;
+    Ok(())
+}
+
 pub fn apt_codecs(host: &Host<'_>, package: &str) -> Result<()> {
     host.require("codec installation", "sudo", ["apt-get", "update", "-qq"])?;
     host.require(

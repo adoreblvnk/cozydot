@@ -100,12 +100,9 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     }
     if cfg.tagged_enabled("check.deps") {
         out.push(apt(&["update", "-qq"]));
-        for pkg in cfg.strings("check.deps") {
-            out.push(run_if(
-                Condition::PackageMissing(pkg.clone()),
-                apt_owned(vec!["install".into(), "-qq".into(), pkg]),
-            ));
-        }
+        out.push(Step::workflow(Operation::AptPackages {
+            packages: cfg.strings("check.deps"),
+        }));
     }
     if cfg.bool("check.rustupCheck") {
         out.push(run_if(
@@ -176,12 +173,9 @@ pub fn plan_apply(cfg: &Config, p: &Platform, root: &Path) -> Result<Vec<Step>> 
 fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
     if cfg.tagged_enabled("install.apt") {
         out.push(apt(&["update", "-qq"]));
-        for pkg in cfg.strings("install.apt") {
-            out.push(run_if(
-                Condition::PackageMissing(pkg.clone()),
-                apt_owned(vec!["install".into(), "-qq".into(), pkg]),
-            ));
-        }
+        out.push(Step::workflow(Operation::AptPackages {
+            packages: cfg.strings("install.apt"),
+        }));
     }
     if cfg.tagged_enabled("install.addRepos") {
         for repo in cfg.sequence("install.addRepos") {
@@ -220,12 +214,9 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             }
         }
         out.push(apt(&["update", "-qq"]));
-        for pkg in repo_packages(cfg) {
-            out.push(run_if(
-                Condition::PackageMissing(pkg.clone()),
-                apt_owned(vec!["install".into(), "-qq".into(), pkg]),
-            ));
-        }
+        out.push(Step::workflow(Operation::AptPackages {
+            packages: repo_packages(cfg),
+        }));
     }
     if cfg.tagged_enabled("install.flatpak") {
         out.push(run_if(

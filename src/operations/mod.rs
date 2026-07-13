@@ -21,6 +21,9 @@ pub enum Operation {
     AptCodecs {
         package: String,
     },
+    AptPackages {
+        packages: Vec<String>,
+    },
     Appimaged {
         arch: String,
     },
@@ -84,6 +87,9 @@ impl Operation {
     pub fn display_args(&self) -> Vec<String> {
         match self {
             Self::AptCodecs { package } => vec!["apt-codecs".into(), package.clone()],
+            Self::AptPackages { packages } => std::iter::once("apt-packages".into())
+                .chain(packages.clone())
+                .collect(),
             Self::Appimaged { arch } => vec!["appimaged".into(), arch.clone()],
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
@@ -145,6 +151,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
     let host = Host { env };
     match operation {
         Operation::AptCodecs { package } => provisioning::apt_codecs(&host, package),
+        Operation::AptPackages { packages } => provisioning::apt_packages(&host, packages),
         Operation::Appimaged { arch } => appimaged::execute(&host, arch),
         Operation::DockerConfig { user } => apps::docker(&host, user),
         Operation::DownloadBinary {
