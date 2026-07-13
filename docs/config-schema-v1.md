@@ -120,12 +120,12 @@ The reference demonstrates every field. It is intentionally an amd64/arm64 refer
 - `schema` is required, must be the integer `1`, and is the only required top-level field.
 - The only top-level fields are `schema`, `system`, `packages`, `tools`, `fonts`, `dotfiles`, `integrations`, `desktop`, and `updates`. Unknown fields are errors at every level.
 - Omission or `null` leaves the corresponding host feature unchanged unless a field documents a detection default. Empty collections schedule no entries. Boolean `false` is meaningful for controls that explicitly manage an on/off host state and otherwise schedules no action; each field below states its behavior. `schema` cannot be omitted or disabled.
-- YAML tags, profiles, inheritance, templates, arbitrary shell commands, and public interpolation variables are invalid. Strings are literal values.
+- YAML directives, tags, profiles, inheritance, templates, arbitrary shell commands, and public interpolation variables are invalid. Strings are literal values.
 - Each concept has only the representation shown here. A scalar cannot replace a sequence or mapping, and a mapping cannot replace a scalar.
 - Cozydot detects its native architecture once by running `uname -m`, requiring successful, non-empty UTF-8 output, trimming it, and normalizing that machine label. Schema v1 supports amd64, arm64, Armv7/armhf, and riscv64 hosts. Host aliases are source-specific: normalization accepts `x86_64`/`amd64`, `aarch64`/`arm64`, `arm32`/`armv7`/`armv7l`/`armhf`, and `riscv64`. It rejects ambiguous `arm`, Armv6 label `armv6l`, and release-only aliases such as `x64` and `riscv64gc`. Go's official `armv6l` archive name, Rust's `riscv64gc` target spelling, and release-asset aliases remain output translations rather than host inputs. Architecture aliases are not configuration fields or interpolation variables.
 - Cozydot infers and installs internal prerequisites for enabled features. Users do not configure prerequisite package lists or select package managers.
 - Sequences preserve user order. Duplicate entries in a package sequence or duplicate `name` values in definition sequences are validation errors.
-- All names, package identifiers, versions, URLs, repository coordinates, extension IDs, and asset patterns must be non-empty strings. URLs must use HTTPS, contain a real host, and contain no credentials or fragment.
+- All names, package identifiers, versions, URLs, repository coordinates, extension IDs, and asset patterns must be non-empty strings. URLs must use HTTPS, contain a real host, and contain no credentials or fragment. Accepted URLs are stored canonically, including IDN host conversion to ASCII punycode; malformed or ambiguous authority forms are rejected rather than normalized.
 
 ## `system`
 
@@ -199,7 +199,7 @@ Every `packages.direct` item has exactly these fields:
 A GitHub `source` has exactly these fields:
 
 - `type`: required literal `github`.
-- `repository`: required `owner/repository` coordinate.
+- `repository`: required `owner/repository` coordinate. Owners use ASCII alphanumerics and interior hyphens; repository names additionally allow `.`, `_`, and `-`, but path-semantic dot-only names are invalid.
 - `assets`: required map from canonical architecture keys to asset selector mappings. Allowed keys are `amd64`, `arm64`, `arm32`, and `riscv64`; these keys accommodate upstream naming and are not interpolation variables.
 
 Each architecture value is one mapping with exactly two required children: `include`, one anchored wildcard pattern, and `exclude`, a sequence of zero or more anchored wildcard patterns. Every pattern must contain `*` or `?`, may use only those two wildcard operators, and matches an entire asset filename (`*` matches zero or more characters and `?` matches exactly one). Paths, character classes, malformed wildcard syntax, interpolation, and substitutions are invalid. Scalar selectors and selectors missing either canonical child are invalid.
