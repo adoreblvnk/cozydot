@@ -6,7 +6,7 @@ use cozydot::{
 };
 use std::{
     fs,
-    os::unix::fs::{symlink, PermissionsExt},
+    os::unix::fs::{symlink, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -88,10 +88,15 @@ case "$command" in
     [ "$failure" != sync ] || exit 43
     /bin/sync -- "$(map_path "${!#}")"
     ;;
+  test)
+    [ "$#" -eq 3 ] && [ "$1" = '!' ] && [ "$2" = -d ] || exit 46
+    [ ! -d "$(map_path "$3")" ]
+    ;;
   mv)
     [ "$failure" != rename ] || exit 44
-    source=$(map_path "${@: -2:1}"); destination=$(map_path "${!#}")
-    /bin/mv -f -- "$source" "$destination"
+    [ "$#" -eq 4 ] && [ "$1" = -fT ] && [ "$2" = -- ] || exit 47
+    source=$(map_path "$3"); destination=$(map_path "$4")
+    /bin/mv -fT -- "$source" "$destination"
     ;;
   rm)
     /bin/rm -f -- "$(map_path "${!#}")"
@@ -449,7 +454,7 @@ fn apt_packages_batch_only_missing_packages_into_one_install() {
     host.fake(
         "dpkg-query",
         r#"printf 'dpkg-query %s\n' "$*" >>"$LOG"
-shift 2
+shift 3
 status=0
 for package in "$@"; do
   case "$package" in bash|curl) printf '%s\tii \n' "$package" ;; *) status=1 ;; esac
@@ -468,9 +473,13 @@ exit "$status""#,
     host.run_ok(&step);
     let log = host.log();
     assert_eq!(log.matches("dpkg-query ").count(), 1, "{log}");
-    assert_eq!(log.matches("sudo apt-get install -qq").count(), 1, "{log}");
+    assert_eq!(
+        log.matches("sudo apt-get install -y -qq --").count(),
+        1,
+        "{log}"
+    );
     assert!(
-        log.contains("sudo apt-get install -qq missing-one missing-two"),
+        log.contains("sudo apt-get install -y -qq -- missing-one missing-two"),
         "{log}"
     );
 }
@@ -489,7 +498,7 @@ fn apt_install_uses_dpkg_status_and_never_refreshes() {
     host.fake(
         "dpkg-query",
         r#"printf 'dpkg-query %s\n' "$*" >>"$LOG"
-shift 2
+shift 3
 status=0
 for package in "$@"; do
   case "$package" in
@@ -514,7 +523,11 @@ exit "$status""#,
     let log = host.log();
     assert_eq!(log.matches("dpkg-query ").count(), 1, "{log}");
     assert!(
-        log.contains("sudo apt-get install -qq residual absent\n"),
+        log.contains("dpkg-query -W -f=${Package}\\t${db:Status-Abbrev}\\n -- installed held residual absent\n"),
+        "{log}"
+    );
+    assert!(
+        log.contains("sudo apt-get install -y -qq -- residual absent\n"),
         "{log}"
     );
     assert!(!log.contains(" update "));
@@ -527,7 +540,7 @@ fn apt_purge_batches_installed_targets_and_second_run_is_noop() {
         "dpkg-query",
         r#"printf 'dpkg-query %s\n' "$*" >>"$LOG"
 [ ! -f "$TMPDIR/purged" ] || exit 1
-shift 2
+shift 3
 status=0
 for package in "$@"; do
   case "$package" in
@@ -542,7 +555,7 @@ exit "$status""#,
     host.fake(
         "sudo",
         r#"printf 'sudo %s\n' "$*" >>"$LOG"
-[ "$*" = 'apt-get purge -y -qq installed held' ] && touch "$TMPDIR/purged""#,
+[ "$*" = 'apt-get purge -y -qq -- installed held' ] && touch "$TMPDIR/purged""#,
     );
     let step = Step::workflow(operations::Operation::AptPurge {
         packages: vec![
@@ -556,11 +569,118 @@ exit "$status""#,
     host.run_ok(&step);
     let log = host.log();
     assert_eq!(log.matches("dpkg-query ").count(), 2, "{log}");
-    assert_eq!(log.matches("sudo apt-get purge").count(), 1, "{log}");
     assert!(
-        log.contains("sudo apt-get purge -y -qq installed held\n"),
+        log.contains("dpkg-query -W -f=${Package}\\t${db:Status-Abbrev}\\n -- absent installed residual held\n"),
         "{log}"
     );
+    assert_eq!(log.matches("sudo apt-get purge").count(), 1, "{log}");
+    assert!(
+        log.contains("sudo apt-get purge -y -qq -- installed held\n"),
+        "{log}"
+    );
+}
+
+#[test]
+fn apt_package_state_fails_closed_for_fatal_status_signal_and_invalid_output() {
+    for (name, body, error) in [
+        (
+            "exit-2",
+            "printf 'fatal database error\\n' >&2; exit 2",
+            "APT package state query: dpkg-query failed (exit status: 2): fatal database error",
+        ),
+        (
+            "signal",
+            "printf 'terminated query\\n' >&2; kill -TERM $$",
+            "APT package state query: dpkg-query failed (signal:",
+        ),
+        (
+            "non-UTF-8",
+            "printf '\\377'",
+            "dpkg-query returned non-UTF-8 package state",
+        ),
+        (
+            "missing-tab",
+            "printf 'package ii \\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "empty-package",
+            "printf '\\tii \\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "short-status",
+            "printf 'package\\ti\\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "extra-tab",
+            "printf 'package\\tii \\textra\\n'",
+            "dpkg-query returned malformed package state",
+        ),
+    ] {
+        for operation in ["install", "purge"] {
+            let host = Host::new();
+            host.fake(
+                "dpkg-query",
+                &format!("printf 'dpkg-query %s\\n' \"$*\" >>\"$LOG\"; {body}"),
+            );
+            host.logging_fake("sudo");
+            let step = match operation {
+                "install" => Step::workflow(operations::Operation::AptPackages {
+                    packages: vec!["package".into()],
+                }),
+                "purge" => Step::workflow(operations::Operation::AptPurge {
+                    packages: vec!["package".into()],
+                }),
+                _ => unreachable!(),
+            };
+            let output = host.run(&step);
+            assert!(!output.status.success(), "{name} {operation}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains(error), "{name} {operation}: {stderr}");
+            if name == "signal" {
+                assert!(stderr.contains("terminated query"), "{stderr}");
+            }
+            let log = host.log();
+            assert!(
+                log.starts_with("dpkg-query -W "),
+                "{name} {operation}: {log}"
+            );
+            assert!(!log.contains("sudo "), "{name} {operation}: {log}");
+        }
+    }
+}
+
+#[test]
+fn apt_package_state_accepts_exit_one_with_mixed_output() {
+    for operation in ["install", "purge"] {
+        let host = Host::new();
+        host.fake(
+            "dpkg-query",
+            r#"printf 'dpkg-query %s\n' "$*" >>"$LOG"
+printf 'installed\tii \nresidual\trc \n'
+exit 1"#,
+        );
+        host.logging_fake("sudo");
+        let step = match operation {
+            "install" => Step::workflow(operations::Operation::AptPackages {
+                packages: vec!["installed".into(), "residual".into(), "absent".into()],
+            }),
+            "purge" => Step::workflow(operations::Operation::AptPurge {
+                packages: vec!["installed".into(), "residual".into(), "absent".into()],
+            }),
+            _ => unreachable!(),
+        };
+        host.run_ok(&step);
+        let log = host.log();
+        let expected = match operation {
+            "install" => "sudo apt-get install -y -qq -- residual absent\n",
+            "purge" => "sudo apt-get purge -y -qq -- installed\n",
+            _ => unreachable!(),
+        };
+        assert!(log.contains(expected), "{operation}: {log}");
+    }
 }
 
 #[test]
@@ -625,7 +745,19 @@ fn apt_source_publication_is_atomic_retry_safe_and_mode_0644() {
         "{publication_log}"
     );
     assert!(publication_log.contains("sudo sync -- /etc/apt/sources.list.d/.vendor.list."));
-    assert!(publication_log.contains("sudo mv -f -- /etc/apt/sources.list.d/.vendor.list."));
+    assert!(publication_log.contains("sudo mv -fT -- /etc/apt/sources.list.d/.vendor.list."));
+    let rename = publication_log
+        .lines()
+        .find(|line| line.starts_with("sudo mv "))
+        .unwrap();
+    let rename_args = rename.split_whitespace().collect::<Vec<_>>();
+    assert_eq!(rename_args.len(), 6, "{rename}");
+    assert_eq!(rename_args[0..4], ["sudo", "mv", "-fT", "--"]);
+    assert!(
+        rename_args[4].starts_with("/etc/apt/sources.list.d/.vendor.list."),
+        "{rename}"
+    );
+    assert_eq!(rename_args[5], "/etc/apt/sources.list.d/vendor.list");
     host.run_ok(&first);
     assert_eq!(
         fs::read(&destination).unwrap(),
@@ -655,6 +787,69 @@ fn apt_source_publication_is_atomic_retry_safe_and_mode_0644() {
             1,
             "{failure}"
         );
+    }
+}
+
+#[test]
+fn apt_source_refuses_directory_and_directory_symlink_destinations() {
+    for kind in ["directory", "directory-symlink"] {
+        let host = Host::new();
+        host.atomic_sudo();
+        let parent = host.root.join("etc/apt/sources.list.d");
+        let destination = parent.join("vendor.list");
+        fs::create_dir_all(&parent).unwrap();
+        let preserved_directory = if kind == "directory" {
+            fs::create_dir(&destination).unwrap();
+            destination.clone()
+        } else {
+            let target = parent.join("vendor-target");
+            fs::create_dir(&target).unwrap();
+            symlink("vendor-target", &destination).unwrap();
+            target
+        };
+        fs::write(preserved_directory.join("marker"), b"old").unwrap();
+        let inode = fs::metadata(&preserved_directory).unwrap().ino();
+        let destination_inode = fs::symlink_metadata(&destination).unwrap().ino();
+        let link_target = fs::read_link(&destination).ok();
+        let step = Step::workflow(operations::Operation::AptSource {
+            destination: "/etc/apt/sources.list.d/vendor.list".into(),
+            contents: "deb https://example.test stable main\n".into(),
+        });
+
+        let output = host.run(&step);
+        assert!(!output.status.success(), "{kind}");
+        assert_eq!(
+            fs::metadata(&preserved_directory).unwrap().ino(),
+            inode,
+            "{kind}"
+        );
+        assert_eq!(
+            fs::symlink_metadata(&destination).unwrap().ino(),
+            destination_inode,
+            "{kind}"
+        );
+        assert_eq!(
+            fs::read(preserved_directory.join("marker")).unwrap(),
+            b"old",
+            "{kind}"
+        );
+        assert_eq!(fs::read_link(&destination).ok(), link_target, "{kind}");
+        let entries = fs::read_dir(&parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert!(
+            entries
+                .iter()
+                .all(|name| !name.to_string_lossy().starts_with(".vendor.list.")),
+            "{kind}: {entries:?}"
+        );
+        let log = host.log();
+        assert!(
+            log.contains("sudo rm -f -- /etc/apt/sources.list.d/.vendor.list."),
+            "{kind}: {log}"
+        );
+        assert!(!log.contains("sudo mv "), "{kind}: {log}");
     }
 }
 
@@ -809,32 +1004,72 @@ fn repository_key_rejects_url_and_destination_before_subprocesses() {
     host.logging_fake("curl");
     host.logging_fake("gpg");
     host.logging_fake("sudo");
-    for (url, destination) in [
-        ("http://example.test/key", "/etc/apt/keyrings/vendor.gpg"),
-        (
-            "https://example.test/key#fragment",
-            "/etc/apt/keyrings/vendor.gpg",
-        ),
-        (
-            "https://example.test/key",
-            "/etc/apt/keyrings/../vendor.gpg",
-        ),
-        ("HTTPS://example.test/key", "/etc/apt/keyrings/vendor.gpg"),
-        ("https://example.test/key", "/etc/apt/keyrings/vendor.asc"),
-        ("https://example.test/key", "/etc/apt/keyrings/.gpg"),
-        (
-            "https://example.test/key",
-            "/etc/apt/keyrings/vendor.gpg\0suffix",
-        ),
-        ("https://example.test/key", "/tmp/vendor.gpg"),
+    let oversized_label = "a".repeat(64);
+    let invalid_urls = vec![
+        "http://example.test/key".to_owned(),
+        "https://example.test/key#fragment".into(),
+        "HTTPS://example.test/key".into(),
+        "https:///key".into(),
+        "https://bad..example/key".into(),
+        "https://_bad.example/key".into(),
+        "https://-bad.example/key".into(),
+        "https://bad-.example/key".into(),
+        format!("https://{oversized_label}.example/key"),
+        "https://127.1/key".into(),
+        "https://0177.0.0.1/key".into(),
+        "https://user@example.test/key".into(),
+        "https://user:password@example.test/key".into(),
+        "https://example.test\\key".into(),
+        "https://%65xample.test/key".into(),
+        "https://例え.テスト/key".into(),
+    ];
+    for url in invalid_urls {
+        let step = Step::workflow(operations::Operation::RepositoryKey {
+            url: url.clone(),
+            destination: "/etc/apt/keyrings/vendor.gpg".into(),
+        });
+        assert!(!host.run(&step).status.success(), "{url}");
+    }
+    for destination in [
+        "/etc/apt/keyrings/../vendor.gpg",
+        "/etc/apt/keyrings/vendor.asc",
+        "/etc/apt/keyrings/.gpg",
+        "/etc/apt/keyrings/vendor.gpg\0suffix",
+        "/tmp/vendor.gpg",
     ] {
         let step = Step::workflow(operations::Operation::RepositoryKey {
-            url: url.into(),
+            url: "https://example.test/key".into(),
             destination: destination.into(),
         });
-        assert!(!host.run(&step).status.success(), "{url} {destination}");
+        assert!(!host.run(&step).status.success(), "{destination}");
     }
     assert!(host.log().is_empty(), "{}", host.log());
+}
+
+#[test]
+fn repository_key_accepts_canonical_https_url_forms_before_curl() {
+    for url in [
+        "https://example.test/",
+        "https://example.test:8443/key",
+        "https://example.test/path/to/key?version=1",
+        "https://192.0.2.1/key",
+        "https://[2001:db8::1]/key",
+    ] {
+        let host = Host::new();
+        host.fake("curl", "printf 'curl %s\\n' \"$*\" >>\"$LOG\"; exit 67");
+        host.logging_fake("gpg");
+        host.logging_fake("sudo");
+        let step = Step::workflow(operations::Operation::RepositoryKey {
+            url: url.into(),
+            destination: "/etc/apt/keyrings/vendor.gpg".into(),
+        });
+        assert!(!host.run(&step).status.success(), "{url}");
+        let log = host.log();
+        assert!(log.contains(&format!(" {url}\n")), "{url}: {log}");
+        assert_eq!(log.matches("curl ").count(), 1, "{url}: {log}");
+        assert!(!log.contains("gpg "), "{url}: {log}");
+        assert!(!log.contains("sudo "), "{url}: {log}");
+    }
 }
 
 #[test]

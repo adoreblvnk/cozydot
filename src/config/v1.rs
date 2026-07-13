@@ -674,7 +674,7 @@ impl HttpsUrl {
         self.0.as_str()
     }
 
-    fn parse(value: &str) -> Result<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         validate_non_empty(value, "URL")?;
         if value.chars().any(char::is_whitespace)
             || value.chars().any(char::is_control)

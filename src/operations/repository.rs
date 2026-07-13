@@ -1,4 +1,5 @@
 use super::{Host, TempPath};
+use crate::config::v1::HttpsUrl;
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::OsStr,
@@ -7,7 +8,6 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
-use url::Url;
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 const KEYRINGS_DIRECTORY: &str = "/etc/apt/keyrings";
@@ -165,8 +165,18 @@ fn publish_bytes(
             operation,
             "sudo",
             [
+                OsStr::new("test"),
+                OsStr::new("!"),
+                OsStr::new("-d"),
+                destination_arg,
+            ],
+        )?;
+        host.require(
+            operation,
+            "sudo",
+            [
                 OsStr::new("mv"),
-                OsStr::new("-f"),
+                OsStr::new("-fT"),
                 OsStr::new("--"),
                 staged_arg,
                 destination_arg,
@@ -219,15 +229,9 @@ fn validate_source_contents(contents: &str) -> Result<()> {
 }
 
 fn validate_https_url(value: &str) -> Result<()> {
-    let parsed = Url::parse(value).context("repository key URL must be an absolute HTTPS URL")?;
-    if parsed.scheme() != "https"
-        || parsed.host().is_none()
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.fragment().is_some()
-        || parsed.as_str() != value
-    {
-        bail!("repository key URL must be canonical HTTPS without credentials or fragment");
+    let validated = HttpsUrl::parse(value).context("repository key URL is invalid")?;
+    if validated.as_str() != value {
+        bail!("repository key URL must be canonical HTTPS");
     }
     Ok(())
 }
