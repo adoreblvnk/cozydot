@@ -125,7 +125,7 @@ The reference demonstrates every field. It is intentionally an amd64/arm64 refer
 - Cozydot detects its native architecture once by running `uname -m`, requiring successful, non-empty UTF-8 output, trimming it, and normalizing that machine label. Schema v1 supports amd64, arm64, Armv7/armhf, and riscv64 hosts. Host aliases are source-specific: normalization accepts `x86_64`/`amd64`, `aarch64`/`arm64`, `arm32`/`armv7`/`armv7l`/`armhf`, and `riscv64`. It rejects ambiguous `arm`, Armv6 label `armv6l`, and release-only aliases such as `x64` and `riscv64gc`. Go's official `armv6l` archive name, Rust's `riscv64gc` target spelling, and release-asset aliases remain output translations rather than host inputs. Architecture aliases are not configuration fields or interpolation variables.
 - Cozydot infers and installs internal prerequisites for enabled features. Users do not configure prerequisite package lists or select package managers.
 - Sequences preserve user order. Duplicate entries in a package sequence or duplicate `name` values in definition sequences are validation errors.
-- All names, package identifiers, versions, URLs, repository coordinates, extension IDs, and asset patterns must be non-empty strings. URLs must use HTTPS.
+- All names, package identifiers, versions, URLs, repository coordinates, extension IDs, and asset patterns must be non-empty strings. URLs must use HTTPS, contain a real host, and contain no credentials or fragment.
 
 ## `system`
 
@@ -148,12 +148,12 @@ Detection is input to planning, not optional host mutation. An unsupported detec
 
 All software installation and removal is declared under `packages`. There is no top-level `apps` section.
 
-- `remove` is a sequence of APT package names to purge. Cozydot may repeat this idempotently on later applies.
-- `apt` is a sequence of native APT package names.
+- `remove` is a sequence of Debian package names to purge. Names start with a lowercase ASCII letter or digit and contain only lowercase ASCII letters, digits, `+`, `.`, and `-`; architecture qualifiers are invalid. Cozydot may repeat this idempotently on later applies.
+- `apt` is a sequence of native Debian package names using the same grammar.
 - `repositories` is a sequence of third-party APT repository definitions.
-- `flatpak` is a sequence of Flatpak application IDs installed from Cozydot's fixed Flathub remote.
-- `cargo` is a sequence of Cargo crate names installed with cargo-binstall. Command-line fragments and per-entry manager choices are invalid.
-- `npm` is a sequence of NPM package names installed with the Node version managed by FNM.
+- `flatpak` is a sequence of canonical Flatpak application IDs installed from Cozydot's fixed Flathub remote. IDs contain at least three dot-separated ASCII identifier segments; each segment starts with a letter and then contains only letters, digits, or `_`.
+- `cargo` is a sequence of unversioned Cargo crate/package names installed with cargo-binstall. Names start with an ASCII alphanumeric and then contain only ASCII alphanumerics, `_`, or `-`. Command-line fragments, versions, coordinates, paths, and per-entry manager choices are invalid.
+- `npm` is a sequence of unversioned modern NPM package names installed with the Node version managed by FNM. Each entry is either a lowercase unscoped identifier or exactly `@scope/name`; identifier parts start with a lowercase ASCII letter or digit and then contain only lowercase ASCII letters, digits, `.`, `_`, or `-`.
 - `direct` is a sequence of direct package definitions.
 
 APT metadata is refreshed once before the first enabled APT action. Missing internal prerequisites are inferred from enabled behavior and are not added to `packages.apt` in the effective user configuration.
@@ -162,13 +162,13 @@ APT metadata is refreshed once before the first enabled APT action. Missing inte
 
 Every `packages.repositories` item has exactly these fields:
 
-- `name`: required stable identifier. Cozydot derives keyring and source-list filenames from it.
+- `name`: required literal stable identifier without interpolation, substitution, or newlines. Cozydot derives keyring and source-list filenames from it.
 - `key`: required HTTPS URL for the repository signing key.
 - `source`: required mapping containing exactly `urls`, `suite`, and `components`.
 - `source.urls`: required map of HTTPS base URLs. Keys are `default` and/or supported distro IDs. Cozydot selects the detected distro key first, then `default`, and errors when neither exists.
 - `source.suite`: required scalar. The semantic literal `system` resolves internally to the detected distribution codename. Any other non-empty value is a fixed literal suite, such as `stable` or `squeeze`; it is never interpolated.
 - `source.components`: required non-empty sequence of literal APT components.
-- `packages`: required non-empty sequence of package names installed from the repository.
+- `packages`: required non-empty sequence of Debian package names installed from the repository, using the same grammar as `packages.apt`.
 
 Cozydot derives the repository filename stem by ASCII-lowercasing `name`, replacing each maximal run outside `[a-z0-9]` with one hyphen, and trimming leading and trailing hyphens. Validation rejects an empty result and rejects any two repository names that produce the same stem, preventing traversal and filename collisions. No key-path or sanitization fields are configurable.
 
@@ -191,7 +191,7 @@ Architecture fields, raw `deb` lines, key paths, pinning blocks, and variable su
 
 Every `packages.direct` item has exactly these fields:
 
-- `name`: required stable identifier used for state and update tracking.
+- `name`: required safe ASCII identifier used for state and update tracking. It starts with an ASCII alphanumeric and then contains only ASCII alphanumerics, `.`, `_`, or `-`.
 - `format`: required scalar, either `deb` or `appimage` in schema v1.
 - `provides`: required non-empty sequence of unique executable names used together to determine whether the package is present. A package may expose more than one executable, so a scalar form is invalid.
 - `source`: required source mapping. Schema v1 supports only the GitHub source below.
@@ -210,7 +210,7 @@ At plan time Cozydot selects the mapping for the native canonical architecture a
 
 Each tool has one scalar representation. A present non-null scalar installs or selects the tool through its fixed manager.
 
-- `rust`: Rustup toolchain name or version, for example `stable`.
+- `rust`: one Rust channel or version: `stable`, `beta`, `nightly`, `nightly-YYYY-MM-DD`, or a numeric two- or three-component Rust version. Target-qualified Rustup toolchain names are invalid because Cozydot selects the host target internally.
 - `go`: `latest` or an exact Go version, installed from official Go archives.
 - `node`: `lts`, `latest`, or an exact Node version, managed by FNM.
 - `python`: an exact Python major/minor or patch version string, managed by UV. Quote values such as `"3.13"` so YAML cannot coerce them to numbers.
@@ -267,4 +267,4 @@ An update flag never enables an installation declaration, broadens its exact tar
 
 ## Validation boundary
 
-The complete configuration is parsed and validated before host-changing operations begin. Errors include the field path and reject unknown keys, wrong YAML types, unsupported enum values, malformed identifiers, non-HTTPS URLs, duplicate definitions, unsupported architectures, missing native architecture selectors, and missing selector children. Cozydot does not silently reinterpret invalid input.
+The complete configuration is parsed and validated before host-changing operations begin. After platform detection, one unified platform-validation call checks distribution family, managed APT components, repository URL selection, architecture, and native asset selectors before planning or mutation. Errors include the field path and reject unknown keys, wrong YAML types, unsupported enum values, malformed identifiers, non-HTTPS URLs, duplicate definitions, unsupported architectures, missing native architecture selectors, and missing selector children. Cozydot does not silently reinterpret invalid input.

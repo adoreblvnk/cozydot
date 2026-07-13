@@ -1,4 +1,7 @@
-use cozydot::{config::v1::ConfigV1, platform::Architecture};
+use cozydot::{
+    config::v1::ConfigV1,
+    platform::{Architecture, Platform},
+};
 
 const MINIMAL: &str = include_str!("fixtures/config-v1-minimal.yaml");
 const FULL: &str = include_str!("fixtures/config-v1-full.yaml");
@@ -15,6 +18,17 @@ fn assert_rejected(yaml: &str, expected: &str) {
     );
 }
 
+fn platform(distro: &str, upstream: &str, architecture: Architecture) -> Platform {
+    Platform::from_parts(
+        distro.into(),
+        upstream.into(),
+        "noble".into(),
+        "gnome".into(),
+        architecture.canonical(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn parses_minimal_and_canonical_full_fixtures() {
     let minimal = ConfigV1::parse(MINIMAL).unwrap();
@@ -22,11 +36,16 @@ fn parses_minimal_and_canonical_full_fixtures() {
     assert!(minimal.system.is_none());
 
     let full = ConfigV1::parse(FULL).unwrap();
-    full.validate_for_architecture(Architecture::Amd64).unwrap();
-    full.validate_for_architecture(Architecture::Arm64).unwrap();
+    for platform in [
+        platform("ubuntu", "ubuntu", Architecture::Amd64),
+        platform("debian", "debian", Architecture::Arm64),
+    ] {
+        full.validate_for_platform(&platform).unwrap();
+    }
     for architecture in [Architecture::Arm32, Architecture::Riscv64] {
+        let platform = platform("ubuntu", "ubuntu", architecture);
         let message = full
-            .validate_for_architecture(architecture)
+            .validate_for_platform(&platform)
             .unwrap_err()
             .to_string();
         assert!(message.contains(&format!(
@@ -89,6 +108,33 @@ fn rejects_unknown_fields_and_wrong_yaml_shapes_with_paths() {
 }
 
 #[test]
+fn yaml_extension_preflight_uses_parsed_events_not_source_characters() {
+    for (yaml, expected) in [
+        (
+            r#"{schema: 1, fonts: {nerd: ["Name\\"]}, system: &shared {}, desktop: *shared}"#,
+            "YAML anchors",
+        ),
+        (
+            "schema: 1\nsystem: &shared\n  ensure_admin: true\ndesktop: *shared",
+            "YAML anchors",
+        ),
+        ("schema: 1\nfonts:\n  nerd: [!custom Name]", "YAML tags"),
+        ("schema: 1\n---\nschema: 1", "multiple YAML documents"),
+    ] {
+        assert_rejected(yaml, expected);
+    }
+
+    for yaml in [
+        r#"{schema: 1, fonts: {nerd: ["Name\\", "literal ! & *"]}}"#,
+        "schema: 1\nfonts:\n  nerd:\n    - '!tag &anchor *alias' # !comment &ignored *ignored",
+        "schema: 1\nfonts:\n  nerd:\n    - >-\n      literal !tag\n      second &anchor and *alias\n",
+        "schema: 1\nfonts:\n  nerd:\n    - plain-value # !tag &anchor *alias\n",
+    ] {
+        ConfigV1::parse(yaml).unwrap_or_else(|error| panic!("YAML {yaml:?}: {error}"));
+    }
+}
+
+#[test]
 fn validates_system_enums_components_and_dependencies() {
     for (yaml, expected) in [
         ("schema: 1\nsystem:\n  distro: Ubuntu", "system.distro"),
@@ -125,17 +171,31 @@ fn validates_system_enums_components_and_dependencies() {
         "schema: 1\nsystem:\n  distro: auto\n  apt:\n    sources: managed\n    components: [contrib]",
     )
     .unwrap();
-    auto.validate_for_distro("debian").unwrap();
+    auto.validate_for_platform(&platform("debian", "debian", Architecture::Amd64))
+        .unwrap();
     assert!(auto
-        .validate_for_distro("ubuntu")
+        .validate_for_platform(&platform("ubuntu", "ubuntu", Architecture::Amd64))
         .unwrap_err()
         .to_string()
         .contains("system.apt.components[0]"));
+    let unsupported = Platform::from_parts(
+        "arch".into(),
+        "arch".into(),
+        "rolling".into(),
+        "none".into(),
+        "amd64",
+    )
+    .unwrap();
     assert!(auto
-        .validate_for_distro("arch")
+        .validate_for_platform(&unsupported)
         .unwrap_err()
         .to_string()
         .contains("system.distro"));
+    assert!(auto
+        .validate_for_platform(&platform("ubuntu", "debian", Architecture::Amd64))
+        .unwrap_err()
+        .to_string()
+        .contains("upstream family"));
 
     for distro in [
         "auto",
@@ -212,6 +272,40 @@ fn validates_repository_urls_content_and_selection() {
 }
 
 #[test]
+fn repository_urls_are_parsed_https_urls_without_credentials_or_fragments() {
+    let repository = |key: &str, url: &str| {
+        format!(
+            "schema: 1\npackages:\n  repositories:\n    - name: repo\n      key: {key:?}\n      source: {{ urls: {{ default: {url:?} }}, suite: stable, components: [main] }}\n      packages: [pkg]"
+        )
+    };
+    for invalid in [
+        "http://example.com/key",
+        "ftp://example.com/key",
+        "https:///key",
+        "https://@:443/key",
+        "https://user@example.com/key",
+        "https://user:pass@example.com/key",
+        "https://example.com/key#fragment",
+        "https://example.com/a b",
+        "https://example.com/${ARCH}",
+        "https://example.com/\tkey",
+    ] {
+        assert_rejected(&repository(invalid, "https://example.com/repo"), ".key");
+        assert_rejected(
+            &repository("https://example.com/key", invalid),
+            ".source.urls.default",
+        );
+    }
+
+    for valid in [
+        "https://example.com/path/to/key?format=gpg",
+        "https://[2001:db8::1]:8443/repository?channel=stable",
+    ] {
+        ConfigV1::parse(&repository(valid, valid)).unwrap();
+    }
+}
+
+#[test]
 fn rejects_repository_name_duplicates_empty_stems_and_collisions() {
     let repository = |name: &str| {
         format!(
@@ -241,6 +335,21 @@ fn rejects_repository_name_duplicates_empty_stems_and_collisions() {
         ),
         "filename stem \"github-cli\" collides",
     );
+    for name in [
+        "${ARCH}",
+        "$ARCH",
+        "{{ distro }}",
+        "{% distro %}",
+        "line\nbreak",
+    ] {
+        assert_rejected(
+            &format!(
+                "schema: 1\npackages:\n  repositories:\n{}",
+                repository(name)
+            ),
+            "packages.repositories[0].name",
+        );
+    }
 }
 
 #[test]
@@ -251,7 +360,7 @@ fn rejects_duplicate_and_empty_package_list_entries() {
         ("schema: 1\npackages:\n  apt: [123]", "packages.apt[0]"),
         (
             "schema: 1\npackages:\n  cargo: ['bat --force']",
-            "command-line fragment",
+            "unversioned Cargo package name",
         ),
         ("schema: 1\nfonts:\n  nerd: [GeistMono, GeistMono]", "fonts.nerd[1]"),
         (
@@ -265,6 +374,95 @@ fn rejects_duplicate_and_empty_package_list_entries() {
         ),
     ] {
         assert_rejected(yaml, expected);
+    }
+}
+
+#[test]
+fn validates_manager_specific_package_identifier_grammars() {
+    ConfigV1::parse(
+        "schema: 1\npackages:\n  remove: [libc6]\n  apt: [g++, libssl3, foo.bar]\n  cargo: [serde-json, Cargo_Edit]\n  npm: [opencode-ai, '@scope/package_name']\n  flatpak: [com.bitwarden.desktop, org.gnome.Builder]",
+    )
+    .unwrap();
+
+    for value in [
+        "Curl",
+        "curl:amd64",
+        "curl|id",
+        "curl&&id",
+        "curl>file",
+        "$(id)",
+        "-curl",
+        "curl/id",
+    ] {
+        assert_rejected(
+            &format!("schema: 1\npackages:\n  apt: [{value:?}]"),
+            "packages.apt[0]",
+        );
+        assert_rejected(
+            &format!("schema: 1\npackages:\n  remove: [{value:?}]"),
+            "packages.remove[0]",
+        );
+        let yaml = format!(
+            "schema: 1\npackages:\n  repositories:\n    - name: repo\n      key: https://example.com/key\n      source: {{ urls: {{ default: https://example.com/repo }}, suite: stable, components: [main] }}\n      packages: [{value:?}]"
+        );
+        assert_rejected(&yaml, "packages.repositories[0].packages[0]");
+    }
+
+    for value in [
+        "bat@1.0",
+        "--locked",
+        "owner/crate",
+        "crate=1",
+        "curl|id",
+        "curl&&id",
+        "crate>file",
+        "$(id)",
+        "crate name",
+    ] {
+        assert_rejected(
+            &format!("schema: 1\npackages:\n  cargo: [{value:?}]"),
+            "packages.cargo[0]",
+        );
+    }
+
+    for value in [
+        "Package",
+        "package@1.0",
+        "@scope/package@1",
+        "@/package",
+        "@scope/",
+        "@scope/name/extra",
+        "@scope",
+        "--flag",
+        "curl|id",
+        "curl&&id",
+        "package>file",
+        "$(id)",
+        "package name",
+    ] {
+        assert_rejected(
+            &format!("schema: 1\npackages:\n  npm: [{value:?}]"),
+            "packages.npm[0]",
+        );
+    }
+
+    for value in [
+        "com.example",
+        "com..App",
+        "com.example.app-id",
+        "1com.example.App",
+        "com.example.App/ref",
+        "com.example.App@stable",
+        "curl|id",
+        "curl&&id",
+        "com.example.App>file",
+        "$(id)",
+        "com.example.App name",
+    ] {
+        assert_rejected(
+            &format!("schema: 1\npackages:\n  flatpak: [{value:?}]"),
+            "packages.flatpak[0]",
+        );
     }
 }
 
@@ -316,6 +514,31 @@ fn validates_direct_package_shape_coordinates_and_selectors() {
         "    - name: app\n      format: deb\n      provides: [app]\n      source: { type: github, repository: owner/repo, assets: { amd64: { include: 'app-*.deb', exclude: [] } } }\n    - name: app\n      format: appimage\n      provides: [app2]\n      source: { type: github, repository: owner/repo2, assets: { amd64: { include: 'app-*.AppImage', exclude: [] } } }\n",
     );
     assert_rejected(&duplicate, "duplicate direct-package name");
+
+    for name in [
+        ".app",
+        "-app",
+        "app/name",
+        "app name",
+        "${APP}",
+        "$APP",
+        "{{ app }}",
+        "app;id",
+        "app\nname",
+    ] {
+        assert_rejected(
+            &direct(
+                &base("          amd64: { include: 'app-*.deb', exclude: [] }\n")
+                    .replace("name: app", &format!("name: {name:?}")),
+            ),
+            "packages.direct[0].name",
+        );
+    }
+    ConfigV1::parse(&direct(
+        &base("          amd64: { include: 'app-*.deb', exclude: [] }\n")
+            .replace("name: app", "name: App.image_1"),
+    ))
+    .unwrap();
 }
 
 #[test]
@@ -326,10 +549,35 @@ fn validates_tool_versions_and_requires_yaml_strings() {
         ("schema: 1\ntools:\n  go: stable", "invalid version"),
         ("schema: 1\ntools:\n  node: v22", "invalid version"),
         ("schema: 1\ntools:\n  rust: '../stable'", "invalid version"),
+        (
+            "schema: 1\ntools:\n  rust: 1.85.0-x86_64-unknown-linux-gnu",
+            "tools.rust",
+        ),
+        (
+            "schema: 1\ntools:\n  rust: stable-x86_64-unknown-linux-gnu",
+            "tools.rust",
+        ),
+        (
+            "schema: 1\ntools:\n  rust: nightly-2026-02-29",
+            "tools.rust",
+        ),
     ] {
         assert_rejected(yaml, expected);
     }
-    ConfigV1::parse("schema: 1\ntools: { rust: nightly-2026-07-14, go: '1.24.5', node: '22', python: '3.13.5' }").unwrap();
+    for rust in [
+        "stable",
+        "beta",
+        "nightly",
+        "nightly-2026-07-14",
+        "1.85",
+        "1.85.0",
+    ] {
+        ConfigV1::parse(&format!("schema: 1\ntools:\n  rust: {rust:?}")).unwrap();
+    }
+    ConfigV1::parse(
+        "schema: 1\ntools: { rust: nightly-2026-07-14, go: '1.24.5', node: '22', python: '3.13.5' }",
+    )
+    .unwrap();
 }
 
 #[test]
