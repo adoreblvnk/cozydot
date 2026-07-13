@@ -583,7 +583,7 @@ if [ "${{1:-}}" = list ] && {{ [ {present} = true ] || [ -f "$TMPDIR/gnome-exten
 }
 
 #[test]
-fn newly_installed_gnome_extension_requests_session_reload_when_not_visible() {
+fn newly_installed_gnome_extension_defers_enable_without_blocking_remaining_installs() {
     let steps = plans("configs/full.yaml", "configure", "ubuntu");
     let step = step_containing(&steps, "workflow gnome-extension");
     let host = Host::new();
@@ -595,10 +595,8 @@ fn newly_installed_gnome_extension_requests_session_reload_when_not_visible() {
     );
 
     let output = host.run(&step);
-    assert!(!output.status.success());
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("log out and back in"), "{error}");
-    assert!(error.contains("cozydot apply"), "{error}");
+    assert!(output.status.success());
+    assert!(host.log().contains("gnome-extensions install --force"));
     assert!(!host.log().contains("gnome-extensions enable"));
 }
 
