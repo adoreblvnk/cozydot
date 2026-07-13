@@ -1,9 +1,5 @@
 use super::{publish_file, Host, TempPath};
-use crate::{
-    config::v1::{DirectFormat, HttpsUrl},
-    planner::v1::DirectPackageIntent,
-    platform::Architecture,
-};
+use crate::{config::v1::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -108,25 +104,6 @@ impl DirectPackageOperation {
         };
         operation.validate()?;
         Ok(operation)
-    }
-
-    pub fn from_intent(intent: &DirectPackageIntent, mode: DirectPackageMode) -> Result<Self> {
-        let format = match intent.format {
-            DirectFormat::Deb => DirectPackageFormat::Deb,
-            DirectFormat::Appimage => DirectPackageFormat::AppImage,
-        };
-        Self::new(
-            intent.name.clone(),
-            format,
-            intent.provides.clone(),
-            GithubRepository::parse(intent.source.repository.clone())?,
-            intent.source.architecture,
-            DirectPackageSelector::new(
-                intent.source.selector.include.clone(),
-                intent.source.selector.exclude.clone(),
-            )?,
-            mode,
-        )
     }
 
     pub(crate) fn display_args(&self) -> Vec<String> {
@@ -280,15 +257,15 @@ fn select_asset(input: &str, package: &DirectPackageOperation) -> Result<Release
         .context("GitHub release assets must be an array")?;
     let mut matches = Vec::new();
     for (index, value) in assets.iter().enumerate() {
-        let asset = parse_asset(value, index)?;
-        if wildcard_match(&package.selector.include, &asset.name)
+        let name = parse_asset_name(value, index)?;
+        if wildcard_match(&package.selector.include, name)
             && !package
                 .selector
                 .excludes
                 .iter()
-                .any(|exclude| wildcard_match(exclude, &asset.name))
+                .any(|exclude| wildcard_match(exclude, name))
         {
-            matches.push(asset);
+            matches.push(parse_asset(value, index, name)?);
         }
     }
     if matches.len() != 1 {
@@ -309,7 +286,7 @@ fn select_asset(input: &str, package: &DirectPackageOperation) -> Result<Release
     Ok(matches.remove(0))
 }
 
-fn parse_asset(value: &Value, index: usize) -> Result<ReleaseAsset> {
+fn parse_asset_name(value: &Value, index: usize) -> Result<&str> {
     let asset = value
         .as_object()
         .with_context(|| format!("GitHub release asset {index} must be an object"))?;
@@ -320,6 +297,13 @@ fn parse_asset(value: &Value, index: usize) -> Result<ReleaseAsset> {
         .with_context(|| format!("GitHub release asset {index} name must be a string"))?;
     validate_asset_name(name)
         .with_context(|| format!("GitHub release asset {index} has an unsafe name"))?;
+    Ok(name)
+}
+
+fn parse_asset(value: &Value, index: usize, name: &str) -> Result<ReleaseAsset> {
+    let asset = value
+        .as_object()
+        .with_context(|| format!("GitHub release asset {index} must be an object"))?;
     let raw_url = asset
         .get("browser_download_url")
         .with_context(|| format!("GitHub release asset {index} is missing browser_download_url"))?
@@ -430,8 +414,11 @@ fn managed_artifact(host: &Host<'_>, package: &DirectPackageOperation) -> PathBu
 }
 
 fn valid_managed_artifact(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| {
-        metadata.is_file() && metadata.len() > 0 && metadata.permissions().mode() & 0o777 == 0o755
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file()
+            && metadata.len() > 0
+            && metadata.permissions().mode() & 0o7777 == 0o755
+            && has_elf_magic(path)
     })
 }
 
@@ -504,12 +491,18 @@ fn verify_appimage(
 }
 
 fn require_elf(path: &Path, name: &str) -> Result<()> {
-    let mut magic = [0; 4];
-    let mut file = fs::File::open(path).context("open downloaded AppImage")?;
-    if file.read_exact(&mut magic).is_err() || magic != *b"\x7fELF" {
+    if !has_elf_magic(path) {
         bail!("direct package {name:?} AppImage does not have ELF magic");
     }
     Ok(())
+}
+
+fn has_elf_magic(path: &Path) -> bool {
+    let mut magic = [0; 4];
+    fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok()
+        && magic == *b"\x7fELF"
 }
 
 fn verify_provides(host: &Host<'_>, package: &DirectPackageOperation) -> Result<()> {
@@ -618,25 +611,24 @@ fn validate_asset_name(value: &str) -> Result<()> {
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let text = text.as_bytes();
+    let text = text.chars().collect::<Vec<_>>();
     let mut previous = vec![false; text.len() + 1];
     previous[0] = true;
-    for token in pattern {
+    for token in pattern.chars() {
         let mut current = vec![false; text.len() + 1];
         match token {
-            b'*' => {
+            '*' => {
                 current[0] = previous[0];
                 for index in 1..=text.len() {
                     current[index] = previous[index] || current[index - 1];
                 }
             }
-            b'?' => {
+            '?' => {
                 current[1..].copy_from_slice(&previous[..text.len()]);
             }
             literal => {
                 for index in 1..=text.len() {
-                    current[index] = previous[index - 1] && text[index - 1] == *literal;
+                    current[index] = previous[index - 1] && text[index - 1] == literal;
                 }
             }
         }
@@ -664,12 +656,14 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_is_anchored_and_question_matches_one_byte() {
+    fn wildcard_is_anchored_and_matches_unicode_scalars() {
         assert!(wildcard_match("app-*.deb", "app-.deb"));
         assert!(wildcard_match("app-??.deb", "app-ab.deb"));
+        assert!(wildcard_match("app-?.deb", "app-é.deb"));
+        assert!(wildcard_match("应用-?.deb", "应用-版.deb"));
         assert!(!wildcard_match("app-?.deb", "xapp-a.deb"));
         assert!(!wildcard_match("app-?.deb", "app-ab.deb"));
-        assert!(!wildcard_match("app-?.deb", "app-é.deb"));
+        assert!(!wildcard_match("app-?.deb", "app-é好.deb"));
     }
 
     #[test]
@@ -700,6 +694,26 @@ mod tests {
         assert!(multiple.contains("matched 2 assets"));
         assert!(multiple.contains("sample-a.AppImage"));
         assert!(multiple.contains("sample-b.AppImage"));
+
+        let unicode_package = DirectPackageOperation::new(
+            "sample",
+            DirectPackageFormat::AppImage,
+            vec!["sample".into()],
+            GithubRepository::parse("owner/repo").unwrap(),
+            Architecture::Amd64,
+            DirectPackageSelector::new("sample-?.AppImage", vec!["sample-坏*.AppImage".into()])
+                .unwrap(),
+            DirectPackageMode::EnsurePresent,
+        )
+        .unwrap();
+        let unicode = r#"{"assets":[
+            {"name":"sample-坏.AppImage","browser_download_url":"https://example.test/bad"},
+            {"name":"sample-é.AppImage","browser_download_url":"https://example.test/good"}
+        ]}"#;
+        assert_eq!(
+            select_asset(unicode, &unicode_package).unwrap().name,
+            "sample-é.AppImage"
+        );
     }
 
     #[test]
@@ -749,6 +763,33 @@ mod tests {
             ),
         ] {
             let error = select_asset(json, &package).unwrap_err().to_string();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn unrelated_asset_payload_is_ignored_but_every_name_is_validated() {
+        let package = package(Architecture::Amd64);
+        let selected = select_asset(
+            r#"{"assets":[
+                {"name":"unrelated.txt","browser_download_url":7,"digest":{}},
+                {"name":"also-unrelated.txt"},
+                {"name":"sample-a.AppImage","browser_download_url":"https://example.test/a"}
+            ]}"#,
+            &package,
+        )
+        .unwrap();
+        assert_eq!(selected.name, "sample-a.AppImage");
+
+        for (unrelated, expected) in [
+            (r#"{}"#, "missing name"),
+            (r#"{"name":7}"#, "name must be a string"),
+            (r#"{"name":"../unrelated.txt"}"#, "unsafe name"),
+        ] {
+            let json = format!(
+                r#"{{"assets":[{unrelated},{{"name":"sample-a.AppImage","browser_download_url":"https://example.test/a"}}]}}"#
+            );
+            let error = select_asset(&json, &package).unwrap_err().to_string();
             assert!(error.contains(expected), "{error}");
         }
     }
