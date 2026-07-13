@@ -331,7 +331,8 @@ fn publish_file(source: &Path, destination: &Path, mode: u32) -> Result<()> {
         .as_file_mut()
         .sync_all()
         .context("sync downloaded file")?;
-    staged
+    let staged_path = staged.into_temp_path();
+    staged_path
         .persist(destination)
         .map_err(|error| error.error)
         .context("publish downloaded file")?;
