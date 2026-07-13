@@ -582,41 +582,114 @@ exit "$status""#,
 
 #[test]
 fn apt_package_state_fails_closed_for_fatal_status_signal_and_invalid_output() {
-    for (name, body, error) in [
+    for (name, packages, body, error) in [
         (
             "exit-2",
+            &["package"][..],
             "printf 'fatal database error\\n' >&2; exit 2",
             "APT package state query: dpkg-query failed (exit status: 2): fatal database error",
         ),
         (
             "signal",
+            &["package"][..],
             "printf 'terminated query\\n' >&2; kill -TERM $$",
             "APT package state query: dpkg-query failed (signal:",
         ),
         (
             "non-UTF-8",
+            &["package"][..],
             "printf '\\377'",
             "dpkg-query returned non-UTF-8 package state",
         ),
         (
             "missing-tab",
+            &["package"][..],
             "printf 'package ii \\n'",
             "dpkg-query returned malformed package state",
         ),
         (
             "empty-package",
+            &["package"][..],
             "printf '\\tii \\n'",
             "dpkg-query returned malformed package state",
         ),
         (
-            "short-status",
-            "printf 'package\\ti\\n'",
+            "two-byte-status",
+            &["package"][..],
+            "printf 'package\\tii\\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "four-byte-status",
+            &["package"][..],
+            "printf 'package\\tii x\\n'",
             "dpkg-query returned malformed package state",
         ),
         (
             "extra-tab",
+            &["package"][..],
             "printf 'package\\tii \\textra\\n'",
             "dpkg-query returned malformed package state",
+        ),
+        (
+            "undocumented-x-status",
+            &["package"][..],
+            "printf 'package\\txi \\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "invalid-desired",
+            &["package"][..],
+            "printf 'package\\tzi \\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "invalid-package-status",
+            &["package"][..],
+            "printf 'package\\tix \\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "invalid-error",
+            &["package"][..],
+            "printf 'package\\tiiX\\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "trailing-text",
+            &["package"][..],
+            "printf 'package\\tii junk\\n'",
+            "dpkg-query returned malformed package state",
+        ),
+        (
+            "duplicate-request",
+            &["package", "package"][..],
+            "printf 'package\\tii \\n'",
+            "duplicate requested package",
+        ),
+        (
+            "duplicate-record",
+            &["package"][..],
+            "printf 'package\\tii \\npackage\\tii \\n'",
+            "duplicate package record",
+        ),
+        (
+            "unrequested-record",
+            &["package"][..],
+            "printf 'other\\tii \\n'",
+            "unrequested package record",
+        ),
+        (
+            "exit-zero-empty",
+            &["package"][..],
+            ":",
+            "incomplete package state; missing records for: package",
+        ),
+        (
+            "exit-zero-subset",
+            &["package", "missing"][..],
+            "printf 'package\\tii \\n'",
+            "incomplete package state; missing records for: missing",
         ),
     ] {
         for operation in ["install", "purge"] {
@@ -628,10 +701,10 @@ fn apt_package_state_fails_closed_for_fatal_status_signal_and_invalid_output() {
             host.logging_fake("sudo");
             let step = match operation {
                 "install" => Step::workflow(operations::Operation::AptPackages {
-                    packages: vec!["package".into()],
+                    packages: packages.iter().map(|package| (*package).into()).collect(),
                 }),
                 "purge" => Step::workflow(operations::Operation::AptPurge {
-                    packages: vec!["package".into()],
+                    packages: packages.iter().map(|package| (*package).into()).collect(),
                 }),
                 _ => unreachable!(),
             };
@@ -643,10 +716,14 @@ fn apt_package_state_fails_closed_for_fatal_status_signal_and_invalid_output() {
                 assert!(stderr.contains("terminated query"), "{stderr}");
             }
             let log = host.log();
-            assert!(
-                log.starts_with("dpkg-query -W "),
-                "{name} {operation}: {log}"
-            );
+            if name == "duplicate-request" {
+                assert!(log.is_empty(), "{name} {operation}: {log}");
+            } else {
+                assert!(
+                    log.starts_with("dpkg-query -W "),
+                    "{name} {operation}: {log}"
+                );
+            }
             assert!(!log.contains("sudo "), "{name} {operation}: {log}");
         }
     }
@@ -680,6 +757,38 @@ exit 1"#,
             _ => unreachable!(),
         };
         assert!(log.contains(expected), "{operation}: {log}");
+    }
+}
+
+#[test]
+fn apt_package_state_accepts_exit_one_with_empty_output() {
+    for operation in ["install", "purge"] {
+        let host = Host::new();
+        host.fake(
+            "dpkg-query",
+            r#"printf 'dpkg-query %s\n' "$*" >>"$LOG"
+exit 1"#,
+        );
+        host.logging_fake("sudo");
+        let step = match operation {
+            "install" => Step::workflow(operations::Operation::AptPackages {
+                packages: vec!["first".into(), "second".into()],
+            }),
+            "purge" => Step::workflow(operations::Operation::AptPurge {
+                packages: vec!["first".into(), "second".into()],
+            }),
+            _ => unreachable!(),
+        };
+        host.run_ok(&step);
+        let log = host.log();
+        match operation {
+            "install" => assert!(
+                log.contains("sudo apt-get install -y -qq -- first second\n"),
+                "{log}"
+            ),
+            "purge" => assert!(!log.contains("sudo "), "{log}"),
+            _ => unreachable!(),
+        }
     }
 }
 
