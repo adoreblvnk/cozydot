@@ -14,7 +14,7 @@ impl Architecture {
         match value {
             "x86_64" | "amd64" | "x64" => Ok(Self::Amd64),
             "aarch64" | "arm64" => Ok(Self::Arm64),
-            "arm32" | "armv6l" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
+            "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
             "riscv64" | "riscv64gc" => Ok(Self::Riscv64),
             _ => bail!(
                 "unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32, riscv64"
@@ -221,6 +221,7 @@ mod tests {
             ("aarch64", Architecture::Arm64),
             ("arm64", Architecture::Arm64),
             ("arm32", Architecture::Arm32),
+            ("armv7", Architecture::Arm32),
             ("armv7l", Architecture::Arm32),
             ("armhf", Architecture::Arm32),
             ("riscv64", Architecture::Riscv64),
@@ -300,6 +301,15 @@ mod tests {
         assert_eq!(
             error,
             "unsupported architecture \"sparc64\"; supported architectures: amd64, arm64, arm32, riscv64"
+        );
+    }
+
+    #[test]
+    fn rejects_armv6_as_arm32() {
+        let error = Architecture::normalize("armv6l").unwrap_err().to_string();
+        assert_eq!(
+            error,
+            "unsupported architecture \"armv6l\"; supported architectures: amd64, arm64, arm32, riscv64"
         );
     }
     #[test]
