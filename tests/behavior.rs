@@ -697,7 +697,11 @@ if [ -n "$out" ]; then printf new-deb >"$out"; else printf '{"assets":[{"name":"
 #[test]
 fn uv_installs_the_requested_python_series_without_parsing_display_output() {
     let host = Host::new();
-    host.logging_fake("uv");
+    host.fake(
+        "uv",
+        r#"printf 'uv %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then exit 1; fi"#,
+    );
     let step = step_containing(
         &plans("configs/cli.yaml", "install", "ubuntu"),
         "workflow uv-install",
@@ -705,8 +709,27 @@ fn uv_installs_the_requested_python_series_without_parsing_display_output() {
     host.run_ok(&step);
     let log = host.log();
     assert!(!log.contains("uv self update"), "{log}");
+    assert!(log.contains("uv python find 3.13"), "{log}");
     assert!(log.contains("uv python install 3.13"), "{log}");
     assert!(!log.contains("uv python list"), "{log}");
+}
+
+#[test]
+fn uv_skips_python_install_when_requested_series_is_resolvable() {
+    let host = Host::new();
+    host.fake(
+        "uv",
+        r#"printf 'uv %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then printf '%s\n' '/managed/python'; exit 0; fi"#,
+    );
+    let step = step_containing(
+        &plans("configs/cli.yaml", "install", "ubuntu"),
+        "workflow uv-install",
+    );
+    host.run_ok(&step);
+    let log = host.log();
+    assert!(log.contains("uv python find 3.13"), "{log}");
+    assert!(!log.contains("uv python install"), "{log}");
 }
 
 #[test]
@@ -749,6 +772,7 @@ mkdir -p "$UV_UNMANAGED_INSTALL"
 cat >"$UV_UNMANAGED_INSTALL/uv" <<'UV'
 #!/bin/sh
 printf 'uv %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then exit 1; fi
 UV
 chmod +x "$UV_UNMANAGED_INSTALL/uv"
 INSTALL"#,
