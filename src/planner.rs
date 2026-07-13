@@ -112,7 +112,7 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
     }
     if cfg.bool("check.appimaged") {
         out.push(Step::workflow(Operation::Appimaged {
-            arch: p.uname_arch.clone(),
+            arch: p.architecture.uname().into(),
         }));
     }
     if cfg.tagged_enabled("check.nerdfont") {
@@ -268,7 +268,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             version: cfg
                 .string("install.languages.goVersion")
                 .expect("validated goVersion"),
-            arch: p.go_arch.clone(),
+            arch: p.architecture.go_archive().into(),
         }));
     }
     if cfg.tagged_enabled("install.languages.nodeVersion") {
@@ -342,7 +342,7 @@ fn update(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             Condition::CommandExists("go".into()),
             Step::workflow(Operation::GoInstall {
                 version: "latest".into(),
-                arch: p.go_arch.clone(),
+                arch: p.architecture.go_archive().into(),
             }),
         ));
     }
