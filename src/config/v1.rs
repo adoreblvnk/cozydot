@@ -42,6 +42,32 @@ impl ConfigV1 {
     }
 
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
+        if let Some(configured) = self
+            .system
+            .as_ref()
+            .and_then(|system| system.distro.as_ref())
+            .and_then(Distro::configured_id)
+        {
+            if configured != platform.distro {
+                bail!(
+                    "system.distro: configured distribution {configured:?} does not match resolved platform distribution {:?}",
+                    platform.distro
+                );
+            }
+        }
+        if let Some(configured) = self
+            .system
+            .as_ref()
+            .and_then(|system| system.desktop.as_ref())
+            .and_then(DesktopKind::configured_id)
+        {
+            if configured != platform.desktop {
+                bail!(
+                    "system.desktop: configured desktop {configured:?} does not match resolved platform desktop {:?}",
+                    platform.desktop
+                );
+            }
+        }
         let upstream = upstream_for_distro(&platform.distro)?;
         let detected_upstream = upstream_from_id(&platform.upstream)?;
         if upstream != detected_upstream {
@@ -75,6 +101,19 @@ impl ConfigV1 {
         }
         if let Some(tools) = &self.tools {
             tools.validate()?;
+        }
+        if self
+            .packages
+            .as_ref()
+            .and_then(|packages| packages.npm.as_ref())
+            .is_some_and(|packages| !packages.is_empty())
+            && self
+                .tools
+                .as_ref()
+                .and_then(|tools| tools.node.as_ref())
+                .is_none()
+        {
+            bail!("packages.npm: requires tools.node");
         }
         if let Some(fonts) = &self.fonts {
             validate_unique_strings(fonts.nerd.as_deref(), "fonts.nerd")?;
@@ -213,6 +252,17 @@ pub enum DesktopKind {
     None,
     Gnome,
     Cinnamon,
+}
+
+impl DesktopKind {
+    fn configured_id(&self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::None => Some("none"),
+            Self::Gnome => Some("gnome"),
+            Self::Cinnamon => Some("cinnamon"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -507,6 +557,10 @@ pub struct RepositoryUrls {
 
 impl RepositoryUrls {
     pub fn select(&self, distro: &str) -> Result<&str> {
+        self.select_url(distro).map(HttpsUrl::as_str)
+    }
+
+    pub fn select_url(&self, distro: &str) -> Result<&HttpsUrl> {
         let selected = match distro {
             "ubuntu" => self.ubuntu.as_ref(),
             "linuxmint" => self.linuxmint.as_ref(),
@@ -518,14 +572,11 @@ impl RepositoryUrls {
             "tails" => self.tails.as_ref(),
             _ => bail!("repository source URL selection: unsupported distro {distro:?}"),
         };
-        selected
-            .or(self.default.as_ref())
-            .map(HttpsUrl::as_str)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "repository source URL selection: no URL for distro {distro:?} and no default URL"
-                )
-            })
+        selected.or(self.default.as_ref()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "repository source URL selection: no URL for distro {distro:?} and no default URL"
+            )
+        })
     }
 
     fn validate(&self, path: &str) -> Result<()> {
