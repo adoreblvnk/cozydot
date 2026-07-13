@@ -281,6 +281,7 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             } else {
                 vec![]
             },
+            update: false,
         }));
     }
     if cfg.tagged_enabled("install.npm") && !cfg.tagged_enabled("install.languages.nodeVersion") {
@@ -351,6 +352,7 @@ fn update(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
             Step::workflow(Operation::NodeInstall {
                 version: "latest".into(),
                 npm: vec![],
+                update: true,
             }),
         ));
     }
