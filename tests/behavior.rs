@@ -1639,8 +1639,8 @@ if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"samp
     );
     host.fake(
         "sudo",
-        r#"printf 'sudo %s\n' "$*" >>"$LOG"
-[ "$1" = apt-get ] && [ "$2" = install ] && [ "$3" = -y ] && [ "$4" = -qq ] && [ "$5" = -- ]
+        r#"printf 'sudo-arg <%s>\n' "$@" >>"$LOG"
+[ "$#" -eq 7 ] && [ "$1" = DEBIAN_FRONTEND=noninteractive ] && [ "$2" = apt-get ] && [ "$3" = install ] && [ "$4" = -y ] && [ "$5" = -qq ] && [ "$6" = -- ] && [[ "$7" = *.deb ]]
 bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#,
     );
     host.run_ok(&direct_step(
@@ -1656,7 +1656,18 @@ bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#
             .is_some_and(|line| line.ends_with(".deb")),
         "{log}"
     );
-    assert!(log.contains("sudo apt-get install -y -qq -- "), "{log}");
+    let sudo_args = log
+        .lines()
+        .filter(|line| line.starts_with("sudo-arg "))
+        .collect::<Vec<_>>();
+    assert_eq!(sudo_args.len(), 7, "{log}");
+    assert_eq!(sudo_args[0], "sudo-arg <DEBIAN_FRONTEND=noninteractive>");
+    assert_eq!(sudo_args[1], "sudo-arg <apt-get>");
+    assert_eq!(sudo_args[2], "sudo-arg <install>");
+    assert_eq!(sudo_args[3], "sudo-arg <-y>");
+    assert_eq!(sudo_args[4], "sudo-arg <-qq>");
+    assert_eq!(sudo_args[5], "sudo-arg <-->");
+    assert!(sudo_args[6].ends_with(".deb>"), "{log}");
     assert!(!log.contains("apt-get update"), "{log}");
 
     let skipped_log = host.log();
@@ -1666,6 +1677,41 @@ bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#
         operations::DirectPackageMode::EnsurePresent,
     ));
     assert_eq!(host.log(), skipped_log);
+}
+
+#[test]
+fn direct_debian_install_failure_propagates_before_provides_verification() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.deb","browser_download_url":"https://example.test/sample.deb"}]}'; fi"#,
+    );
+    host.fake("dpkg-deb", r#"[ "$1" = --info ] && [ "$2" = -- ]"#);
+    host.fake(
+        "sudo",
+        r#"printf 'sudo-arg <%s>\n' "$@" >>"$LOG"
+[ "$#" -eq 7 ] && [ "$1" = DEBIAN_FRONTEND=noninteractive ] && [ "$2" = apt-get ] && [ "$3" = install ] && [ "$4" = -y ] && [ "$5" = -qq ] && [ "$6" = -- ] && [[ "$7" = *.deb ]]
+exit 42"#,
+    );
+
+    let output = host.run(&direct_step(
+        operations::DirectPackageFormat::Deb,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("direct Debian install"), "{stderr}");
+    assert!(!stderr.contains("remain unavailable"), "{stderr}");
+    let log = host.log();
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.starts_with("sudo-arg "))
+            .count(),
+        7,
+        "{log}"
+    );
 }
 
 #[test]
@@ -1691,7 +1737,11 @@ if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"samp
             operations::DirectPackageMode::EnsurePresent,
         ));
         assert!(!output.status.success());
-        assert_eq!(host.log().contains("sudo apt-get"), preflight_succeeds);
+        assert_eq!(
+            host.log()
+                .contains("sudo DEBIAN_FRONTEND=noninteractive apt-get"),
+            preflight_succeeds
+        );
         if preflight_succeeds {
             assert!(String::from_utf8_lossy(&output.stderr).contains("remain unavailable"));
         }
