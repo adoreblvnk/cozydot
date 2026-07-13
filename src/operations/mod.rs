@@ -66,6 +66,9 @@ pub enum Operation {
         npm: Vec<String>,
         update: bool,
     },
+    NpmPackages {
+        packages: Vec<String>,
+    },
     PyenvInstall {
         update: bool,
         version: String,
@@ -129,6 +132,9 @@ impl Operation {
                 args.extend(npm.clone());
                 args
             }
+            Self::NpmPackages { packages } => std::iter::once("npm-packages".into())
+                .chain(packages.clone())
+                .collect(),
             Self::PyenvInstall {
                 update,
                 version,
@@ -188,6 +194,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
             npm,
             update,
         } => languages::node(&host, version, npm, *update),
+        Operation::NpmPackages { packages } => languages::npm_packages(&host, packages),
         Operation::PyenvInstall {
             update,
             version,

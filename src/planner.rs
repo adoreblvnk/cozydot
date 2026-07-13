@@ -285,11 +285,11 @@ fn install(cfg: &Config, p: &Platform, out: &mut Vec<Step>) {
         }));
     }
     if cfg.tagged_enabled("install.npm") && !cfg.tagged_enabled("install.languages.nodeVersion") {
-        let mut a = vec!["install".into(), "--global".into()];
-        a.extend(cfg.strings("install.npm"));
         out.push(run_if(
             Condition::CommandExists("npm".into()),
-            Step::owned("npm", a),
+            Step::workflow(Operation::NpmPackages {
+                packages: cfg.strings("install.npm"),
+            }),
         ));
     }
     if cfg.tagged_enabled("install.languages.pyenv") {

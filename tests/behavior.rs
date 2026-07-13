@@ -710,6 +710,34 @@ fn uv_installs_the_requested_python_series_without_parsing_display_output() {
 }
 
 #[test]
+fn standalone_npm_packages_skip_installed_specs() {
+    let host = Host::new();
+    host.fake(
+        "npm",
+        r#"printf 'npm %s\n' "$*" >>"$LOG"
+if [ "${1:-}" = list ]; then [ -f "$TMPDIR/npm-standalone-installed" ]; exit; fi
+if [ "${1:-}" = install ]; then touch "$TMPDIR/npm-standalone-installed"; fi"#,
+    );
+    let step = Step::workflow(operations::Operation::NpmPackages {
+        packages: vec!["opencode-ai".into()],
+    });
+    host.run_ok(&step);
+    host.run_ok(&step);
+    let log = host.log();
+    assert_eq!(
+        log.matches("npm list --global --depth=0 opencode-ai")
+            .count(),
+        2,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("npm install --global opencode-ai").count(),
+        1,
+        "{log}"
+    );
+}
+
+#[test]
 fn fresh_uv_install_uses_a_deterministic_verified_destination() {
     let host = Host::new();
     host.fake(
