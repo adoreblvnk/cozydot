@@ -117,6 +117,12 @@ Exit criteria:
 
 ### 4. Lower typed intents into complete fixed-manager operations
 
+Implementation progress:
+
+- Pass 004b adds the typed executable boundary for direct-package ensure-present and update modes without switching production lowering. It validates schema-v1 direct intents again at execution, resolves one latest GitHub release asset with exact anchored `*`/`?` include-then-exclude semantics, validates canonical HTTPS asset URLs and optional GitHub SHA-256 digests, and installs Debian packages or atomically managed AppImages through fixed handlers.
+- Direct Debian execution now skips only when every declared provide is executable, validates downloads with `dpkg-deb` before one fixed noninteractive APT install, and verifies every provide afterward. Direct AppImages now use `~/.local/share/cozydot/direct/<name>.AppImage` with mode `0755` and conflict-safe managed links in `~/.local/bin`; failed downloads, checksums, or ELF validation do not replace the managed artifact.
+- The legacy `DownloadBinary` operation and production planner remain unchanged until the atomic integration pass. Remaining milestone-4 work includes lowering all `PlannedAction` variants, including `DirectPackageIntent` and `UpdateAction::Direct`, plus the other fixed-manager, dotfile, integration, and desktop handlers listed below.
+
 Affected paths:
 
 - `src/operations/`
