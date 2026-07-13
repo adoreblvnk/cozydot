@@ -1,7 +1,7 @@
 use cozydot::{
     config::Config,
     operations, planner,
-    platform::Platform,
+    platform::{Architecture, Platform},
     runner::{command_exists_in, Condition, Step},
 };
 use std::{
@@ -218,6 +218,37 @@ fn step_containing(steps: &[Step], needle: &str) -> Step {
         .find(|step| step.display().contains(needle))
         .unwrap_or_else(|| panic!("no planned step contains {needle}"))
         .clone()
+}
+
+fn direct_step(
+    format: operations::DirectPackageFormat,
+    provides: &[&str],
+    mode: operations::DirectPackageMode,
+) -> Step {
+    Step::workflow(operations::Operation::DirectPackage(
+        operations::DirectPackageOperation::new(
+            "sample",
+            format,
+            provides.iter().map(|value| (*value).into()).collect(),
+            operations::GithubRepository::parse("owner/repo").unwrap(),
+            Architecture::Amd64,
+            operations::DirectPackageSelector::new(
+                match format {
+                    operations::DirectPackageFormat::Deb => "sample-amd64-*.deb",
+                    operations::DirectPackageFormat::AppImage => "sample-amd64-*.AppImage",
+                },
+                vec![match format {
+                    operations::DirectPackageFormat::Deb => "sample-amd64-debug-*.deb".into(),
+                    operations::DirectPackageFormat::AppImage => {
+                        "sample-amd64-debug-*.AppImage".into()
+                    }
+                }],
+            )
+            .unwrap(),
+            mode,
+        )
+        .unwrap(),
+    ))
 }
 
 #[test]
@@ -1423,6 +1454,230 @@ if [ -n "$out" ]; then printf appimage >"$out"; else printf '{"assets":[{"name":
     let repaired = fs::metadata(&destination).unwrap();
     assert!(repaired.len() > 0);
     assert_ne!(repaired.permissions().mode() & 0o111, 0);
+}
+
+#[test]
+fn direct_appimage_ensure_skips_network_but_update_forces_resolution() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    let link = host.home.join(".local/bin/sample");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    fs::write(&artifact, b"\x7fELFold").unwrap();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+    symlink(&artifact, &link).unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
+    );
+
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+    assert!(host.log().is_empty());
+
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample"],
+        operations::DirectPackageMode::Update,
+    ));
+    assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFnew");
+    let log = host.log();
+    assert!(log.contains("api.github.com/repos/owner/repo/releases/latest"));
+    assert!(log.contains("--proto =https"), "{log}");
+    assert!(log.contains("User-Agent: cozydot/0.0.1"), "{log}");
+}
+
+#[test]
+fn direct_appimage_failed_downloads_preserve_old_artifact_and_links() {
+    for failure in ["interrupted", "empty", "checksum"] {
+        let host = Host::new();
+        let artifact = host
+            .home
+            .join(".local/share/cozydot/direct/sample.AppImage");
+        let link = host.home.join(".local/bin/sample");
+        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        fs::write(&artifact, b"\x7fELFold").unwrap();
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+        symlink(&artifact, &link).unwrap();
+        let digest = if failure == "checksum" {
+            r#", "digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000""#
+        } else {
+            ""
+        };
+        host.fake(
+            "curl",
+            &format!(
+                r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -z "$out" ]; then printf '{{"assets":[{{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"{digest}}}]}}'; exit 0; fi
+case {failure} in interrupted) printf partial >"$out"; exit 42 ;; empty) : >"$out" ;; checksum) printf '\177ELFnew' >"$out" ;; esac"#
+            ),
+        );
+
+        let output = host.run(&direct_step(
+            operations::DirectPackageFormat::AppImage,
+            &["sample"],
+            operations::DirectPackageMode::Update,
+        ));
+        assert!(!output.status.success(), "{failure}");
+        assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFold", "{failure}");
+        assert_eq!(fs::read_link(&link).unwrap(), artifact, "{failure}");
+    }
+}
+
+#[test]
+fn direct_debian_preflight_install_and_post_install_verification_are_fixed() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.deb","browser_download_url":"https://example.test/sample.deb"}]}'; fi"#,
+    );
+    host.fake(
+        "dpkg-deb",
+        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"
+[ "$1" = --info ] && [ "$2" = -- ]"#,
+    );
+    host.fake(
+        "sudo",
+        r#"printf 'sudo %s\n' "$*" >>"$LOG"
+[ "$1" = apt-get ] && [ "$2" = install ] && [ "$3" = -y ] && [ "$4" = -qq ] && [ "$5" = -- ]
+bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#,
+    );
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::Deb,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+    let log = host.log();
+    assert!(log.contains("dpkg-deb --info -- "), "{log}");
+    assert!(
+        log.lines()
+            .find(|line| line.starts_with("dpkg-deb "))
+            .is_some_and(|line| line.ends_with(".deb")),
+        "{log}"
+    );
+    assert!(log.contains("sudo apt-get install -y -qq -- "), "{log}");
+    assert!(!log.contains("apt-get update"), "{log}");
+
+    let skipped_log = host.log();
+    host.run_ok(&direct_step(
+        operations::DirectPackageFormat::Deb,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent,
+    ));
+    assert_eq!(host.log(), skipped_log);
+}
+
+#[test]
+fn direct_debian_preflight_failure_prevents_sudo_and_missing_provide_fails() {
+    for preflight_succeeds in [false, true] {
+        let host = Host::new();
+        host.fake(
+            "curl",
+            r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.deb","browser_download_url":"https://example.test/sample.deb"}]}'; fi"#,
+        );
+        host.fake(
+            "dpkg-deb",
+            &format!(
+                "printf 'dpkg-deb %s\\n' \"$*\" >>\"$LOG\"; exit {}",
+                if preflight_succeeds { 0 } else { 42 }
+            ),
+        );
+        host.logging_fake("sudo");
+        let output = host.run(&direct_step(
+            operations::DirectPackageFormat::Deb,
+            &["sample"],
+            operations::DirectPackageMode::EnsurePresent,
+        ));
+        assert!(!output.status.success());
+        assert_eq!(host.log().contains("sudo apt-get"), preflight_succeeds);
+        if preflight_succeeds {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("remain unavailable"));
+        }
+    }
+}
+
+#[test]
+fn direct_appimage_publishes_elf_mode_and_multiple_retry_safe_links() {
+    let host = Host::new();
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/direct/sample.AppImage");
+    let first_link = host.home.join(".local/bin/sample");
+    fs::create_dir_all(first_link.parent().unwrap()).unwrap();
+    symlink(&artifact, &first_link).unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFpayload' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage","digest":"sha256:f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb"}]}'; fi"#,
+    );
+    let step = direct_step(
+        operations::DirectPackageFormat::AppImage,
+        &["sample", "sample-cli"],
+        operations::DirectPackageMode::EnsurePresent,
+    );
+    host.run_ok(&step);
+    assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFpayload");
+    assert_eq!(
+        fs::metadata(&artifact).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    assert_eq!(fs::read_link(&first_link).unwrap(), artifact);
+    assert_eq!(
+        fs::read_link(host.home.join(".local/bin/sample-cli")).unwrap(),
+        artifact
+    );
+    let first_log = host.log();
+    host.run_ok(&step);
+    assert_eq!(host.log(), first_log);
+}
+
+#[test]
+fn direct_appimage_rejects_non_elf_and_link_conflicts_without_publication() {
+    for conflict in ["regular", "directory", "symlink", "none"] {
+        let host = Host::new();
+        let artifact = host
+            .home
+            .join(".local/share/cozydot/direct/sample.AppImage");
+        let link = host.home.join(".local/bin/sample");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        match conflict {
+            "regular" => fs::write(&link, b"foreign").unwrap(),
+            "directory" => fs::create_dir(&link).unwrap(),
+            "symlink" => symlink("/foreign", &link).unwrap(),
+            "none" => {}
+            _ => unreachable!(),
+        }
+        host.fake(
+            "curl",
+            r#"printf 'curl\n' >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf not-elf >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
+        );
+        let output = host.run(&direct_step(
+            operations::DirectPackageFormat::AppImage,
+            &["sample"],
+            operations::DirectPackageMode::EnsurePresent,
+        ));
+        assert!(!output.status.success(), "{conflict}");
+        assert!(!artifact.exists(), "{conflict}");
+        if conflict == "none" {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("ELF magic"));
+        } else {
+            assert!(host.log().is_empty(), "{conflict}: {}", host.log());
+        }
+    }
 }
 
 #[test]

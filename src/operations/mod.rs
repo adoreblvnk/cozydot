@@ -2,6 +2,7 @@ mod appimaged;
 mod apps;
 mod apt;
 mod desktop;
+mod direct;
 mod downloads;
 mod languages;
 mod provisioning;
@@ -9,6 +10,10 @@ mod repository;
 mod snap_cleanup;
 
 pub use apt::AptUpgradePolicy;
+pub use direct::{
+    DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
+    GithubRepository,
+};
 
 use anyhow::{bail, Context, Result};
 use std::{
@@ -55,6 +60,7 @@ pub enum Operation {
     DockerConfig {
         user: String,
     },
+    DirectPackage(DirectPackageOperation),
     DownloadBinary {
         name: String,
         url: String,
@@ -136,6 +142,7 @@ impl Operation {
             }
             Self::Appimaged { arch } => vec!["appimaged".into(), arch.clone()],
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
+            Self::DirectPackage(package) => package.display_args(),
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
             Self::GnomeExtension { extension } => {
                 vec!["gnome-extension".into(), extension.clone()]
@@ -216,6 +223,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
         } => repository::source(&host, destination, contents),
         Operation::Appimaged { arch } => appimaged::execute(&host, arch),
         Operation::DockerConfig { user } => apps::docker(&host, user),
+        Operation::DirectPackage(package) => direct::execute(&host, package),
         Operation::DownloadBinary {
             name,
             url,
@@ -472,10 +480,14 @@ pub(crate) struct TempPath(PathBuf);
 
 impl TempPath {
     pub fn new(host: &Host<'_>, stem: &str) -> Result<Self> {
+        Self::new_with_suffix(host, stem, "")
+    }
+
+    pub fn new_with_suffix(host: &Host<'_>, stem: &str, suffix: &str) -> Result<Self> {
         for attempt in 0..100 {
             let path = host
                 .temp_dir()
-                .join(format!("{stem}.{}.{attempt}", std::process::id()));
+                .join(format!("{stem}.{}.{attempt}{suffix}", std::process::id()));
             match std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
