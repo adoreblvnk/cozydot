@@ -14,11 +14,21 @@ use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
     fs,
-    io::Write,
+    io::{self, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    thread,
+    time::Duration,
 };
+
+const ETXTBSY: i32 = 26;
+const ETXTBSY_BACKOFFS: [Duration; 4] = [
+    Duration::from_millis(20),
+    Duration::from_millis(40),
+    Duration::from_millis(80),
+    Duration::from_millis(160),
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
@@ -285,6 +295,39 @@ impl Host<'_> {
         Ok(output)
     }
 
+    pub fn require_retrying_etxtbsy<I, S>(
+        &self,
+        operation: &str,
+        program: &str,
+        args: I,
+    ) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let args = args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_os_string())
+            .collect::<Vec<_>>();
+        let output = output_retrying_etxtbsy(|| {
+            let mut command = Command::new(program);
+            command.args(&args);
+            for (key, value) in self.env {
+                command.env(key, value);
+            }
+            command
+        })
+        .with_context(|| format!("{operation}: start {}", display(program, &args)))?;
+        if !output.status.success() {
+            bail!(
+                "{operation}: {program} failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(output)
+    }
+
     pub fn require_input<I, S>(
         &self,
         operation: &str,
@@ -346,6 +389,30 @@ impl Host<'_> {
             .map(|(_, value)| value.clone())
             .or_else(|| std::env::var_os(name))
     }
+}
+
+fn output_retrying_etxtbsy(mut command: impl FnMut() -> Command) -> io::Result<Output> {
+    for attempt in 0..=ETXTBSY_BACKOFFS.len() {
+        let mut command = command();
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        match command.spawn() {
+            Ok(child) => return child.wait_with_output(),
+            Err(error) if error.raw_os_error() == Some(ETXTBSY) => {
+                let Some(backoff) = ETXTBSY_BACKOFFS.get(attempt) else {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "ETXTBSY persisted across {} spawn attempts: {error}",
+                            ETXTBSY_BACKOFFS.len() + 1
+                        ),
+                    ));
+                };
+                thread::sleep(*backoff);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!()
 }
 
 pub(crate) struct TempDir(PathBuf);
@@ -443,8 +510,21 @@ fn display(program: &str, args: &[OsString]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::publish_file;
-    use std::{fs, os::unix::fs::MetadataExt};
+    use super::{output_retrying_etxtbsy, publish_file, ETXTBSY};
+    use std::{
+        fs::{self, OpenOptions},
+        os::unix::fs::{MetadataExt, PermissionsExt},
+        process::Command,
+        thread,
+        time::Duration,
+    };
+
+    fn executable(directory: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        let path = directory.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
 
     #[test]
     fn downloaded_files_publish_across_filesystems() {
@@ -469,5 +549,85 @@ mod tests {
 
         publish_file(&source, &destination, 0o755).unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"complete artifact");
+    }
+
+    #[test]
+    fn etxtbsy_spawn_retries_until_writer_closes() {
+        let directory = tempfile::tempdir().unwrap();
+        let program = executable(directory.path(), "eventually-ready", "exit 0");
+        let writer = OpenOptions::new().write(true).open(&program).unwrap();
+        assert_eq!(
+            Command::new(&program).spawn().unwrap_err().raw_os_error(),
+            Some(ETXTBSY)
+        );
+        let closer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            drop(writer);
+        });
+        let mut attempts = 0;
+
+        let output = output_retrying_etxtbsy(|| {
+            attempts += 1;
+            Command::new(&program)
+        })
+        .unwrap();
+
+        closer.join().unwrap();
+        assert!(output.status.success());
+        assert!(attempts > 1);
+        assert!(attempts <= 5);
+    }
+
+    #[test]
+    fn persistent_etxtbsy_exhausts_five_spawn_attempts() {
+        let directory = tempfile::tempdir().unwrap();
+        let program = executable(directory.path(), "always-busy", "exit 0");
+        let _writer = OpenOptions::new().write(true).open(&program).unwrap();
+        let mut attempts = 0;
+
+        let error = output_retrying_etxtbsy(|| {
+            attempts += 1;
+            Command::new(&program)
+        })
+        .unwrap_err();
+
+        assert_eq!(attempts, 5);
+        assert!(error.to_string().contains("ETXTBSY"));
+        assert!(error.to_string().contains("5 spawn attempts"));
+    }
+
+    #[test]
+    fn non_etxtbsy_spawn_errors_are_not_retried() {
+        let directory = tempfile::tempdir().unwrap();
+        let inaccessible = executable(directory.path(), "inaccessible", "exit 0");
+        fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o644)).unwrap();
+
+        for (program, expected_error) in [(inaccessible, 13), (directory.path().join("missing"), 2)]
+        {
+            let mut attempts = 0;
+            let error = output_retrying_etxtbsy(|| {
+                attempts += 1;
+                Command::new(&program)
+            })
+            .unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(expected_error));
+            assert_eq!(attempts, 1);
+        }
+    }
+
+    #[test]
+    fn nonzero_exit_is_not_retried() {
+        let directory = tempfile::tempdir().unwrap();
+        let program = executable(directory.path(), "fails", "exit 42");
+        let mut attempts = 0;
+
+        let output = output_retrying_etxtbsy(|| {
+            attempts += 1;
+            Command::new(&program)
+        })
+        .unwrap();
+
+        assert_eq!(output.status.code(), Some(42));
+        assert_eq!(attempts, 1);
     }
 }

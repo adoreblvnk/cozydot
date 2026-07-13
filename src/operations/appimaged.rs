@@ -81,7 +81,7 @@ pub(super) fn execute(host: &Host<'_>, arch: &str) -> Result<()> {
         let destination = destination_dir.join("appimaged.AppImage");
         publish_file(temporary.path(), &destination, 0o755)
             .context("appimaged: install AppImage")?;
-        host.require(
+        host.require_retrying_etxtbsy(
             "appimaged",
             destination.to_string_lossy().as_ref(),
             std::iter::empty::<&str>(),
