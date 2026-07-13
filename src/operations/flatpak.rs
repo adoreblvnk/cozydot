@@ -1,54 +1,26 @@
 use super::Host;
 use anyhow::{Context, Result};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 const FLATHUB_NAME: &str = "flathub";
 const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
 const FLATHUB_REPOSITORY_URL: &str = "https://dl.flathub.org/repo/";
 
 pub fn ensure_flathub(host: &Host<'_>) -> Result<()> {
-    let output = host.run(
-        "flatpak",
-        [
-            "--user",
-            "remotes",
-            "--show-disabled",
-            "--columns=name,url,options",
-        ],
-    )?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "Flathub remote query: flatpak failed ({}): {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    if let Some((url, options)) = user_remotes(&output.stdout)?.get(FLATHUB_NAME) {
-        let insecure = options.iter().find(|option| {
-            matches!(
-                **option,
-                "disabled" | "no-gpg-verify" | "no-enumerate" | "no-deps" | "no-use-for-deps"
-            )
-        });
-        if *url != FLATHUB_REPOSITORY_URL || insecure.is_some() {
-            let options = options.iter().copied().collect::<Vec<_>>().join(",");
-            anyhow::bail!(
-                "Flathub remote mismatch: expected URL {FLATHUB_REPOSITORY_URL:?} with GPG verification, enumeration, and dependency use enabled; found URL {url:?} and options {options:?}. Repair or remove the per-user {FLATHUB_NAME:?} remote and retry"
-            );
-        }
-        return Ok(());
+    if !validate_flathub(&inspect_user_remotes(host)?)? {
+        host.require(
+            "Flathub remote ensure",
+            "flatpak",
+            ["--user", "remote-add", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
+        )?;
+        require_flathub(&inspect_user_remotes(host)?)?;
     }
     host.require(
-        "Flathub remote ensure",
+        "Flathub dependency use enablement",
         "flatpak",
-        [
-            "--user",
-            "remote-add",
-            "--if-not-exists",
-            FLATHUB_NAME,
-            FLATHUB_DESCRIPTOR_URL,
-        ],
+        ["--user", "remote-modify", "--use-for-deps", FLATHUB_NAME],
     )?;
+    require_flathub(&inspect_user_remotes(host)?)?;
     Ok(())
 }
 
@@ -130,30 +102,97 @@ fn installed_apps(output: &[u8]) -> Result<BTreeSet<&str>> {
     Ok(installed)
 }
 
-fn user_remotes(output: &[u8]) -> Result<std::collections::BTreeMap<&str, (&str, BTreeSet<&str>)>> {
+struct UserRemote {
+    url: String,
+    options: BTreeSet<String>,
+    filter: String,
+}
+
+fn inspect_user_remotes(host: &Host<'_>) -> Result<BTreeMap<String, UserRemote>> {
+    let output = host.run(
+        "flatpak",
+        [
+            "--user",
+            "remotes",
+            "--show-disabled",
+            "--columns=name,url,options,filter",
+        ],
+    )?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "Flathub remote query: flatpak failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    user_remotes(&output.stdout)
+}
+
+fn require_flathub(remotes: &BTreeMap<String, UserRemote>) -> Result<()> {
+    if !validate_flathub(remotes)? {
+        anyhow::bail!(
+            "Flathub remote mismatch: expected the per-user {FLATHUB_NAME:?} remote to exist after mutation"
+        );
+    }
+    Ok(())
+}
+
+fn validate_flathub(remotes: &BTreeMap<String, UserRemote>) -> Result<bool> {
+    let Some(remote) = remotes.get(FLATHUB_NAME) else {
+        return Ok(false);
+    };
+    let insecure = remote.options.iter().find(|option| {
+        matches!(
+            option.as_str(),
+            "disabled" | "no-gpg-verify" | "no-enumerate"
+        )
+    });
+    if remote.url != FLATHUB_REPOSITORY_URL || insecure.is_some() || remote.filter != "-" {
+        let options = remote.options.iter().cloned().collect::<Vec<_>>().join(",");
+        anyhow::bail!(
+            "Flathub remote mismatch: expected URL {FLATHUB_REPOSITORY_URL:?} with GPG verification and enumeration enabled and no local filter; found URL {:?}, options {options:?}, and filter {:?}. Repair or remove the per-user {FLATHUB_NAME:?} remote and retry",
+            remote.url,
+            remote.filter
+        );
+    }
+    Ok(true)
+}
+
+fn user_remotes(output: &[u8]) -> Result<BTreeMap<String, UserRemote>> {
     let output =
         std::str::from_utf8(output).context("flatpak returned non-UTF-8 per-user remote state")?;
-    let mut remotes = std::collections::BTreeMap::new();
+    let mut remotes = BTreeMap::new();
     for line in output.lines() {
         let mut fields = line.split('\t');
-        let (Some(name), Some(url), Some(options), None) =
-            (fields.next(), fields.next(), fields.next(), fields.next())
-        else {
+        let (Some(name), Some(url), Some(options), Some(filter), None) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
             anyhow::bail!("flatpak returned malformed per-user remote state: {line:?}");
         };
-        if name.is_empty() || url.is_empty() {
+        if name.is_empty() || url.is_empty() || filter.is_empty() || url::Url::parse(url).is_err() {
             anyhow::bail!("flatpak returned malformed per-user remote state: {line:?}");
         }
+        let options = if options.is_empty() {
+            BTreeSet::new()
+        } else {
+            let parsed = options.split(',').collect::<BTreeSet<_>>();
+            if parsed.contains("") || parsed.len() != options.split(',').count() {
+                anyhow::bail!("flatpak returned malformed per-user remote state: {line:?}");
+            }
+            parsed.into_iter().map(str::to_owned).collect()
+        };
         if remotes
             .insert(
-                name,
-                (
-                    url,
-                    options
-                        .split(',')
-                        .filter(|option| !option.is_empty())
-                        .collect(),
-                ),
+                name.to_owned(),
+                UserRemote {
+                    url: url.to_owned(),
+                    options,
+                    filter: filter.to_owned(),
+                },
             )
             .is_some()
         {
