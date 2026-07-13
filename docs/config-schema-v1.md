@@ -54,8 +54,13 @@ packages:
         type: github
         repository: obsidianmd/obsidian-releases
         assets:
-          amd64: "Obsidian-*.AppImage"
-          arm64: "Obsidian-*-arm64.AppImage"
+          amd64:
+            include: "Obsidian-*.AppImage"
+            exclude:
+              - "Obsidian-*-arm64.AppImage"
+          arm64:
+            include: "Obsidian-*-arm64.AppImage"
+            exclude: []
 
 tools:
   rust: stable
@@ -87,7 +92,7 @@ desktop:
   theme: dark
   terminal: wezterm
   idle:
-    timeout: 900
+    timeout: 15m
     dim: false
   gnome:
     extensions:
@@ -126,14 +131,14 @@ The reference demonstrates every field. It is one configuration, not a promise t
 
 `system` controls host detection and specific distribution preparation. It is not an opaque preparation switch.
 
-- `distro` is one of `auto`, `ubuntu`, `linuxmint`, or `debian`. `auto` reads `/etc/os-release`. Omission defaults detection to `auto`.
+- `distro` is one of `auto`, `ubuntu`, `linuxmint`, `pop`, `zorin`, `deepin`, `debian`, `kali`, or `tails`. These canonical configured and detected IDs are lowercase. `auto` reads `/etc/os-release`. Omission defaults detection to `auto`.
 - `desktop` is one of `auto`, `none`, `gnome`, or `cinnamon`. `auto` reads the current desktop environment and resolves to one of the other three values. `none` explicitly selects no desktop. Omission defaults detection to `auto`.
 - `ensure_admin` is a boolean. `true` ensures the invoking user belongs to the distribution's administrative group (`sudo` on supported Debian-family systems); `false`, omission, or `null` does not change group membership.
 - `apt` is a mapping containing only `sources`, `components`, and `unattended_upgrades`.
 - `apt.sources` is either `preserve` or `managed`. `preserve` leaves distribution-owned APT source files untouched. `managed` writes Cozydot's canonical source set for the detected distribution and codename. Omission or `null` is equivalent to `preserve`.
 - `apt.components` is a non-empty sequence selected from `main`, `contrib`, `non-free`, `non-free-firmware`, `restricted`, `universe`, and `multiverse`, without duplicates. It supplies the components for `apt.sources: managed`; components unsupported by the detected distribution are validation errors. It is invalid when sources are omitted or `preserve`.
 - `apt.unattended_upgrades` is a boolean host-state control. `true` installs and enables the distribution's unattended-upgrade service and periodic configuration. `false` disables its periodic configuration and removes the `unattended-upgrades` package. Omission or `null` preserves the current state.
-- `ubuntu` is a mapping containing only `snap` and `codecs`. Its populated controls are skipped when the detected distribution is not Ubuntu; they are not emulated on another distribution.
+- `ubuntu` is a mapping containing only `snap` and `codecs`. Its populated controls apply when the normalized upstream family is Ubuntu, including supported Ubuntu derivatives. They are skipped for non-Ubuntu-family distributions and are not emulated there.
 - `ubuntu.snap` is a boolean host-state control. `true` ensures Ubuntu's `snapd` package and service are enabled. `false` removes installed snaps and `snapd`, disables its services, removes its data directories, and installs Cozydot's no-Snap APT pin. Omission or `null` preserves the current state.
 - `ubuntu.codecs` is an enable-only boolean. `true` installs `ubuntu-restricted-extras`; `false`, omission, or `null` does not install or remove codecs.
 
@@ -180,9 +185,11 @@ A GitHub `source` has exactly these fields:
 
 - `type`: required literal `github`.
 - `repository`: required `owner/repository` coordinate.
-- `assets`: required map from canonical architecture keys to literal wildcard asset patterns. Allowed keys are `amd64`, `arm64`, `arm32`, and `riscv64`; these keys accommodate upstream naming and are not interpolation variables.
+- `assets`: required map from canonical architecture keys to asset selector mappings. Allowed keys are `amd64`, `arm64`, `arm32`, and `riscv64`; these keys accommodate upstream naming and are not interpolation variables.
 
-At plan time Cozydot selects the pattern for the native canonical architecture and fails clearly if that key is absent. A pattern must contain `*` or `?`, uses only those two wildcard operators, and matches an entire asset filename (`*` matches zero or more characters and `?` matches exactly one). Paths, character classes, interpolation, and substitutions are invalid. Cozydot resolves the latest GitHub release and compares the literal pattern with its asset filenames. Exactly one match succeeds; zero or multiple matches fail with the package name, architecture, pattern, and match count. Cozydot downloads the sole match and installs it with the fixed handler for `format`.
+Each architecture value is one mapping with exactly two required children: `include`, one anchored wildcard pattern, and `exclude`, a sequence of zero or more anchored wildcard patterns. Every pattern must contain `*` or `?`, may use only those two wildcard operators, and matches an entire asset filename (`*` matches zero or more characters and `?` matches exactly one). Paths, character classes, malformed wildcard syntax, interpolation, and substitutions are invalid. Scalar selectors and selectors missing either canonical child are invalid.
+
+At plan time Cozydot selects the mapping for the native canonical architecture and fails clearly if that key is absent. Cozydot resolves the latest GitHub release, matches asset filenames against `include`, removes every asset matching any `exclude` pattern, and requires exactly one remaining asset. Zero or multiple remaining assets fail with the package name, architecture, selector, and match count. Cozydot downloads the sole match and installs it with the fixed handler for `format`.
 
 ## `tools`
 
@@ -221,7 +228,7 @@ Integrations configure installed software; they do not implicitly add the associ
 - `theme` is either `light` or `dark` and applies the corresponding supported desktop color preference. Omission or `null` preserves the current preference.
 - `terminal` is a non-empty executable name configured as the default terminal on supported desktops. It is not restricted to a package catalogue. Omission or `null` preserves the current default.
 - `idle` is a mapping containing only `timeout` and `dim`.
-- `idle.timeout` is a non-negative integer number of seconds before the session is considered idle; `0` disables the idle timeout. Omission or `null` preserves the current timeout.
+- `idle.timeout` is a scalar duration string consisting of a non-negative integer followed by exactly one unit: `s`, `m`, or `h`. For example, `15m` sets a fifteen-minute timeout and `0s` disables it. Numeric YAML values, negative values, multiple units, and other duration forms are invalid. Omission or `null` preserves the current timeout.
 - `idle.dim` is a boolean host-state control. `true` enables dimming when idle and `false` disables it. Omission or `null` preserves the current setting.
 - `gnome` is a mapping applied only when the detected desktop is GNOME.
 - `gnome.extensions` is a sequence of unique exact GNOME extension UUIDs to install and enable. Omission or an empty sequence manages no extensions.
@@ -234,7 +241,7 @@ Desktop behavior that does not match the detected desktop is skipped, not emulat
 
 `updates` controls update actions independently of initial installation. The leaves remain granular; enabling one does not enable its siblings.
 
-- `apt` is one scalar policy: YAML `false`, `standard`, or `full`. `false`, omission, or `null` schedules no APT update. `standard` runs metadata refresh followed by the normal upgrade. `full` runs those steps followed by full upgrade and purge-autoremove. A mapping form is invalid.
+- `apt` is one scalar string policy: `off`, `standard`, or `full`. `off` is the explicit disabled value; omission or `null` is equivalent to `off` and schedules no APT update. `standard` runs metadata refresh followed by the normal upgrade. `full` runs those steps followed by full upgrade and purge-autoremove. YAML booleans, mappings, and other scalar values are invalid.
 - `flatpak` is a boolean enabling Flatpak updates.
 - `tools.rust`, `tools.go`, and `tools.node` are booleans enabling updates through Rustup, official Go archives, and FNM respectively.
 - `packages.cargo`, `packages.npm`, and `packages.direct` are booleans enabling updates of the corresponding configured package sets.
@@ -243,4 +250,4 @@ An update flag only acts on its corresponding configured or installed set. It ne
 
 ## Validation boundary
 
-The complete configuration is parsed and validated before host-changing operations begin. Errors include the field path and reject unknown keys, wrong YAML types, unsupported enum values, malformed identifiers, non-HTTPS URLs, duplicate definitions, unsupported architectures, and missing architecture assets. Cozydot does not silently reinterpret invalid input.
+The complete configuration is parsed and validated before host-changing operations begin. Errors include the field path and reject unknown keys, wrong YAML types, unsupported enum values, malformed identifiers, non-HTTPS URLs, duplicate definitions, unsupported architectures, missing native architecture selectors, and missing selector children. Cozydot does not silently reinterpret invalid input.

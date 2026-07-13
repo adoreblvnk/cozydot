@@ -182,7 +182,7 @@ impl Platform {
 }
 fn upstream(id: &str) -> Result<&'static str> {
     match id {
-        "ubuntu" | "linuxmint" | "pop" | "zorin" | "Deepin" => Ok("ubuntu"),
+        "ubuntu" | "linuxmint" | "pop" | "zorin" | "deepin" => Ok("ubuntu"),
         "debian" | "kali" | "tails" => Ok("debian"),
         _ => bail!("unsupported distro: {id}"),
     }
@@ -315,6 +315,7 @@ mod tests {
     #[test]
     fn distro_map() {
         assert_eq!(upstream("linuxmint").unwrap(), "ubuntu");
+        assert_eq!(upstream("deepin").unwrap(), "ubuntu");
         assert!(upstream("arch").is_err());
     }
 }

@@ -49,16 +49,16 @@ Work:
 - Define Serde-backed structs and enums matching only the authoritative contract.
 - Require integer `schema: 1`; deny unknown fields recursively.
 - Preserve the contract's distinction between omitted/`null` host-state controls and an explicit `false`; do not create alternate public forms while normalizing enable-only controls and empty collections.
-- Validate names, URLs, versions, duplicate entries, managed APT components, repository URL selection, `system` suite resolution, wildcard direct-asset maps, and cross-field requirements.
+- Validate names, URLs, versions, duration strings, duplicate entries, managed APT components, repository URL selection, `system` suite resolution, direct-asset selector mappings, and cross-field requirements.
 - Return field-path errors before platform mutation or command execution.
 - Delete tag handling, string-path lookup, purge-tag mutation, and legacy validation after all callers use typed values.
 
 TDD gate:
 
 - Start with one minimal valid fixture and one complete valid fixture.
-- Add one negative test for each unknown field, wrong type, enum, URL, duplicate, missing required child, schema version, invalid component, invalid wildcard pattern, invalid field dependency, and native-asset failure class.
+- Add one negative test for each unknown field, wrong type, enum, URL, duplicate, missing required child, schema version, invalid component, invalid duration string, invalid wildcard pattern, invalid field dependency, and native-asset failure class. Prove numeric YAML values are invalid for `desktop.idle.timeout`.
 - Assert omission and `null` preservation, meaningful explicit `false` host-state controls, enable-only `false`, and empty-collection behavior for their respective fields.
-- Reject every removed system, dotfile, integration, and desktop form, plus nested APT update mappings, scalar `provides`, and architecture interpolation.
+- Reject every removed system, dotfile, integration, and desktop form, plus boolean or nested `updates.apt` values, scalar `provides`, scalar asset selectors, selectors missing `include` or `exclude`, and architecture interpolation or substitution.
 - `cargo test --all-targets --all-features` passes with no legacy fixture dependency.
 
 Exit criteria:
@@ -82,7 +82,7 @@ Work:
 - Plan in contract order: explicit system controls, removals, repositories/APT, Flatpak, tools, Cargo/NPM/direct packages, fonts, dotfiles, integrations, desktop, then enabled granular updates.
 - Infer prerequisites from enabled features and coalesce APT metadata refresh/install work.
 - Generate managed distribution sources from detected platform data and configured components. Generate third-party APT source entries from typed fields, the selected distro URL, `system` codename resolution or fixed literal suite, inferred key path, and `Architecture::debian()`.
-- Select one direct-package wildcard pattern by canonical architecture, require exactly one latest-release asset match, and use the fixed format handler.
+- Select one direct-package asset selector by canonical architecture, match its required anchored `include`, remove matches for its required `exclude` sequence, require exactly one remaining latest-release asset, and use the fixed format handler.
 - Plan fixed backup-before-adoption dotfile behavior and the canonical Docker, VirtualBox, VS Code, theme, terminal, idle, and GNOME controls independently.
 - Translate `updates.apt` scalar policies and each Flatpak, tool, and package update leaf independently.
 - Remove interpolation expansion and every raw legacy repository/binary planning path.
@@ -92,12 +92,12 @@ TDD gate:
 
 - Snapshot or exact-step tests cover minimal, complete, disabled, and mixed configurations.
 - Ordering tests prove prerequisites precede consumers and each shared refresh/bootstrap occurs once.
-- System tests cover preserve/managed APT sources, component compatibility, admin membership, unattended upgrades, and Ubuntu Snap/codecs controls including their non-Ubuntu skip behavior, without an opaque preparation path.
+- System tests cover preserve/managed APT sources, component compatibility, admin membership, unattended upgrades, every supported lowercase distro ID, and Ubuntu Snap/codecs controls on the Ubuntu upstream family including supported derivatives and their non-Ubuntu-family skip behavior, without an opaque preparation path.
 - Repository tests cover distro URL precedence, default fallback, `system` codename resolution, fixed literal suites, signed-by output, and native architecture.
-- Direct-package tests cover all canonical architecture keys, absent-native-pattern failure, one-match selection, and clear zero/multiple-match failures without interpolation.
+- Direct-package tests cover all canonical architecture keys, absent-native-selector failure, required `include` and `exclude` children, exclusion of overlapping architecture assets, one-remaining-asset selection, and clear zero/multiple-remaining-asset failures. They reject paths, substitutions, and invalid wildcard syntax.
 - Dotfile tests prove every conflict is backed up before Stow and that backup failure prevents adoption.
-- Integration and desktop tests cover each child independently and reject boolean or legacy shorthand forms.
-- Update tests cover `false`, `standard`, and `full` APT policies plus every granular sibling without cross-enablement.
+- Integration and desktop tests cover each child independently, accept `desktop.idle.timeout` duration strings including disabling `0s`, and reject numeric idle values plus boolean or legacy shorthand forms.
+- Update tests cover `off`, `standard`, and `full` APT string policies, reject YAML booleans, and cover every granular sibling without cross-enablement. Omitted and `null` APT policies behave as `off`.
 - Existing operation behavior tests are migrated rather than duplicated.
 
 Exit criteria:
@@ -118,7 +118,7 @@ Work:
 
 - Ensure Rustup, cargo-binstall, official Go archives, FNM, NPM, UV, APT, Flatpak, and Stow are the only manager implementations.
 - Add Rust toolchain selection and canonical Rust target use where host targeting is required.
-- Implement deterministic latest-GitHub-release wildcard matching with exactly-one semantics and fixed `deb`/`appimage` installation.
+- Implement deterministic latest-GitHub-release selector matching in include-then-exclude order, with exactly one remaining asset and fixed `deb`/`appimage` installation.
 - Make state checks and updates deterministic for `provides`, tools, and configured package sets.
 - Make direct-package presence checks require the complete non-empty `provides` sequence.
 - Implement the one fixed dotfile backup policy and parameterized integration/desktop operations without adding alternate schema forms.
@@ -126,7 +126,7 @@ Work:
 
 TDD gate:
 
-- Fake-host tests prove first install, idempotent second apply, requested granular update, zero/one/multiple asset matches, malformed metadata, checksum failure, backup failure, and interrupted download behavior.
+- Fake-host tests prove first install, idempotent second apply, requested granular update, include/exclude overlap, zero/one/multiple remaining asset matches, malformed metadata, checksum failure, backup failure, and interrupted download behavior.
 - No test requires network, root, or the developer's real home.
 
 Exit criteria:
@@ -242,7 +242,7 @@ Run from packaged artifacts on clean amd64 and arm64 VMs for each supported base
 - GNOME VM: theme, terminal, idle controls, configured extensions, dock, rounded corners, fonts, and backup-before-Stow behavior match the preset after relogin where required.
 - APT repository VM: distro-specific URL selection, default fallback, detected-codename `system` suite, fixed literal suite, inferred signed-by path, and native Debian architecture are correct in generated files.
 - Tool VM: Rustup/Rust, official Go, FNM/Node, and UV/Python report the requested versions; Cargo and NPM packages are executable.
-- Direct-package VM: the native canonical pattern selects exactly one latest-release asset; missing architecture keys and zero/multiple matches fail before download.
-- Update VM: `updates.apt` implements exactly `false`, `standard`, and `full`; each other update leaf changes only its manager/package set, and omitted, `null`, `false`, and empty enable-only controls produce no update step.
+- Direct-package VM: the native canonical selector applies `include` then `exclude` and selects exactly one remaining latest-release asset; missing architecture keys and zero/multiple remaining matches fail before download.
+- Update VM: `updates.apt` implements exactly the string policies `off`, `standard`, and `full`; omission and `null` behave as `off`, YAML booleans are rejected, and each other update leaf changes only its manager/package set. Omitted, `null`, `false`, and empty enable-only controls produce no update step for those boolean leaves.
 - Failure VM: invalid schema, unsupported architecture, unavailable asset, bad checksum, interrupted download, and failed privileged command leave no partially published binary or source file.
 - Preset matrix: default, CLI, full, and VM presets validate and complete on their intended desktop/server targets, with unsupported product packages removed from that target's preset rather than hidden by compatibility logic.
