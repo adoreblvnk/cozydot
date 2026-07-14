@@ -1,0 +1,295 @@
+# Comprehensive Cozydot configuration version 1.0.0 workstation example.
+# Mandatory validated reference hosts: Ubuntu amd64 with GNOME and Debian 13 amd64 with GNOME.
+# These are acceptance targets, not exclusive architecture/release constraints.
+# This is a realistic full configuration, not an exhaustive parser fixture.
+version: 1.0.0
+
+system:
+  require:
+    distros: [ubuntu, debian]
+    desktops: [gnome]
+  ensure_admin: true
+  apt:
+    sources:
+      mode: managed
+      components:
+        ubuntu: [main, restricted, universe, multiverse]
+        debian: [main, contrib, non-free, non-free-firmware]
+    unattended_upgrades: disabled
+  ubuntu:
+    snap: disabled
+    codecs: installed
+
+packages:
+  apt:
+    remove:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+
+    install:
+      - bash-completion
+      - build-essential
+      - cmake
+      - curl
+      - default-jdk
+      - ffmpeg
+      - figlet
+      - git
+      - imagemagick
+      - lolcat
+      - openssh-server
+      - pandoc
+      - pass
+      - pinentry-tty
+      - trash-cli
+      - ttf-mscorefonts-installer
+      - unzip
+      - vim
+      - vlc
+      - xz-utils
+
+    repositories:
+      - name: docker
+        key: https://download.docker.com/linux/ubuntu/gpg
+        urls:
+          ubuntu: https://download.docker.com/linux/ubuntu
+          debian: https://download.docker.com/linux/debian
+        suite: system
+        components: [stable]
+        packages:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+
+      - name: debian-griffo
+        key: https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc
+        urls:
+          ubuntu: https://debian.griffo.io/apt
+          debian: https://debian.griffo.io/apt
+        suite: system
+        components: [main]
+        packages: [eza, fzf, yazi, zoxide]
+
+      - name: github-cli
+        key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        urls:
+          default: https://cli.github.com/packages
+        suite: stable
+        components: [main]
+        packages: [gh]
+
+      - name: helium
+        key: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
+        urls:
+          default: https://pkg.helium.computer/deb
+        suite: stable
+        components: [main]
+        packages: [helium-bin]
+
+      - name: onlyoffice
+        key: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+        urls:
+          default: https://download.onlyoffice.com/repo/debian
+        suite: squeeze
+        components: [main]
+        packages: [onlyoffice-desktopeditors]
+
+      - name: virtualbox
+        key: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        urls:
+          ubuntu: https://download.virtualbox.org/virtualbox/debian
+          debian: https://download.virtualbox.org/virtualbox/debian
+        suite: system
+        components: [contrib]
+        packages: [virtualbox-7.1]
+
+      - name: vscode
+        key: https://packages.microsoft.com/keys/microsoft.asc
+        urls:
+          default: https://packages.microsoft.com/repos/code
+        suite: stable
+        components: [main]
+        packages: [code]
+
+      - name: wezterm
+        key: https://apt.fury.io/wez/gpg.key
+        urls:
+          default: https://apt.fury.io/wez/
+        suite: "*"
+        components: ["*"]
+        packages: [wezterm-nightly]
+
+  flatpak:
+    - com.bitwarden.desktop
+    - com.discordapp.Discord
+    - com.obsproject.Studio
+    - io.bassi.Amberol
+    - net.sapples.LiveCaptions
+    - org.gimp.GIMP
+    - org.qbittorrent.qBittorrent
+    - org.shotcut.Shotcut
+    - org.telegram.desktop
+
+  cargo:
+    - bat
+    - bottom
+    - du-dust
+    - fd-find
+    - presenterm
+    - starship
+    - tealdeer
+
+  npm:
+    - opencode-ai
+
+  binaries:
+    - name: drawio
+      format: deb
+      commands: [drawio]
+      source:
+        provider: github
+        repository: jgraph/drawio-desktop
+        assets:
+          amd64:
+            include: "drawio-amd64-*.deb"
+          arm64:
+            include: "drawio-arm64-*.deb"
+
+    - name: fastfetch
+      format: deb
+      commands: [fastfetch]
+      source:
+        provider: github
+        repository: fastfetch-cli/fastfetch
+        assets:
+          amd64:
+            include: "fastfetch-linux-amd64*.deb"
+            exclude: ["*-polyfilled.deb"]
+          arm64:
+            include: "fastfetch-linux-aarch64*.deb"
+            exclude: ["*-polyfilled.deb"]
+          arm32:
+            include: "fastfetch-linux-armv7l*.deb"
+          riscv64:
+            include: "fastfetch-linux-riscv64*.deb"
+
+    - name: git-credential-manager
+      format: deb
+      commands: [git-credential-manager]
+      source:
+        provider: github
+        repository: git-ecosystem/git-credential-manager
+        assets:
+          amd64:
+            include: "gcm-linux-x64-*.deb"
+          arm64:
+            include: "gcm-linux-arm64-*.deb"
+
+    - name: obsidian
+      format: appimage
+      commands: [obsidian]
+      source:
+        provider: github
+        repository: obsidianmd/obsidian-releases
+        assets:
+          amd64:
+            include: "Obsidian-*.AppImage"
+            exclude: ["Obsidian-*-arm64.AppImage"]
+          arm64:
+            include: "Obsidian-*-arm64.AppImage"
+
+    - name: zen-browser
+      format: appimage
+      commands: [zen]
+      source:
+        provider: github
+        repository: zen-browser/desktop
+        assets:
+          amd64:
+            include: "zen-x86_6?.AppImage"
+          arm64:
+            include: "zen-aarch6?.AppImage"
+
+tools:
+  rust: stable
+  go: latest
+  node: latest
+  python: "3.13"
+
+fonts:
+  nerd:
+    - GeistMono
+
+dotfiles:
+  packages:
+    - bash
+    - bin
+    - bat
+    - bottom
+    - fastfetch
+    - starship
+    - vscode
+    - wezterm
+    - yazi
+
+integrations:
+  docker:
+    add_user_to_group: true
+    logging:
+      driver: local
+      max_size: 10m
+  virtualbox:
+    add_user_to_group: true
+  vscode:
+    extensions:
+      - catppuccin.catppuccin-vsc
+      - charliermarsh.ruff
+      - christian-kohler.path-intellisense
+      - eamodio.gitlens
+      - ecmel.vscode-html-css
+      - foxundermoon.shell-format
+      - golang.go
+      - llvm-vs-code-extensions.vscode-clangd
+      - ms-python.debugpy
+      - ms-python.python
+      - ms-python.vscode-pylance
+      - prettier.prettier-vscode
+      - redhat.vscode-yaml
+      - rust-lang.rust-analyzer
+      - streetsidesoftware.code-spell-checker
+      - timonwong.shellcheck
+      - wayou.vscode-todo-highlight
+      - yzhang.markdown-all-in-one
+
+desktop:
+  theme: dark
+  terminal: wezterm
+  idle:
+    timeout: 15m
+    dim: false
+  gnome:
+    extensions:
+      - blur-my-shell@aunetx
+      - netspeedsimplified@prateekmedia.extension
+    dock: true
+    rounded_corners: true
+
+updates:
+  apt: full
+  flatpak: true
+  tools:
+    rust: true
+    go: true
+    node: true
+  packages:
+    cargo: true
+    npm: true
+    binaries: true
+  fonts: true
