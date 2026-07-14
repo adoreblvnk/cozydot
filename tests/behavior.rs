@@ -112,13 +112,14 @@ case "$command" in
       /usr/bin/install -m 0644 -- "$source" "$destination"
     fi
     ;;
-  touch)
+  cp)
     [ "$failure" != lock-setup ] || exit 50
-    [ "$#" -eq 2 ] && [ "$1" = -- ] || exit 51
-    /usr/bin/touch -- "$(map_path "$2")"
+    [ "$#" -eq 5 ] && [ "$1" = --no-clobber ] && [ "$2" = --no-target-directory ] && [ "$3" = -- ] && [ "$4" = /dev/null ] || exit 51
+    destination=$(map_path "$5")
+    /bin/cp --no-clobber --no-target-directory -- /dev/null "$destination"
     ;;
   chown)
-    [ "$#" -eq 3 ] && [ "$1" = root:root ] && [ "$2" = -- ] || exit 52
+    [ "$#" -eq 4 ] && [ "$1" = --no-dereference ] && [ "$2" = root:root ] && [ "$3" = -- ] || exit 52
     ;;
   chmod)
     [ "$#" -eq 3 ] && [ "$1" = 0644 ] && [ "$2" = -- ] || exit 53
@@ -917,7 +918,9 @@ fn docker_lock_failures_precede_reads_and_parent_sync_failure_keeps_publication(
     assert!(!host.run(&docker_local_log_step(None)).status.success());
     assert_eq!(fs::read(&destination).unwrap(), b"{\"keep\":true}");
     let log = host.log();
-    assert!(log.contains("sudo touch -- /run/cozydot/docker-daemon.lock"));
+    assert!(log.contains(
+        "sudo cp --no-clobber --no-target-directory -- /dev/null /run/cozydot/docker-daemon.lock"
+    ));
     assert!(!log.contains("sudo stat --format=%f -- /etc/docker/daemon.json"));
     assert!(!log.contains("sudo cat -- /etc/docker/daemon.json"));
     assert!(!log.contains("/usr/bin/flock"));
@@ -956,17 +959,24 @@ fn docker_lock_failures_precede_reads_and_parent_sync_failure_keeps_publication(
 }
 
 #[test]
-fn docker_lock_open_and_type_failures_precede_config_reads() {
-    for failure in ["open", "type"] {
+fn docker_lock_open_symlink_and_type_failures_precede_config_reads() {
+    for failure in ["open", "symlink", "type"] {
         let host = Host::new();
         host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
         host.atomic_sudo();
         let configured_lock = host.root.join("run/cozydot/docker-daemon.lock");
-        let open_path = if failure == "open" {
-            host.root.join("missing/docker-daemon.lock")
-        } else {
-            fs::create_dir_all(&configured_lock).unwrap();
-            configured_lock.clone()
+        let open_path = match failure {
+            "open" => host.root.join("missing/docker-daemon.lock"),
+            "symlink" => {
+                let path = host.root.join("open-path-symlink");
+                symlink(&configured_lock, &path).unwrap();
+                path
+            }
+            "type" => {
+                fs::create_dir_all(&configured_lock).unwrap();
+                configured_lock.clone()
+            }
+            _ => unreachable!(),
         };
         let operation = operations::Operation::DockerLocalLog(
             operations::DockerLocalLogOperation::new(None).unwrap(),
@@ -985,6 +995,30 @@ fn docker_lock_open_and_type_failures_precede_config_reads() {
             "{failure}: {log}"
         );
     }
+}
+
+#[test]
+fn docker_lock_setup_does_not_follow_or_replace_a_symlink() {
+    let host = Host::new();
+    host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+    host.atomic_sudo();
+    let lock = host.root.join("run/cozydot/docker-daemon.lock");
+    fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    let referent = host.root.join("foreign-lock-target");
+    fs::write(&referent, b"foreign bytes").unwrap();
+    let referent_inode = fs::metadata(&referent).unwrap().ino();
+    symlink(&referent, &lock).unwrap();
+
+    assert!(!host.run(&docker_local_log_step(None)).status.success());
+    assert_eq!(fs::read(&referent).unwrap(), b"foreign bytes");
+    assert_eq!(fs::metadata(&referent).unwrap().ino(), referent_inode);
+    assert_eq!(fs::read_link(&lock).unwrap(), referent);
+    let log = host.log();
+    assert!(log.contains(
+        "sudo cp --no-clobber --no-target-directory -- /dev/null /run/cozydot/docker-daemon.lock"
+    ));
+    assert!(!log.contains("sudo chown"));
+    assert!(!log.contains("sudo cat -- /etc/docker/daemon.json"));
 }
 
 #[test]
