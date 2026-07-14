@@ -1,137 +1,66 @@
-metadata:
-  description: CLI utilities only. For use with WSL2 too.
+schema: 1
+
+system:
   distro: auto
-  DE: auto
-check:
-  distroCfg: true
-  purge: !disabled
-    # docker installed via aptAltSources
-    - docker.io
-    - docker-doc
-    - docker-compose
-    - docker-compose-v2
-    - podman-docker
-    - containerd
-    - runc
-    - "*firefox*" # firefox installed via aptAltSources
-    - "*libreoffice*" # libreoffice replaced with onlyoffice
-  deps: !enabled
-    # essential packages
-    - apt-transport-https
+  desktop: auto
+  ensure_admin: true
+  apt:
+    sources: preserve
+    unattended_upgrades: false
+  ubuntu:
+    snap: false
+
+packages:
+  apt:
     - bash-completion
     - build-essential
-    - ca-certificates
     - cmake
     - curl
-    - ffmpeg
-    - flatpak
     - git
-    - pinentry-tty
-    - stow
-    - ttf-mscorefonts-installer
-    - unzip
-    # pyenv dependencies
-    - libbz2-dev
-    - libffi-dev
-    - liblzma-dev
-    - libncurses-dev # libncursesw5-dev is a transitional pkg
-    - libreadline-dev
-    - libsqlite3-dev
-    - libssl-dev
-    - libxml2-dev
-    - libxmlsec1-dev
-    - tk-dev
-    - xz-utils
-    - zlib1g-dev
-    # imagemagick dependencies
-    - libjpeg-dev
-    - libpng-dev
-    - libtiff-dev
-  rustupCheck: true
-  appimaged: false
-  nerdfont: !enabled GeistMono
-install:
-  check: true
-  apt: !enabled
-    - default-jdk
-    - figlet
-    - gnupg2
-    - imagemagick # image converter
-    - lolcat
     - openssh-server
-    - pandoc # document converter
+    - pandoc
     - pass
     - trash-cli
+    - unzip
     - vim
-    - vlc
-  addRepos: !enabled
-    - sourceName: github-cli
-      remoteKey: https://cli.github.com/packages/githubcli-archive-keyring.gpg
-      keyPath: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-      repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main
-      pinning: false
-      packages:
-        - gh
-  flatpak: !disabled []
-  cargo: !enabled
-    - bat --locked # cat replacement
-    - bottom --locked # process / system monitor
-    - du-dust # du alternative
-    - fd-find # find alternative
-    - starship --locked
+    - xz-utils
+  repositories:
+    - name: github-cli
+      key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+      source:
+        urls:
+          default: https://cli.github.com/packages
+        suite: stable
+        components: [main]
+      packages: [gh]
+  cargo:
+    - bat
+    - bottom
+    - du-dust
+    - fd-find
+    - presenterm
+    - starship
     - tealdeer
-    - presenterm --locked
-  npm: !enabled
-    - opencode-ai
-  binaries: !enabled
-    - name: git-credential-manager.deb
-      url:
-        repo: git-ecosystem/git-credential-manager
-        asset: "*linux-${X64_ARCH}-*.deb"
-  languages:
-    goVersion: !enabled latest
-    nodeVersion: !enabled latest
-    pyenv: !disabled
-      update: false
-      version: 3
-      pip: true
-    uv: !enabled
-      version: !enabled 3.13
-update:
-  check: true
-  apt: !enabled
-    aptFull: false
-  flatpak: true
-  cargo: true
-  other:
-    go: false
-    node: false
-configure:
-  check: true
-  dotfiles: !enabled
-    stowMode: override
-    packages:
-      - bash
-      - bin
-      - bat
-      - bottom
-      - fastfetch
-      - starship
-      - yazi
-  apps:
-    docker: false
-    virtualbox: false
-    vscodeExtensions: !disabled []
-  desktopEnvironment: !disabled
-    common: !disabled
-      defaultTerm: !enabled wezterm
-    gnome: !disabled
-      settings: true
-      extensions: !enabled
-        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-        - blur-my-shell@aunetx
-        - netspeedsimplified@prateekmedia.extension
-        - rounded-window-corners@fxgn
-      MacOSDock: true
-      smoothRoundedCorners: true
-    cinnamon: !disabled
+  npm: [opencode-ai]
+
+tools:
+  rust: stable
+  go: latest
+  node: lts
+  python: "3.13"
+
+fonts:
+  nerd: [GeistMono]
+
+dotfiles:
+  packages: [bash, bin, bat, bottom, fastfetch, starship, yazi]
+
+updates:
+  apt: standard
+  tools:
+    rust: true
+    go: true
+    node: true
+  packages:
+    cargo: true
+    npm: true

@@ -296,8 +296,8 @@ fn command_is_executable(host: &Host<'_>, executable: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     host.value("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|directory| {
-            std::fs::symlink_metadata(directory.join(executable)).is_ok_and(|metadata| {
-                metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0
+            std::fs::metadata(directory.join(executable)).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
             })
         })
     })

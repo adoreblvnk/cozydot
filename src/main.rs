@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use cozydot::{
-    config::Config,
+    config::v1::ConfigV1,
     init, planner,
     platform::Platform,
     runner::{execute, ProcessRunner},
@@ -29,23 +29,15 @@ fn main() -> Result<()> {
 fn apply() -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
-    let cfg = Config::load(&path)
-        .map_err(|_| anyhow::anyhow!("config not found or invalid; run 'cozydot init' first"))?;
-    let platform = Platform::detect(
-        cfg.string("metadata.distro").as_deref().unwrap_or("auto"),
-        cfg.string("metadata.DE").as_deref().unwrap_or("auto"),
-    )?;
+    let cfg = ConfigV1::load(&path)
+        .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
+    let platform = Platform::detect(cfg.distro_request(), cfg.desktop_request())?;
+    let plan = planner::v1::plan(&cfg, &platform, &root.join("dotfiles"))?;
+    let steps = planner::lower_v1::lower(&plan)?;
     let mut runner = ProcessRunner {
         dry_run: std::env::var_os("COZYDOT_DRY_RUN").is_some(),
     };
-    let steps = planner::plan_apply(&cfg, &platform, &root)?;
     execute(&mut runner, &steps)?;
-    if (cfg.bool("install.check") || cfg.bool("configure.check"))
-        && cfg.tagged_enabled("check.purge")
-        && !runner.dry_run
-    {
-        Config::disable_purge(&path)?;
-    }
     println!("Finished cozydot apply");
     Ok(())
 }
