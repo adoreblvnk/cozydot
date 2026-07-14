@@ -1,20 +1,24 @@
 mod appimaged;
 mod apps;
 mod apt;
+mod cargo;
 mod desktop;
 mod direct;
 mod downloads;
 mod flatpak;
 mod languages;
+mod npm;
 mod provisioning;
 mod repository;
 mod snap_cleanup;
 
 pub use apt::AptUpgradePolicy;
+pub use cargo::{CargoPackageMode, CargoPackageOperation};
 pub use direct::{
     DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
     GithubRepository,
 };
+pub use npm::{NpmPackageMode, NpmPackageOperation};
 
 use anyhow::{bail, Context, Result};
 use std::{
@@ -99,6 +103,7 @@ pub enum Operation {
         destination: String,
     },
     RustupBootstrap,
+    CargoPackageSet(CargoPackageOperation),
     CargoPackages {
         packages: Vec<String>,
         force: bool,
@@ -108,6 +113,7 @@ pub enum Operation {
         npm: Vec<String>,
         update: bool,
     },
+    NpmPackageSet(NpmPackageOperation),
     NpmPackages {
         packages: Vec<String>,
     },
@@ -182,6 +188,7 @@ impl Operation {
                 vec!["repository-key".into(), destination.clone()]
             }
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
+            Self::CargoPackageSet(operation) => operation.display_args(),
             Self::CargoPackages { packages, force } => {
                 let mut args = vec!["cargo-packages".into()];
                 if *force {
@@ -202,6 +209,7 @@ impl Operation {
                 args.extend(npm.clone());
                 args
             }
+            Self::NpmPackageSet(operation) => operation.display_args(),
             Self::NpmPackages { packages } => std::iter::once("npm-packages".into())
                 .chain(packages.clone())
                 .collect(),
@@ -266,6 +274,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
         Operation::NerdFont { font } => downloads::nerdfont(&host, font),
         Operation::RepositoryKey { url, destination } => repository::key(&host, url, destination),
         Operation::RustupBootstrap => provisioning::rustup(&host),
+        Operation::CargoPackageSet(operation) => cargo::execute(&host, operation),
         Operation::CargoPackages { packages, force } => {
             provisioning::cargo_packages(&host, packages, *force)
         }
@@ -274,6 +283,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
             npm,
             update,
         } => languages::node(&host, version, npm, *update),
+        Operation::NpmPackageSet(operation) => npm::execute(&host, operation),
         Operation::NpmPackages { packages } => languages::npm_packages(&host, packages),
         Operation::PyenvInstall {
             update,
