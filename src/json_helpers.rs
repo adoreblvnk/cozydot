@@ -26,16 +26,19 @@ pub fn github_asset(input: &str, pattern: &str) -> Result<String> {
 pub fn latest_go(input: &str, requested: &str, arch: &str) -> Result<(String, String, String)> {
     let value: Value = serde_json::from_str(input).context("parse Go release JSON")?;
     let releases = value.as_array().context("Go metadata must be an array")?;
-    let version = if requested == "latest" {
-        releases
-            .iter()
-            .filter_map(|release| release["version"].as_str())
-            .find(|version| stable_go_version(version))
-            .context("Go metadata has no stable release")?
-            .trim_start_matches("go")
-    } else {
-        requested
-    };
+    let version = releases
+        .iter()
+        .filter_map(|release| release["version"].as_str())
+        .filter(|version| stable_go_version(version))
+        .map(|version| version.trim_start_matches("go"))
+        .find(|version| {
+            requested == "latest"
+                || *version == requested
+                || version
+                    .strip_prefix(requested)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        })
+        .context("Go metadata has no matching stable release")?;
     let filename = format!("go{version}.linux-{arch}.tar.gz");
     let checksum = releases
         .iter()
@@ -138,6 +141,23 @@ mod tests {
     fn stable_go_versions_exclude_prereleases() {
         assert!(stable_go_version("go1.26.1"));
         assert!(!stable_go_version("go1.27rc2"));
+    }
+
+    #[test]
+    fn partial_go_versions_resolve_to_a_matching_stable_patch() {
+        let metadata = r#"[
+            {"version":"go1.26.2","files":[{"filename":"go1.26.2.linux-amd64.tar.gz","sha256":"aa"}]},
+            {"version":"go1.25.9","files":[{"filename":"go1.25.9.linux-amd64.tar.gz","sha256":"bb"}]}
+        ]"#;
+        assert_eq!(
+            latest_go(metadata, "1.26", "amd64").unwrap(),
+            (
+                "1.26.2".into(),
+                "go1.26.2.linux-amd64.tar.gz".into(),
+                "aa".into()
+            )
+        );
+        assert!(latest_go(metadata, "1.2", "amd64").is_err());
     }
 
     #[test]

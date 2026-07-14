@@ -82,41 +82,7 @@ pub fn go(host: &Host<'_>, requested: &str, arch: &str) -> Result<()> {
 }
 
 pub fn node(host: &Host<'_>, version: &str, npm: &[String], update: bool) -> Result<()> {
-    let fnm_dir = host
-        .value("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| host.home().join(".local/share"))
-        .join("fnm");
-    let installed_fnm = fnm_dir.join("fnm");
-    let fnm = if host.command_exists("fnm") {
-        "fnm".to_owned()
-    } else if executable_file(&installed_fnm) {
-        installed_fnm.to_string_lossy().into_owned()
-    } else {
-        let installer = TempPath::new(host, "fnm-install")?;
-        host.require(
-            "node install",
-            "curl",
-            [
-                "-fsSL",
-                "-o",
-                &installer.path().to_string_lossy(),
-                "https://fnm.vercel.app/install",
-            ],
-        )?;
-        host.require(
-            "node install",
-            "bash",
-            [&installer.path().to_string_lossy(), "--skip-shell"],
-        )?;
-        if !executable_file(&installed_fnm) {
-            bail!(
-                "node install: fnm installer did not create {}",
-                installed_fnm.display()
-            );
-        }
-        installed_fnm.to_string_lossy().into_owned()
-    };
+    let fnm = ensure_fnm(host)?;
     let mut args = vec![
         "-euo".to_owned(),
         "pipefail".to_owned(),
@@ -167,6 +133,48 @@ fi"#
     args.extend(npm.iter().cloned());
     host.require("node install", "bash", args)?;
     Ok(())
+}
+
+pub fn fnm_bootstrap(host: &Host<'_>) -> Result<()> {
+    ensure_fnm(host).map(|_| ())
+}
+
+fn ensure_fnm(host: &Host<'_>) -> Result<String> {
+    let fnm_dir = host
+        .value("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| host.home().join(".local/share"))
+        .join("fnm");
+    let installed_fnm = fnm_dir.join("fnm");
+    Ok(if host.command_exists("fnm") {
+        "fnm".to_owned()
+    } else if executable_file(&installed_fnm) {
+        installed_fnm.to_string_lossy().into_owned()
+    } else {
+        let installer = TempPath::new(host, "fnm-install")?;
+        host.require(
+            "node install",
+            "curl",
+            [
+                "-fsSL",
+                "-o",
+                &installer.path().to_string_lossy(),
+                "https://fnm.vercel.app/install",
+            ],
+        )?;
+        host.require(
+            "node install",
+            "bash",
+            [&installer.path().to_string_lossy(), "--skip-shell"],
+        )?;
+        if !executable_file(&installed_fnm) {
+            bail!(
+                "node install: fnm installer did not create {}",
+                installed_fnm.display()
+            );
+        }
+        installed_fnm.to_string_lossy().into_owned()
+    })
 }
 
 pub fn npm_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
@@ -234,9 +242,24 @@ pub fn pyenv(host: &Host<'_>, update: bool, version: &str, pip: bool) -> Result<
 }
 
 pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
+    let uv = ensure_uv(host)?;
+    if version_enabled {
+        let installed = host.run(&uv, ["python", "find", version])?;
+        if !installed.status.success() {
+            host.require("uv install", &uv, ["python", "install", version])?;
+        }
+    }
+    Ok(())
+}
+
+pub fn uv_bootstrap(host: &Host<'_>) -> Result<()> {
+    ensure_uv(host).map(|_| ())
+}
+
+fn ensure_uv(host: &Host<'_>) -> Result<String> {
     let install_dir = host.home().join(".local/bin");
     let installed_uv = install_dir.join("uv");
-    let uv = if host.command_exists("uv") {
+    Ok(if host.command_exists("uv") {
         "uv".to_owned()
     } else if executable_file(&installed_uv) {
         installed_uv.to_string_lossy().into_owned()
@@ -269,14 +292,7 @@ pub fn uv(host: &Host<'_>, version_enabled: bool, version: &str) -> Result<()> {
             );
         }
         installed_uv.to_string_lossy().into_owned()
-    };
-    if version_enabled {
-        let installed = host.run(&uv, ["python", "find", version])?;
-        if !installed.status.success() {
-            host.require("uv install", &uv, ["python", "install", version])?;
-        }
-    }
-    Ok(())
+    })
 }
 
 fn executable_file(path: &Path) -> bool {

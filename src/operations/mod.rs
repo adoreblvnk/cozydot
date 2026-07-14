@@ -4,8 +4,10 @@ mod apt;
 mod cargo;
 mod desktop;
 mod direct;
+mod dotfiles;
 mod downloads;
 mod flatpak;
+mod fonts;
 mod integrations;
 mod languages;
 mod managed_apt;
@@ -13,16 +15,29 @@ mod npm;
 mod provisioning;
 mod repository;
 mod snap_cleanup;
+mod system;
+mod tools;
 
 pub use apt::AptUpgradePolicy;
 pub use cargo::{CargoPackageMode, CargoPackageOperation};
+pub use desktop::{
+    DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, GnomeDockOperation,
+    GnomeExtensionsOperation, GnomeRoundedCornersOperation,
+};
 pub use direct::{
     DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
     GithubRepository,
 };
+pub use dotfiles::DotfilesOperation;
+pub use fonts::NerdFontsOperation;
 pub use integrations::{DockerLocalLogOperation, VsCodeExtensionOperation};
 pub use managed_apt::ManagedAptSourcesOperation;
 pub use npm::{NpmPackageMode, NpmPackageOperation};
+pub use system::{EnsureAdminOperation, UbuntuSnapOperation, UnattendedUpgradesOperation};
+pub use tools::{
+    GoToolchainOperation, GoToolchainSelector, NodeToolchainOperation, NodeToolchainSelector,
+    PythonToolchainOperation, RustToolchainOperation, RustToolchainSelector, ToolMutationMode,
+};
 
 use anyhow::{bail, Context, Result};
 use std::{
@@ -77,7 +92,9 @@ pub enum Operation {
     },
     DockerGroup,
     DockerLocalLog(DockerLocalLogOperation),
+    DesktopSetting(DesktopSettingOperation),
     DirectPackage(DirectPackageOperation),
+    Dotfiles(DotfilesOperation),
     DownloadBinary {
         name: String,
         url: String,
@@ -91,12 +108,17 @@ pub enum Operation {
     FlatpakUpdateApps {
         refs: Vec<String>,
     },
+    FnmBootstrap,
+    EnsureAdmin(EnsureAdminOperation),
     GnomeExtension {
         extension: String,
     },
+    GnomeExtensions(GnomeExtensionsOperation),
     GnomeDependencies,
     GnomeDockSettings,
+    GnomeDock(GnomeDockOperation),
     GnomeRoundedCornersSettings,
+    GnomeRoundedCorners(GnomeRoundedCornersOperation),
     GnomeTerminal {
         terminal: String,
     },
@@ -104,14 +126,17 @@ pub enum Operation {
         version: String,
         arch: String,
     },
+    GoToolchain(GoToolchainOperation),
     NerdFont {
         font: String,
     },
+    NerdFonts(NerdFontsOperation),
     RepositoryKey {
         url: String,
         destination: String,
     },
     RustupBootstrap,
+    RustToolchain(RustToolchainOperation),
     CargoPackageSet(CargoPackageOperation),
     CargoPackages {
         packages: Vec<String>,
@@ -122,6 +147,7 @@ pub enum Operation {
         npm: Vec<String>,
         update: bool,
     },
+    NodeToolchain(NodeToolchainOperation),
     NpmPackageSet(NpmPackageOperation),
     NpmPackages {
         packages: Vec<String>,
@@ -132,10 +158,14 @@ pub enum Operation {
         pip: bool,
     },
     SnapCleanup,
+    UbuntuSnap(UbuntuSnapOperation),
+    UnattendedUpgrades(UnattendedUpgradesOperation),
     UvInstall {
         version_enabled: bool,
         version: String,
     },
+    UvBootstrap,
+    PythonToolchain(PythonToolchainOperation),
     VirtualBoxConfig {
         user: String,
     },
@@ -178,7 +208,9 @@ impl Operation {
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
             Self::DockerGroup => vec!["docker-group".into()],
             Self::DockerLocalLog(operation) => operation.display_args(),
+            Self::DesktopSetting(operation) => operation.display_args(),
             Self::DirectPackage(package) => package.display_args(),
+            Self::Dotfiles(operation) => operation.display_args(),
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
             Self::FlatpakEnsureApps { refs } => std::iter::once("flatpak-ensure-apps".into())
@@ -187,21 +219,29 @@ impl Operation {
             Self::FlatpakUpdateApps { refs } => std::iter::once("flatpak-update-apps".into())
                 .chain(refs.clone())
                 .collect(),
+            Self::FnmBootstrap => vec!["fnm-bootstrap".into()],
+            Self::EnsureAdmin(operation) => operation.display_args(),
             Self::GnomeExtension { extension } => {
                 vec!["gnome-extension".into(), extension.clone()]
             }
+            Self::GnomeExtensions(operation) => operation.display_args(),
             Self::GnomeDependencies => vec!["gnome-dependencies".into()],
             Self::GnomeDockSettings => vec!["gnome-dock-settings".into()],
+            Self::GnomeDock(operation) => operation.display_args(),
             Self::GnomeRoundedCornersSettings => vec!["gnome-rounded-corners-settings".into()],
+            Self::GnomeRoundedCorners(operation) => operation.display_args(),
             Self::GnomeTerminal { terminal } => vec!["gnome-terminal".into(), terminal.clone()],
             Self::GoInstall { version, arch } => {
                 vec!["go-install".into(), version.clone(), arch.clone()]
             }
+            Self::GoToolchain(operation) => operation.display_args(),
             Self::NerdFont { font } => vec!["nerdfont".into(), font.clone()],
+            Self::NerdFonts(operation) => operation.display_args(),
             Self::RepositoryKey { destination, .. } => {
                 vec!["repository-key".into(), destination.clone()]
             }
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
+            Self::RustToolchain(operation) => operation.display_args(),
             Self::CargoPackageSet(operation) => operation.display_args(),
             Self::CargoPackages { packages, force } => {
                 let mut args = vec!["cargo-packages".into()];
@@ -223,6 +263,7 @@ impl Operation {
                 args.extend(npm.clone());
                 args
             }
+            Self::NodeToolchain(operation) => operation.display_args(),
             Self::NpmPackageSet(operation) => operation.display_args(),
             Self::NpmPackages { packages } => std::iter::once("npm-packages".into())
                 .chain(packages.clone())
@@ -238,6 +279,8 @@ impl Operation {
                 pip.to_string(),
             ],
             Self::SnapCleanup => vec!["snap-cleanup".into()],
+            Self::UbuntuSnap(operation) => operation.display_args(),
+            Self::UnattendedUpgrades(operation) => operation.display_args(),
             Self::UvInstall {
                 version_enabled,
                 version,
@@ -246,6 +289,8 @@ impl Operation {
                 version_enabled.to_string(),
                 version.clone(),
             ],
+            Self::UvBootstrap => vec!["uv-bootstrap".into()],
+            Self::PythonToolchain(operation) => operation.display_args(),
             Self::VirtualBoxConfig { user } => vec!["virtualbox-config".into(), user.clone()],
             Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
             Self::VsCodeExtension { extension } => {
@@ -298,7 +343,9 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
         Operation::DockerConfig { user } => apps::docker(&host, user),
         Operation::DockerGroup => integrations::docker_group(&host),
         Operation::DockerLocalLog(operation) => integrations::docker_local_log(&host, operation),
+        Operation::DesktopSetting(operation) => desktop::desktop_setting(&host, operation),
         Operation::DirectPackage(package) => direct::execute(&host, package),
+        Operation::Dotfiles(operation) => dotfiles::execute(&host, operation),
         Operation::DownloadBinary {
             name,
             url,
@@ -308,15 +355,25 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
         Operation::FlatpakEnsureFlathub => flatpak::ensure_flathub(&host),
         Operation::FlatpakEnsureApps { refs } => flatpak::ensure_apps(&host, refs),
         Operation::FlatpakUpdateApps { refs } => flatpak::update_apps(&host, refs),
+        Operation::FnmBootstrap => languages::fnm_bootstrap(&host),
+        Operation::EnsureAdmin(operation) => system::ensure_admin(&host, operation),
         Operation::GnomeExtension { extension } => desktop::gnome_extension(&host, extension),
+        Operation::GnomeExtensions(operation) => desktop::gnome_extensions(&host, operation),
         Operation::GnomeDependencies => provisioning::gnome_dependencies(&host),
         Operation::GnomeDockSettings => provisioning::gnome_dock_settings(&host),
+        Operation::GnomeDock(operation) => desktop::gnome_dock(&host, operation),
         Operation::GnomeRoundedCornersSettings => provisioning::gnome_rounded_settings(&host),
+        Operation::GnomeRoundedCorners(operation) => {
+            desktop::gnome_rounded_corners(&host, operation)
+        }
         Operation::GnomeTerminal { terminal } => apps::gnome_terminal(&host, terminal),
         Operation::GoInstall { version, arch } => languages::go(&host, version, arch),
+        Operation::GoToolchain(operation) => tools::execute_go(&host, operation),
         Operation::NerdFont { font } => downloads::nerdfont(&host, font),
+        Operation::NerdFonts(operation) => fonts::execute(&host, operation),
         Operation::RepositoryKey { url, destination } => repository::key(&host, url, destination),
         Operation::RustupBootstrap => provisioning::rustup(&host),
+        Operation::RustToolchain(operation) => tools::execute_rust(&host, operation),
         Operation::CargoPackageSet(operation) => cargo::execute(&host, operation),
         Operation::CargoPackages { packages, force } => {
             provisioning::cargo_packages(&host, packages, *force)
@@ -326,6 +383,7 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
             npm,
             update,
         } => languages::node(&host, version, npm, *update),
+        Operation::NodeToolchain(operation) => tools::execute_node(&host, operation),
         Operation::NpmPackageSet(operation) => npm::execute(&host, operation),
         Operation::NpmPackages { packages } => languages::npm_packages(&host, packages),
         Operation::PyenvInstall {
@@ -334,10 +392,14 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
             pip,
         } => languages::pyenv(&host, *update, version, *pip),
         Operation::SnapCleanup => snap_cleanup::execute(&host),
+        Operation::UbuntuSnap(operation) => system::ubuntu_snap(&host, operation),
+        Operation::UnattendedUpgrades(operation) => system::unattended_upgrades(&host, operation),
         Operation::UvInstall {
             version_enabled,
             version,
         } => languages::uv(&host, *version_enabled, version),
+        Operation::UvBootstrap => languages::uv_bootstrap(&host),
+        Operation::PythonToolchain(operation) => tools::execute_python(&host, operation),
         Operation::VirtualBoxConfig { user } => apps::virtualbox(&host, user),
         Operation::VirtualBoxGroup => integrations::virtualbox_group(&host),
         Operation::VsCodeExtension { extension } => apps::vscode_extension(&host, extension),
@@ -610,10 +672,12 @@ pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
     pub fn new(host: &Host<'_>, stem: &str) -> Result<Self> {
+        Self::new_in(&host.temp_dir(), stem)
+    }
+
+    pub fn new_in(parent: &Path, stem: &str) -> Result<Self> {
         for attempt in 0..100 {
-            let path = host
-                .temp_dir()
-                .join(format!("{stem}.{}.{attempt}", std::process::id()));
+            let path = parent.join(format!("{stem}.{}.{attempt}", std::process::id()));
             match std::fs::create_dir(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,

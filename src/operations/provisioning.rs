@@ -13,6 +13,13 @@ pub fn apt_codecs(host: &Host<'_>, package: &str) -> Result<()> {
 }
 
 pub fn rustup(host: &Host<'_>) -> Result<()> {
+    let cargo_home = host
+        .value("CARGO_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| host.home().join(".cargo"));
+    if executable_file(&cargo_home.join("bin/rustup")) || host.command_exists("rustup") {
+        return Ok(());
+    }
     let installer = TempPath::new(host, "rustup")?;
     host.require(
         "rustup bootstrap",
@@ -32,6 +39,9 @@ pub fn rustup(host: &Host<'_>) -> Result<()> {
         "sh",
         [installer.path().as_os_str(), "-y".as_ref()],
     )?;
+    if !executable_file(&cargo_home.join("bin/rustup")) && !host.command_exists("rustup") {
+        bail!("rustup bootstrap did not publish an executable rustup");
+    }
     Ok(())
 }
 

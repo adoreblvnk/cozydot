@@ -397,6 +397,152 @@ fn npm_package_step(packages: &[&str], mode: operations::NpmPackageMode) -> Step
     ))
 }
 
+fn rust_toolchain_step(mode: operations::ToolMutationMode) -> Step {
+    Step::workflow(operations::Operation::RustToolchain(
+        operations::RustToolchainOperation::new(
+            operations::RustToolchainSelector::Stable,
+            Architecture::Amd64,
+            mode,
+        )
+        .unwrap(),
+    ))
+}
+
+fn node_toolchain_step(mode: operations::ToolMutationMode) -> Step {
+    Step::workflow(operations::Operation::NodeToolchain(
+        operations::NodeToolchainOperation::new(operations::NodeToolchainSelector::Lts, mode)
+            .unwrap(),
+    ))
+}
+
+fn python_toolchain_step(version: &str) -> Step {
+    Step::workflow(operations::Operation::PythonToolchain(
+        operations::PythonToolchainOperation::new(version).unwrap(),
+    ))
+}
+
+fn nerd_fonts_step(families: &[&str]) -> Step {
+    Step::workflow(operations::Operation::NerdFonts(
+        operations::NerdFontsOperation::new(
+            families.iter().map(|family| (*family).into()).collect(),
+        )
+        .unwrap(),
+    ))
+}
+
+fn dotfiles_step(root: &Path, packages: &[&str]) -> Step {
+    Step::workflow(operations::Operation::Dotfiles(
+        operations::DotfilesOperation::new(
+            root.to_path_buf(),
+            packages.iter().map(|package| (*package).into()).collect(),
+        )
+        .unwrap(),
+    ))
+}
+
+fn desktop_setting_step(
+    target: operations::DesktopEnvironment,
+    setting: operations::DesktopSetting,
+) -> Step {
+    Step::workflow(operations::Operation::DesktopSetting(
+        operations::DesktopSettingOperation::new(target, setting).unwrap(),
+    ))
+}
+
+fn gnome_extensions_step(extensions: &[&str]) -> Step {
+    Step::workflow(operations::Operation::GnomeExtensions(
+        operations::GnomeExtensionsOperation::new(
+            extensions
+                .iter()
+                .map(|extension| (*extension).into())
+                .collect(),
+        )
+        .unwrap(),
+    ))
+}
+
+fn gnome_dock_step() -> Step {
+    Step::workflow(operations::Operation::GnomeDock(
+        operations::GnomeDockOperation::new(),
+    ))
+}
+
+fn gnome_rounded_corners_step() -> Step {
+    Step::workflow(operations::Operation::GnomeRoundedCorners(
+        operations::GnomeRoundedCornersOperation::new(),
+    ))
+}
+
+fn ensure_admin_step() -> Step {
+    Step::workflow(operations::Operation::EnsureAdmin(
+        operations::EnsureAdminOperation::new(),
+    ))
+}
+
+fn configure_rust_toolchain_fake(host: &Host) {
+    let cargo_bin = host.home.join(".cargo/bin");
+    fs::create_dir_all(&cargo_bin).unwrap();
+    host.fake(
+        "rustup",
+        r#"{ printf 'rustup'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = toolchain ] && [ "$2" = install ]; then touch "$TMPDIR/rust-installed"; exit; fi
+if [ "$1" = run ]; then
+  [ -f "$TMPDIR/rust-installed" ] || exit 1
+  printf 'rustc 1.90.0 (abc 2026-01-01)\nbinary: rustc\ncommit-hash: abc\ncommit-date: 2026-01-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.0\n'
+  exit
+fi
+if [ "$1" = default ]; then
+  if [ "$#" -eq 2 ]; then printf '%s' "$2" >"$TMPDIR/rust-default"; exit; fi
+  if [ -f "$TMPDIR/rust-default" ]; then printf '%s (default)\n' "$(cat "$TMPDIR/rust-default")"; else printf 'no default toolchain configured\n'; fi
+  exit
+fi
+exit 40"#,
+    );
+    fs::rename(host.bin.join("rustup"), cargo_bin.join("rustup")).unwrap();
+}
+
+fn configure_node_toolchain_fake(host: &Host) {
+    host.fake(
+        "fnm",
+        r#"{ printf 'fnm'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+case "$1" in
+  exec)
+    alias=$3
+    [ -f "$TMPDIR/fnm-alias-$alias" ] || exit 1
+    cat "$TMPDIR/fnm-alias-$alias"
+    ;;
+  list-remote)
+    cat "$TMPDIR/fnm-remote"
+    ;;
+  install)
+    printf '%s\n' "$2" >"$TMPDIR/fnm-installed"
+    ;;
+  alias)
+    printf '%s\n' "$2" >"$TMPDIR/fnm-alias-$3"
+    ;;
+  unalias)
+    rm -f "$TMPDIR/fnm-alias-$2"
+    ;;
+  default)
+    if [ "$#" -eq 2 ]; then printf '%s\n' "$2" >"$TMPDIR/fnm-default"; elif [ -f "$TMPDIR/fnm-default" ]; then cat "$TMPDIR/fnm-default"; else printf 'none\n'; fi
+    ;;
+  *) exit 40 ;;
+esac"#,
+    );
+    fs::write(host._dir.path().join("tmp/fnm-remote"), b"v22.14.0 (Jod)\n").unwrap();
+}
+
+fn configure_python_toolchain_fake(host: &Host) {
+    host.fake(
+        "uv",
+        r#"{ printf 'uv'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+[ "$1" = python ] || exit 40
+if [ "$2" = find ]; then [ -f "$TMPDIR/python-version" ] || exit 1; cat "$TMPDIR/python-version"; exit; fi
+if [ "$2" = install ]; then printf '3.13.7\n' >"$TMPDIR/python-version"; exit; fi
+exit 41"#,
+    );
+}
+
 fn configure_cargo_package_fakes(host: &Host, state: &str) {
     fs::write(host._dir.path().join("tmp/cargo-state"), state).unwrap();
     host.fake(
@@ -4520,6 +4666,433 @@ fn schema_v1_package_operation_display_forms_include_typed_modes() {
         npm_package_step(&["opencode-ai"], operations::NpmPackageMode::EnsurePresent,).display(),
         "workflow npm-package-set ensure-present opencode-ai"
     );
+}
+
+#[test]
+fn schema_v1_rust_toolchain_ensure_is_retry_safe_and_update_refreshes_moving_channel() {
+    let host = Host::new();
+    configure_rust_toolchain_fake(&host);
+    let ensure = rust_toolchain_step(operations::ToolMutationMode::EnsurePresent);
+
+    host.run_ok(&ensure);
+    host.run_ok(&ensure);
+    assert_eq!(
+        host.log()
+            .matches("rustup <toolchain> <install> <stable-x86_64-unknown-linux-gnu>")
+            .count(),
+        1,
+        "{}",
+        host.log()
+    );
+    assert_eq!(
+        host.log()
+            .matches("rustup <default> <stable-x86_64-unknown-linux-gnu>")
+            .count(),
+        1,
+        "{}",
+        host.log()
+    );
+
+    host.run_ok(&rust_toolchain_step(
+        operations::ToolMutationMode::UpdateMoving,
+    ));
+    assert_eq!(
+        host.log()
+            .matches("rustup <toolchain> <install> <stable-x86_64-unknown-linux-gnu>")
+            .count(),
+        2,
+        "{}",
+        host.log()
+    );
+}
+
+#[test]
+fn schema_v1_node_toolchain_uses_managed_alias_without_shell_evaluation() {
+    let host = Host::new();
+    configure_node_toolchain_fake(&host);
+    let ensure = node_toolchain_step(operations::ToolMutationMode::EnsurePresent);
+
+    host.run_ok(&ensure);
+    host.run_ok(&ensure);
+    let log = host.log();
+    assert_eq!(
+        log.matches("fnm <list-remote> <--latest> <--lts>").count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("fnm <install> <v22.14.0> <--progress> <never>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("fnm <alias> <v22.14.0> <cozydot-lts>").count(),
+        1,
+        "{log}"
+    );
+    assert!(
+        log.contains("fnm <exec> <--using> <cozydot-lts> <--> <node> <--version>"),
+        "{log}"
+    );
+    assert!(!log.contains("bash"), "{log}");
+}
+
+#[test]
+fn schema_v1_node_update_replaces_only_the_moving_selector_alias() {
+    let host = Host::new();
+    configure_node_toolchain_fake(&host);
+    host.run_ok(&node_toolchain_step(
+        operations::ToolMutationMode::EnsurePresent,
+    ));
+    fs::write(host._dir.path().join("tmp/fnm-remote"), b"v24.4.1\n").unwrap();
+
+    host.run_ok(&node_toolchain_step(
+        operations::ToolMutationMode::UpdateMoving,
+    ));
+
+    let log = host.log();
+    assert!(log.contains("fnm <unalias> <cozydot-lts>"), "{log}");
+    assert!(log.contains("fnm <alias> <v24.4.1> <cozydot-lts>"), "{log}");
+    assert!(log.contains("fnm <default> <v24.4.1>"), "{log}");
+}
+
+#[test]
+fn schema_v1_uv_python_uses_managed_state_and_is_retry_safe() {
+    let host = Host::new();
+    configure_python_toolchain_fake(&host);
+    let step = python_toolchain_step("3.13");
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let log = host.log();
+    assert_eq!(
+        log.matches(
+            "uv <python> <install> <--no-config> <--managed-python> <--no-progress> <--default> <3.13>"
+        )
+        .count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("uv <python> <find> <--no-project> <--managed-python> <--show-version> <3.13>")
+            .count(),
+        4,
+        "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_tool_operation_display_forms_are_typed() {
+    assert_eq!(
+        rust_toolchain_step(operations::ToolMutationMode::UpdateMoving).display(),
+        "workflow rust-toolchain update-moving stable x86_64-unknown-linux-gnu"
+    );
+    assert_eq!(
+        node_toolchain_step(operations::ToolMutationMode::EnsurePresent).display(),
+        "workflow node-toolchain ensure-present lts"
+    );
+    assert_eq!(
+        python_toolchain_step("3.13").display(),
+        "workflow python-toolchain 3.13"
+    );
+}
+
+#[test]
+fn schema_v1_nerd_fonts_publish_user_local_files_and_verify_fontconfig_state() {
+    let host = Host::new();
+    host.fake(
+        "fc-list",
+        r#"{ printf 'fc-list'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ -f "$TMPDIR/font-cached" ]; then printf 'GeistMono Nerd Font,GeistMono Nerd Font Mono\n'; fi"#,
+    );
+    host.fake(
+        "curl",
+        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+while [ "$#" -gt 0 ]; do if [ "$1" = --output ]; then : >"$2"; exit; fi; shift; done
+exit 40"#,
+    );
+    host.fake(
+        "tar",
+        r#"{ printf 'tar'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+for argument in "$@"; do [ "$argument" != --list ] || { printf 'GeistMonoNerdFont-Regular.ttf\n'; exit; }; done
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --directory ]; then mkdir -p "$2"; printf 'font' >"$2/GeistMonoNerdFont-Regular.ttf"; exit; fi
+  shift
+done
+exit 41"#,
+    );
+    host.fake(
+        "fc-cache",
+        "{ printf 'fc-cache'; printf ' <%s>' \"$@\"; printf '\n'; } >>\"$LOG\"; touch \"$TMPDIR/font-cached\"",
+    );
+    let step = nerd_fonts_step(&["GeistMono"]);
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let installed = host
+        .home
+        .join(".local/share/fonts/cozydot/GeistMono/GeistMonoNerdFont-Regular.ttf");
+    assert_eq!(fs::read(installed).unwrap(), b"font");
+    let log = host.log();
+    assert_eq!(log.matches("fc-cache <--force>").count(), 1, "{log}");
+    assert_eq!(log.matches("curl <").count(), 1, "{log}");
+    assert!(
+        log.contains(
+            "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/GeistMono.tar.xz"
+        ),
+        "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_dotfiles_back_up_conflicts_before_stow_and_are_retry_safe() {
+    let host = Host::new();
+    let root = host._dir.path().join("dotfiles");
+    fs::create_dir_all(root.join("bash")).unwrap();
+    fs::write(root.join("bash/.bashrc"), b"managed\n").unwrap();
+    fs::write(host.home.join(".bashrc"), b"user-owned\n").unwrap();
+    host.fake(
+        "stow",
+        r#"{ printf 'stow'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+root=''; target=''; package=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in --dir) root=$2; shift 2 ;; --target) target=$2; shift 2 ;; --stow|--) shift ;; *) package=$1; shift ;; esac
+done
+[ -L "$target/.bashrc" ] || ln -s "$root/$package/.bashrc" "$target/.bashrc""#,
+    );
+    let step = dotfiles_step(&root, &["bash"]);
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    assert_eq!(
+        fs::canonicalize(host.home.join(".bashrc")).unwrap(),
+        fs::canonicalize(root.join("bash/.bashrc")).unwrap()
+    );
+    let backups = host.home.join(".local/state/cozydot/dotfile-backups");
+    let runs = fs::read_dir(backups)
+        .unwrap()
+        .collect::<std::io::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(
+        fs::read(runs[0].path().join("bash/.bashrc")).unwrap(),
+        b"user-owned\n"
+    );
+    let log = host.log();
+    assert_eq!(log.matches("stow <").count(), 2, "{log}");
+    assert!(log.contains("<--stow> <--> <bash>"), "{log}");
+}
+
+#[test]
+fn schema_v1_local_state_operation_display_forms_are_typed() {
+    assert_eq!(
+        nerd_fonts_step(&["GeistMono", "JetBrainsMono"]).display(),
+        "workflow nerd-fonts GeistMono JetBrainsMono"
+    );
+    assert_eq!(
+        dotfiles_step(Path::new("/dotfiles"), &["bash", "starship"]).display(),
+        "workflow dotfiles-backup-stow bash starship"
+    );
+}
+
+#[test]
+fn schema_v1_desktop_settings_use_target_schemas_and_verify_exact_state() {
+    let host = Host::new();
+    host.fake(
+        "gsettings",
+        r#"{ printf 'gsettings'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+state="$TMPDIR/gsettings-${2//./_}-$3"
+if [ "$1" = get ]; then if [ -f "$state" ]; then cat "$state"; else printf "'initial'\n"; fi; exit; fi
+if [ "$1" = set ]; then printf '%s\n' "$4" >"$state"; exit; fi
+exit 40"#,
+    );
+    host.fake("wezterm", "exit 0");
+    let steps = [
+        desktop_setting_step(
+            operations::DesktopEnvironment::Gnome,
+            operations::DesktopSetting::Theme(operations::DesktopTheme::Dark),
+        ),
+        desktop_setting_step(
+            operations::DesktopEnvironment::Cinnamon,
+            operations::DesktopSetting::Terminal("wezterm".into()),
+        ),
+        desktop_setting_step(
+            operations::DesktopEnvironment::Gnome,
+            operations::DesktopSetting::IdleTimeoutSeconds(900),
+        ),
+        desktop_setting_step(
+            operations::DesktopEnvironment::Cinnamon,
+            operations::DesktopSetting::IdleDim(false),
+        ),
+    ];
+    for step in &steps {
+        host.run_ok(step);
+        host.run_ok(step);
+    }
+
+    let log = host.log();
+    assert_eq!(log.matches("gsettings <set>").count(), 5, "{log}");
+    assert!(
+        log.contains("<org.gnome.desktop.interface> <color-scheme> <'prefer-dark'>"),
+        "{log}"
+    );
+    assert!(
+        log.contains("<org.cinnamon.desktop.default-applications.terminal> <exec> <'wezterm'>"),
+        "{log}"
+    );
+    assert!(
+        log.contains("<org.gnome.desktop.session> <idle-delay> <uint32 900>"),
+        "{log}"
+    );
+    assert!(
+        log.contains("<org.cinnamon.settings-daemon.plugins.power> <idle-dim> <false>"),
+        "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_gnome_extensions_install_enable_and_requery_without_shells() {
+    let host = Host::new();
+    host.fake(
+        "gnome-extensions",
+        r#"{ printf 'gnome-extensions'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+case "$1" in
+  list) if [ "${2:-}" = --enabled ]; then [ ! -f "$TMPDIR/gnome-enabled" ] || cat "$TMPDIR/gnome-enabled"; else [ ! -f "$TMPDIR/gnome-installed" ] || cat "$TMPDIR/gnome-installed"; fi ;;
+  install) printf 'blur-my-shell@aunetx\n' >"$TMPDIR/gnome-installed" ;;
+  enable) printf '%s\n' "$2" >"$TMPDIR/gnome-enabled" ;;
+  *) exit 40 ;;
+esac"#,
+    );
+    host.fake("gnome-shell", "printf 'GNOME Shell 48.4\n'");
+    host.fake(
+        "curl",
+        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = -fsSL ]; then printf '{"shell_version_map":{"48":{"version":13}}}\n'; exit; fi
+while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then : >"$2"; exit; fi; shift; done
+exit 41"#,
+    );
+    let step = gnome_extensions_step(&["blur-my-shell@aunetx"]);
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let log = host.log();
+    assert_eq!(
+        log.matches("gnome-extensions <install> <--force>").count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("gnome-extensions <enable> <blur-my-shell@aunetx>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert!(
+        log.contains("blur-my-shellaunetx.v13.shell-extension.zip"),
+        "{log}"
+    );
+    assert!(!log.contains("bash"), "{log}");
+}
+
+#[test]
+fn schema_v1_gnome_dconf_layouts_write_once_and_verify_every_apply() {
+    for step in [gnome_dock_step(), gnome_rounded_corners_step()] {
+        let host = Host::new();
+        host.fake(
+            "dconf",
+            r#"{ printf 'dconf'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+name=$(printf '%s' "$2" | tr -c 'A-Za-z0-9' '_')
+state="$TMPDIR/dconf-$name"
+if [ "$1" = read ]; then [ ! -f "$state" ] || cat "$state"; exit; fi
+if [ "$1" = write ]; then printf '%s\n' "$3" >"$state"; exit; fi
+exit 40"#,
+        );
+
+        host.run_ok(&step);
+        host.run_ok(&step);
+
+        let log = host.log();
+        let expected_writes = if step.display().contains("rounded") {
+            1
+        } else {
+            9
+        };
+        assert_eq!(
+            log.matches("dconf <write>").count(),
+            expected_writes,
+            "{log}"
+        );
+        assert_eq!(
+            log.matches("dconf <read>").count(),
+            expected_writes * 4,
+            "{log}"
+        );
+    }
+}
+
+#[test]
+fn schema_v1_desktop_operation_display_forms_are_typed() {
+    assert_eq!(
+        desktop_setting_step(
+            operations::DesktopEnvironment::Gnome,
+            operations::DesktopSetting::IdleTimeoutSeconds(900)
+        )
+        .display(),
+        "workflow desktop-setting gnome idle-timeout-seconds 900"
+    );
+    assert_eq!(
+        gnome_extensions_step(&["blur-my-shell@aunetx"]).display(),
+        "workflow gnome-extensions blur-my-shell@aunetx"
+    );
+    assert_eq!(gnome_dock_step().display(), "workflow gnome-dock");
+    assert_eq!(
+        gnome_rounded_corners_step().display(),
+        "workflow gnome-rounded-corners"
+    );
+}
+
+#[test]
+fn schema_v1_ensure_admin_adds_effective_user_once_and_verifies_membership() {
+    let host = Host::new();
+    let uid = rustix::process::geteuid().as_raw();
+    host.fake(
+        "getent",
+        &format!(
+            r#"{{ printf 'getent'; printf ' <%s>' "$@"; printf '\n'; }} >>"$LOG"
+if [ "$1" = passwd ] && [ "$2" = {uid} ]; then printf 'tester:x:{uid}:1000:Tester:/home/tester:/bin/bash\n'; exit; fi
+if [ "$1" = group ] && [ "$2" = sudo ]; then printf 'sudo:x:27:\n'; exit; fi
+exit 2"#
+        ),
+    );
+    host.fake(
+        "id",
+        r#"{ printf 'id'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ -f "$TMPDIR/admin-added" ]; then printf '1000 27\n'; else printf '1000\n'; fi"#,
+    );
+    host.fake(
+        "sudo",
+        r#"{ printf 'sudo'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+[ "$1" = usermod ] && [ "$2" = -aG ] && [ "$3" = sudo ] && [ "$4" = -- ] && [ "$5" = tester ] || exit 40
+touch "$TMPDIR/admin-added""#,
+    );
+    let step = ensure_admin_step();
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let log = host.log();
+    assert_eq!(
+        log.matches("sudo <usermod> <-aG> <sudo> <--> <tester>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(step.display(), "workflow ensure-admin");
 }
 
 #[test]
