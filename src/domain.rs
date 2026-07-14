@@ -18,9 +18,11 @@ impl HttpsUrl {
             || value.contains('\\')
             || has_substitution(value)
         {
-            bail!("must be a literal HTTPS URL without whitespace or substitutions");
+            bail!("invalid HTTPS URL {value:?}; must be literal and contain no whitespace or substitutions");
         }
-        let parsed = Url::parse(value).context("must be a valid absolute HTTPS URL")?;
+        let parsed = Url::parse(value).with_context(|| {
+            format!("invalid HTTPS URL {value:?}; must be a valid absolute URL")
+        })?;
         let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
         let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
         let host_port = authority
@@ -52,7 +54,7 @@ impl HttpsUrl {
             || authority.contains('@')
             || parsed.fragment().is_some()
         {
-            bail!("must use HTTPS with a non-empty host and no credentials or fragment");
+            bail!("invalid HTTPS URL {value:?}; must use HTTPS with a non-empty host and no credentials or fragment");
         }
         Ok(Self(parsed))
     }
@@ -88,7 +90,7 @@ impl<'de> Deserialize<'de> for HttpsUrl {
 
 fn validate_non_empty(value: &str) -> Result<()> {
     if value.trim().is_empty() {
-        bail!("URL: must be a non-empty string");
+        bail!("invalid HTTPS URL {value:?}; must be a non-empty string");
     }
     Ok(())
 }
@@ -134,7 +136,8 @@ mod tests {
             "https://example.com/path#fragment",
             "https://example.com/${ARCH}",
         ] {
-            assert!(HttpsUrl::parse(invalid).is_err(), "accepted {invalid:?}");
+            let error = HttpsUrl::parse(invalid).unwrap_err().to_string();
+            assert!(error.contains(invalid), "missing {invalid:?} in {error:?}");
         }
     }
 
