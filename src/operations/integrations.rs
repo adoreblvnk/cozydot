@@ -32,7 +32,7 @@ pub struct VsCodeExtensionOperation {
 
 impl VsCodeExtensionOperation {
     pub fn new(extensions: Vec<String>) -> Result<Self> {
-        validate_extensions(&extensions)?;
+        let extensions = canonical_extensions(&extensions)?;
         Ok(Self { extensions })
     }
 
@@ -55,6 +55,7 @@ pub(crate) fn docker_local_log(host: &Host<'_>, operation: &DockerLocalLogOperat
     validate_max_size(operation.max_size.as_deref())
         .context("validate Docker logging operation")?;
     preflight(host, Product::Docker)?;
+    let _lock = host.acquire_docker_lock()?;
 
     let current = read_daemon_config(host)?;
     let mut requested = current.clone();
@@ -94,11 +95,11 @@ pub(crate) fn vscode_extensions(
     host: &Host<'_>,
     operation: &VsCodeExtensionOperation,
 ) -> Result<()> {
-    validate_extensions(&operation.extensions).context("validate VS Code extension operation")?;
+    let extensions = canonical_extensions(&operation.extensions)
+        .context("validate VS Code extension operation")?;
     preflight(host, Product::VsCode)?;
     let installed = inspect_extensions(host)?;
-    let missing = operation
-        .extensions
+    let missing = extensions
         .iter()
         .filter(|extension| !installed.contains(extension.as_str()))
         .cloned()
@@ -114,8 +115,7 @@ pub(crate) fn vscode_extensions(
         )?;
     }
     let installed = inspect_extensions(host)?;
-    let missing = operation
-        .extensions
+    let missing = extensions
         .iter()
         .filter(|extension| !installed.contains(extension.as_str()))
         .cloned()
@@ -259,29 +259,30 @@ fn valid_token(value: &str) -> bool {
 }
 
 fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
-    let username = runtime_username(host)?;
+    let (username, _) = effective_user(host)?;
     preflight(host, product)?;
-    inspect_passwd(host, &username)?;
     let group = product.group().expect("group product");
-    if !group_exists(host, group)? {
+    let gid = if let Some(gid) = group_gid(host, group)? {
+        gid
+    } else {
         host.require(
             &format!("{} group creation", product.label()),
             "sudo",
             ["groupadd", "--system", group],
         )?;
-        if !group_exists(host, group)? {
-            bail!("{} group creation did not create {group}", product.label());
-        }
-    }
-    if user_groups(host, &username)?.contains(group) {
+        group_gid(host, group)?.ok_or_else(|| {
+            anyhow::anyhow!("{} group creation did not create {group}", product.label())
+        })?
+    };
+    if user_group_ids(host, &username)?.contains(&gid) {
         return Ok(());
     }
     host.require(
         &format!("{} group membership", product.label()),
         "sudo",
-        ["usermod", "-aG", group, username.as_str()],
+        ["usermod", "-aG", group, "--", username.as_str()],
     )?;
-    if !user_groups(host, &username)?.contains(group) {
+    if !user_group_ids(host, &username)?.contains(&gid) {
         bail!(
             "{} group membership mutation did not add {username} to {group}",
             product.label()
@@ -290,55 +291,44 @@ fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
     Ok(())
 }
 
-fn runtime_username(host: &Host<'_>) -> Result<String> {
-    let username = host
-        .value("USER")
-        .context("integration operation requires USER in the execution environment")?
-        .into_string()
-        .map_err(|_| anyhow::anyhow!("integration USER is not valid UTF-8"))?;
-    if !valid_username(&username) {
-        bail!("integration USER is not a canonical system username: {username:?}");
-    }
-    Ok(username)
-}
-
-fn valid_username(value: &str) -> bool {
-    value.len() <= 32
-        && value
-            .bytes()
-            .next()
-            .is_some_and(|byte| byte.is_ascii_lowercase() || byte == b'_')
-        && value.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || matches!(byte, b'_' | b'-')
-                || byte == b'$' && index + 1 == value.len()
-        })
-}
-
-fn inspect_passwd(host: &Host<'_>, username: &str) -> Result<()> {
-    let output = host.require("system user query", "getent", ["passwd", username])?;
+fn effective_user(host: &Host<'_>) -> Result<(String, u32)> {
+    let uid = rustix::process::geteuid().as_raw();
+    let uid_arg = uid.to_string();
+    let output = host.require(
+        "effective system user query",
+        "getent",
+        ["passwd", &uid_arg],
+    )?;
     let record = one_utf8_record(&output.stdout, "getent passwd")?;
-    let fields = record.split(':').collect::<Vec<_>>();
-    if fields.len() != 7
-        || fields[0] != username
-        || fields[2].is_empty()
-        || !fields[2].bytes().all(|byte| byte.is_ascii_digit())
-        || fields[3].is_empty()
-        || !fields[3].bytes().all(|byte| byte.is_ascii_digit())
-        || !fields[5].starts_with('/')
-        || !fields[6].starts_with('/')
-    {
-        bail!("getent passwd returned a malformed or mismatched user record");
+    if record.bytes().any(|byte| byte.is_ascii_control()) {
+        bail!("getent passwd returned control characters");
     }
-    Ok(())
+    let fields = record.split(':').collect::<Vec<_>>();
+    if fields.len() != 7 || !valid_nss_login(fields[0]) || parse_decimal_id(fields[2]) != Some(uid)
+    {
+        bail!("getent passwd returned a malformed or mismatched effective-user record");
+    }
+    Ok((fields[0].to_owned(), uid))
 }
 
-fn group_exists(host: &Host<'_>, group: &str) -> Result<bool> {
+fn valid_nss_login(value: &str) -> bool {
+    !value.is_empty()
+        && !value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
+}
+
+fn parse_decimal_id(value: &str) -> Option<u32> {
+    (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.parse().ok())
+        .flatten()
+}
+
+fn group_gid(host: &Host<'_>, group: &str) -> Result<Option<u32>> {
     let output = host.run("getent", ["group", group])?;
     if !output.status.success() {
         if output.status.code() == Some(2) && output.stdout.is_empty() {
-            return Ok(false);
+            return Ok(None);
         }
         bail!(
             "system group query failed ({}): {}",
@@ -347,37 +337,29 @@ fn group_exists(host: &Host<'_>, group: &str) -> Result<bool> {
         );
     }
     let record = one_utf8_record(&output.stdout, "getent group")?;
+    if record.bytes().any(|byte| byte.is_ascii_control()) {
+        bail!("getent group returned control characters");
+    }
     let fields = record.split(':').collect::<Vec<_>>();
-    if fields.len() != 4
-        || fields[0] != group
-        || fields[2].is_empty()
-        || !fields[2].bytes().all(|byte| byte.is_ascii_digit())
-    {
+    if fields.len() != 4 || fields[0] != group || parse_decimal_id(fields[2]).is_none() {
         bail!("getent group returned a malformed or mismatched group record");
     }
-    let mut members = BTreeSet::new();
-    for member in fields[3].split(',').filter(|member| !member.is_empty()) {
-        if !valid_username(member) || !members.insert(member) {
-            bail!("getent group returned malformed member records");
-        }
-    }
-    Ok(true)
+    Ok(parse_decimal_id(fields[2]))
 }
 
-fn user_groups(host: &Host<'_>, username: &str) -> Result<BTreeSet<String>> {
-    let output = host.require("system user group query", "id", ["-nG", "--", username])?;
-    let record = one_utf8_record(&output.stdout, "id -nG")?;
+fn user_group_ids(host: &Host<'_>, username: &str) -> Result<BTreeSet<u32>> {
+    let output = host.require("system user group query", "id", ["-G", "--", username])?;
+    let record = one_utf8_record(&output.stdout, "id -G")?;
     let mut groups = BTreeSet::new();
-    for group in record.split(' ') {
-        if !valid_group_name(group) || !groups.insert(group.to_owned()) {
-            bail!("id -nG returned malformed or duplicate group records");
+    for group in record.split_ascii_whitespace() {
+        let Some(gid) = parse_decimal_id(group) else {
+            bail!("id -G returned malformed group IDs");
+        };
+        if !groups.insert(gid) {
+            bail!("id -G returned duplicate group IDs");
         }
     }
     Ok(groups)
-}
-
-fn valid_group_name(value: &str) -> bool {
-    valid_username(value) && !value.ends_with('$')
 }
 
 fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
@@ -435,42 +417,48 @@ fn inspect_extensions(host: &Host<'_>) -> Result<BTreeSet<String>> {
         .context("code returned non-UTF-8 installed extension state")?;
     let mut installed = BTreeSet::new();
     for extension in output.lines() {
-        if !valid_extension(extension) {
+        let Some(extension) = canonical_extension(extension) else {
             bail!("code returned malformed extension identifier: {extension:?}");
+        };
+        if !installed.insert(extension) {
+            bail!("code returned duplicate case-folded extension identifiers");
         }
-        installed.insert(extension.to_owned());
     }
     Ok(installed)
 }
 
-fn validate_extensions(extensions: &[String]) -> Result<()> {
+fn canonical_extensions(extensions: &[String]) -> Result<Vec<String>> {
     if extensions.is_empty() {
         bail!("VS Code extension operation requires at least one extension");
     }
     let mut unique = BTreeSet::new();
+    let mut canonical = Vec::with_capacity(extensions.len());
     for extension in extensions {
-        if !valid_extension(extension) {
+        let Some(normalized) = canonical_extension(extension) else {
             bail!("invalid VS Code publisher.extension identifier: {extension:?}");
-        }
-        if !unique.insert(extension) {
+        };
+        if !unique.insert(normalized.clone()) {
             bail!("duplicate VS Code extension identifier: {extension:?}");
         }
+        canonical.push(normalized);
     }
-    Ok(())
+    Ok(canonical)
 }
 
-fn valid_extension(value: &str) -> bool {
+fn canonical_extension(value: &str) -> Option<String> {
     let mut parts = value.split('.');
-    valid_identifier(parts.next().unwrap_or_default())
+    (valid_identifier(parts.next().unwrap_or_default())
         && valid_identifier(parts.next().unwrap_or_default())
-        && parts.next().is_none()
+        && parts.next().is_none())
+    .then(|| value.to_ascii_lowercase())
 }
 
 fn valid_identifier(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
 fn validate_max_size(value: Option<&str>) -> Result<()> {

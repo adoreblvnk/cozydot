@@ -75,7 +75,7 @@ impl Host {
             "sudo",
             r#"printf 'sudo %s\n' "$*" >>"$LOG"
 command=$1; shift
-map_path() { case "$1" in /etc/*) printf '%s%s' "$ROOT" "$1" ;; *) printf '%s' "$1" ;; esac; }
+map_path() { case "$1" in /etc/*|/run/*) printf '%s%s' "$ROOT" "$1" ;; *) printf '%s' "$1" ;; esac; }
 failure=''; [ ! -f "$TMPDIR/publication-failure" ] || failure=$(cat "$TMPDIR/publication-failure")
 case "$command" in
   stat)
@@ -89,6 +89,10 @@ case "$command" in
     if [ -f "$TMPDIR/publication-postcondition-failure" ] && [ "$count" -gt 1 ]; then
       printf '{}\n'
       exit
+    fi
+    if [ -f "$TMPDIR/publication-pause-after-read" ] && [ "$count" -eq 1 ]; then
+      touch "$TMPDIR/publication-read-observed"
+      while [ ! -f "$TMPDIR/publication-read-release" ]; do sleep 0.01; done
     fi
     /bin/cat -- "$destination"
     ;;
@@ -105,8 +109,10 @@ case "$command" in
     fi
     ;;
   sync)
+    target=$(map_path "${!#}")
     [ "$failure" != sync ] || exit 43
-    /bin/sync -- "$(map_path "${!#}")"
+    { [ "$failure" != parent-sync ] || [ ! -d "$target" ]; } || exit 49
+    /bin/sync -- "$target"
     ;;
   test)
     [ "$#" -eq 3 ] && [ "$1" = '!' ] || exit 46
@@ -126,6 +132,15 @@ case "$command" in
     ;;
   rm)
     /bin/rm -f -- "$(map_path "${!#}")"
+    ;;
+  /usr/bin/flock)
+    [ "$failure" != lock ] || exit 50
+    [ "$#" -eq 5 ] && [ "$1" = --exclusive ] && [ "$2" = -- ] || exit 51
+    lock=$(map_path "$3")
+    mkdir -p "$(dirname "$lock")"
+    [ "$failure" != lock-helper ] || exit 52
+    [ "$4" = /usr/bin/tee ] && [ "$5" = /dev/null ] || exit 53
+    exec /usr/bin/flock --exclusive -- "$lock" "$4" "$5"
     ;;
   *) exit 45 ;;
 esac"#,
@@ -157,6 +172,8 @@ esac"#,
         let env = [
             ("HOME".into(), self.home.as_os_str().to_owned()),
             ("USER".into(), user.into()),
+            ("LOGNAME".into(), user.into()),
+            ("SUDO_USER".into(), user.into()),
             ("LOG".into(), self.log.as_os_str().to_owned()),
             ("ROOT".into(), self.root.as_os_str().to_owned()),
             (
@@ -405,6 +422,7 @@ fn vscode_extension_step(extensions: &[&str]) -> Step {
 }
 
 fn configure_group_fakes(host: &Host, product: &str, version: &str, group: &str) {
+    let uid = rustix::process::geteuid().as_raw();
     host.fake(
         product,
         &format!(
@@ -415,9 +433,10 @@ fn configure_group_fakes(host: &Host, product: &str, version: &str, group: &str)
         "getent",
         &format!(
             r#"{{ printf 'getent'; printf ' <%s>' "$@"; printf '\n'; }} >>"$LOG"
-if [ "$1" = passwd ] && [ "$2" = tester ]; then
+if [ "$1" = passwd ] && [ "$2" = {uid} ]; then
+  [ ! -f "$TMPDIR/passwd-query-failure" ] || exit 40
   [ ! -f "$TMPDIR/passwd-malformed" ] || {{ cat "$TMPDIR/passwd-malformed"; exit; }}
-  printf 'tester:x:1000:1000:Tester:/home/tester:/bin/bash\n'; exit
+  printf 'tester:x:{uid}:1000:Tester:/home/tester:/bin/bash\n'; exit
 fi
 if [ "$1" = group ] && [ "$2" = {group} ]; then
   [ ! -f "$TMPDIR/group-query-failure" ] || exit 41
@@ -431,7 +450,7 @@ exit 42"#
     host.fake(
         "id",
         r#"{ printf 'id'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
-[ "$1" = -nG ] && [ "$2" = -- ] && [ "$3" = tester ] || exit 43
+[ "$1" = -G ] && [ "$2" = -- ] && [ "$3" = tester ] || exit 43
 [ ! -f "$TMPDIR/id-query-failure" ] || exit 44
 cat "$TMPDIR/group-state""#,
     );
@@ -445,9 +464,9 @@ if [ "$1" = groupadd ]; then
   touch "$TMPDIR/group-exists"; exit
 fi
 if [ "$1" = usermod ]; then
-  [ "$2" = -aG ] && [ "$3" = {group} ] && [ "$4" = tester ] || exit 47
+  [ "$2" = -aG ] && [ "$3" = {group} ] && [ "$4" = -- ] && [ "$5" = tester ] || exit 47
   [ ! -f "$TMPDIR/usermod-failure" ] || exit 48
-  [ -f "$TMPDIR/postcondition-failure" ] || printf 'tester {group}\n' >"$TMPDIR/group-state"
+  [ -f "$TMPDIR/postcondition-failure" ] || printf '1000 997\n' >"$TMPDIR/group-state"
   exit
 fi
 exit 49"#
@@ -519,22 +538,28 @@ fn product_group_operations_use_exact_state_and_converge_without_newgrp() {
     ] {
         let host = Host::new();
         configure_group_fakes(&host, product, version, group);
-        fs::write(host._dir.path().join("tmp/group-state"), "tester users\n").unwrap();
+        fs::write(host._dir.path().join("tmp/group-state"), "1000 100\n").unwrap();
 
         host.run_ok(&Step::workflow(operation.clone()));
         host.run_ok(&Step::workflow(operation));
 
         let log = host.log();
         assert!(log.contains(&format!("{product} <--version>")), "{log}");
-        assert!(log.contains("getent <passwd> <tester>"), "{log}");
+        assert!(
+            log.contains(&format!(
+                "getent <passwd> <{}>",
+                rustix::process::geteuid().as_raw()
+            )),
+            "{log}"
+        );
         assert!(log.contains(&format!("getent <group> <{group}>")), "{log}");
-        assert!(log.contains("id <-nG> <--> <tester>"), "{log}");
+        assert!(log.contains("id <-G> <--> <tester>"), "{log}");
         assert!(
             log.contains(&format!("sudo <groupadd> <--system> <{group}>")),
             "{log}"
         );
         assert_eq!(
-            log.matches(&format!("sudo <usermod> <-aG> <{group}> <tester>"))
+            log.matches(&format!("sudo <usermod> <-aG> <{group}> <--> <tester>"))
                 .count(),
             1,
             "{log}"
@@ -554,15 +579,11 @@ fn product_group_exact_membership_rejects_similar_and_malformed_state() {
         "docker",
     );
     fs::write(host._dir.path().join("tmp/group-exists"), "").unwrap();
-    fs::write(
-        host._dir.path().join("tmp/group-state"),
-        "tester docker-helper\n",
-    )
-    .unwrap();
+    fs::write(host._dir.path().join("tmp/group-state"), "1000 9970\n").unwrap();
     host.run_ok(&Step::workflow(operations::Operation::DockerGroup));
     assert!(host
         .log()
-        .contains("sudo <usermod> <-aG> <docker> <tester>"));
+        .contains("sudo <usermod> <-aG> <docker> <--> <tester>"));
 
     let malformed = Host::new();
     configure_group_fakes(
@@ -574,7 +595,7 @@ fn product_group_exact_membership_rejects_similar_and_malformed_state() {
     fs::write(malformed._dir.path().join("tmp/group-exists"), "").unwrap();
     fs::write(
         malformed._dir.path().join("tmp/group-state"),
-        "tester  docker\n",
+        "1000 997 997\n",
     )
     .unwrap();
     assert!(!malformed
@@ -598,7 +619,7 @@ fn product_group_exact_membership_rejects_similar_and_malformed_state() {
             "docker",
         );
         fs::write(host._dir.path().join("tmp/group-exists"), "").unwrap();
-        fs::write(host._dir.path().join("tmp/group-state"), "tester users\n").unwrap();
+        fs::write(host._dir.path().join("tmp/group-state"), "1000 100\n").unwrap();
         fs::write(host._dir.path().join("tmp").join(marker), record).unwrap();
         assert!(!host
             .run(&Step::workflow(operations::Operation::DockerGroup))
@@ -611,6 +632,7 @@ fn product_group_exact_membership_rejects_similar_and_malformed_state() {
 #[test]
 fn product_group_failures_stop_at_the_failed_boundary_and_validate_user_first() {
     for marker in [
+        "passwd-query-failure",
         "group-query-failure",
         "groupadd-failure",
         "usermod-failure",
@@ -623,18 +645,74 @@ fn product_group_failures_stop_at_the_failed_boundary_and_validate_user_first() 
             "Docker version 28.3.2, build abcdef0",
             "docker",
         );
-        fs::write(host._dir.path().join("tmp/group-state"), "tester users\n").unwrap();
+        fs::write(host._dir.path().join("tmp/group-state"), "1000 100\n").unwrap();
         fs::write(host._dir.path().join("tmp").join(marker), "").unwrap();
         let output = host.run(&Step::workflow(operations::Operation::DockerGroup));
         assert!(!output.status.success(), "{marker}: {}", host.log());
     }
 
-    let hostile = Host::new();
-    let error = hostile
-        .execute_operation_as(&operations::Operation::DockerGroup, "root;touch-pwned")
-        .unwrap_err();
-    assert!(error.to_string().contains("canonical system username"));
-    assert!(hostile.log().is_empty());
+    let spoofed = Host::new();
+    configure_group_fakes(
+        &spoofed,
+        "docker",
+        "Docker version 28.3.2, build abcdef0",
+        "docker",
+    );
+    fs::write(spoofed._dir.path().join("tmp/group-state"), "1000 100\n").unwrap();
+    spoofed
+        .execute_operation_as(&operations::Operation::DockerGroup, "root")
+        .unwrap();
+    let log = spoofed.log();
+    assert!(
+        log.contains(&format!(
+            "getent <passwd> <{}>",
+            rustix::process::geteuid().as_raw()
+        )),
+        "{log}"
+    );
+    assert!(
+        log.contains("sudo <usermod> <-aG> <docker> <--> <tester>"),
+        "{log}"
+    );
+    assert!(!log.contains("<root>"), "{log}");
+}
+
+#[test]
+fn product_group_uses_numeric_nss_state_without_validating_unrelated_names() {
+    let host = Host::new();
+    configure_group_fakes(
+        &host,
+        "docker",
+        "Docker version 28.3.2, build abcdef0",
+        "docker",
+    );
+    fs::write(host._dir.path().join("tmp/group-exists"), "").unwrap();
+    fs::write(
+        host._dir.path().join("tmp/group-malformed"),
+        "docker:x:997:UPPER.Name,DOMAIN\\User,user with spaces\n",
+    )
+    .unwrap();
+    fs::write(host._dir.path().join("tmp/group-state"), "1000\t997\n").unwrap();
+
+    host.run_ok(&Step::workflow(operations::Operation::DockerGroup));
+    assert!(!host.log().contains("sudo <usermod>"), "{}", host.log());
+
+    for state in ["", "1000 nope\n", "1000 997 997\n", "1000 +997\n"] {
+        let malformed = Host::new();
+        configure_group_fakes(
+            &malformed,
+            "docker",
+            "Docker version 28.3.2, build abcdef0",
+            "docker",
+        );
+        fs::write(malformed._dir.path().join("tmp/group-exists"), "").unwrap();
+        fs::write(malformed._dir.path().join("tmp/group-state"), state).unwrap();
+        assert!(!malformed
+            .run(&Step::workflow(operations::Operation::DockerGroup))
+            .status
+            .success());
+        assert!(!malformed.log().contains("sudo <usermod>"));
+    }
 }
 
 #[test]
@@ -781,6 +859,132 @@ fn docker_publication_failures_preserve_old_bytes_and_postcondition_is_required(
 }
 
 #[test]
+fn docker_lock_failures_precede_reads_and_parent_sync_failure_keeps_publication() {
+    for failure in ["lock", "lock-helper"] {
+        let host = Host::new();
+        host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+        host.atomic_sudo();
+        let destination = host.root.join("etc/docker/daemon.json");
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::write(&destination, b"{\"keep\":true}").unwrap();
+        fs::write(host._dir.path().join("tmp/publication-failure"), failure).unwrap();
+
+        assert!(!host.run(&docker_local_log_step(None)).status.success());
+        assert_eq!(fs::read(&destination).unwrap(), b"{\"keep\":true}");
+        let log = host.log();
+        assert!(
+            log.contains("sudo /usr/bin/flock --exclusive -- /run/cozydot/docker-daemon.lock /usr/bin/tee /dev/null")
+        );
+        assert!(!log.contains("sudo stat"), "{failure}: {log}");
+        assert!(!log.contains("sudo cat"), "{failure}: {log}");
+    }
+
+    let host = Host::new();
+    host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+    host.atomic_sudo();
+    let destination = host.root.join("etc/docker/daemon.json");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, b"{}").unwrap();
+    fs::write(
+        host._dir.path().join("tmp/publication-failure"),
+        "parent-sync",
+    )
+    .unwrap();
+
+    assert!(!host.run(&docker_local_log_step(None)).status.success());
+    let published: serde_json::Value =
+        serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert_eq!(published["log-driver"], "local");
+    assert!(destination.exists());
+}
+
+#[test]
+fn docker_transaction_lock_preserves_a_contending_unrelated_edit() {
+    let host = Host::new();
+    host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+    host.atomic_sudo();
+    let destination = host.root.join("etc/docker/daemon.json");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, b"{\"existing\":true}\n").unwrap();
+    fs::write(
+        host._dir.path().join("tmp/publication-pause-after-read"),
+        "",
+    )
+    .unwrap();
+
+    let home = host.home.clone();
+    let log = host.log.clone();
+    let root = host.root.clone();
+    let temp = host._dir.path().join("tmp");
+    let path = format!("{}:/usr/bin:/bin", host.bin.display());
+    let operation = operations::Operation::DockerLocalLog(
+        operations::DockerLocalLogOperation::new(Some("10m".into())).unwrap(),
+    );
+    let worker = std::thread::spawn(move || {
+        let env = [
+            ("HOME".into(), home.into_os_string()),
+            ("USER".into(), "spoofed".into()),
+            ("LOG".into(), log.into_os_string()),
+            ("ROOT".into(), root.into_os_string()),
+            ("TMPDIR".into(), temp.into_os_string()),
+            ("PATH".into(), path.into()),
+        ];
+        operations::execute(&operation, &env)
+    });
+
+    let observed = host._dir.path().join("tmp/publication-read-observed");
+    for _ in 0..500 {
+        if observed.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        observed.exists(),
+        "Docker operation did not reach locked read"
+    );
+
+    let lock = host.root.join("run/cozydot/docker-daemon.lock");
+    let contended = host._dir.path().join("tmp/editor-contended");
+    let script = r#"
+if /usr/bin/flock --nonblock -- "$LOCK" /bin/true; then exit 90; fi
+touch "$CONTENDED"
+/usr/bin/flock --exclusive -- "$LOCK" /bin/bash -c '
+  sed '\''1s/{/{"concurrent-edit":true,/'\'' "$DEST" >"$DEST.edit"
+  mv -f -- "$DEST.edit" "$DEST"
+'
+"#;
+    let mut editor = Command::new("/bin/bash")
+        .args(["-euo", "pipefail", "-c", script])
+        .env("LOCK", &lock)
+        .env("CONTENDED", &contended)
+        .env("DEST", &destination)
+        .spawn()
+        .unwrap();
+    for _ in 0..500 {
+        if contended.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        contended.exists(),
+        "simulated editor did not observe lock contention"
+    );
+    assert!(editor.try_wait().unwrap().is_none());
+    fs::write(host._dir.path().join("tmp/publication-read-release"), "").unwrap();
+
+    worker.join().unwrap().unwrap();
+    assert!(editor.wait().unwrap().success());
+    let final_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert_eq!(final_state["existing"], true);
+    assert_eq!(final_state["log-driver"], "local");
+    assert_eq!(final_state["log-opts"]["max-size"], "10m");
+    assert_eq!(final_state["concurrent-edit"], true);
+}
+
+#[test]
 fn integration_preflights_fail_before_state_or_mutation() {
     let docker = Host::new();
     docker.fake("docker", "printf 'not a docker version\\n'");
@@ -837,10 +1041,7 @@ fn existing_product_preflight_rejects_missing_nonexecutable_nonzero_and_non_utf8
 #[test]
 fn vscode_extension_set_selects_exact_missing_ids_in_order_and_converges() {
     let host = Host::new();
-    configure_vscode_fake(
-        &host,
-        b"publisher.present\npublisher.present\npublisher.extension-helper\n",
-    );
+    configure_vscode_fake(&host, b"publisher.present\npublisher.extension-helper\n");
     let step =
         vscode_extension_step(&["publisher.present", "publisher.extension", "other.missing"]);
     host.run_ok(&step);
@@ -870,6 +1071,62 @@ fn vscode_complete_state_is_one_inspection_after_preflight() {
     assert_eq!(log.matches("code <--version>").count(), 1, "{log}");
     assert_eq!(log.matches("code <--list-extensions>").count(), 1, "{log}");
     assert!(!log.contains("--install-extension"), "{log}");
+}
+
+#[test]
+fn vscode_operation_canonicalizes_direct_input_and_cli_state() {
+    let operation =
+        operations::VsCodeExtensionOperation::new(vec!["Publisher.Extension-Name".into()]).unwrap();
+    assert_eq!(
+        operations::Operation::VsCodeExtensionSet(operation.clone()).display_args(),
+        ["vscode-extension-set", "publisher.extension-name"]
+    );
+
+    let present = Host::new();
+    configure_vscode_fake(&present, b"publisher.extension-name\n");
+    present.run_ok(&Step::workflow(operations::Operation::VsCodeExtensionSet(
+        operation.clone(),
+    )));
+    assert!(!present.log().contains("--install-extension"));
+
+    let absent = Host::new();
+    configure_vscode_fake(&absent, b"");
+    absent.run_ok(&Step::workflow(operations::Operation::VsCodeExtensionSet(
+        operation,
+    )));
+    assert!(
+        absent
+            .log()
+            .contains("code <--install-extension> <publisher.extension-name>"),
+        "{}",
+        absent.log()
+    );
+
+    for invalid in ["_publisher.extension", "publisher.ext_name", ".extension"] {
+        assert!(operations::VsCodeExtensionOperation::new(vec![invalid.into()]).is_err());
+    }
+    assert!(operations::VsCodeExtensionOperation::new(vec![
+        "Publisher.Extension".into(),
+        "publisher.extension".into(),
+    ])
+    .is_err());
+}
+
+#[test]
+fn vscode_rejects_malformed_and_case_fold_duplicate_cli_state() {
+    for state in [
+        b"_publisher.extension\n".as_slice(),
+        b"publisher.ext_name\n",
+        b"Publisher.Extension\npublisher.extension\n",
+    ] {
+        let host = Host::new();
+        configure_vscode_fake(&host, state);
+        assert!(!host
+            .run(&vscode_extension_step(&["publisher.extension"]))
+            .status
+            .success());
+        assert!(!host.log().contains("--install-extension"));
+    }
 }
 
 #[test]
@@ -2375,6 +2632,7 @@ fn apt_source_publication_is_atomic_retry_safe_and_mode_0644() {
     );
     assert!(publication_log.contains("sudo sync -- /etc/apt/sources.list.d/.vendor.list."));
     assert!(publication_log.contains("sudo mv -fT -- /etc/apt/sources.list.d/.vendor.list."));
+    assert!(publication_log.contains("sudo sync -- /etc/apt/sources.list.d"));
     let rename = publication_log
         .lines()
         .find(|line| line.starts_with("sudo mv "))
@@ -2417,6 +2675,18 @@ fn apt_source_publication_is_atomic_retry_safe_and_mode_0644() {
             "{failure}"
         );
     }
+
+    fs::write(
+        host._dir.path().join("tmp/publication-failure"),
+        "parent-sync",
+    )
+    .unwrap();
+    assert!(!host.run(&first).status.success());
+    assert_eq!(
+        fs::read(&destination).unwrap(),
+        b"deb [arch=amd64] https://example.test stable main\n"
+    );
+    assert!(destination.exists());
 }
 
 #[test]
