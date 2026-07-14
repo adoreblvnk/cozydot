@@ -501,14 +501,16 @@ impl Host<'_> {
             ],
         )?;
         self.require(
-            "Docker transaction lock symlink check",
-            "sudo",
-            ["test", "!", "-L", DOCKER_LOCK],
-        )?;
-        self.require(
             "Docker transaction lock creation",
             "sudo",
-            ["touch", "--", DOCKER_LOCK],
+            [
+                "cp",
+                "--no-clobber",
+                "--no-target-directory",
+                "--",
+                "/dev/null",
+                DOCKER_LOCK,
+            ],
         )?;
         let kind = self.require(
             "Docker transaction lock type check",
@@ -526,7 +528,7 @@ impl Host<'_> {
         self.require(
             "Docker transaction lock ownership",
             "sudo",
-            ["chown", "root:root", "--", DOCKER_LOCK],
+            ["chown", "--no-dereference", "root:root", "--", DOCKER_LOCK],
         )?;
         self.require(
             "Docker transaction lock permissions",
@@ -554,8 +556,13 @@ impl Host<'_> {
         {
             bail!("Docker transaction lock has mismatched type, ownership, or permissions");
         }
-        let lock = File::open(self.docker_lock_open_path)
-            .context("Docker transaction lock: open fixed regular lock file")?;
+        let lock: File = rustix::fs::open(
+            self.docker_lock_open_path,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .context("Docker transaction lock: open fixed regular lock file without following links")?
+        .into();
         if !lock
             .metadata()
             .context("Docker transaction lock: inspect opened lock file")?
