@@ -238,6 +238,11 @@ Dotfiles are applied with Stow. Cozydot owns one fixed conflict policy: before a
 
 Integrations configure installed software; they do not implicitly add the associated product package.
 
+Docker and VirtualBox group membership is persisted for the invoking user, but an existing login
+session does not gain the new supplementary group. Log out and back in before relying on that
+membership. Docker daemon configuration is published without restarting or reloading Docker;
+active containers and daemon behavior adopt it at Docker's normal reload or restart boundary.
+
 ## `desktop`
 
 - `theme` is either `light` or `dark` and applies the corresponding supported desktop color preference. Omission or `null` preserves the current preference.
