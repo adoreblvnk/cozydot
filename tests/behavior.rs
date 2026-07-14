@@ -3057,6 +3057,47 @@ fn schema_v1_npm_dependency_error_prevents_ensure_noop_and_mutation() {
 }
 
 #[test]
+fn schema_v1_npm_dependency_problem_states_prevent_ensure_noop_and_mutation() {
+    for (name, state) in [
+        (
+            "problems",
+            br#"{"dependencies":{"tool":{"version":"1.0.0","problems":["broken"]}}}"#.as_slice(),
+        ),
+        (
+            "invalid",
+            br#"{"dependencies":{"tool":{"version":"1.0.0","invalid":true}}}"#.as_slice(),
+        ),
+        (
+            "missing",
+            br#"{"dependencies":{"tool":{"version":"1.0.0","missing":true}}}"#.as_slice(),
+        ),
+    ] {
+        let host = Host::new();
+        configure_npm_package_fakes(&host, b"v22.14.0\n", state, state);
+
+        assert!(
+            !host
+                .run(&npm_package_step(
+                    &["tool"],
+                    operations::NpmPackageMode::EnsurePresent,
+                ))
+                .status
+                .success(),
+            "dependency {name} state unexpectedly accepted"
+        );
+        assert_eq!(
+            host.log(),
+            concat!(
+                "fnm <default>\n",
+                "fnm <exec> <--using> <v22.14.0> <--> <npm> <list> <--global> <--depth=0> <--json>\n"
+            ),
+            "dependency {name} state"
+        );
+        assert!(!host.log().contains("ambient-npm"), "{}", host.log());
+    }
+}
+
+#[test]
 fn schema_v1_npm_update_installs_existing_and_missing_without_targeting_unrelated_package() {
     let host = Host::new();
     let state =
@@ -3171,8 +3212,6 @@ fn schema_v1_npm_query_failures_and_bad_json_are_fatal() {
         br#"{"dependencies":{"BAD":{}}}"#.as_slice(),
         br#"{"dependencies":{"tool":{}}}"#.as_slice(),
         br#"{"dependencies":{"tool":null}}"#.as_slice(),
-        br#"{"dependencies":{"tool":{"invalid":true}}}"#.as_slice(),
-        br#"{"dependencies":{"tool":{"problems":["broken"]}}}"#.as_slice(),
         br#"{"dependencies":{},"problems":["missing: tool"]}"#.as_slice(),
         br#"{"dependencies":{},"error":{"code":"EFAIL"}}"#.as_slice(),
         b"\xff".as_slice(),
