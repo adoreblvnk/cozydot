@@ -1,5 +1,5 @@
 use super::{Host, TempPath};
-use crate::config::v1::HttpsUrl;
+use crate::domain::HttpsUrl;
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::OsStr,

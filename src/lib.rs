@@ -1,5 +1,6 @@
 pub mod bundle;
 pub mod config;
+mod domain;
 pub mod init;
 pub mod json_helpers;
 pub mod operations;

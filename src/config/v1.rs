@@ -1,8 +1,8 @@
+pub use crate::domain::HttpsUrl;
 use crate::platform::{Architecture, Platform};
 use anyhow::{bail, Context, Result};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::HashSet, fmt, fs, path::Path};
-use url::{Host, Url};
 use yaml_rust2::{
     parser::{Event, MarkedEventReceiver, Parser},
     scanner::{Marker, Scanner, TokenType},
@@ -715,71 +715,6 @@ impl RepositoryUrls {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HttpsUrl(Url);
-
-impl HttpsUrl {
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self> {
-        validate_non_empty(value, "URL")?;
-        if value.chars().any(char::is_whitespace)
-            || value.chars().any(char::is_control)
-            || value.contains('\\')
-            || has_substitution(value)
-        {
-            bail!("must be a literal HTTPS URL without whitespace or substitutions");
-        }
-        let parsed = Url::parse(value).context("must be a valid absolute HTTPS URL")?;
-        let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
-        let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
-        let host_port = authority
-            .rsplit_once('@')
-            .map_or(authority, |(_, host)| host);
-        let (raw_host, empty_port) = if let Some(rest) = host_port.strip_prefix('[') {
-            let closing = rest.find(']').map(|index| index + 1);
-            let raw_host = closing.map_or(host_port, |index| &host_port[..=index]);
-            let suffix = closing.map_or("", |index| &host_port[index + 1..]);
-            (raw_host, suffix == ":")
-        } else if let Some((host, port)) = host_port.rsplit_once(':') {
-            (host, port.is_empty())
-        } else {
-            (host_port, false)
-        };
-        let invalid_host = parsed.host().is_none_or(|host| match host {
-            Host::Ipv4(address) => raw_host != address.to_string(),
-            Host::Ipv6(_) => false,
-            Host::Domain(domain) => !valid_domain_host(domain),
-        });
-        if raw_scheme != "https"
-            || parsed.scheme() != "https"
-            || authority.is_empty()
-            || authority.contains('%')
-            || empty_port
-            || invalid_host
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || authority.contains('@')
-            || parsed.fragment().is_some()
-        {
-            bail!("must use HTTPS with a non-empty host and no credentials or fragment");
-        }
-        Ok(Self(parsed))
-    }
-}
-
-impl<'de> Deserialize<'de> for HttpsUrl {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = deserialize_string(deserializer)?;
-        Self::parse(&value).map_err(de::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DirectFormat {
@@ -1356,25 +1291,6 @@ where
         }
     }
     Ok(())
-}
-
-fn valid_domain_host(domain: &str) -> bool {
-    !domain.is_empty()
-        && domain.len() <= 253
-        && domain.split('.').all(|label| {
-            label.len() <= 63
-                && label
-                    .as_bytes()
-                    .first()
-                    .is_some_and(u8::is_ascii_alphanumeric)
-                && label
-                    .as_bytes()
-                    .last()
-                    .is_some_and(u8::is_ascii_alphanumeric)
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
 }
 
 fn validate_github_repository(value: &str, path: &str) -> Result<()> {
