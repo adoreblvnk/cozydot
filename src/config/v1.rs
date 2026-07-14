@@ -68,8 +68,8 @@ impl ConfigV1 {
                 );
             }
         }
-        let upstream = upstream_for_distro(&platform.distro)?;
         let detected_upstream = upstream_from_id(&platform.upstream)?;
+        let upstream = upstream_for_distro(&platform.distro, detected_upstream)?;
         if upstream != detected_upstream {
             bail!(
                 "system.distro: platform distro {:?} does not belong to upstream family {:?}",
@@ -78,6 +78,15 @@ impl ConfigV1 {
             );
         }
         if let Some(apt) = self.system.as_ref().and_then(|system| system.apt.as_ref()) {
+            if matches!(apt.sources, Some(AptSources::Managed)) {
+                let components = apt
+                    .components
+                    .iter()
+                    .flatten()
+                    .map(AptComponent::name)
+                    .collect::<Vec<_>>();
+                platform.managed_apt_sources(&components)?;
+            }
             apt.validate(Some(upstream))?;
         }
         if let Some(packages) = &self.packages {
@@ -197,10 +206,9 @@ impl Distro {
     fn upstream(&self) -> Option<Upstream> {
         match self {
             Self::Auto => None,
-            Self::Ubuntu | Self::Linuxmint | Self::Pop | Self::Zorin | Self::Deepin => {
-                Some(Upstream::Ubuntu)
-            }
-            Self::Debian | Self::Kali | Self::Tails => Some(Upstream::Debian),
+            Self::Ubuntu | Self::Pop | Self::Zorin => Some(Upstream::Ubuntu),
+            Self::Deepin | Self::Debian | Self::Kali | Self::Tails => Some(Upstream::Debian),
+            Self::Linuxmint => None,
         }
     }
 
@@ -225,10 +233,11 @@ enum Upstream {
     Debian,
 }
 
-fn upstream_for_distro(distro: &str) -> Result<Upstream> {
+fn upstream_for_distro(distro: &str, detected: Upstream) -> Result<Upstream> {
     match distro {
-        "ubuntu" | "linuxmint" | "pop" | "zorin" | "deepin" => Ok(Upstream::Ubuntu),
-        "debian" | "kali" | "tails" => Ok(Upstream::Debian),
+        "ubuntu" | "pop" | "zorin" => Ok(Upstream::Ubuntu),
+        "debian" | "kali" | "tails" | "deepin" => Ok(Upstream::Debian),
+        "linuxmint" => Ok(detected),
         _ => bail!(
             "system.distro: unsupported detected distribution {distro:?}; supported distributions are ubuntu, linuxmint, pop, zorin, deepin, debian, kali, and tails"
         ),
@@ -278,6 +287,15 @@ pub struct System {
 impl System {
     fn validate(&self) -> Result<()> {
         if let Some(apt) = &self.apt {
+            if matches!(apt.sources, Some(AptSources::Managed)) {
+                if let Some(distro) = self.distro.as_ref().and_then(Distro::configured_id) {
+                    if !matches!(distro, "ubuntu" | "debian" | "kali") {
+                        bail!(
+                            "system.apt.sources: managed is unsupported for distribution {distro:?}; use preserve"
+                        );
+                    }
+                }
+            }
             apt.validate(self.distro.as_ref().and_then(Distro::upstream))?;
         }
         Ok(())
@@ -304,7 +322,7 @@ pub enum AptComponent {
 }
 
 impl AptComponent {
-    fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Main => "main",
             Self::Contrib => "contrib",

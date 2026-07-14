@@ -112,40 +112,64 @@ impl Architecture {
 pub struct Platform {
     pub distro: String,
     pub upstream: String,
-    pub codename: String,
+    pub distro_codename: String,
+    pub base_codename: String,
     pub desktop: String,
     pub architecture: Architecture,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAptSources {
+    pub distro: String,
+    pub release: String,
+    pub architecture: Architecture,
+    pub components: Vec<String>,
+    pub stanzas: Vec<ManagedAptStanza>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAptStanza {
+    pub uri: String,
+    pub suites: Vec<String>,
+    pub signed_by: String,
+}
+
+impl ManagedAptSources {
+    pub fn render_deb822(&self) -> String {
+        let components = self.components.join(" ");
+        self.stanzas
+            .iter()
+            .map(|stanza| {
+                format!(
+                    "Types: deb\nURIs: {}\nSuites: {}\nComponents: {}\nArchitectures: {}\nSigned-By: {}\n",
+                    stanza.uri,
+                    stanza.suites.join(" "),
+                    components,
+                    self.architecture.debian(),
+                    stanza.signed_by,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 impl Platform {
-    pub fn detect(config_distro: &str, config_desktop: &str) -> Result<Self> {
+    pub fn detect(_config_distro: &str, _config_desktop: &str) -> Result<Self> {
         let os = parse_os_release(Path::new("/etc/os-release"))?;
         let uname = Command::new("uname")
             .arg("-m")
             .output()
             .context("run uname -m")?;
         let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-        let distro = if config_distro == "auto" {
-            os.get("ID").cloned().unwrap_or_default()
-        } else {
-            config_distro.into()
-        };
-        let upstream = upstream(&distro)?.into();
-        let codename = os
-            .get("UBUNTU_CODENAME")
-            .or_else(|| os.get("VERSION_CODENAME"))
-            .cloned()
-            .unwrap_or_default();
-        let desktop = if config_desktop == "auto" {
-            desktop(
-                std::env::var("XDG_CURRENT_DESKTOP")
-                    .unwrap_or_default()
-                    .as_str(),
-            )
-        } else {
-            config_desktop.into()
-        };
-        Self::from_parts(distro, upstream, codename, desktop, &arch)
+        let desktop = desktop(
+            std::env::var("XDG_CURRENT_DESKTOP")
+                .unwrap_or_default()
+                .as_str(),
+        );
+        Self::from_os_release(&os, desktop, &arch)
     }
+
     pub fn from_parts(
         distro: String,
         upstream: String,
@@ -153,20 +177,178 @@ impl Platform {
         desktop: String,
         arch: &str,
     ) -> Result<Self> {
+        Self::from_release_parts(distro, upstream, codename.clone(), codename, desktop, arch)
+    }
+
+    pub fn from_release_parts(
+        distro: String,
+        upstream: String,
+        distro_codename: String,
+        base_codename: String,
+        desktop: String,
+        arch: &str,
+    ) -> Result<Self> {
         let architecture = Architecture::normalize(arch)?;
         Ok(Self {
             distro,
             upstream,
-            codename,
+            distro_codename,
+            base_codename,
             desktop: normalize_desktop(&desktop),
             architecture,
         })
     }
+
+    fn from_os_release(os: &BTreeMap<String, String>, desktop: String, arch: &str) -> Result<Self> {
+        let distro = os.get("ID").cloned().unwrap_or_default();
+        let upstream: String = upstream(&distro, os.get("ID_LIKE").map(String::as_str))?.into();
+        let distro_codename = os.get("VERSION_CODENAME").cloned().unwrap_or_default();
+        let base_codename = match upstream.as_str() {
+            "ubuntu" => os
+                .get("UBUNTU_CODENAME")
+                .cloned()
+                .unwrap_or_else(|| distro_codename.clone()),
+            "debian" => os
+                .get("DEBIAN_CODENAME")
+                .cloned()
+                .unwrap_or_else(|| distro_codename.clone()),
+            _ => unreachable!(),
+        };
+        Self::from_release_parts(
+            distro,
+            upstream,
+            distro_codename,
+            base_codename,
+            desktop,
+            arch,
+        )
+    }
+
+    pub fn managed_apt_sources(&self, configured_components: &[&str]) -> Result<ManagedAptSources> {
+        if !matches!(self.distro.as_str(), "ubuntu" | "debian" | "kali") {
+            bail!(
+                "system.apt.sources: managed is unsupported for distribution {:?}; use preserve",
+                self.distro
+            );
+        }
+        let components = managed_components(self, configured_components)?;
+        let architecture = self.architecture;
+        if matches!(self.distro.as_str(), "ubuntu" | "debian")
+            && (self.distro_codename.is_empty()
+                || !self
+                    .distro_codename
+                    .bytes()
+                    .enumerate()
+                    .all(|(index, byte)| {
+                        byte.is_ascii_lowercase()
+                            || byte.is_ascii_digit()
+                            || index != 0 && matches!(byte, b'.' | b'_' | b'+' | b'-')
+                    }))
+        {
+            bail!("system.apt.sources: managed requires a valid platform codename");
+        }
+        let (release, stanzas) = match self.distro.as_str() {
+            "ubuntu" => {
+                let release = self.distro_codename.as_str();
+                if !matches!(release, "jammy" | "noble" | "questing" | "resolute") {
+                    bail!(
+                        "system.apt.sources: managed Ubuntu release {:?} is unsupported; supported releases are jammy, noble, questing, and resolute",
+                        release
+                    );
+                }
+                let main_archive = architecture == Architecture::Amd64
+                    || architecture == Architecture::Arm64 && release == "resolute";
+                let keyring = "/usr/share/keyrings/ubuntu-archive-keyring.gpg";
+                let stanzas = if main_archive {
+                    vec![
+                        ManagedAptStanza {
+                            uri: "https://archive.ubuntu.com/ubuntu".into(),
+                            suites: vec![
+                                release.into(),
+                                format!("{release}-updates"),
+                                format!("{release}-backports"),
+                            ],
+                            signed_by: keyring.into(),
+                        },
+                        ManagedAptStanza {
+                            uri: "https://security.ubuntu.com/ubuntu".into(),
+                            suites: vec![format!("{release}-security")],
+                            signed_by: keyring.into(),
+                        },
+                    ]
+                } else {
+                    vec![ManagedAptStanza {
+                        uri: "https://ports.ubuntu.com/ubuntu-ports".into(),
+                        suites: vec![
+                            release.into(),
+                            format!("{release}-updates"),
+                            format!("{release}-backports"),
+                            format!("{release}-security"),
+                        ],
+                        signed_by: keyring.into(),
+                    }]
+                };
+                (release.to_owned(), stanzas)
+            }
+            "debian" => {
+                let release = self.distro_codename.as_str();
+                if !matches!(release, "bullseye" | "bookworm" | "trixie") {
+                    bail!(
+                        "system.apt.sources: managed Debian release {:?} is unsupported; supported releases are bullseye, bookworm, and trixie",
+                        release
+                    );
+                }
+                if architecture == Architecture::Riscv64 && release != "trixie" {
+                    bail!(
+                        "system.apt.sources: Debian {release} does not support architecture riscv64"
+                    );
+                }
+                let keyring = "/usr/share/keyrings/debian-archive-keyring.gpg";
+                (
+                    release.to_owned(),
+                    vec![
+                        ManagedAptStanza {
+                            uri: "https://deb.debian.org/debian".into(),
+                            suites: vec![release.into(), format!("{release}-updates")],
+                            signed_by: keyring.into(),
+                        },
+                        ManagedAptStanza {
+                            uri: "https://security.debian.org/debian-security".into(),
+                            suites: vec![format!("{release}-security")],
+                            signed_by: keyring.into(),
+                        },
+                    ],
+                )
+            }
+            "kali" => {
+                if architecture == Architecture::Riscv64 {
+                    bail!("system.apt.sources: Kali rolling does not support architecture riscv64");
+                }
+                (
+                    "kali-rolling".into(),
+                    vec![ManagedAptStanza {
+                        uri: "https://http.kali.org/kali".into(),
+                        suites: vec!["kali-rolling".into()],
+                        signed_by: "/usr/share/keyrings/kali-archive-keyring.gpg".into(),
+                    }],
+                )
+            }
+            _ => unreachable!(),
+        };
+        Ok(ManagedAptSources {
+            distro: self.distro.clone(),
+            release,
+            architecture,
+            components,
+            stanzas,
+        })
+    }
+
     pub fn expand(&self, input: &str) -> String {
         let architecture = self.architecture;
         [
             ("UPSTREAM_DISTRO", self.upstream.as_str()),
-            ("VERSION_CODENAME", self.codename.as_str()),
+            ("VERSION_CODENAME", self.base_codename.as_str()),
             ("UNAME_ARCH", architecture.uname()),
             ("GO_ARCH", architecture.go_archive()),
             ("LINUX_ARCH", architecture.linux_release()),
@@ -197,12 +379,64 @@ fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
     }
     Ok(machine.into())
 }
-fn upstream(id: &str) -> Result<&'static str> {
+fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
     match id {
-        "ubuntu" | "linuxmint" | "pop" | "zorin" | "deepin" => Ok("ubuntu"),
-        "debian" | "kali" | "tails" => Ok("debian"),
+        "ubuntu" | "pop" | "zorin" => Ok("ubuntu"),
+        "debian" | "kali" | "tails" | "deepin" => Ok("debian"),
+        "linuxmint" => {
+            let families = id_like.unwrap_or_default().split_ascii_whitespace();
+            let mut ubuntu = false;
+            let mut debian = false;
+            for family in families {
+                ubuntu |= family == "ubuntu";
+                debian |= family == "debian";
+            }
+            match (ubuntu, debian) {
+                (true, _) => Ok("ubuntu"),
+                (false, true) => Ok("debian"),
+                _ => bail!(
+                    "unsupported linuxmint base family in ID_LIKE {:?}; expected ubuntu or debian",
+                    id_like.unwrap_or_default()
+                ),
+            }
+        }
         _ => bail!("unsupported distro: {id}"),
     }
+}
+
+fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<String>> {
+    let defaults: &[&str] = if platform.distro == "kali" {
+        &["main", "contrib", "non-free", "non-free-firmware"]
+    } else {
+        &["main"]
+    };
+    let components = if configured.is_empty() {
+        defaults
+    } else {
+        configured
+    };
+    let supported: &[&str] = match platform.distro.as_str() {
+        "ubuntu" => &["main", "restricted", "universe", "multiverse"],
+        "debian" if platform.distro_codename == "bullseye" => &["main", "contrib", "non-free"],
+        "debian" => &["main", "contrib", "non-free", "non-free-firmware"],
+        "kali" => &["main", "contrib", "non-free", "non-free-firmware"],
+        _ => &[],
+    };
+    let mut result = Vec::new();
+    for (index, component) in components.iter().enumerate() {
+        if !supported.contains(component) {
+            bail!(
+                "system.apt.components[{index}]: component {component:?} is unsupported for {} {}",
+                platform.distro,
+                platform.distro_codename
+            );
+        }
+        if result.iter().any(|existing| existing == component) {
+            bail!("system.apt.components: duplicate component {component:?}");
+        }
+        result.push((*component).to_owned());
+    }
+    Ok(result)
 }
 fn desktop(s: &str) -> String {
     normalize_desktop(s)
@@ -393,8 +627,114 @@ mod tests {
 
     #[test]
     fn distro_map() {
-        assert_eq!(upstream("linuxmint").unwrap(), "ubuntu");
-        assert_eq!(upstream("deepin").unwrap(), "ubuntu");
-        assert!(upstream("arch").is_err());
+        assert_eq!(
+            upstream("linuxmint", Some("ubuntu debian")).unwrap(),
+            "ubuntu"
+        );
+        assert_eq!(upstream("linuxmint", Some("debian")).unwrap(), "debian");
+        assert_eq!(upstream("deepin", Some("debian")).unwrap(), "debian");
+        assert!(upstream("linuxmint", None).is_err());
+        assert!(upstream("arch", None).is_err());
+    }
+
+    #[test]
+    fn os_release_preserves_distribution_and_base_codenames() {
+        let detected = |values: &[(&str, &str)]| {
+            let os = values
+                .iter()
+                .map(|(key, value)| ((*key).into(), (*value).into()))
+                .collect();
+            Platform::from_os_release(&os, "none".into(), "amd64").unwrap()
+        };
+        let mint = detected(&[
+            ("ID", "linuxmint"),
+            ("ID_LIKE", "ubuntu debian"),
+            ("VERSION_CODENAME", "wilma"),
+            ("UBUNTU_CODENAME", "noble"),
+        ]);
+        assert_eq!(mint.upstream, "ubuntu");
+        assert_eq!(mint.distro_codename, "wilma");
+        assert_eq!(mint.base_codename, "noble");
+
+        let lmde = detected(&[
+            ("ID", "linuxmint"),
+            ("ID_LIKE", "debian"),
+            ("VERSION_CODENAME", "gigi"),
+            ("DEBIAN_CODENAME", "bookworm"),
+        ]);
+        assert_eq!(lmde.upstream, "debian");
+        assert_eq!(lmde.distro_codename, "gigi");
+        assert_eq!(lmde.base_codename, "bookworm");
+
+        let deepin = detected(&[
+            ("ID", "deepin"),
+            ("ID_LIKE", "debian"),
+            ("VERSION_CODENAME", "crimson"),
+        ]);
+        assert_eq!(deepin.upstream, "debian");
+        assert_eq!(deepin.distro_codename, "crimson");
+    }
+
+    #[test]
+    fn managed_apt_release_architecture_and_component_tables_are_strict() {
+        let platform = |distro: &str, release: &str, architecture: &str| {
+            Platform::from_parts(
+                distro.into(),
+                if distro == "ubuntu" {
+                    "ubuntu"
+                } else {
+                    "debian"
+                }
+                .into(),
+                release.into(),
+                "none".into(),
+                architecture,
+            )
+            .unwrap()
+        };
+
+        let noble_arm64 = platform("ubuntu", "noble", "arm64")
+            .managed_apt_sources(&["main"])
+            .unwrap();
+        assert_eq!(noble_arm64.stanzas.len(), 1);
+        assert_eq!(
+            noble_arm64.stanzas[0].uri,
+            "https://ports.ubuntu.com/ubuntu-ports"
+        );
+        let resolute_arm64 = platform("ubuntu", "resolute", "arm64")
+            .managed_apt_sources(&["main", "universe"])
+            .unwrap();
+        assert_eq!(resolute_arm64.stanzas.len(), 2);
+        assert_eq!(
+            resolute_arm64.stanzas[0].uri,
+            "https://archive.ubuntu.com/ubuntu"
+        );
+        assert!(resolute_arm64
+            .render_deb822()
+            .contains("Architectures: arm64"));
+
+        assert!(platform("debian", "bookworm", "riscv64")
+            .managed_apt_sources(&["main"])
+            .unwrap_err()
+            .to_string()
+            .contains("does not support architecture riscv64"));
+        assert!(platform("debian", "bullseye", "amd64")
+            .managed_apt_sources(&["non-free-firmware"])
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported"));
+        assert!(platform("debian", "trixie", "riscv64")
+            .managed_apt_sources(&["main", "non-free-firmware"])
+            .is_ok());
+        assert!(platform("kali", "kali-rolling", "riscv64")
+            .managed_apt_sources(&[])
+            .unwrap_err()
+            .to_string()
+            .contains("does not support architecture riscv64"));
+        assert!(platform("ubuntu", "plucky", "amd64")
+            .managed_apt_sources(&["main"])
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported"));
     }
 }

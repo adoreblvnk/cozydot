@@ -94,7 +94,7 @@ updates:
     assert_eq!(actions[1], PlannedAction::System(SystemAction::EnsureAdmin));
     assert!(matches!(
         actions[2],
-        PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed { .. }))
+        PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed(_)))
     ));
     assert!(matches!(actions[3], PlannedAction::Repository(_)));
     assert_eq!(actions[4], PlannedAction::AptMetadataRefresh);
@@ -145,7 +145,7 @@ system:
     assert_eq!(source_only.len(), 1);
     assert!(matches!(
         source_only[0],
-        PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed { .. }))
+        PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed(_)))
     ));
     assert!(!source_only.contains(&PlannedAction::AptMetadataRefresh));
 
@@ -195,6 +195,75 @@ fn managed_sources_require_a_codename_and_unattended_both_states_are_consumers()
             ]
         );
     }
+}
+
+#[test]
+fn managed_source_policy_is_release_aware_and_kali_never_uses_debian_sources() {
+    let yaml = "schema: 1\nsystem:\n  apt:\n    sources: managed\n    components: [main]";
+    let noble = planned(
+        yaml,
+        &platform("ubuntu", "ubuntu", "noble", "none", "arm64"),
+    );
+    let PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed(noble))) =
+        &noble[0]
+    else {
+        panic!("missing noble managed source intent")
+    };
+    assert_eq!(noble.stanzas.len(), 1);
+    assert_eq!(
+        noble.stanzas[0].uri,
+        "https://ports.ubuntu.com/ubuntu-ports"
+    );
+
+    let resolute = planned(
+        yaml,
+        &platform("ubuntu", "ubuntu", "resolute", "none", "arm64"),
+    );
+    let PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed(resolute))) =
+        &resolute[0]
+    else {
+        panic!("missing resolute managed source intent")
+    };
+    assert_eq!(resolute.stanzas.len(), 2);
+    assert_eq!(resolute.stanzas[0].uri, "https://archive.ubuntu.com/ubuntu");
+
+    let kali = planned(
+        yaml,
+        &platform("kali", "debian", "kali-rolling", "none", "arm64"),
+    );
+    let PlannedAction::System(SystemAction::AptSources(AptSourcesIntent::Managed(kali))) = &kali[0]
+    else {
+        panic!("missing Kali managed source intent")
+    };
+    let rendered = kali.render_deb822();
+    assert!(rendered.contains("https://http.kali.org/kali"));
+    assert!(rendered.contains("Suites: kali-rolling"));
+    assert!(!rendered.contains("debian.org"));
+}
+
+#[test]
+fn system_repository_suite_uses_distribution_not_base_codename() {
+    let mint = Platform::from_release_parts(
+        "linuxmint".into(),
+        "ubuntu".into(),
+        "wilma".into(),
+        "noble".into(),
+        "none".into(),
+        "amd64",
+    )
+    .unwrap();
+    let actions = planned(
+        "schema: 1\npackages:\n  repositories:\n    - name: vendor\n      key: https://example.com/key\n      source: { urls: { default: https://example.com/repo }, suite: system, components: [main] }\n      packages: [vendor]",
+        &mint,
+    );
+    let repository = actions
+        .iter()
+        .find_map(|action| match action {
+            PlannedAction::Repository(repository) => Some(repository),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(repository.suite.value(), "wilma");
 }
 
 #[test]
@@ -466,14 +535,14 @@ desktop:
 }
 
 #[test]
-fn ubuntu_snap_both_states_emit_codecs_is_enable_only_and_debian_skips_both() {
+fn ubuntu_controls_apply_only_to_resolved_ubuntu_family() {
     for enabled in [true, false] {
         let yaml = format!("schema: 1\nsystem:\n  ubuntu:\n    snap: {enabled}\n    codecs: true");
         let actions = planned(&yaml, &ubuntu("amd64"));
         assert!(actions.contains(&PlannedAction::System(SystemAction::UbuntuSnap { enabled })));
         assert!(actions.contains(&PlannedAction::System(SystemAction::UbuntuCodecs)));
 
-        for distro in ["linuxmint", "pop", "zorin", "deepin"] {
+        for distro in ["linuxmint", "pop", "zorin"] {
             let derivative = planned(
                 &yaml,
                 &platform(distro, "ubuntu", "release", "none", "amd64"),
@@ -489,6 +558,13 @@ fn ubuntu_snap_both_states_emit_codecs_is_enable_only_and_debian_skips_both() {
             &platform("debian", "debian", "trixie", "none", "amd64"),
         );
         assert!(debian.is_empty());
+        for distro in ["linuxmint", "deepin"] {
+            let debian_family = planned(
+                &yaml,
+                &platform(distro, "debian", "release", "none", "amd64"),
+            );
+            assert!(debian_family.is_empty());
+        }
     }
 
     for codecs in ["false", "null"] {

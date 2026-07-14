@@ -93,6 +93,19 @@ pub(crate) fn publish_bytes(
     contents: &[u8],
     operation: &str,
 ) -> Result<()> {
+    publish_bytes_with_mode(host, destination, contents, operation, "0644")
+}
+
+pub(crate) fn publish_bytes_with_mode(
+    host: &Host<'_>,
+    destination: &Path,
+    contents: &[u8],
+    operation: &str,
+    mode: &str,
+) -> Result<()> {
+    if !matches!(mode, "0600" | "0644") {
+        bail!("unsupported privileged publication mode");
+    }
     let local = TempPath::new(host, "privileged-publication")?;
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -150,7 +163,7 @@ pub(crate) fn publish_bytes(
                 OsStr::new("-g"),
                 OsStr::new("root"),
                 OsStr::new("-m"),
-                OsStr::new("0644"),
+                OsStr::new(mode),
                 OsStr::new("--"),
                 local_arg,
                 staged_arg,
