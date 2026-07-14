@@ -87,7 +87,7 @@ fn add_check(cfg: &Config, p: &Platform, root: &Path, out: &mut Vec<Step>) {
                 ));
                 out.push(
                     sudo(vec!["tee".into(), "/etc/apt/sources.list".into()])
-                        .input(debian_sources(&p.codename)),
+                        .input(debian_sources(&p.base_codename)),
                 );
             }
             _ => {}

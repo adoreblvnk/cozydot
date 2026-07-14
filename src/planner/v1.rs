@@ -3,7 +3,7 @@ use crate::{
         AptComponent, AptSourceToken, AptSources, AptUpdate, AssetSelector, ConfigV1,
         ConfiguredRepositorySuite, DirectFormat, DirectPackage, HttpsUrl, Theme,
     },
-    platform::{Architecture, Platform},
+    platform::{Architecture, ManagedAptSources, Platform},
 };
 use anyhow::{bail, Context, Result};
 use std::{
@@ -70,12 +70,7 @@ pub enum SystemAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AptSourcesIntent {
-    Managed {
-        distro: String,
-        upstream: String,
-        codename: AptSourceToken,
-        components: Option<Vec<AptComponent>>,
-    },
+    Managed(ManagedAptSources),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,7 +358,7 @@ pub fn plan(config: &ConfigV1, platform: &Platform, dotfiles_root: &Path) -> Res
                 .with_context(|| format!("packages.repositories[{index}].source.urls"))?;
             let suite = match &repository.source.suite {
                 ConfiguredRepositorySuite::System => RepositorySuite::ResolvedSystem(
-                    AptSourceToken::parse(&platform.codename).with_context(|| {
+                    AptSourceToken::parse(&platform.distro_codename).with_context(|| {
                         format!("packages.repositories[{index}].source.suite: invalid system platform codename")
                     })?,
                 ),
@@ -494,15 +489,15 @@ fn plan_system(
     }
     if let Some(apt) = &system.apt {
         if matches!(apt.sources, Some(AptSources::Managed)) {
-            let codename = AptSourceToken::parse(&platform.codename)
-                .context("system.apt.sources: managed requires a valid platform codename")?;
+            let components = apt
+                .components
+                .iter()
+                .flatten()
+                .map(AptComponent::name)
+                .collect::<Vec<_>>();
+            let managed = platform.managed_apt_sources(&components)?;
             sources.push(PlannedAction::System(SystemAction::AptSources(
-                AptSourcesIntent::Managed {
-                    distro: platform.distro.clone(),
-                    upstream: platform.upstream.clone(),
-                    codename,
-                    components: apt.components.clone(),
-                },
+                AptSourcesIntent::Managed(managed),
             )));
         }
         if let Some(enabled) = apt.unattended_upgrades {

@@ -75,30 +75,42 @@ impl Host {
             "sudo",
             r#"printf 'sudo %s\n' "$*" >>"$LOG"
 command=$1; shift
-map_path() { case "$1" in /etc/*|/run/*) printf '%s%s' "$ROOT" "$1" ;; *) printf '%s' "$1" ;; esac; }
+map_path() { case "$1" in /etc/*|/run/*|/usr/share/keyrings/*|/var/lib/cozydot/*) printf '%s%s' "$ROOT" "$1" ;; *) printf '%s' "$1" ;; esac; }
 failure=''; [ ! -f "$TMPDIR/publication-failure" ] || failure=$(cat "$TMPDIR/publication-failure")
 case "$command" in
   stat)
     destination=$(map_path "${!#}")
     if [ "$1" = --format=%f:%u:%g ]; then
       printf '%s:0:0\n' "$(/usr/bin/stat --format=%f -- "$destination")"
+    elif [ "$1" = --format=%f:%s ]; then
+      /usr/bin/stat --format=%f:%s -- "$destination"
     else
       /usr/bin/stat --format=%f -- "$destination"
     fi
     ;;
   cat)
+    logical=${!#}
     destination=$(map_path "${!#}")
-    count=0; [ ! -f "$TMPDIR/publication-cat-count" ] || count=$(cat "$TMPDIR/publication-cat-count")
-    count=$((count + 1)); printf '%s' "$count" >"$TMPDIR/publication-cat-count"
-    if [ -f "$TMPDIR/publication-postcondition-failure" ] && [ "$count" -gt 1 ]; then
-      printf '{}\n'
-      exit
-    fi
-    if [ -f "$TMPDIR/publication-pause-after-read" ] && [ "$count" -eq 1 ]; then
-      touch "$TMPDIR/publication-read-observed"
-      while [ ! -f "$TMPDIR/publication-read-release" ]; do sleep 0.01; done
+    if [ "$logical" = /etc/docker/daemon.json ]; then
+      count=0; [ ! -f "$TMPDIR/publication-cat-count" ] || count=$(cat "$TMPDIR/publication-cat-count")
+      count=$((count + 1)); printf '%s' "$count" >"$TMPDIR/publication-cat-count"
+      if [ -f "$TMPDIR/publication-postcondition-failure" ] && [ "$count" -gt 1 ]; then
+        printf '{}\n'
+        exit
+      fi
+      if [ -f "$TMPDIR/publication-pause-after-read" ] && [ "$count" -eq 1 ]; then
+        touch "$TMPDIR/publication-read-observed"
+        while [ ! -f "$TMPDIR/publication-read-release" ]; do sleep 0.01; done
+      fi
     fi
     /bin/cat -- "$destination"
+    ;;
+  find)
+    [ "$#" -eq 15 ] && [ "$1" = /etc/apt ] && [ "$2" = -xdev ] && [ "$3" = -maxdepth ] && [ "$4" = 2 ] && [ "$5" = '(' ] && [ "$6" = -path ] && [ "$7" = /etc/apt/sources.list ] && [ "$8" = -o ] && [ "$9" = -path ] && [ "${10}" = '/etc/apt/sources.list.d/*.list' ] && [ "${11}" = -o ] && [ "${12}" = -path ] && [ "${13}" = '/etc/apt/sources.list.d/*.sources' ] && [ "${14}" = ')' ] && [ "${15}" = -print0 ] || exit 54
+    apt_root=$(map_path /etc/apt)
+    while IFS= read -r -d '' path; do
+      printf '%s\0' "${path#"$ROOT"}"
+    done < <(/usr/bin/find "$apt_root" -xdev -maxdepth 2 \( -path "$apt_root/sources.list" -o -path "$apt_root/sources.list.d/*.list" -o -path "$apt_root/sources.list.d/*.sources" \) -print0)
     ;;
   install)
     if [ "${1:-}" = -d ]; then
@@ -109,7 +121,8 @@ case "$command" in
     else
       [ "$failure" != stage ] || exit 42
       source=${@: -2:1}; destination=$(map_path "${!#}")
-      /usr/bin/install -m 0644 -- "$source" "$destination"
+      [ "$5" = -m ] && { [ "$6" = 0600 ] || [ "$6" = 0644 ]; } || exit 55
+      /usr/bin/install -m "$6" -- "$source" "$destination"
     fi
     ;;
   cp)
@@ -142,6 +155,7 @@ case "$command" in
     ;;
   mv)
     [ "$failure" != rename ] || exit 44
+    { [ "$failure" != managed-second-rewrite ] || [ "$4" != /etc/apt/sources.list.d/second.list ]; } || exit 56
     [ "$#" -eq 4 ] && [ "$1" = -fT ] && [ "$2" = -- ] || exit 47
     source=$(map_path "$3"); destination=$(map_path "$4")
     /bin/mv -fT -- "$source" "$destination"
@@ -443,6 +457,26 @@ exit 54"#,
 fn docker_local_log_step(max_size: Option<&str>) -> Step {
     Step::workflow(operations::Operation::DockerLocalLog(
         operations::DockerLocalLogOperation::new(max_size.map(str::to_owned)).unwrap(),
+    ))
+}
+
+fn managed_apt_sources_step(
+    distro: &str,
+    release: &str,
+    architecture: Architecture,
+    components: &[&str],
+) -> Step {
+    Step::workflow(operations::Operation::ManagedAptSources(
+        operations::ManagedAptSourcesOperation::new(
+            distro.into(),
+            release.into(),
+            architecture,
+            components
+                .iter()
+                .map(|component| (*component).into())
+                .collect(),
+        )
+        .unwrap(),
     ))
 }
 
@@ -2970,6 +3004,163 @@ fn apt_source_rejects_unsafe_destination_and_content_before_mutation() {
         assert!(!host.run(&step).status.success(), "{contents:?}");
     }
     assert!(host.log().is_empty(), "{}", host.log());
+}
+
+fn files_below(root: &Path) -> Vec<PathBuf> {
+    let mut pending = vec![root.to_owned()];
+    let mut files = Vec::new();
+    while let Some(path) = pending.pop() {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                pending.push(entry.path());
+            } else {
+                files.push(entry.path());
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn managed_apt_migrates_both_formats_preserves_unrelated_state_and_reapplies_as_noop() {
+    let host = Host::new();
+    host.atomic_sudo();
+    let apt = host.root.join("etc/apt");
+    let keyring = host
+        .root
+        .join("usr/share/keyrings/ubuntu-archive-keyring.gpg");
+    fs::create_dir_all(apt.join("sources.list.d")).unwrap();
+    fs::create_dir_all(keyring.parent().unwrap()).unwrap();
+    fs::write(&keyring, b"archive key").unwrap();
+    fs::write(
+        apt.join("sources.list"),
+        b"# keep comment\ndeb http://archive.ubuntu.com/ubuntu noble main\ndeb-src http://archive.ubuntu.com/ubuntu noble main\n",
+    )
+    .unwrap();
+    fs::write(
+        apt.join("sources.list.d/base.sources"),
+        b"Types: deb deb-src\nURIs: https://security.ubuntu.com/ubuntu\nSuites: noble-security\nComponents: main\nX-Unknown: keep\n",
+    )
+    .unwrap();
+    let vendor = b"Types: deb\nURIs: https://vendor.example/apt\nSuites: noble\nComponents: main\nX-Repolib-Name: Vendor\n";
+    fs::write(apt.join("sources.list.d/vendor.sources"), vendor).unwrap();
+    let step = managed_apt_sources_step("ubuntu", "noble", Architecture::Amd64, &["main"]);
+
+    host.run_ok(&step);
+    assert_eq!(
+        fs::read_to_string(apt.join("sources.list")).unwrap(),
+        "# keep comment\ndeb-src http://archive.ubuntu.com/ubuntu noble main\n"
+    );
+    let migrated = fs::read_to_string(apt.join("sources.list.d/base.sources")).unwrap();
+    assert!(migrated.contains("Types: deb-src"));
+    assert!(migrated.contains("X-Unknown: keep"));
+    assert_eq!(
+        fs::read(apt.join("sources.list.d/vendor.sources")).unwrap(),
+        vendor
+    );
+    let owned = fs::read_to_string(apt.join("sources.list.d/cozydot-base.sources")).unwrap();
+    assert!(owned.contains("URIs: https://archive.ubuntu.com/ubuntu"));
+    assert!(owned.contains("URIs: https://security.ubuntu.com/ubuntu"));
+    assert!(owned.contains("Architectures: amd64"));
+
+    let backups = files_below(&host.root.join("var/lib/cozydot/apt-source-backups"));
+    assert_eq!(backups.len(), 2, "{backups:?}");
+    assert!(backups
+        .iter()
+        .all(|path| { fs::metadata(path).unwrap().permissions().mode() & 0o777 == 0o600 }));
+    let owned_renames_before = host
+        .log()
+        .lines()
+        .filter(|line| line.starts_with("sudo mv ") && line.ends_with(OWNED_APT_SOURCE))
+        .count();
+    host.run_ok(&step);
+    let owned_renames_after = host
+        .log()
+        .lines()
+        .filter(|line| line.starts_with("sudo mv ") && line.ends_with(OWNED_APT_SOURCE))
+        .count();
+    assert_eq!(owned_renames_before, 1);
+    assert_eq!(owned_renames_after, owned_renames_before);
+}
+
+const OWNED_APT_SOURCE: &str = "/etc/apt/sources.list.d/cozydot-base.sources";
+
+#[test]
+fn managed_apt_partial_multi_file_failure_keeps_backups_and_retry_converges() {
+    let host = Host::new();
+    host.atomic_sudo();
+    let apt = host.root.join("etc/apt");
+    let keyring = host
+        .root
+        .join("usr/share/keyrings/debian-archive-keyring.gpg");
+    fs::create_dir_all(apt.join("sources.list.d")).unwrap();
+    fs::create_dir_all(keyring.parent().unwrap()).unwrap();
+    fs::write(&keyring, b"archive key").unwrap();
+    let base = b"deb https://deb.debian.org/debian trixie main\n";
+    fs::write(apt.join("sources.list"), base).unwrap();
+    fs::write(apt.join("sources.list.d/second.list"), base).unwrap();
+    fs::write(
+        host._dir.path().join("tmp/publication-failure"),
+        "managed-second-rewrite",
+    )
+    .unwrap();
+    let step = managed_apt_sources_step("debian", "trixie", Architecture::Amd64, &["main"]);
+
+    assert!(!host.run(&step).status.success());
+    assert_eq!(fs::read(apt.join("sources.list")).unwrap(), b"");
+    assert_eq!(
+        fs::read(apt.join("sources.list.d/second.list")).unwrap(),
+        base
+    );
+    assert!(!apt.join("sources.list.d/cozydot-base.sources").exists());
+    assert_eq!(
+        files_below(&host.root.join("var/lib/cozydot/apt-source-backups")).len(),
+        2
+    );
+
+    fs::remove_file(host._dir.path().join("tmp/publication-failure")).unwrap();
+    host.run_ok(&step);
+    assert_eq!(
+        fs::read(apt.join("sources.list.d/second.list")).unwrap(),
+        b""
+    );
+    assert!(apt.join("sources.list.d/cozydot-base.sources").is_file());
+}
+
+#[test]
+fn managed_apt_keyring_preflight_fails_before_source_inspection_or_backup() {
+    for keyring_kind in ["missing", "symlink"] {
+        let host = Host::new();
+        host.atomic_sudo();
+        let apt = host.root.join("etc/apt");
+        fs::create_dir_all(apt.join("sources.list.d")).unwrap();
+        fs::write(
+            apt.join("sources.list"),
+            b"deb https://deb.debian.org/debian trixie main\n",
+        )
+        .unwrap();
+        if keyring_kind == "symlink" {
+            let directory = host.root.join("usr/share/keyrings");
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("foreign-keyring"), b"foreign").unwrap();
+            symlink(
+                "foreign-keyring",
+                directory.join("debian-archive-keyring.gpg"),
+            )
+            .unwrap();
+        }
+        let step = managed_apt_sources_step("debian", "trixie", Architecture::Amd64, &["main"]);
+
+        assert!(!host.run(&step).status.success(), "{keyring_kind}");
+        assert_eq!(
+            fs::read(apt.join("sources.list")).unwrap(),
+            b"deb https://deb.debian.org/debian trixie main\n"
+        );
+        assert!(!host.root.join("var/lib/cozydot").exists());
+        assert!(!host.log().contains("sudo find"), "{}", host.log());
+    }
 }
 
 fn configure_key_fakes(host: &Host) {

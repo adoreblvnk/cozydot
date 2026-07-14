@@ -19,10 +19,15 @@ fn assert_rejected(yaml: &str, expected: &str) {
 }
 
 fn platform(distro: &str, upstream: &str, architecture: Architecture) -> Platform {
+    let codename = match distro {
+        "debian" => "trixie",
+        "kali" => "kali-rolling",
+        _ => "noble",
+    };
     Platform::from_parts(
         distro.into(),
         upstream.into(),
-        "noble".into(),
+        codename.into(),
         "gnome".into(),
         architecture.canonical(),
     )
@@ -182,6 +187,18 @@ fn validates_system_enums_components_and_dependencies() {
             "schema: 1\nsystem:\n  distro: debian\n  apt:\n    sources: managed\n    components: [universe]",
             "unsupported by the configured distribution family",
         ),
+        (
+            "schema: 1\nsystem:\n  distro: linuxmint\n  apt:\n    sources: managed\n    components: [main]",
+            "use preserve",
+        ),
+        (
+            "schema: 1\nsystem:\n  distro: deepin\n  apt:\n    sources: managed",
+            "use preserve",
+        ),
+        (
+            "schema: 1\nsystem:\n  distro: tails\n  apt:\n    sources: managed",
+            "use preserve",
+        ),
     ] {
         assert_rejected(yaml, expected);
     }
@@ -215,6 +232,24 @@ fn validates_system_enums_components_and_dependencies() {
         .unwrap_err()
         .to_string()
         .contains("upstream family"));
+
+    for (distro, upstream) in [
+        ("linuxmint", "ubuntu"),
+        ("linuxmint", "debian"),
+        ("pop", "ubuntu"),
+        ("zorin", "ubuntu"),
+        ("deepin", "debian"),
+        ("tails", "debian"),
+    ] {
+        let error = auto
+            .validate_for_platform(&platform(distro, upstream, Architecture::Amd64))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("use preserve"),
+            "{distro}/{upstream}: {error}"
+        );
+    }
 
     for distro in [
         "auto",

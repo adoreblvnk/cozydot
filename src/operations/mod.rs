@@ -8,6 +8,7 @@ mod downloads;
 mod flatpak;
 mod integrations;
 mod languages;
+mod managed_apt;
 mod npm;
 mod provisioning;
 mod repository;
@@ -20,6 +21,7 @@ pub use direct::{
     GithubRepository,
 };
 pub use integrations::{DockerLocalLogOperation, VsCodeExtensionOperation};
+pub use managed_apt::ManagedAptSourcesOperation;
 pub use npm::{NpmPackageMode, NpmPackageOperation};
 
 use anyhow::{bail, Context, Result};
@@ -50,6 +52,7 @@ pub enum Operation {
         packages: Vec<String>,
     },
     AptMetadataRefresh,
+    ManagedAptSources(ManagedAptSourcesOperation),
     AptCodecs {
         package: String,
     },
@@ -152,6 +155,7 @@ impl Operation {
                     .collect()
             }
             Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
+            Self::ManagedAptSources(operation) => operation.display_args(),
             Self::AptCodecs { package } => vec!["apt-codecs".into(), package.clone()],
             Self::AptPackages { packages } => std::iter::once("apt-packages".into())
                 .chain(packages.clone())
@@ -281,6 +285,7 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
     match operation {
         Operation::AptBootstrapPackages { packages } => apt::bootstrap_packages(&host, packages),
         Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
+        Operation::ManagedAptSources(operation) => managed_apt::execute(&host, operation),
         Operation::AptCodecs { package } => provisioning::apt_codecs(&host, package),
         Operation::AptPackages { packages } => apt::packages(&host, packages),
         Operation::AptPurge { packages } => apt::purge(&host, packages),
