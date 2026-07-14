@@ -1,11 +1,8 @@
-mod appimaged;
-mod apps;
 mod apt;
 mod cargo;
 mod desktop;
 mod direct;
 mod dotfiles;
-mod downloads;
 mod flatpak;
 mod fonts;
 mod integrations;
@@ -14,7 +11,6 @@ mod managed_apt;
 mod npm;
 mod provisioning;
 mod repository;
-mod snap_cleanup;
 mod system;
 mod tools;
 
@@ -43,23 +39,14 @@ use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
     fs::{self, File},
-    io::{self, Write},
+    io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    thread,
-    time::Duration,
 };
 
-const ETXTBSY: i32 = 26;
 const COZYDOT_RUNTIME_DIRECTORY: &str = "/run/cozydot";
 const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
-const ETXTBSY_BACKOFFS: [Duration; 4] = [
-    Duration::from_millis(20),
-    Duration::from_millis(40),
-    Duration::from_millis(80),
-    Duration::from_millis(160),
-];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
@@ -68,9 +55,6 @@ pub enum Operation {
     },
     AptMetadataRefresh,
     ManagedAptSources(ManagedAptSourcesOperation),
-    AptCodecs {
-        package: String,
-    },
     AptPackages {
         packages: Vec<String>,
     },
@@ -84,23 +68,11 @@ pub enum Operation {
         destination: String,
         contents: String,
     },
-    Appimaged {
-        arch: String,
-    },
-    DockerConfig {
-        user: String,
-    },
     DockerGroup,
     DockerLocalLog(DockerLocalLogOperation),
     DesktopSetting(DesktopSettingOperation),
     DirectPackage(DirectPackageOperation),
     Dotfiles(DotfilesOperation),
-    DownloadBinary {
-        name: String,
-        url: String,
-        repo: String,
-        pattern: String,
-    },
     FlatpakEnsureFlathub,
     FlatpakEnsureApps {
         refs: Vec<String>,
@@ -110,26 +82,10 @@ pub enum Operation {
     },
     FnmBootstrap,
     EnsureAdmin(EnsureAdminOperation),
-    GnomeExtension {
-        extension: String,
-    },
     GnomeExtensions(GnomeExtensionsOperation),
-    GnomeDependencies,
-    GnomeDockSettings,
     GnomeDock(GnomeDockOperation),
-    GnomeRoundedCornersSettings,
     GnomeRoundedCorners(GnomeRoundedCornersOperation),
-    GnomeTerminal {
-        terminal: String,
-    },
-    GoInstall {
-        version: String,
-        arch: String,
-    },
     GoToolchain(GoToolchainOperation),
-    NerdFont {
-        font: String,
-    },
     NerdFonts(NerdFontsOperation),
     RepositoryKey {
         url: String,
@@ -138,41 +94,13 @@ pub enum Operation {
     RustupBootstrap,
     RustToolchain(RustToolchainOperation),
     CargoPackageSet(CargoPackageOperation),
-    CargoPackages {
-        packages: Vec<String>,
-        force: bool,
-    },
-    NodeInstall {
-        version: String,
-        npm: Vec<String>,
-        update: bool,
-    },
     NodeToolchain(NodeToolchainOperation),
     NpmPackageSet(NpmPackageOperation),
-    NpmPackages {
-        packages: Vec<String>,
-    },
-    PyenvInstall {
-        update: bool,
-        version: String,
-        pip: bool,
-    },
-    SnapCleanup,
     UbuntuSnap(UbuntuSnapOperation),
     UnattendedUpgrades(UnattendedUpgradesOperation),
-    UvInstall {
-        version_enabled: bool,
-        version: String,
-    },
     UvBootstrap,
     PythonToolchain(PythonToolchainOperation),
-    VirtualBoxConfig {
-        user: String,
-    },
     VirtualBoxGroup,
-    VsCodeExtension {
-        extension: String,
-    },
     VsCodeExtensionSet(VsCodeExtensionOperation),
 }
 
@@ -186,7 +114,6 @@ impl Operation {
             }
             Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
             Self::ManagedAptSources(operation) => operation.display_args(),
-            Self::AptCodecs { package } => vec!["apt-codecs".into(), package.clone()],
             Self::AptPackages { packages } => std::iter::once("apt-packages".into())
                 .chain(packages.clone())
                 .collect(),
@@ -204,14 +131,11 @@ impl Operation {
             Self::AptSource { destination, .. } => {
                 vec!["apt-source".into(), destination.clone()]
             }
-            Self::Appimaged { arch } => vec!["appimaged".into(), arch.clone()],
-            Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
             Self::DockerGroup => vec!["docker-group".into()],
             Self::DockerLocalLog(operation) => operation.display_args(),
             Self::DesktopSetting(operation) => operation.display_args(),
             Self::DirectPackage(package) => package.display_args(),
             Self::Dotfiles(operation) => operation.display_args(),
-            Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
             Self::FlatpakEnsureApps { refs } => std::iter::once("flatpak-ensure-apps".into())
                 .chain(refs.clone())
@@ -221,21 +145,10 @@ impl Operation {
                 .collect(),
             Self::FnmBootstrap => vec!["fnm-bootstrap".into()],
             Self::EnsureAdmin(operation) => operation.display_args(),
-            Self::GnomeExtension { extension } => {
-                vec!["gnome-extension".into(), extension.clone()]
-            }
             Self::GnomeExtensions(operation) => operation.display_args(),
-            Self::GnomeDependencies => vec!["gnome-dependencies".into()],
-            Self::GnomeDockSettings => vec!["gnome-dock-settings".into()],
             Self::GnomeDock(operation) => operation.display_args(),
-            Self::GnomeRoundedCornersSettings => vec!["gnome-rounded-corners-settings".into()],
             Self::GnomeRoundedCorners(operation) => operation.display_args(),
-            Self::GnomeTerminal { terminal } => vec!["gnome-terminal".into(), terminal.clone()],
-            Self::GoInstall { version, arch } => {
-                vec!["go-install".into(), version.clone(), arch.clone()]
-            }
             Self::GoToolchain(operation) => operation.display_args(),
-            Self::NerdFont { font } => vec!["nerdfont".into(), font.clone()],
             Self::NerdFonts(operation) => operation.display_args(),
             Self::RepositoryKey { destination, .. } => {
                 vec!["repository-key".into(), destination.clone()]
@@ -243,59 +156,13 @@ impl Operation {
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
             Self::RustToolchain(operation) => operation.display_args(),
             Self::CargoPackageSet(operation) => operation.display_args(),
-            Self::CargoPackages { packages, force } => {
-                let mut args = vec!["cargo-packages".into()];
-                if *force {
-                    args.push("--force".into());
-                }
-                args.extend(packages.clone());
-                args
-            }
-            Self::NodeInstall {
-                version,
-                npm,
-                update,
-            } => {
-                let mut args = vec!["node-install".into(), version.clone()];
-                if *update {
-                    args.push("--update".into());
-                }
-                args.extend(npm.clone());
-                args
-            }
             Self::NodeToolchain(operation) => operation.display_args(),
             Self::NpmPackageSet(operation) => operation.display_args(),
-            Self::NpmPackages { packages } => std::iter::once("npm-packages".into())
-                .chain(packages.clone())
-                .collect(),
-            Self::PyenvInstall {
-                update,
-                version,
-                pip,
-            } => vec![
-                "pyenv-install".into(),
-                update.to_string(),
-                version.clone(),
-                pip.to_string(),
-            ],
-            Self::SnapCleanup => vec!["snap-cleanup".into()],
             Self::UbuntuSnap(operation) => operation.display_args(),
             Self::UnattendedUpgrades(operation) => operation.display_args(),
-            Self::UvInstall {
-                version_enabled,
-                version,
-            } => vec![
-                "uv-install".into(),
-                version_enabled.to_string(),
-                version.clone(),
-            ],
             Self::UvBootstrap => vec!["uv-bootstrap".into()],
             Self::PythonToolchain(operation) => operation.display_args(),
-            Self::VirtualBoxConfig { user } => vec!["virtualbox-config".into(), user.clone()],
             Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
-            Self::VsCodeExtension { extension } => {
-                vec!["vscode-extension".into(), extension.clone()]
-            }
             Self::VsCodeExtensionSet(operation) => operation.display_args(),
         }
     }
@@ -331,7 +198,6 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
         Operation::AptBootstrapPackages { packages } => apt::bootstrap_packages(&host, packages),
         Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
         Operation::ManagedAptSources(operation) => managed_apt::execute(&host, operation),
-        Operation::AptCodecs { package } => provisioning::apt_codecs(&host, package),
         Operation::AptPackages { packages } => apt::packages(&host, packages),
         Operation::AptPurge { packages } => apt::purge(&host, packages),
         Operation::AptUpgrade { policy } => apt::upgrade(&host, *policy),
@@ -339,70 +205,34 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
             destination,
             contents,
         } => repository::source(&host, destination, contents),
-        Operation::Appimaged { arch } => appimaged::execute(&host, arch),
-        Operation::DockerConfig { user } => apps::docker(&host, user),
         Operation::DockerGroup => integrations::docker_group(&host),
         Operation::DockerLocalLog(operation) => integrations::docker_local_log(&host, operation),
         Operation::DesktopSetting(operation) => desktop::desktop_setting(&host, operation),
         Operation::DirectPackage(package) => direct::execute(&host, package),
         Operation::Dotfiles(operation) => dotfiles::execute(&host, operation),
-        Operation::DownloadBinary {
-            name,
-            url,
-            repo,
-            pattern,
-        } => downloads::binary(&host, name, url, repo, pattern),
         Operation::FlatpakEnsureFlathub => flatpak::ensure_flathub(&host),
         Operation::FlatpakEnsureApps { refs } => flatpak::ensure_apps(&host, refs),
         Operation::FlatpakUpdateApps { refs } => flatpak::update_apps(&host, refs),
         Operation::FnmBootstrap => languages::fnm_bootstrap(&host),
         Operation::EnsureAdmin(operation) => system::ensure_admin(&host, operation),
-        Operation::GnomeExtension { extension } => desktop::gnome_extension(&host, extension),
         Operation::GnomeExtensions(operation) => desktop::gnome_extensions(&host, operation),
-        Operation::GnomeDependencies => provisioning::gnome_dependencies(&host),
-        Operation::GnomeDockSettings => provisioning::gnome_dock_settings(&host),
         Operation::GnomeDock(operation) => desktop::gnome_dock(&host, operation),
-        Operation::GnomeRoundedCornersSettings => provisioning::gnome_rounded_settings(&host),
         Operation::GnomeRoundedCorners(operation) => {
             desktop::gnome_rounded_corners(&host, operation)
         }
-        Operation::GnomeTerminal { terminal } => apps::gnome_terminal(&host, terminal),
-        Operation::GoInstall { version, arch } => languages::go(&host, version, arch),
         Operation::GoToolchain(operation) => tools::execute_go(&host, operation),
-        Operation::NerdFont { font } => downloads::nerdfont(&host, font),
         Operation::NerdFonts(operation) => fonts::execute(&host, operation),
         Operation::RepositoryKey { url, destination } => repository::key(&host, url, destination),
         Operation::RustupBootstrap => provisioning::rustup(&host),
         Operation::RustToolchain(operation) => tools::execute_rust(&host, operation),
         Operation::CargoPackageSet(operation) => cargo::execute(&host, operation),
-        Operation::CargoPackages { packages, force } => {
-            provisioning::cargo_packages(&host, packages, *force)
-        }
-        Operation::NodeInstall {
-            version,
-            npm,
-            update,
-        } => languages::node(&host, version, npm, *update),
         Operation::NodeToolchain(operation) => tools::execute_node(&host, operation),
         Operation::NpmPackageSet(operation) => npm::execute(&host, operation),
-        Operation::NpmPackages { packages } => languages::npm_packages(&host, packages),
-        Operation::PyenvInstall {
-            update,
-            version,
-            pip,
-        } => languages::pyenv(&host, *update, version, *pip),
-        Operation::SnapCleanup => snap_cleanup::execute(&host),
         Operation::UbuntuSnap(operation) => system::ubuntu_snap(&host, operation),
         Operation::UnattendedUpgrades(operation) => system::unattended_upgrades(&host, operation),
-        Operation::UvInstall {
-            version_enabled,
-            version,
-        } => languages::uv(&host, *version_enabled, version),
         Operation::UvBootstrap => languages::uv_bootstrap(&host),
         Operation::PythonToolchain(operation) => tools::execute_python(&host, operation),
-        Operation::VirtualBoxConfig { user } => apps::virtualbox(&host, user),
         Operation::VirtualBoxGroup => integrations::virtualbox_group(&host),
-        Operation::VsCodeExtension { extension } => apps::vscode_extension(&host, extension),
         Operation::VsCodeExtensionSet(operation) => {
             integrations::vscode_extensions(&host, operation)
         }
@@ -440,39 +270,6 @@ impl Host<'_> {
         S: AsRef<OsStr>,
     {
         let output = self.run(program, args)?;
-        if !output.status.success() {
-            bail!(
-                "{operation}: {program} failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        Ok(output)
-    }
-
-    pub fn require_retrying_etxtbsy<I, S>(
-        &self,
-        operation: &str,
-        program: &str,
-        args: I,
-    ) -> Result<Output>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let args = args
-            .into_iter()
-            .map(|arg| arg.as_ref().to_os_string())
-            .collect::<Vec<_>>();
-        let output = output_retrying_etxtbsy(|| {
-            let mut command = Command::new(program);
-            command.args(&args);
-            for (key, value) in self.env {
-                command.env(key, value);
-            }
-            command
-        })
-        .with_context(|| format!("{operation}: start {}", display(program, &args)))?;
         if !output.status.success() {
             bail!(
                 "{operation}: {program} failed ({}): {}",
@@ -644,30 +441,6 @@ impl Host<'_> {
     }
 }
 
-fn output_retrying_etxtbsy(mut command: impl FnMut() -> Command) -> io::Result<Output> {
-    for attempt in 0..=ETXTBSY_BACKOFFS.len() {
-        let mut command = command();
-        command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        match command.spawn() {
-            Ok(child) => return child.wait_with_output(),
-            Err(error) if error.raw_os_error() == Some(ETXTBSY) => {
-                let Some(backoff) = ETXTBSY_BACKOFFS.get(attempt) else {
-                    return Err(io::Error::new(
-                        error.kind(),
-                        format!(
-                            "ETXTBSY persisted across {} spawn attempts: {error}",
-                            ETXTBSY_BACKOFFS.len() + 1
-                        ),
-                    ));
-                };
-                thread::sleep(*backoff);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    unreachable!()
-}
-
 pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
@@ -769,27 +542,8 @@ fn display(program: &str, args: &[OsString]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{output_retrying_etxtbsy, publish_file, ETXTBSY};
-    use std::{
-        fs::{self, OpenOptions},
-        io::Write,
-        os::unix::fs::{MetadataExt, PermissionsExt},
-        process::Command,
-        thread,
-        time::Duration,
-    };
-
-    fn executable(directory: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
-        let path = directory.join(name);
-        let mut temporary = tempfile::NamedTempFile::new_in(directory).unwrap();
-        write!(temporary, "#!/bin/sh\n{body}\n").unwrap();
-        temporary.flush().unwrap();
-        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
-        temporary.as_file().sync_all().unwrap();
-        temporary.into_temp_path().persist(&path).unwrap();
-        fs::File::open(directory).unwrap().sync_all().unwrap();
-        path
-    }
+    use super::publish_file;
+    use std::{fs, os::unix::fs::MetadataExt};
 
     #[test]
     fn downloaded_files_publish_across_filesystems() {
@@ -814,85 +568,5 @@ mod tests {
 
         publish_file(&source, &destination, 0o755).unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"complete artifact");
-    }
-
-    #[test]
-    fn etxtbsy_spawn_retries_until_writer_closes() {
-        let directory = tempfile::tempdir().unwrap();
-        let program = executable(directory.path(), "eventually-ready", "exit 0");
-        let writer = OpenOptions::new().write(true).open(&program).unwrap();
-        assert_eq!(
-            Command::new(&program).spawn().unwrap_err().raw_os_error(),
-            Some(ETXTBSY)
-        );
-        let closer = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
-            drop(writer);
-        });
-        let mut attempts = 0;
-
-        let output = output_retrying_etxtbsy(|| {
-            attempts += 1;
-            Command::new(&program)
-        })
-        .unwrap();
-
-        closer.join().unwrap();
-        assert!(output.status.success());
-        assert!(attempts > 1);
-        assert!(attempts <= 5);
-    }
-
-    #[test]
-    fn persistent_etxtbsy_exhausts_five_spawn_attempts() {
-        let directory = tempfile::tempdir().unwrap();
-        let program = executable(directory.path(), "always-busy", "exit 0");
-        let _writer = OpenOptions::new().write(true).open(&program).unwrap();
-        let mut attempts = 0;
-
-        let error = output_retrying_etxtbsy(|| {
-            attempts += 1;
-            Command::new(&program)
-        })
-        .unwrap_err();
-
-        assert_eq!(attempts, 5);
-        assert!(error.to_string().contains("ETXTBSY"));
-        assert!(error.to_string().contains("5 spawn attempts"));
-    }
-
-    #[test]
-    fn non_etxtbsy_spawn_errors_are_not_retried() {
-        let directory = tempfile::tempdir().unwrap();
-        let inaccessible = executable(directory.path(), "inaccessible", "exit 0");
-        fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o644)).unwrap();
-
-        for (program, expected_error) in [(inaccessible, 13), (directory.path().join("missing"), 2)]
-        {
-            let mut attempts = 0;
-            let error = output_retrying_etxtbsy(|| {
-                attempts += 1;
-                Command::new(&program)
-            })
-            .unwrap_err();
-            assert_eq!(error.raw_os_error(), Some(expected_error));
-            assert_eq!(attempts, 1);
-        }
-    }
-
-    #[test]
-    fn nonzero_exit_is_not_retried() {
-        let directory = tempfile::tempdir().unwrap();
-        let program = executable(directory.path(), "fails", "exit 42");
-        let mut attempts = 0;
-
-        let output = output_retrying_etxtbsy(|| {
-            attempts += 1;
-            Command::new(&program)
-        })
-        .unwrap();
-
-        assert_eq!(output.status.code(), Some(42));
-        assert_eq!(attempts, 1);
     }
 }

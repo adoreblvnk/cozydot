@@ -1,7 +1,6 @@
 use cozydot::{
-    config::Config,
-    operations, planner,
-    platform::{Architecture, Platform},
+    operations,
+    platform::Architecture,
     runner::{command_exists_in, Condition, Step},
 };
 use std::{
@@ -11,17 +10,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-
-fn platform(distro: &str) -> Platform {
-    Platform::from_parts(
-        distro.into(),
-        "ubuntu".into(),
-        "noble".into(),
-        "gnome".into(),
-        "x86_64",
-    )
-    .unwrap()
-}
 
 struct Host {
     _dir: tempfile::TempDir,
@@ -75,7 +63,7 @@ impl Host {
             "sudo",
             r#"printf 'sudo %s\n' "$*" >>"$LOG"
 command=$1; shift
-map_path() { case "$1" in /etc/*|/run/*|/usr/share/keyrings/*|/var/lib/cozydot/*) printf '%s%s' "$ROOT" "$1" ;; *) printf '%s' "$1" ;; esac; }
+map_path() { case "$1" in /etc/*|/run/*|/snap|/var/snap|/var/lib/snapd|/usr/share/keyrings/*|/var/lib/cozydot/*) printf '%s%s' "$ROOT" "$1" ;; *) printf '%s' "$1" ;; esac; }
 failure=''; [ ! -f "$TMPDIR/publication-failure" ] || failure=$(cat "$TMPDIR/publication-failure")
 case "$command" in
   stat)
@@ -161,7 +149,19 @@ case "$command" in
     /bin/mv -fT -- "$source" "$destination"
     ;;
   rm)
-    /bin/rm -f -- "$(map_path "${!#}")"
+    if [ "${1:-}" = -rf ]; then
+      shift; [ "${1:-}" != -- ] || shift
+      for path in "$@"; do /bin/rm -rf -- "$(map_path "$path")"; done
+    else
+      /bin/rm -f -- "$(map_path "${!#}")"
+    fi
+    ;;
+  apt-get|snap|systemctl)
+    command "$command" "$@"
+    ;;
+  DEBIAN_FRONTEND=noninteractive)
+    program=$1; shift
+    command "$program" "$@"
     ;;
   *) exit 45 ;;
 esac"#,
@@ -333,19 +333,6 @@ esac"#,
     }
 }
 
-fn plans(config: &str, command: &str, distro: &str) -> Vec<Step> {
-    let cfg = Config::load(Path::new(config)).unwrap();
-    planner::plan(command, &cfg, &platform(distro), Path::new(".")).unwrap()
-}
-
-fn step_containing(steps: &[Step], needle: &str) -> Step {
-    steps
-        .iter()
-        .find(|step| step.display().contains(needle))
-        .unwrap_or_else(|| panic!("no planned step contains {needle}"))
-        .clone()
-}
-
 fn direct_step(
     format: operations::DirectPackageFormat,
     provides: &[&str],
@@ -421,6 +408,10 @@ fn python_toolchain_step(version: &str) -> Step {
     ))
 }
 
+fn bootstrap_step(operation: operations::Operation) -> Step {
+    Step::workflow(operation)
+}
+
 fn nerd_fonts_step(families: &[&str]) -> Step {
     Step::workflow(operations::Operation::NerdFonts(
         operations::NerdFontsOperation::new(
@@ -476,6 +467,18 @@ fn gnome_rounded_corners_step() -> Step {
 fn ensure_admin_step() -> Step {
     Step::workflow(operations::Operation::EnsureAdmin(
         operations::EnsureAdminOperation::new(),
+    ))
+}
+
+fn unattended_upgrades_step(enabled: bool) -> Step {
+    Step::workflow(operations::Operation::UnattendedUpgrades(
+        operations::UnattendedUpgradesOperation::new(enabled),
+    ))
+}
+
+fn ubuntu_snap_step(enabled: bool) -> Step {
+    Step::workflow(operations::Operation::UbuntuSnap(
+        operations::UbuntuSnapOperation::new(enabled),
     ))
 }
 
@@ -539,6 +542,54 @@ fn configure_python_toolchain_fake(host: &Host) {
 [ "$1" = python ] || exit 40
 if [ "$2" = find ]; then [ -f "$TMPDIR/python-version" ] || exit 1; cat "$TMPDIR/python-version"; exit; fi
 if [ "$2" = install ]; then printf '3.13.7\n' >"$TMPDIR/python-version"; exit; fi
+exit 41"#,
+    );
+}
+
+fn configure_system_state_fakes(host: &Host) {
+    host.atomic_sudo();
+    host.fake(
+        "dpkg-query",
+        r#"{ printf 'dpkg-query'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+package=${!#}
+if [ -f "$TMPDIR/package-$package" ]; then printf '%s\tii \n' "$package"; else exit 1; fi"#,
+    );
+    host.fake(
+        "apt-get",
+        r#"{ printf 'apt-get'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+for argument in "$@"; do
+  case "$argument" in
+    *+) touch "$TMPDIR/package-${argument%+}" ;;
+    *-) rm -f "$TMPDIR/package-${argument%-}" ;;
+  esac
+done"#,
+    );
+    host.fake(
+        "systemctl",
+        r#"{ printf 'systemctl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = --quiet ]; then
+  query=$2; unit=${3//./_}
+  [ -f "$TMPDIR/systemd-$unit-${query#is-}" ]
+  exit
+fi
+action=$1; shift
+[ "${1:-}" != --now ] || shift
+unit=${1//./_}
+case "$action" in
+  enable) touch "$TMPDIR/systemd-$unit-enabled" "$TMPDIR/systemd-$unit-active" ;;
+  disable) rm -f "$TMPDIR/systemd-$unit-enabled" "$TMPDIR/systemd-$unit-active" ;;
+  *) exit 40 ;;
+esac"#,
+    );
+    host.fake(
+        "snap",
+        r#"{ printf 'snap'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = list ]; then
+  printf 'Name Version Rev Tracking Publisher Notes\n'
+  [ ! -f "$TMPDIR/snap-firefox" ] || printf 'firefox 1 1 latest canonical -\n'
+  exit
+fi
+if [ "$1" = remove ] && [ "$2" = --purge ]; then rm -f "$TMPDIR/snap-$3"; exit; fi
 exit 41"#,
     );
 }
@@ -627,8 +678,17 @@ fn managed_apt_sources_step(
 }
 
 fn assert_lock_released(path: &Path) {
-    let file = fs::File::open(path).unwrap();
-    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+    for _ in 0..100 {
+        let file = fs::File::open(path).unwrap();
+        match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+            Ok(()) => return,
+            Err(rustix::io::Errno::WOULDBLOCK) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(error) => panic!("unexpected lock probe failure: {error}"),
+        }
+    }
+    panic!("Docker operation did not release {}", path.display());
 }
 
 fn vscode_extension_step(extensions: &[&str]) -> Step {
@@ -1523,163 +1583,6 @@ fn vscode_state_install_and_postcondition_failures_propagate() {
 }
 
 #[test]
-#[ignore = "superseded by schema-v1 typed Go tests"]
-fn latest_go_ignores_prereleases_and_verifies_matching_stable_checksum() {
-    let host = Host::new();
-    let fixture = Path::new("tests/fixtures/go-releases-prerelease-first.json");
-    host.fake(
-        "curl",
-        &format!(
-            r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; url=''
-while [ "$#" -gt 0 ]; do
-  case "$1" in -o) out=$2; shift 2 ;; http*) url=$1; shift ;; *) shift ;; esac
-done
-if [[ "$url" == *'mode=json'* ]]; then cat '{}'; else printf archive >"$out"; fi"#,
-            fixture.display()
-        ),
-    );
-    host.fake("go", "printf 'go version go1.25.7 linux/amd64\n'");
-    host.fake("sha256sum", "input=$(cat); printf 'sha256sum %s\\n' \"$input\" >>\"$LOG\"; [[ \"$input\" == cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc* ]]");
-    host.fake(
-        "tar",
-        r#"printf 'tar %s\n' "$*" >>"$LOG"
-if [ "$1" = -C ]; then mkdir -p "$2/go/bin"; printf '#!/bin/sh\n' >"$2/go/bin/go"; chmod +x "$2/go/bin/go"; fi"#,
-    );
-    host.logging_fake("sudo");
-    let step = step_containing(
-        &plans("configs/cli.yaml", "install", "ubuntu"),
-        "workflow go-install",
-    );
-    host.run_ok(&step);
-    let log = host.log();
-    assert!(log.contains("include=all"));
-    assert!(log.contains("go1.26.1.linux-amd64.tar.gz"));
-    assert!(
-        log.contains("sha256sum cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-    );
-    assert!(!log.contains("go1.27rc2.linux"));
-}
-
-#[test]
-fn exact_go_version_reruns_without_release_metadata() {
-    let host = Host::new();
-    host.fake("go", "printf 'go version go1.26.1 linux/amd64\\n'");
-    host.fake("curl", "printf 'unexpected curl\\n' >>\"$LOG\"; exit 42");
-    let step = Step::workflow(operations::Operation::GoInstall {
-        version: "1.26.1".into(),
-        arch: "amd64".into(),
-    });
-    host.run_ok(&step);
-    assert!(!host.log().contains("unexpected curl"), "{}", host.log());
-}
-
-#[test]
-#[ignore = "superseded by schema-v1 FNM and npm tests"]
-fn fresh_fnm_bootstrap_exposes_npm_for_configured_packages_in_same_step() {
-    let host = Host::new();
-    host.fake(
-        "curl",
-        r#"printf 'fnm-installer-download\n' >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-cat >"$out" <<'INSTALL'
-#!/bin/bash
-mkdir -p "$XDG_DATA_HOME/fnm"
-cat >"$XDG_DATA_HOME/fnm/fnm" <<'FNM'
-#!/bin/bash
-printf 'fnm %s\n' "$*" >>"$LOG"
-case "$1" in
- env) printf 'export FNM_MULTISHELL_PATH="%s/multishell"\nexport PATH="%s:$PATH"\n' "$XDG_DATA_HOME/fnm" "$XDG_DATA_HOME/fnm" ;;
- install) [ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }; touch "$TMPDIR/fnm-node-installed" ;;
- use) [ -f "$TMPDIR/fnm-node-installed" ] ;;
- current) if [ -f "$TMPDIR/fnm-node-installed" ]; then printf 'v22.1.0\n'; else printf 'none\n'; fi ;;
- default) if [ "$#" -gt 1 ]; then touch "$TMPDIR/fnm-default-set"; elif [ -f "$TMPDIR/fnm-default-set" ]; then printf 'v22.1.0\n'; fi ;;
-esac
-FNM
-cat >"$XDG_DATA_HOME/fnm/npm" <<'NPM'
-#!/bin/bash
-[ -n "${FNM_MULTISHELL_PATH:-}" ] || { printf 'missing fnm environment\n' >&2; exit 1; }
-printf 'npm %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = list ]; then
-  [ -f "$TMPDIR/npm-opencode-installed" ] || exit 1
-fi
-if [ "${1:-}" = install ]; then touch "$TMPDIR/npm-opencode-installed"; fi
-NPM
-chmod +x "$XDG_DATA_HOME/fnm/fnm" "$XDG_DATA_HOME/fnm/npm"
-INSTALL"#,
-    );
-    let step = step_containing(
-        &plans("configs/cli.yaml", "install", "ubuntu"),
-        "workflow node-install",
-    );
-    host.run_ok(&step);
-    host.run_ok(&step);
-    let log = host.log();
-    assert_eq!(log.matches("fnm install --lts --use").count(), 1, "{log}");
-    assert!(log.contains("fnm use v22.1.0"));
-    assert_eq!(log.matches("fnm-installer-download").count(), 1, "{log}");
-    assert_eq!(log.matches("npm install --global").count(), 1, "{log}");
-    assert!(log.contains("npm list --global --depth=0 opencode-ai"));
-    assert!(log.contains("opencode-ai"));
-}
-
-#[test]
-#[ignore = "superseded by schema-v1 Rust and Cargo tests"]
-fn fresh_rustup_cargo_path_bootstraps_binstall_and_installs_packages() {
-    let host = Host::new();
-    host.fake(
-        "curl",
-        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-cat >"$out" <<'INSTALL'
-#!/bin/bash
-mkdir -p "$HOME/.cargo/bin"
-cat >"$HOME/.cargo/bin/rustup" <<'CMD'
-#!/bin/bash
-printf 'rustup %s\n' "$*" >>"$LOG"
-CMD
-cat >"$HOME/.cargo/bin/cargo" <<'CMD'
-#!/bin/bash
-printf 'cargo %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = install ] && [ "${2:-}" = cargo-binstall ]; then
-  cat >"$HOME/.cargo/bin/cargo-binstall" <<'BIN'
-#!/bin/bash
-printf 'cargo-binstall %s\n' "$*" >>"$LOG"
-BIN
-  chmod +x "$HOME/.cargo/bin/cargo-binstall"
-elif [ "${1:-}" = binstall ]; then
-  command cargo-binstall "${@:2}"
-fi
-CMD
-chmod +x "$HOME/.cargo/bin/rustup" "$HOME/.cargo/bin/cargo"
-INSTALL"#,
-    );
-    let steps = plans("configs/cli.yaml", "install", "ubuntu");
-    host.run_ok(&step_containing(&steps, "workflow rustup-bootstrap"));
-    assert!(
-        host.home.join(".cargo/bin/cargo").is_file(),
-        "rustup bootstrap did not create cargo; log: {}",
-        host.log()
-    );
-    host.run_ok(&step_containing(&steps, "workflow cargo-packages"));
-    let log = host.log();
-    assert!(
-        log.contains("cargo install cargo-binstall --locked"),
-        "{log}"
-    );
-    assert!(log.contains("cargo-binstall --no-confirm"), "{log}");
-}
-
-#[test]
-fn configured_cargo_packages_fail_when_bootstrap_did_not_create_cargo() {
-    let host = Host::new();
-    let step = Step::workflow(operations::Operation::CargoPackages {
-        packages: vec!["bat --locked".into()],
-        force: false,
-    });
-    assert!(!host.run(&step).status.success());
-}
-
-#[test]
 fn schema_v1_cargo_ensure_installs_only_missing_packages_in_order_and_is_retry_safe() {
     let host = Host::new();
     configure_cargo_package_fakes(&host, "present v1.2.3:\n    present\n");
@@ -1865,82 +1768,6 @@ exit 63"#,
         ))
         .status
         .success());
-}
-
-#[test]
-#[ignore = "legacy apply mutation was removed by schema v1"]
-fn real_cli_check_disables_purge_after_fake_package_purge() {
-    let host = Host::new();
-    let root = host.home.join(".config/cozydot");
-    fs::create_dir_all(root.join("dotfiles/bash")).unwrap();
-    fs::copy("dotfiles/bash/.bashrc", root.join("dotfiles/bash/.bashrc")).unwrap();
-    let yaml = fs::read_to_string("configs/cli.yaml")
-        .unwrap()
-        .replace("!enabled", "!disabled")
-        .replace("purge: !disabled", "purge: !enabled")
-        .replace("    - docker.io\n", "    - fake-package\n")
-        .replace("distroCfg: true", "distroCfg: false")
-        .replace("rustupCheck: true", "rustupCheck: false")
-        .replace("  cargo: true", "  cargo: false");
-    fs::write(root.join("cozydot.yaml"), yaml).unwrap();
-    host.fake(
-        "dpkg-query",
-        r#"[ "${1:-}" = -W ] && [ "${2:-}" = '-f=${db:Status-Abbrev}\n' ] && printf 'ii \n'"#,
-    );
-    host.logging_fake("sudo");
-    let output = Command::new(assert_cmd::cargo::cargo_bin!("cozydot"))
-        .arg("apply")
-        .env("HOME", &host.home)
-        .env("USER", "tester")
-        .env("LOG", &host.log)
-        .env("PATH", format!("{}:/usr/bin:/bin", host.bin.display()))
-        .env("XDG_CONFIG_HOME", host.home.join(".config"))
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let updated = fs::read_to_string(root.join("cozydot.yaml")).unwrap();
-    assert!(updated.contains("purge: !disabled"));
-    assert!(updated.contains("fake-package"));
-    assert!(host.log().contains("sudo apt-get purge -qq fake-package"));
-}
-
-#[test]
-#[ignore = "superseded by schema-v1 backup-before-Stow tests"]
-fn bashrc_regular_file_is_replaced_but_symlink_is_preserved() {
-    let host = Host::new();
-    let source = host.home.join("dotfiles/bash/.bashrc");
-    fs::create_dir_all(source.parent().unwrap()).unwrap();
-    fs::write(&source, "managed\n").unwrap();
-    fs::write(host.home.join(".bashrc"), "old\n").unwrap();
-    let cfg = Config::load(Path::new("configs/default.yaml")).unwrap();
-    let mut step = planner::plan("check", &cfg, &platform("ubuntu"), &host.home)
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap();
-    let Step::Shell(command) = &mut step else {
-        panic!("expected shell bridge");
-    };
-    *command.args.last_mut().unwrap() = host.home.join(".bashrc").display().to_string();
-    host.run_ok(&step);
-    assert_eq!(
-        fs::read_to_string(host.home.join(".bashrc")).unwrap(),
-        "managed\n"
-    );
-    fs::remove_file(host.home.join(".bashrc")).unwrap();
-    let target = host.home.join("custom-bashrc");
-    fs::write(&target, "custom\n").unwrap();
-    symlink(&target, host.home.join(".bashrc")).unwrap();
-    host.run_ok(&step);
-    assert!(fs::symlink_metadata(host.home.join(".bashrc"))
-        .unwrap()
-        .file_type()
-        .is_symlink());
-    assert_eq!(fs::read_to_string(target).unwrap(), "custom\n");
 }
 
 #[test]
@@ -3502,257 +3329,6 @@ fn repository_key_accepts_canonical_https_url_forms_before_curl() {
 }
 
 #[test]
-#[ignore = "superseded by schema-v1 system lowering"]
-fn ubuntu_and_mint_codecs_execute_apt_update_before_install() {
-    for (distro, package) in [
-        ("ubuntu", "ubuntu-restricted-extras"),
-        ("linuxmint", "mint-meta-codecs"),
-    ] {
-        let host = Host::new();
-        host.fake("dpkg-query", "exit 1");
-        host.logging_fake("sudo");
-        let step = step_containing(&plans("configs/default.yaml", "check", distro), package);
-        host.run_ok(&step);
-        let log = host.log();
-        let update = log.find("apt-get update -qq").unwrap();
-        let install = log.find(&format!("apt-get install -qq {package}")).unwrap();
-        assert!(update < install, "{log}");
-    }
-}
-
-#[test]
-#[ignore = "appimaged is not part of schema v1"]
-fn appimaged_active_and_inactive_branches_execute_against_fake_state() {
-    for active in [true, false] {
-        let host = Host::new();
-        host.fake(
-            "systemctl",
-            if active {
-                "printf 'systemctl %s\\n' \"$*\" >>\"$LOG\"; exit 0"
-            } else {
-                r#"printf 'systemctl %s\n' "$*" >>"$LOG"
-if [ "$*" = '--user -q is-active appimaged' ]; then [ -f "$TMPDIR/appimaged-active" ]; fi"#
-            },
-        );
-        host.fake(
-            "sudo",
-            r#"printf 'sudo %s\n' "$*" >>"$LOG"
-if [ "$*" = 'apt-get install -qq libfuse2' ]; then touch "$TMPDIR/fuse-installed"; fi"#,
-        );
-        host.fake("apt-cache", "exit 1");
-        host.fake("dpkg", if active { "exit 0" } else { "exit 1" });
-        host.fake(
-            "curl",
-            r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-if [ -n "$out" ]; then printf '#!/bin/bash\n[ -f "$TMPDIR/fuse-installed" ] || exit 42\ntouch "$TMPDIR/appimaged-active"\nprintf "appimaged-run\\n" >>"$LOG"\n' >"$out"; else printf '{"assets":[{"name":"appimaged-x86_64.AppImage","browser_download_url":"https://example.test/appimaged.AppImage"}]}\n'; fi"#,
-        );
-        let step = step_containing(
-            &plans("configs/default.yaml", "check", "ubuntu"),
-            "workflow appimaged",
-        );
-        host.run_ok(&step);
-        let log = host.log();
-        assert_eq!(log.contains("appimaged-run"), !active);
-        if !active {
-            assert!(log.contains("systemctl --user daemon-reload"), "{log}");
-            assert_eq!(
-                log.matches("systemctl --user -q is-active appimaged")
-                    .count(),
-                2
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore = "superseded by schema-v1 Ubuntu Snap operation"]
-fn snap_cleanup_parses_packages_and_handles_present_and_absent_snap() {
-    for present in [true, false] {
-        let host = Host::new();
-        host.fake("systemctl", "exit 1");
-        host.logging_fake("sudo");
-        if present {
-            host.fake(
-                "snap",
-                r#"printf 'snap %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = list ]; then
-  printf 'Name Version Rev Tracking Publisher Notes\nfirefox 1 1 latest x -\ncore22 1 1 latest x -\nbare 1 1 latest x -\nsnapd 1 1 latest x -\n'
-fi"#,
-            );
-        }
-        let step = step_containing(
-            &plans("configs/default.yaml", "check", "ubuntu"),
-            "workflow snap-cleanup",
-        );
-        let output = host.run_with_path(&step, host.bin.display().to_string());
-        assert!(
-            output.status.success(),
-            "{} failed: {}",
-            step.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let log = host.log();
-        assert_eq!(
-            log.contains("snap remove --purge firefox"),
-            present,
-            "{log}"
-        );
-        assert_eq!(
-            log.contains("sudo snap remove --purge core22"),
-            present,
-            "{log}"
-        );
-        assert_eq!(log.contains("apt-get purge -qq snapd"), present, "{log}");
-    }
-}
-
-#[test]
-#[ignore = "superseded by typed existing-product integration tests"]
-fn group_membership_branches_only_modify_missing_membership() {
-    for member in [true, false] {
-        let host = Host::new();
-        host.logging_fake("docker");
-        let planned_user = std::env::var("USER").unwrap_or_else(|_| "user".into());
-        host.fake(
-            "getent",
-            &if member {
-                format!("printf 'docker:x:999:{planned_user}\\n'")
-            } else {
-                "printf 'docker:x:999:\\n'".into()
-            },
-        );
-        host.fake(
-            "sudo",
-            "printf 'sudo %s\\n' \"$*\" >>\"$LOG\"; if [ \"${1:-}\" = cat ]; then printf '{}\\n'; elif [ \"${1:-}\" = tee ]; then cat >/dev/null; fi",
-        );
-        host.logging_fake("newgrp");
-        let step = step_containing(
-            &plans("configs/full.yaml", "configure", "ubuntu"),
-            "workflow docker-config",
-        );
-        host.run_ok(&step);
-        assert_eq!(
-            host.log().contains(&format!(
-                "usermod -aG docker {}",
-                std::env::var("USER").unwrap_or_else(|_| "user".into())
-            )),
-            !member,
-            "{}",
-            host.log()
-        );
-    }
-}
-
-#[test]
-fn enabled_desktop_integrations_fail_or_install_dependencies_instead_of_silently_skipping() {
-    let host = Host::new();
-    host.logging_fake("sudo");
-    host.run_ok(&Step::workflow(operations::Operation::GnomeDependencies));
-    assert!(host.log().contains("dconf-cli"), "{}", host.log());
-
-    let extension = Step::workflow(operations::Operation::GnomeExtension {
-        extension: "example@test".into(),
-    });
-    assert!(!host.run(&extension).status.success());
-    let vscode = Step::workflow(operations::Operation::VsCodeExtension {
-        extension: "example.test".into(),
-    });
-    assert!(!host.run(&vscode).status.success());
-    let terminal = Step::workflow(operations::Operation::GnomeTerminal {
-        terminal: "definitely-missing-terminal".into(),
-    });
-    assert!(!host.run(&terminal).status.success());
-}
-
-#[test]
-#[ignore = "superseded by typed GNOME extension tests"]
-fn gnome_extension_present_enables_and_absent_installs() {
-    let steps = plans("configs/full.yaml", "configure", "ubuntu");
-    let step = step_containing(&steps, "workflow gnome-extension");
-    let Step::Workflow(operations::Operation::GnomeExtension { ref extension }) = step else {
-        panic!("expected GNOME extension workflow");
-    };
-    let extension = extension.clone();
-    for present in [true, false] {
-        let host = Host::new();
-        host.fake(
-            "gnome-extensions",
-            &format!(
-                r#"printf 'gnome-extensions %s\n' "$*" >>"$LOG"
-if [ "${{1:-}}" = install ]; then touch "$TMPDIR/gnome-extension-loaded"; fi
-if [ "${{1:-}}" = list ] && {{ [ {present} = true ] || [ -f "$TMPDIR/gnome-extension-loaded" ]; }}; then printf '%s\n' '{extension}'; fi"#
-            ),
-        );
-        host.fake("gnome-shell", "printf 'GNOME Shell 48.4\\n'");
-        host.fake(
-            "curl",
-            r#"printf 'curl %s\n' "$*" >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{"shell_version_map":{"48":{"version":13},"50":{"version":23}}}\n'"#,
-        );
-        host.run_ok(&step);
-        let log = host.log();
-        assert!(log.contains("gnome-extensions enable"), "{log}");
-        assert_eq!(log.contains("gnome-extensions install --force"), !present);
-        if !present {
-            assert!(log.contains(".v13.shell-extension.zip"), "{log}");
-            assert!(!log.contains(".v23.shell-extension.zip"), "{log}");
-        }
-    }
-}
-
-#[test]
-#[ignore = "superseded by typed GNOME login-boundary tests"]
-fn newly_installed_gnome_extension_defers_enable_without_blocking_remaining_installs() {
-    let steps = plans("configs/full.yaml", "configure", "ubuntu");
-    let step = step_containing(&steps, "workflow gnome-extension");
-    let host = Host::new();
-    host.logging_fake("gnome-extensions");
-    host.fake("gnome-shell", "printf 'GNOME Shell 48.4\\n'");
-    host.fake(
-        "curl",
-        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done; [ -z "$out" ] || : >"$out"; printf '{"shell_version_map":{"48":{"version":13}}}\n'"#,
-    );
-
-    let output = host.run(&step);
-    assert!(output.status.success());
-    assert!(host.log().contains("gnome-extensions install --force"));
-    assert!(!host.log().contains("gnome-extensions enable"));
-}
-
-#[test]
-#[ignore = "superseded by typed direct AppImage tests"]
-fn appimage_download_is_executable_and_existing_destination_is_idempotent() {
-    let host = Host::new();
-    host.fake(
-        "curl",
-        r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-if [ -n "$out" ]; then printf appimage >"$out"; else printf '{"assets":[{"name":"Obsidian-1.AppImage","browser_download_url":"https://example.test/Obsidian.AppImage"}]}'; fi"#,
-    );
-    let step = step_containing(
-        &plans("configs/default.yaml", "install", "ubuntu"),
-        "download-binary Obsidian.AppImage",
-    );
-    host.run_ok(&step);
-    let destination = host.home.join("Applications/Obsidian.AppImage");
-    assert!(destination.is_file());
-    assert_ne!(
-        fs::metadata(&destination).unwrap().permissions().mode() & 0o111,
-        0
-    );
-    let first_log = host.log();
-    host.run_ok(&step);
-    assert_eq!(host.log(), first_log);
-
-    fs::write(&destination, []).unwrap();
-    fs::set_permissions(&destination, fs::Permissions::from_mode(0o644)).unwrap();
-    host.run_ok(&step);
-    assert_ne!(host.log(), first_log);
-    let repaired = fs::metadata(&destination).unwrap();
-    assert!(repaired.len() > 0);
-    assert_ne!(repaired.permissions().mode() & 0o111, 0);
-}
-
-#[test]
 fn direct_appimage_ensure_skips_network_but_update_forces_resolution() {
     let host = Host::new();
     let artifact = host
@@ -4230,99 +3806,6 @@ if [ -n "$out" ]; then printf not-elf >"$out"; else printf '{"assets":[{"name":"
             assert!(host.log().is_empty(), "{conflict}: {}", host.log());
         }
     }
-}
-
-#[test]
-#[ignore = "superseded by typed direct Debian package tests"]
-fn orphaned_debian_package_is_retried_instead_of_treated_as_installed() {
-    let host = Host::new();
-    let destination = host.home.join("Applications/git-credential-manager.deb");
-    fs::create_dir_all(destination.parent().unwrap()).unwrap();
-    fs::write(&destination, "stale").unwrap();
-    host.fake(
-        "curl",
-        r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-if [ -n "$out" ]; then printf new-deb >"$out"; else printf '{"assets":[{"name":"gcm-linux-x64-1.deb","browser_download_url":"https://example.test/gcm.deb"}]}'; fi"#,
-    );
-    host.logging_fake("sudo");
-    let step = step_containing(
-        &plans("configs/vm.yaml", "install", "debian"),
-        "download-binary git-credential-manager.deb",
-    );
-    host.run_ok(&step);
-    let log = host.log();
-    assert!(log.contains("https://example.test/gcm.deb"), "{log}");
-    assert!(log.contains("apt-get install -qq"), "{log}");
-    assert!(!destination.exists());
-}
-
-#[test]
-#[ignore = "superseded by typed UV Python tests"]
-fn uv_installs_the_requested_python_series_without_parsing_display_output() {
-    let host = Host::new();
-    host.fake(
-        "uv",
-        r#"printf 'uv %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then exit 1; fi"#,
-    );
-    let step = step_containing(
-        &plans("configs/cli.yaml", "install", "ubuntu"),
-        "workflow uv-install",
-    );
-    host.run_ok(&step);
-    let log = host.log();
-    assert!(!log.contains("uv self update"), "{log}");
-    assert!(log.contains("uv python find 3.13"), "{log}");
-    assert!(log.contains("uv python install 3.13"), "{log}");
-    assert!(!log.contains("uv python list"), "{log}");
-}
-
-#[test]
-#[ignore = "superseded by typed UV Python tests"]
-fn uv_skips_python_install_when_requested_series_is_resolvable() {
-    let host = Host::new();
-    host.fake(
-        "uv",
-        r#"printf 'uv %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then printf '%s\n' '/managed/python'; exit 0; fi"#,
-    );
-    let step = step_containing(
-        &plans("configs/cli.yaml", "install", "ubuntu"),
-        "workflow uv-install",
-    );
-    host.run_ok(&step);
-    let log = host.log();
-    assert!(log.contains("uv python find 3.13"), "{log}");
-    assert!(!log.contains("uv python install"), "{log}");
-}
-
-#[test]
-fn standalone_npm_packages_skip_installed_specs() {
-    let host = Host::new();
-    host.fake(
-        "npm",
-        r#"printf 'npm %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = list ]; then [ -f "$TMPDIR/npm-standalone-installed" ]; exit; fi
-if [ "${1:-}" = install ]; then touch "$TMPDIR/npm-standalone-installed"; fi"#,
-    );
-    let step = Step::workflow(operations::Operation::NpmPackages {
-        packages: vec!["opencode-ai".into()],
-    });
-    host.run_ok(&step);
-    host.run_ok(&step);
-    let log = host.log();
-    assert_eq!(
-        log.matches("npm list --global --depth=0 opencode-ai")
-            .count(),
-        2,
-        "{log}"
-    );
-    assert_eq!(
-        log.matches("npm install --global opencode-ai").count(),
-        1,
-        "{log}"
-    );
 }
 
 #[test]
@@ -4815,6 +4298,60 @@ fn schema_v1_tool_operation_display_forms_are_typed() {
 }
 
 #[test]
+fn schema_v1_manager_bootstraps_publish_fixed_executables_once() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+out=''
+while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
+[ -n "$out" ] || exit 40
+case "$out" in
+  *rustup*) cat >"$out" <<'INSTALL'
+#!/bin/sh
+mkdir -p "$HOME/.cargo/bin"
+printf '#!/bin/sh\n' >"$HOME/.cargo/bin/rustup"
+chmod +x "$HOME/.cargo/bin/rustup"
+INSTALL
+    ;;
+  *fnm-install*) cat >"$out" <<'INSTALL'
+#!/bin/sh
+mkdir -p "$XDG_DATA_HOME/fnm"
+printf '#!/bin/sh\n' >"$XDG_DATA_HOME/fnm/fnm"
+chmod +x "$XDG_DATA_HOME/fnm/fnm"
+INSTALL
+    ;;
+  *uv-install*) cat >"$out" <<'INSTALL'
+#!/bin/sh
+printf '#!/bin/sh\n' >"$UV_UNMANAGED_INSTALL/uv"
+chmod +x "$UV_UNMANAGED_INSTALL/uv"
+INSTALL
+    ;;
+  *) exit 41 ;;
+esac"#,
+    );
+    let steps = [
+        bootstrap_step(operations::Operation::RustupBootstrap),
+        bootstrap_step(operations::Operation::FnmBootstrap),
+        bootstrap_step(operations::Operation::UvBootstrap),
+    ];
+
+    for step in &steps {
+        host.run_ok(step);
+        host.run_ok(step);
+    }
+
+    assert!(host.home.join(".cargo/bin/rustup").is_file());
+    assert!(host.home.join(".local/share/fnm/fnm").is_file());
+    assert!(host.home.join(".local/bin/uv").is_file());
+    let log = host.log();
+    assert_eq!(log.matches("curl <").count(), 3, "{log}");
+    assert_eq!(steps[0].display(), "workflow rustup-bootstrap");
+    assert_eq!(steps[1].display(), "workflow fnm-bootstrap");
+    assert_eq!(steps[2].display(), "workflow uv-bootstrap");
+}
+
+#[test]
 fn schema_v1_nerd_fonts_publish_user_local_files_and_verify_fontconfig_state() {
     let host = Host::new();
     host.fake(
@@ -5111,77 +4648,96 @@ touch "$TMPDIR/admin-added""#,
 }
 
 #[test]
-#[ignore = "superseded by typed UV bootstrap and Python tests"]
-fn fresh_uv_install_uses_a_deterministic_verified_destination() {
+fn schema_v1_unattended_upgrades_converge_enabled_and_disabled_state() {
     let host = Host::new();
-    host.fake(
-        "curl",
-        r#"out=''; while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi; done
-cat >"$out" <<'INSTALL'
-#!/bin/sh
-mkdir -p "$UV_UNMANAGED_INSTALL"
-cat >"$UV_UNMANAGED_INSTALL/uv" <<'UV'
-#!/bin/sh
-printf 'uv %s\n' "$*" >>"$LOG"
-if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then exit 1; fi
-UV
-chmod +x "$UV_UNMANAGED_INSTALL/uv"
-INSTALL"#,
+    configure_system_state_fakes(&host);
+    let enabled = unattended_upgrades_step(true);
+    let disabled = unattended_upgrades_step(false);
+
+    host.run_ok(&enabled);
+    host.run_ok(&enabled);
+    assert!(host
+        ._dir
+        .path()
+        .join("tmp/package-unattended-upgrades")
+        .is_file());
+    assert_eq!(
+        fs::read(host.root.join("etc/apt/apt.conf.d/20auto-upgrades")).unwrap(),
+        b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n"
     );
-    let step = step_containing(
-        &plans("configs/cli.yaml", "install", "ubuntu"),
-        "workflow uv-install",
+
+    host.run_ok(&disabled);
+    host.run_ok(&disabled);
+    assert!(!host
+        ._dir
+        .path()
+        .join("tmp/package-unattended-upgrades")
+        .exists());
+    assert_eq!(
+        fs::read(host.root.join("etc/apt/apt.conf.d/20auto-upgrades")).unwrap(),
+        b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n"
     );
-    host.run_ok(&step);
-    let uv = host.home.join(".local/bin/uv");
-    assert!(uv.is_file());
-    assert_ne!(fs::metadata(uv).unwrap().permissions().mode() & 0o111, 0);
-    assert!(
-        host.log().contains("uv python install 3.13"),
-        "{}",
-        host.log()
+    let log = host.log();
+    assert_eq!(log.matches("apt-get <install>").count(), 1, "{log}");
+    assert_eq!(log.matches("apt-get <purge>").count(), 1, "{log}");
+    assert_eq!(
+        log.matches("systemctl <enable> <--now> <unattended-upgrades.service>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("systemctl <disable> <--now> <unattended-upgrades.service>")
+            .count(),
+        1,
+        "{log}"
     );
 }
 
 #[test]
-#[ignore = "superseded by typed Nerd Fonts tests"]
-fn nerdfont_skips_present_font_and_refreshes_after_installing_absent_font() {
-    for present in [true, false] {
-        let host = Host::new();
-        host.fake(
-            "fc-list",
-            if present {
-                r#"printf 'fc-list %s\n' "$*" >>"$LOG"
-[ "$*" = ':family=GeistMono Nerd Font' ] && printf 'GeistMono Nerd Font\n'"#
-            } else {
-                r#"printf 'fc-list %s\n' "$*" >>"$LOG""#
-            },
-        );
-        host.logging_fake("fc-cache");
-        host.logging_fake("sudo");
-        host.fake(
-            "curl",
-            "out=''; while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift 2; else shift; fi; done; : >\"$out\"",
-        );
-        let step = step_containing(
-            &plans("configs/default.yaml", "check", "ubuntu"),
-            "workflow nerdfont",
-        );
-        host.run_ok(&step);
-        let log = host.log();
-        assert_eq!(log.contains("fc-cache -f"), !present, "{log}");
-        if !present {
-            assert!(
-                log.contains("sudo rm -rf /usr/share/fonts/GeistMono"),
-                "{log}"
-            );
-            host.run_ok(&step);
-            assert_eq!(
-                host.log()
-                    .matches("sudo rm -rf /usr/share/fonts/GeistMono")
-                    .count(),
-                2
-            );
-        }
+fn schema_v1_ubuntu_snap_disable_and_reenable_converge_owned_state() {
+    let host = Host::new();
+    configure_system_state_fakes(&host);
+    let tmp = host._dir.path().join("tmp");
+    fs::write(tmp.join("package-snapd"), b"").unwrap();
+    fs::write(tmp.join("snap-firefox"), b"").unwrap();
+    fs::write(tmp.join("systemd-snapd_socket-enabled"), b"").unwrap();
+    fs::write(tmp.join("systemd-snapd_socket-active"), b"").unwrap();
+    for directory in ["snap", "var/snap", "var/lib/snapd"] {
+        fs::create_dir_all(host.root.join(directory)).unwrap();
     }
+    fs::create_dir_all(host.home.join("snap")).unwrap();
+    let disabled = ubuntu_snap_step(false);
+
+    host.run_ok(&disabled);
+    host.run_ok(&disabled);
+    assert!(!tmp.join("package-snapd").exists());
+    assert!(!tmp.join("snap-firefox").exists());
+    assert_eq!(
+        fs::read(host.root.join("etc/apt/preferences.d/cozydot-no-snap.pref")).unwrap(),
+        b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n"
+    );
+    for directory in ["snap", "var/snap", "var/lib/snapd"] {
+        assert!(!host.root.join(directory).exists());
+    }
+    assert!(!host.home.join("snap").exists());
+
+    host.run_ok(&ubuntu_snap_step(true));
+    assert!(tmp.join("package-snapd").is_file());
+    assert!(!host
+        .root
+        .join("etc/apt/preferences.d/cozydot-no-snap.pref")
+        .exists());
+    let log = host.log();
+    assert_eq!(
+        log.matches("snap <remove> <--purge> <firefox>").count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("systemctl <enable> <--now> <snapd.socket>")
+            .count(),
+        1,
+        "{log}"
+    );
 }
