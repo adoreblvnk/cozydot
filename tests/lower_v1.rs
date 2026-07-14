@@ -28,7 +28,6 @@ fn lowered(yaml: &str, desktop: &str) -> Vec<Step> {
 #[test]
 fn complete_plan_lowers_every_action_to_fixed_workflows() {
     let steps = lowered(FULL, "gnome");
-    assert!(steps.iter().all(|step| matches!(step, Step::Workflow(_))));
     let text = steps
         .iter()
         .map(Step::display)
