@@ -154,6 +154,9 @@ fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
             format!("npm global package metadata for {package:?} must be a JSON object")
         })?;
         reject_problem_state(metadata, &format!("npm global package {package:?}"))?;
+        if metadata.contains_key("error") {
+            bail!("npm global package {package:?} reported an error");
+        }
         let version = metadata
             .get("version")
             .and_then(Value::as_str)
@@ -298,6 +301,10 @@ mod tests {
             br#"{"dependencies":{"tool":{}}}"#.as_slice(),
             br#"{"dependencies":{"tool":null}}"#.as_slice(),
             br#"{"dependencies":{"tool":{"missing":true}}}"#.as_slice(),
+            br#"{"dependencies":{"tool":{"version":"1.0.0","error":{"code":"EFAIL"}}}}"#.as_slice(),
+            br#"{"dependencies":{"tool":{"version":"1.0.0","error":null}}}"#.as_slice(),
+            br#"{"dependencies":{"tool":{"version":"1.0.0","error":false}}}"#.as_slice(),
+            br#"{"dependencies":{"tool":{"version":"1.0.0","error":""}}}"#.as_slice(),
             br#"{"dependencies":{},"problems":["broken"]}"#.as_slice(),
             br#"{"dependencies":{},"error":{"code":"EFAIL"}}"#.as_slice(),
         ] {
