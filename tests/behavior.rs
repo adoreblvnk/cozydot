@@ -3034,6 +3034,29 @@ fn schema_v1_npm_installed_ensure_is_a_single_state_query_noop() {
 }
 
 #[test]
+fn schema_v1_npm_dependency_error_prevents_ensure_noop_and_mutation() {
+    let host = Host::new();
+    let state = br#"{"dependencies":{"tool":{"version":"1.0.0","error":{"code":"EFAIL"}}}}"#;
+    configure_npm_package_fakes(&host, b"v22.14.0\n", state, state);
+
+    assert!(!host
+        .run(&npm_package_step(
+            &["tool"],
+            operations::NpmPackageMode::EnsurePresent,
+        ))
+        .status
+        .success());
+    assert_eq!(
+        host.log(),
+        concat!(
+            "fnm <default>\n",
+            "fnm <exec> <--using> <v22.14.0> <--> <npm> <list> <--global> <--depth=0> <--json>\n"
+        )
+    );
+    assert!(!host.log().contains("ambient-npm"), "{}", host.log());
+}
+
+#[test]
 fn schema_v1_npm_update_installs_existing_and_missing_without_targeting_unrelated_package() {
     let host = Host::new();
     let state =
