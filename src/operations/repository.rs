@@ -87,7 +87,7 @@ pub fn key(host: &Host<'_>, url: &str, destination: &str) -> Result<()> {
     publish_bytes(host, &destination, &bytes, "repository key publication")
 }
 
-fn publish_bytes(
+pub(crate) fn publish_bytes(
     host: &Host<'_>,
     destination: &Path,
     contents: &[u8],

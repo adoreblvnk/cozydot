@@ -6,6 +6,7 @@ mod desktop;
 mod direct;
 mod downloads;
 mod flatpak;
+mod integrations;
 mod languages;
 mod npm;
 mod provisioning;
@@ -18,6 +19,7 @@ pub use direct::{
     DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
     GithubRepository,
 };
+pub use integrations::{DockerLocalLogOperation, VsCodeExtensionOperation};
 pub use npm::{NpmPackageMode, NpmPackageOperation};
 
 use anyhow::{bail, Context, Result};
@@ -68,6 +70,8 @@ pub enum Operation {
     DockerConfig {
         user: String,
     },
+    DockerGroup,
+    DockerLocalLog(DockerLocalLogOperation),
     DirectPackage(DirectPackageOperation),
     DownloadBinary {
         name: String,
@@ -130,9 +134,11 @@ pub enum Operation {
     VirtualBoxConfig {
         user: String,
     },
+    VirtualBoxGroup,
     VsCodeExtension {
         extension: String,
     },
+    VsCodeExtensionSet(VsCodeExtensionOperation),
 }
 
 impl Operation {
@@ -164,6 +170,8 @@ impl Operation {
             }
             Self::Appimaged { arch } => vec!["appimaged".into(), arch.clone()],
             Self::DockerConfig { user } => vec!["docker-config".into(), user.clone()],
+            Self::DockerGroup => vec!["docker-group".into()],
+            Self::DockerLocalLog(operation) => operation.display_args(),
             Self::DirectPackage(package) => package.display_args(),
             Self::DownloadBinary { name, .. } => vec!["download-binary".into(), name.clone()],
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
@@ -233,9 +241,11 @@ impl Operation {
                 version.clone(),
             ],
             Self::VirtualBoxConfig { user } => vec!["virtualbox-config".into(), user.clone()],
+            Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
             Self::VsCodeExtension { extension } => {
                 vec!["vscode-extension".into(), extension.clone()]
             }
+            Self::VsCodeExtensionSet(operation) => operation.display_args(),
         }
     }
 }
@@ -255,6 +265,8 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
         } => repository::source(&host, destination, contents),
         Operation::Appimaged { arch } => appimaged::execute(&host, arch),
         Operation::DockerConfig { user } => apps::docker(&host, user),
+        Operation::DockerGroup => integrations::docker_group(&host),
+        Operation::DockerLocalLog(operation) => integrations::docker_local_log(&host, operation),
         Operation::DirectPackage(package) => direct::execute(&host, package),
         Operation::DownloadBinary {
             name,
@@ -296,7 +308,11 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
             version,
         } => languages::uv(&host, *version_enabled, version),
         Operation::VirtualBoxConfig { user } => apps::virtualbox(&host, user),
+        Operation::VirtualBoxGroup => integrations::virtualbox_group(&host),
         Operation::VsCodeExtension { extension } => apps::vscode_extension(&host, extension),
+        Operation::VsCodeExtensionSet(operation) => {
+            integrations::vscode_extensions(&host, operation)
+        }
     }
 }
 
