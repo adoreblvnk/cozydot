@@ -1,4 +1,4 @@
-use cozydot::{operations, platform::Architecture, runner::Step};
+use cozydot::{config::HttpsUrl, operations, platform::Architecture, runner::Step};
 use std::{
     fs,
     io::Write,
@@ -75,6 +75,10 @@ case "$command" in
   cat)
     logical=${!#}
     destination=$(map_path "${!#}")
+    if [ -f "$TMPDIR/repository-postcondition-failure" ] && [ "$logical" = "$(cat "$TMPDIR/repository-postcondition-failure")" ]; then
+      printf 'corrupt-postcondition'
+      exit
+    fi
     if [ "$logical" = /etc/docker/daemon.json ]; then
       count=0; [ ! -f "$TMPDIR/publication-cat-count" ] || count=$(cat "$TMPDIR/publication-cat-count")
       count=$((count + 1)); printf '%s' "$count" >"$TMPDIR/publication-cat-count"
@@ -105,6 +109,7 @@ case "$command" in
     else
       [ "$failure" != stage ] || exit 42
       source=${@: -2:1}; destination=$(map_path "${!#}")
+      { [ "$failure" != source-stage ] || [[ "$destination" != *cozydot-vendor-name.list* ]]; } || exit 57
       [ "$5" = -m ] && { [ "$6" = 0600 ] || [ "$6" = 0644 ]; } || exit 55
       /usr/bin/install -m "$6" -- "$source" "$destination"
     fi
@@ -136,6 +141,14 @@ case "$command" in
       -L) [ ! -L "$destination" ] ;;
       *) exit 46 ;;
     esac
+    ;;
+  ln)
+    [ "$#" -eq 3 ] && [ "$1" = -- ] || exit 58
+    source=$(map_path "$2"); logical=$3; destination=$(map_path "$3")
+    if [ -f "$TMPDIR/repository-inject-before-link" ] && [ "$logical" = "$(cat "$TMPDIR/repository-inject-before-link")" ]; then
+      printf foreign-race-bytes >"$destination"
+    fi
+    /bin/ln -- "$source" "$destination"
     ;;
   mv)
     [ "$failure" != rename ] || exit 44
@@ -177,6 +190,35 @@ esac"#,
             operation,
             user,
             format!("{}:/usr/bin:/bin", self.bin.display()),
+        )
+    }
+
+    fn execute_operation_as_with_state_home(
+        &self,
+        operation: &operations::Operation,
+        state_home: &Path,
+    ) -> anyhow::Result<()> {
+        let env = [
+            ("HOME".into(), self.home.as_os_str().to_owned()),
+            ("USER".into(), "tester".into()),
+            ("LOGNAME".into(), "tester".into()),
+            ("SUDO_USER".into(), "tester".into()),
+            ("LOG".into(), self.log.as_os_str().to_owned()),
+            ("ROOT".into(), self.root.as_os_str().to_owned()),
+            (
+                "TMPDIR".into(),
+                self._dir.path().join("tmp").into_os_string(),
+            ),
+            (
+                "PATH".into(),
+                format!("{}:/usr/bin:/bin", self.bin.display()).into(),
+            ),
+            ("XDG_STATE_HOME".into(), state_home.as_os_str().to_owned()),
+        ];
+        operations::execute_with_docker_lock_for_test(
+            operation,
+            &env,
+            &self.root.join("run/cozydot/docker-daemon.lock"),
         )
     }
 
@@ -627,6 +669,25 @@ fn managed_apt_sources_step(
         )
         .unwrap(),
     ))
+}
+
+fn apt_repository_operation(key_url: &str, source_url: &str, suite: &str) -> operations::Operation {
+    let key_url: HttpsUrl = serde_yaml::from_str(key_url).unwrap();
+    let source_url: HttpsUrl = serde_yaml::from_str(source_url).unwrap();
+    operations::Operation::AptRepository(
+        operations::AptRepositoryOperation::new(
+            "Vendor_Name",
+            "vendor-name",
+            key_url,
+            source_url,
+            Architecture::Amd64,
+            operations::AptRepositorySourceLayout::SuiteComponents {
+                suite: operations::AptRepositoryToken::parse(suite).unwrap(),
+                components: vec![operations::AptRepositoryToken::parse("main").unwrap()],
+            },
+        )
+        .unwrap(),
+    )
 }
 
 fn assert_lock_released(path: &Path) {
@@ -3093,6 +3154,630 @@ fn managed_apt_keyring_preflight_fails_before_source_inspection_or_backup() {
     }
 }
 
+#[test]
+fn apt_repository_converges_records_completion_and_reapplies_without_publication() {
+    let host = Host::new();
+    configure_key_fakes(&host);
+    fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+    let operation = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "stable",
+    );
+
+    host.execute_operation_as(&operation, "tester").unwrap();
+    let key = host.root.join("etc/apt/keyrings/cozydot-vendor-name.gpg");
+    let source = host
+        .root
+        .join("etc/apt/sources.list.d/cozydot-vendor-name.list");
+    let record = host
+        .home
+        .join(".local/state/cozydot/apt-repositories/vendor-name.json");
+    assert_eq!(fs::read(&key).unwrap(), b"normalized-binary");
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        b"deb [arch=amd64 signed-by=/etc/apt/keyrings/cozydot-vendor-name.gpg] https://example.test/apt/ stable main\n"
+    );
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"completed\""));
+    assert_eq!(
+        fs::metadata(&record).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let initial_links = host.log().matches("sudo ln --").count();
+    assert_eq!(initial_links, 2, "{}", host.log());
+    let record_inode = fs::metadata(&record).unwrap().ino();
+
+    host.execute_operation_as(&operation, "tester").unwrap();
+    assert_eq!(host.log().matches("sudo ln --").count(), initial_links);
+    assert_eq!(fs::metadata(&record).unwrap().ino(), record_inode);
+    assert_eq!(
+        operations::Operation::AptRepository(match operation.clone() {
+            operations::Operation::AptRepository(operation) => operation,
+            _ => unreachable!(),
+        })
+        .display_args(),
+        [
+            "apt-repository",
+            "Vendor_Name",
+            "/etc/apt/keyrings/cozydot-vendor-name.gpg",
+            "/etc/apt/sources.list.d/cozydot-vendor-name.list"
+        ]
+    );
+}
+
+#[test]
+fn apt_repository_refuses_every_unmanaged_destination_kind_before_download() {
+    for (destination_kind, kind) in [
+        ("key", "file"),
+        ("key", "directory"),
+        ("key", "symlink"),
+        ("key", "dangling-symlink"),
+        ("source", "file"),
+        ("source", "directory"),
+        ("source", "symlink"),
+        ("source", "dangling-symlink"),
+    ] {
+        let host = Host::new();
+        configure_key_fakes(&host);
+        fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+        let destination = if destination_kind == "key" {
+            host.root.join("etc/apt/keyrings/cozydot-vendor-name.gpg")
+        } else {
+            host.root
+                .join("etc/apt/sources.list.d/cozydot-vendor-name.list")
+        };
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        match kind {
+            "file" => fs::write(&destination, b"foreign").unwrap(),
+            "directory" => fs::create_dir(&destination).unwrap(),
+            "symlink" => {
+                fs::write(destination.parent().unwrap().join("foreign"), b"foreign").unwrap();
+                symlink("foreign", &destination).unwrap();
+            }
+            "dangling-symlink" => symlink("missing", &destination).unwrap(),
+            _ => unreachable!(),
+        }
+        let operation = apt_repository_operation(
+            "https://example.test/key",
+            "https://example.test/apt/",
+            "stable",
+        );
+        assert!(
+            host.execute_operation_as(&operation, "tester").is_err(),
+            "{destination_kind} {kind}"
+        );
+        assert!(
+            !host.log().contains("curl "),
+            "{destination_kind} {kind}: {}",
+            host.log()
+        );
+        assert!(
+            !host.log().contains("gpg "),
+            "{destination_kind} {kind}: {}",
+            host.log()
+        );
+        assert!(!host
+            .home
+            .join(".local/state/cozydot/apt-repositories/vendor-name.json")
+            .exists());
+    }
+}
+
+#[test]
+fn apt_repository_pending_retries_updates_and_never_completes_early() {
+    let host = Host::new();
+    configure_key_fakes(&host);
+    let input = host._dir.path().join("tmp/key-input");
+    let record = host
+        .home
+        .join(".local/state/cozydot/apt-repositories/vendor-name.json");
+    let first = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "stable",
+    );
+
+    fs::write(&input, "interrupted").unwrap();
+    assert!(host.execute_operation_as(&first, "tester").is_err());
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"pending_initial\""));
+    assert!(!host
+        .root
+        .join("etc/apt/keyrings/cozydot-vendor-name.gpg")
+        .exists());
+
+    fs::write(&input, "binary").unwrap();
+    fs::write(
+        host._dir
+            .path()
+            .join("tmp/repository-postcondition-failure"),
+        "/etc/apt/keyrings/cozydot-vendor-name.gpg",
+    )
+    .unwrap();
+    assert!(host.execute_operation_as(&first, "tester").is_err());
+    assert_eq!(
+        fs::read(host.root.join("etc/apt/keyrings/cozydot-vendor-name.gpg")).unwrap(),
+        b"normalized-binary"
+    );
+    assert!(!host
+        .root
+        .join("etc/apt/sources.list.d/cozydot-vendor-name.list")
+        .exists());
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"pending_initial\""));
+    fs::remove_file(
+        host._dir
+            .path()
+            .join("tmp/repository-postcondition-failure"),
+    )
+    .unwrap();
+    host.execute_operation_as(&first, "tester").unwrap();
+    let old_source = fs::read(
+        host.root
+            .join("etc/apt/sources.list.d/cozydot-vendor-name.list"),
+    )
+    .unwrap();
+    let update = apt_repository_operation(
+        "https://example.test/key-v2",
+        "https://example.test/apt-v2/",
+        "testing",
+    );
+    fs::write(&input, "binary2").unwrap();
+    fs::write(
+        host._dir.path().join("tmp/publication-failure"),
+        "source-stage",
+    )
+    .unwrap();
+    assert!(host.execute_operation_as(&update, "tester").is_err());
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"pending_update\""));
+    assert_eq!(
+        fs::read(host.root.join("etc/apt/keyrings/cozydot-vendor-name.gpg")).unwrap(),
+        b"normalized-binary-2"
+    );
+    assert_eq!(
+        fs::read(
+            host.root
+                .join("etc/apt/sources.list.d/cozydot-vendor-name.list")
+        )
+        .unwrap(),
+        old_source
+    );
+
+    fs::remove_file(host._dir.path().join("tmp/publication-failure")).unwrap();
+    host.execute_operation_as(&update, "tester").unwrap();
+    assert_eq!(
+        fs::read(host.root.join("etc/apt/keyrings/cozydot-vendor-name.gpg")).unwrap(),
+        b"normalized-binary-2"
+    );
+    assert!(fs::read_to_string(
+        host.root
+            .join("etc/apt/sources.list.d/cozydot-vendor-name.list")
+    )
+    .unwrap()
+    .contains("https://example.test/apt-v2/ testing main"));
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"completed\""));
+}
+
+#[test]
+fn apt_repository_retries_after_source_publication_and_exact_postcondition_failure() {
+    let host = Host::new();
+    configure_key_fakes(&host);
+    fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+    let first = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "stable",
+    );
+    host.execute_operation_as(&first, "tester").unwrap();
+    let update = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "testing",
+    );
+    let record = host
+        .home
+        .join(".local/state/cozydot/apt-repositories/vendor-name.json");
+    let source = host
+        .root
+        .join("etc/apt/sources.list.d/cozydot-vendor-name.list");
+
+    fs::write(
+        host._dir.path().join("tmp/publication-failure"),
+        "parent-sync",
+    )
+    .unwrap();
+    assert!(host.execute_operation_as(&update, "tester").is_err());
+    assert!(fs::read_to_string(&source)
+        .unwrap()
+        .contains(" testing main"));
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"pending_update\""));
+    fs::remove_file(host._dir.path().join("tmp/publication-failure")).unwrap();
+    host.execute_operation_as(&update, "tester").unwrap();
+
+    let next = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "next",
+    );
+    fs::write(
+        host._dir
+            .path()
+            .join("tmp/repository-postcondition-failure"),
+        "/etc/apt/sources.list.d/cozydot-vendor-name.list",
+    )
+    .unwrap();
+    assert!(host.execute_operation_as(&next, "tester").is_err());
+    assert!(fs::read_to_string(&record)
+        .unwrap()
+        .contains("\"status\":\"pending_update\""));
+    fs::remove_file(
+        host._dir
+            .path()
+            .join("tmp/repository-postcondition-failure"),
+    )
+    .unwrap();
+    host.execute_operation_as(&next, "tester").unwrap();
+    assert!(fs::read_to_string(&source).unwrap().contains(" next main"));
+}
+
+#[test]
+fn apt_repository_fails_closed_for_ambiguous_or_malformed_managed_records() {
+    for kind in [
+        "corrupt",
+        "duplicate",
+        "nested-duplicate",
+        "unknown-record",
+        "unknown-declaration",
+        "unknown-layout",
+        "unsupported-version",
+        "noncanonical",
+        "symlink",
+        "directory",
+        "wrong-mode",
+        "hardlink",
+    ] {
+        let host = Host::new();
+        configure_key_fakes(&host);
+        fs::write(host._dir.path().join("tmp/key-input"), "interrupted").unwrap();
+        let first = apt_repository_operation(
+            "https://example.test/key",
+            "https://example.test/apt/",
+            "stable",
+        );
+        assert!(host.execute_operation_as(&first, "tester").is_err());
+        let record = host
+            .home
+            .join(".local/state/cozydot/apt-repositories/vendor-name.json");
+        match kind {
+            "corrupt" => fs::write(&record, b"not json").unwrap(),
+            "duplicate" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen("\"version\":1", "\"version\":1,\"version\":1", 1),
+                )
+                .unwrap();
+            }
+            "nested-duplicate" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen(
+                        "\"suite\":\"stable\"",
+                        "\"suite\":\"stable\",\"suite\":\"testing\"",
+                        1,
+                    ),
+                )
+                .unwrap();
+            }
+            "unknown-record" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen('{', "{\"unknown\":true,", 1)).unwrap();
+            }
+            "unknown-declaration" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen(
+                        "\"name\":\"Vendor_Name\"",
+                        "\"name\":\"Vendor_Name\",\"unknown\":true",
+                        1,
+                    ),
+                )
+                .unwrap();
+            }
+            "unknown-layout" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen(
+                        "\"suite\":\"stable\"",
+                        "\"suite\":\"stable\",\"unknown\":true",
+                        1,
+                    ),
+                )
+                .unwrap();
+            }
+            "unsupported-version" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen("\"version\":1", "\"version\":2", 1)).unwrap();
+            }
+            "noncanonical" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen(
+                        "\"architecture\":\"amd64\"",
+                        "\"architecture\":\"AMD64\"",
+                        1,
+                    ),
+                )
+                .unwrap();
+            }
+            "symlink" => {
+                fs::remove_file(&record).unwrap();
+                symlink("missing", &record).unwrap();
+            }
+            "directory" => {
+                fs::remove_file(&record).unwrap();
+                fs::create_dir(&record).unwrap();
+            }
+            "wrong-mode" => {
+                fs::set_permissions(&record, fs::Permissions::from_mode(0o644)).unwrap()
+            }
+            "hardlink" => {
+                fs::hard_link(&record, record.with_extension("linked")).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        fs::write(host.log.as_path(), b"").unwrap();
+        fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+        assert!(
+            host.execute_operation_as(&first, "tester").is_err(),
+            "{kind}"
+        );
+        assert!(host.log().is_empty(), "{kind}: {}", host.log());
+    }
+
+    let host = Host::new();
+    configure_key_fakes(&host);
+    fs::write(host._dir.path().join("tmp/key-input"), "interrupted").unwrap();
+    let first = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "stable",
+    );
+    assert!(host.execute_operation_as(&first, "tester").is_err());
+    fs::write(host.log.as_path(), b"").unwrap();
+    let different = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/other/",
+        "stable",
+    );
+    assert!(host.execute_operation_as(&different, "tester").is_err());
+    assert!(host.log().is_empty());
+}
+
+#[test]
+fn apt_repository_initial_publication_races_preserve_foreign_bytes_and_pending_state() {
+    for logical in [
+        "/etc/apt/keyrings/cozydot-vendor-name.gpg",
+        "/etc/apt/sources.list.d/cozydot-vendor-name.list",
+    ] {
+        let host = Host::new();
+        configure_key_fakes(&host);
+        fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+        fs::write(
+            host._dir.path().join("tmp/repository-inject-before-link"),
+            logical,
+        )
+        .unwrap();
+        let operation = apt_repository_operation(
+            "https://example.test/key",
+            "https://example.test/apt/",
+            "stable",
+        );
+
+        assert!(host.execute_operation_as(&operation, "tester").is_err());
+        let destination = host.root.join(logical.trim_start_matches('/'));
+        assert_eq!(
+            fs::read(destination).unwrap(),
+            b"foreign-race-bytes",
+            "{logical}"
+        );
+        let record = fs::read_to_string(
+            host.home
+                .join(".local/state/cozydot/apt-repositories/vendor-name.json"),
+        )
+        .unwrap();
+        assert!(record.contains("\"status\":\"pending_initial\""));
+        assert!(!record.contains("\"status\":\"completed\""));
+    }
+}
+
+#[test]
+fn apt_repository_rejects_symlinked_and_writable_state_hierarchy_components() {
+    for kind in [
+        "root-symlink",
+        "cozydot-symlink",
+        "repositories-symlink",
+        "root-writable",
+        "cozydot-writable",
+        "cozydot-group-writable",
+        "repositories-writable",
+    ] {
+        let host = Host::new();
+        configure_key_fakes(&host);
+        fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+        let state_home = host._dir.path().join("managed-state");
+        let target = host._dir.path().join("state-target");
+        match kind {
+            "root-symlink" => {
+                fs::create_dir(&target).unwrap();
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+                symlink(&target, &state_home).unwrap();
+            }
+            "cozydot-symlink" => {
+                fs::create_dir(&state_home).unwrap();
+                fs::set_permissions(&state_home, fs::Permissions::from_mode(0o700)).unwrap();
+                fs::create_dir(&target).unwrap();
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+                symlink(&target, state_home.join("cozydot")).unwrap();
+            }
+            "repositories-symlink" => {
+                fs::create_dir_all(state_home.join("cozydot")).unwrap();
+                fs::set_permissions(&state_home, fs::Permissions::from_mode(0o700)).unwrap();
+                fs::set_permissions(
+                    state_home.join("cozydot"),
+                    fs::Permissions::from_mode(0o700),
+                )
+                .unwrap();
+                fs::create_dir(&target).unwrap();
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+                symlink(&target, state_home.join("cozydot/apt-repositories")).unwrap();
+            }
+            "root-writable"
+            | "cozydot-writable"
+            | "cozydot-group-writable"
+            | "repositories-writable" => {
+                fs::create_dir_all(state_home.join("cozydot/apt-repositories")).unwrap();
+                for path in [
+                    state_home.as_path(),
+                    state_home.join("cozydot").as_path(),
+                    state_home.join("cozydot/apt-repositories").as_path(),
+                ] {
+                    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+                }
+                let unsafe_path = match kind {
+                    "root-writable" => state_home.clone(),
+                    "cozydot-writable" | "cozydot-group-writable" => state_home.join("cozydot"),
+                    _ => state_home.join("cozydot/apt-repositories"),
+                };
+                let mode = if kind == "cozydot-group-writable" {
+                    0o770
+                } else {
+                    0o777
+                };
+                fs::set_permissions(unsafe_path, fs::Permissions::from_mode(mode)).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let operation = apt_repository_operation(
+            "https://example.test/key",
+            "https://example.test/apt/",
+            "stable",
+        );
+        assert!(
+            host.execute_operation_as_with_state_home(&operation, &state_home)
+                .is_err(),
+            "{kind}"
+        );
+        assert!(host.log().is_empty(), "{kind}: {}", host.log());
+    }
+}
+
+#[test]
+fn apt_repository_state_root_ignores_unrelated_sticky_ancestor_and_creates_mode_0700() {
+    const CHILD: &str = "COZYDOT_TEST_PERMISSIVE_STATE_UMASK";
+    if std::env::var_os(CHILD).is_none() {
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg("umask 000; exec \"$@\"")
+            .arg("sh")
+            .arg(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(
+                "apt_repository_state_root_ignores_unrelated_sticky_ancestor_and_creates_mode_0700",
+            )
+            .arg("--nocapture")
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+
+    let host = Host::new();
+    configure_key_fakes(&host);
+    fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+    let unrelated = host._dir.path().join("sticky-parent");
+    fs::create_dir(&unrelated).unwrap();
+    fs::set_permissions(&unrelated, fs::Permissions::from_mode(0o1777)).unwrap();
+    let state_home = unrelated.join("selected-state-root");
+    let operation = apt_repository_operation(
+        "https://example.test/key",
+        "https://example.test/apt/",
+        "stable",
+    );
+    host.execute_operation_as_with_state_home(&operation, &state_home)
+        .unwrap();
+    for path in [
+        state_home.clone(),
+        state_home.join("cozydot"),
+        state_home.join("cozydot/apt-repositories"),
+    ] {
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+}
+
+#[test]
+fn apt_repository_rejects_unsafe_preexisting_lock_entries() {
+    for kind in ["symlink", "directory", "wrong-mode", "hardlink"] {
+        let host = Host::new();
+        configure_key_fakes(&host);
+        fs::write(host._dir.path().join("tmp/key-input"), "binary").unwrap();
+        let state_home = host._dir.path().join("managed-state");
+        let directory = state_home.join("cozydot/apt-repositories");
+        fs::create_dir_all(&directory).unwrap();
+        for path in [
+            state_home.as_path(),
+            state_home.join("cozydot").as_path(),
+            directory.as_path(),
+        ] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let lock = directory.join("vendor-name.lock");
+        match kind {
+            "symlink" => symlink("missing", &lock).unwrap(),
+            "directory" => fs::create_dir(&lock).unwrap(),
+            "wrong-mode" => {
+                fs::write(&lock, b"").unwrap();
+                fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            "hardlink" => {
+                fs::write(&lock, b"").unwrap();
+                fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+                fs::hard_link(&lock, directory.join("linked.lock")).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let operation = apt_repository_operation(
+            "https://example.test/key",
+            "https://example.test/apt/",
+            "stable",
+        );
+        assert!(
+            host.execute_operation_as_with_state_home(&operation, &state_home)
+                .is_err(),
+            "{kind}"
+        );
+        assert!(host.log().is_empty(), "{kind}: {}", host.log());
+    }
+}
+
 fn configure_key_fakes(host: &Host) {
     host.fake(
         "curl",
@@ -3112,6 +3797,7 @@ if [[ " $* " = *' --dearmor '* ]]; then
   case "$kind" in
     armored) printf normalized-armored >"$out" ;;
     binary|validation-failure) printf normalized-binary >"$out" ;;
+    binary2) printf normalized-binary-2 >"$out" ;;
     empty) : >"$out" ;;
     conversion-failure|malformed) exit 53 ;;
     *) exit 54 ;;

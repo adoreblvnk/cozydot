@@ -40,6 +40,11 @@ impl ManagedAptSourcesOperation {
         )?;
         let component_refs = components.iter().map(String::as_str).collect::<Vec<_>>();
         let policy = platform.managed_apt_sources(&component_refs)?;
+        Self::from_policy(policy)
+    }
+
+    pub fn from_policy(policy: ManagedAptSources) -> Result<Self> {
+        validate_policy(&policy)?;
         Ok(Self { policy })
     }
 
@@ -111,13 +116,24 @@ pub(crate) fn execute(host: &Host<'_>, operation: &ManagedAptSourcesOperation) -
 }
 
 fn validate_policy(policy: &ManagedAptSources) -> Result<()> {
-    let operation = ManagedAptSourcesOperation::new(
+    let upstream = if policy.distro == "ubuntu" {
+        "ubuntu"
+    } else {
+        "debian"
+    };
+    let platform = Platform::from_parts(
         policy.distro.clone(),
+        upstream.into(),
         policy.release.clone(),
-        policy.architecture,
-        policy.components.clone(),
+        "none".into(),
+        policy.architecture.canonical(),
     )?;
-    if operation.policy != *policy {
+    let component_refs = policy
+        .components
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if platform.managed_apt_sources(&component_refs)? != *policy {
         bail!("managed APT operation policy is not canonical");
     }
     Ok(())
@@ -753,5 +769,23 @@ mod tests {
             },
         ];
         assert!(reconcile(&policy, &converged).unwrap().is_empty());
+    }
+
+    #[test]
+    fn from_policy_matches_legacy_constructor_and_rejects_noncanonical_policy() {
+        let policy = policy("debian", "trixie", Architecture::Arm64);
+        assert_eq!(
+            ManagedAptSourcesOperation::from_policy(policy.clone()).unwrap(),
+            ManagedAptSourcesOperation::new(
+                "debian".into(),
+                "trixie".into(),
+                Architecture::Arm64,
+                vec!["main".into()],
+            )
+            .unwrap()
+        );
+        let mut invalid = policy;
+        invalid.stanzas[0].uri = "https://foreign.example/".into();
+        assert!(ManagedAptSourcesOperation::from_policy(invalid).is_err());
     }
 }

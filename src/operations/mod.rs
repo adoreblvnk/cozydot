@@ -29,6 +29,9 @@ pub use fonts::NerdFontsOperation;
 pub use integrations::{DockerLocalLogOperation, VsCodeExtensionOperation};
 pub use managed_apt::ManagedAptSourcesOperation;
 pub use npm::{NpmPackageMode, NpmPackageOperation};
+pub use repository::{
+    AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken,
+};
 pub use system::{EnsureAdminOperation, UbuntuSnapOperation, UnattendedUpgradesOperation};
 pub use tools::{
     GoToolchainOperation, GoToolchainSelector, NodeToolchainOperation, NodeToolchainSelector,
@@ -54,6 +57,7 @@ pub enum Operation {
         packages: Vec<String>,
     },
     AptMetadataRefresh,
+    AptRepository(AptRepositoryOperation),
     ManagedAptSources(ManagedAptSourcesOperation),
     AptPackages {
         packages: Vec<String>,
@@ -113,6 +117,7 @@ impl Operation {
                     .collect()
             }
             Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
+            Self::AptRepository(operation) => operation.display_args(),
             Self::ManagedAptSources(operation) => operation.display_args(),
             Self::AptPackages { packages } => std::iter::once("apt-packages".into())
                 .chain(packages.clone())
@@ -185,6 +190,7 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
     match operation {
         Operation::AptBootstrapPackages { packages } => apt::bootstrap_packages(&host, packages),
         Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
+        Operation::AptRepository(operation) => repository::execute(&host, operation),
         Operation::ManagedAptSources(operation) => managed_apt::execute(&host, operation),
         Operation::AptPackages { packages } => apt::packages(&host, packages),
         Operation::AptPurge { packages } => apt::purge(&host, packages),
