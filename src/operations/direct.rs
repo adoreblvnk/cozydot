@@ -1,5 +1,5 @@
 use super::{publish_file, Host, TempPath};
-use crate::{config::v1::HttpsUrl, platform::Architecture};
+use crate::{domain::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};

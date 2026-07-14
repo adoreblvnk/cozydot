@@ -1,8 +1,9 @@
 use crate::{
     config::v1::{
         AptComponent, AptSourceToken, AptSources, AptUpdate, AssetSelector, ConfigV1,
-        ConfiguredRepositorySuite, DirectFormat, DirectPackage, HttpsUrl, Theme,
+        ConfiguredRepositorySuite, DirectFormat, DirectPackage, Theme,
     },
+    domain::HttpsUrl,
     platform::{Architecture, ManagedAptSources, Platform},
 };
 use anyhow::{bail, Context, Result};
