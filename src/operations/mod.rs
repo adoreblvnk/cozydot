@@ -26,15 +26,18 @@ use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
     fs,
-    io::{self, Write},
+    io::{self, BufRead, BufReader, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
     thread,
     time::Duration,
 };
 
 const ETXTBSY: i32 = 26;
+const COZYDOT_RUNTIME_DIRECTORY: &str = "/run/cozydot";
+const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
+const DOCKER_LOCK_READY: &str = "cozydot-docker-lock-ready";
 const ETXTBSY_BACKOFFS: [Duration; 4] = [
     Duration::from_millis(20),
     Duration::from_millis(40),
@@ -449,6 +452,88 @@ impl Host<'_> {
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.clone())
             .or_else(|| std::env::var_os(name))
+    }
+
+    pub fn acquire_docker_lock(&self) -> Result<PrivilegedLock> {
+        self.require(
+            "Docker transaction lock directory",
+            "sudo",
+            [
+                "install",
+                "-d",
+                "-o",
+                "root",
+                "-g",
+                "root",
+                "-m",
+                "0755",
+                "--",
+                COZYDOT_RUNTIME_DIRECTORY,
+            ],
+        )?;
+        let mut command = Command::new("sudo");
+        command
+            .args([
+                OsStr::new("/usr/bin/flock"),
+                OsStr::new("--exclusive"),
+                OsStr::new("--"),
+                OsStr::new(DOCKER_LOCK),
+                OsStr::new("/usr/bin/tee"),
+                OsStr::new("/dev/null"),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (key, value) in self.env {
+            command.env(key, value);
+        }
+        let mut child = command
+            .spawn()
+            .context("Docker transaction lock: start sudo flock")?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("Docker transaction lock: helper stdin unavailable")?;
+        writeln!(stdin, "{DOCKER_LOCK_READY}")
+            .context("Docker transaction lock: send readiness probe")?;
+        stdin
+            .flush()
+            .context("Docker transaction lock: flush readiness probe")?;
+        let mut ready = String::new();
+        let read = BufReader::new(
+            child
+                .stdout
+                .take()
+                .context("Docker transaction lock: helper stdout unavailable")?,
+        )
+        .read_line(&mut ready);
+        if read.is_err() || ready != format!("{DOCKER_LOCK_READY}\n") {
+            drop(stdin);
+            let output = child
+                .wait_with_output()
+                .context("Docker transaction lock: wait for failed helper")?;
+            bail!(
+                "Docker transaction lock helper failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(PrivilegedLock {
+            child,
+            stdin: Some(stdin),
+        })
+    }
+}
+
+pub(crate) struct PrivilegedLock {
+    child: Child,
+    stdin: Option<std::process::ChildStdin>,
+}
+
+impl Drop for PrivilegedLock {
+    fn drop(&mut self) {
+        drop(self.stdin.take());
+        let _ = self.child.wait();
     }
 }
 

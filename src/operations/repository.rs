@@ -182,6 +182,11 @@ pub(crate) fn publish_bytes(
                 destination_arg,
             ],
         )?;
+        host.require(
+            operation,
+            "sudo",
+            [OsStr::new("sync"), OsStr::new("--"), parent_arg],
+        )?;
         Ok(())
     })();
     if result.is_err() {

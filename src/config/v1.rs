@@ -903,15 +903,18 @@ impl Integrations {
             docker.validate()?;
         }
         if let Some(vscode) = &self.vscode {
-            validate_unique_strings(
-                vscode.extensions.as_deref(),
-                "integrations.vscode.extensions",
-            )?;
+            let mut canonical = HashSet::new();
             for (index, extension) in vscode.extensions.iter().flatten().enumerate() {
-                validate_vscode_extension(
-                    extension,
-                    &format!("integrations.vscode.extensions[{index}]"),
-                )?;
+                let path = format!("integrations.vscode.extensions[{index}]");
+                validate_literal(extension, &path)?;
+                validate_vscode_extension(extension, &path)?;
+                let folded = extension.to_ascii_lowercase();
+                if !canonical.insert(folded) {
+                    bail!("{path}: duplicate case-folded VS Code extension identifier");
+                }
+                if extension != &extension.to_ascii_lowercase() {
+                    bail!("{path}: VS Code extension identifiers must be lowercase");
+                }
             }
         }
         Ok(())
@@ -1576,13 +1579,21 @@ fn validate_directory_name(value: &str, path: &str) -> Result<()> {
 
 fn validate_vscode_extension(value: &str, path: &str) -> Result<()> {
     let mut parts = value.split('.');
-    if !valid_identifier(parts.next().unwrap_or_default())
-        || !valid_identifier(parts.next().unwrap_or_default())
+    if !valid_vscode_identifier(parts.next().unwrap_or_default())
+        || !valid_vscode_identifier(parts.next().unwrap_or_default())
         || parts.next().is_some()
     {
         bail!("{path}: must be a publisher.extension identifier");
     }
     Ok(())
+}
+
+fn valid_vscode_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
 fn validate_gnome_uuid(value: &str, path: &str) -> Result<()> {

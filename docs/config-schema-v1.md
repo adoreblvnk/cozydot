@@ -234,7 +234,7 @@ Dotfiles are applied with Stow. Cozydot owns one fixed conflict policy: before a
 - `docker.local_log_driver` is a boolean. `true` sets Docker's daemon-wide log driver to `local`; `false`, omission, or `null` leaves the configured driver unchanged.
 - `docker.max_log_size` is a Docker size string matching a positive integer followed by `k`, `m`, or `g`, for example `10m`. It sets the `local` driver's `max-size` option and is valid only with `local_log_driver: true`; omission leaves that option unchanged.
 - `virtualbox` is a mapping containing only `add_user_to_group`. Boolean shorthand is invalid. `virtualbox.add_user_to_group: true` ensures the invoking user belongs to `vboxusers`; `false`, omission, or `null` leaves membership unchanged.
-- `vscode` is a mapping containing only `extensions`. `vscode.extensions` is a sequence of unique extension IDs installed through an existing VS Code command; scalar and top-level integration shorthand forms are invalid.
+- `vscode` is a mapping containing only `extensions`. `vscode.extensions` is a sequence of unique lowercase `publisher.extension` IDs installed through an existing VS Code command. Each of the two components starts with an ASCII letter or digit and continues with only ASCII letters, digits, or `-`; `_`, leading punctuation, extra components, and case-fold duplicates are invalid. Scalar and top-level integration shorthand forms are invalid.
 
 Integrations configure installed software; they do not implicitly add the associated product package.
 
@@ -242,6 +242,9 @@ Docker and VirtualBox group membership is persisted for the invoking user, but a
 session does not gain the new supplementary group. Log out and back in before relying on that
 membership. Docker daemon configuration is published without restarting or reloading Docker;
 active containers and daemon behavior adopt it at Docker's normal reload or restart boundary.
+Docker daemon read/merge/publication is serialized with a fixed cooperative advisory lock at
+`/run/cozydot/docker-daemon.lock`; other writers preserve this guarantee only when they use
+the same lock.
 
 ## `desktop`
 

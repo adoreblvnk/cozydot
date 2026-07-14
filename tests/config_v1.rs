@@ -793,6 +793,28 @@ fn validates_durations_docker_sizes_integrations_and_desktop_ids() {
     ] {
         assert_rejected(yaml, expected);
     }
+
+    ConfigV1::parse(
+        "schema: 1\nintegrations:\n  vscode:\n    extensions: [rust-lang.rust-analyzer, ms-vscode.cpptools]",
+    )
+    .unwrap();
+    for extension in [
+        "Publisher.extension",
+        "publisher.Extension",
+        "_publisher.extension",
+        "publisher._extension",
+        "publisher.ext_name",
+        "publisher.-extension",
+    ] {
+        assert_rejected(
+            &format!("schema: 1\nintegrations:\n  vscode:\n    extensions: [{extension:?}]"),
+            "integrations.vscode.extensions[0]",
+        );
+    }
+    assert_rejected(
+        "schema: 1\nintegrations:\n  vscode:\n    extensions: [publisher.extension, Publisher.Extension]",
+        "duplicate case-folded",
+    );
 }
 
 #[test]
