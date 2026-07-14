@@ -521,6 +521,24 @@ fn schema_v1_cargo_ensure_installs_only_missing_packages_in_order_and_is_retry_s
 }
 
 #[test]
+fn schema_v1_cargo_ignores_display_oriented_sources_when_installing_missing_registry_package() {
+    let host = Host::new();
+    configure_cargo_package_fakes(
+        &host,
+        "path-probe v1.2.3 (/tmp/hermes-cargo-probe):\n    path-probe\ngit-probe v2.3.4 (https://github.com/example/repo (main)):\n    git-probe\n",
+    );
+
+    host.run_ok(&cargo_package_step(
+        &["bat"],
+        operations::CargoPackageMode::EnsurePresent,
+    ));
+
+    let log = host.log();
+    assert!(log.contains("cargo-binstall <--no-confirm> <bat>"), "{log}");
+    assert_eq!(log.matches("cargo <install> <--list>").count(), 2, "{log}");
+}
+
+#[test]
 fn schema_v1_cargo_installed_ensure_is_a_single_query_noop() {
     let host = Host::new();
     configure_cargo_package_fakes(&host, "bat v0.25.0:\n    bat\nripgrep v14.1.0:\n    rg\n");
@@ -2971,6 +2989,35 @@ fn schema_v1_npm_ensure_uses_selected_fnm_node_and_installs_ordered_missing_subs
 }
 
 #[test]
+fn schema_v1_npm_empty_global_root_installs_then_becomes_query_only() {
+    let host = Host::new();
+    configure_npm_package_fakes(
+        &host,
+        b"v22.14.0\n",
+        br#"{"name":"lib"}"#,
+        br#"{"name":"lib","dependencies":{"tool":{"version":"1.0.0"}}}"#,
+    );
+    let step = npm_package_step(&["tool"], operations::NpmPackageMode::EnsurePresent);
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let log = host.log();
+    assert_eq!(
+        log.matches("<list> <--global> <--depth=0> <--json>")
+            .count(),
+        3,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("<install> <--global> <--> <tool>").count(),
+        1,
+        "{log}"
+    );
+    assert!(!log.contains("ambient-npm"), "{log}");
+}
+
+#[test]
 fn schema_v1_npm_installed_ensure_is_a_single_state_query_noop() {
     let host = Host::new();
     let state = br#"{"dependencies":{"opencode-ai":{"version":"1.0.0"},"@scope/tool":{"version":"2.0.0"}}}"#;
@@ -2987,21 +3034,30 @@ fn schema_v1_npm_installed_ensure_is_a_single_state_query_noop() {
 }
 
 #[test]
-fn schema_v1_npm_update_targets_every_configured_package_and_no_unrelated_package() {
+fn schema_v1_npm_update_installs_existing_and_missing_without_targeting_unrelated_package() {
     let host = Host::new();
-    let state = br#"{"dependencies":{"unrelated":{"version":"9.0.0"},"tool-two":{"version":"1.0.0"},"@scope/tool":{"version":"1.0.0"}}}"#;
-    configure_npm_package_fakes(&host, b"v24.1.0\n", state, state);
+    let state =
+        br#"{"dependencies":{"unrelated":{"version":"9.0.0"},"tool-two":{"version":"1.0.0"}}}"#;
+    let post_state = br#"{"dependencies":{"unrelated":{"version":"9.0.0"},"tool-two":{"version":"2.0.0"},"@scope/tool":{"version":"3.0.0"}}}"#;
+    configure_npm_package_fakes(&host, b"v24.1.0\n", state, post_state);
     host.run_ok(&npm_package_step(
         &["@scope/tool", "tool-two"],
         operations::NpmPackageMode::UpdateCurrent,
     ));
     let log = host.log();
     assert!(
-        log.contains("fnm <exec> <--using> <v24.1.0> <--> <npm> <update> <--global> <--> <@scope/tool> <tool-two>"),
+        log.contains("fnm <exec> <--using> <v24.1.0> <--> <npm> <install> <--global> <--> <@scope/tool> <tool-two>"),
         "{log}"
     );
     assert!(
-        !log.contains("<update> <--global> <--> <unrelated>"),
+        !log.contains("<install> <--global> <--> <unrelated>"),
+        "{log}"
+    );
+    assert!(!log.contains("<update>"), "{log}");
+    assert_eq!(
+        log.matches("<list> <--global> <--depth=0> <--json>")
+            .count(),
+        2,
         "{log}"
     );
     assert!(!log.contains("ambient-npm"), "{log}");
@@ -3087,7 +3143,7 @@ fn schema_v1_npm_query_failures_and_bad_json_are_fatal() {
     let cases = [
         br#"not-json"#.as_slice(),
         br#"[]"#.as_slice(),
-        br#"{}"#.as_slice(),
+        br#"{"dependencies":null}"#.as_slice(),
         br#"{"dependencies":[]}"#.as_slice(),
         br#"{"dependencies":{"BAD":{}}}"#.as_slice(),
         br#"{"dependencies":{"tool":{}}}"#.as_slice(),
