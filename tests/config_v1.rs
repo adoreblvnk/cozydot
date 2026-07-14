@@ -774,6 +774,10 @@ fn validates_durations_docker_sizes_integrations_and_desktop_ids() {
             "local_log_driver: true",
         ),
         (
+            "schema: 1\nintegrations:\n  docker:\n    local_log_driver: true\n    lock_path: /tmp/docker.lock",
+            "lock_path",
+        ),
+        (
             "schema: 1\nintegrations:\n  docker:\n    local_log_driver: true\n    max_log_size: 0m",
             "positive integer",
         ),

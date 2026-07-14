@@ -244,7 +244,9 @@ membership. Docker daemon configuration is published without restarting or reloa
 active containers and daemon behavior adopt it at Docker's normal reload or restart boundary.
 Docker daemon read/merge/publication is serialized with a fixed cooperative advisory lock at
 `/run/cozydot/docker-daemon.lock`; other writers preserve this guarantee only when they use
-the same lock.
+the same lock. Cozydot holds that lock on its own open file descriptor for the complete
+transaction. The lock path is fixed implementation state and is not exposed in YAML or operation
+display arguments.
 
 ## `desktop`
 

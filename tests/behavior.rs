@@ -80,7 +80,11 @@ failure=''; [ ! -f "$TMPDIR/publication-failure" ] || failure=$(cat "$TMPDIR/pub
 case "$command" in
   stat)
     destination=$(map_path "${!#}")
-    /usr/bin/stat --format=%f -- "$destination"
+    if [ "$1" = --format=%f:%u:%g ]; then
+      printf '%s:0:0\n' "$(/usr/bin/stat --format=%f -- "$destination")"
+    else
+      /usr/bin/stat --format=%f -- "$destination"
+    fi
     ;;
   cat)
     destination=$(map_path "${!#}")
@@ -98,7 +102,7 @@ case "$command" in
     ;;
   install)
     if [ "${1:-}" = -d ]; then
-      [ "$failure" != mkdir ] || exit 41
+      { [ "$failure" != mkdir ] || [ "${!#}" = /run/cozydot ]; } || exit 41
       destination=$(map_path "${!#}")
       mkdir -p "$destination"
       chmod 0755 "$destination"
@@ -107,6 +111,17 @@ case "$command" in
       source=${@: -2:1}; destination=$(map_path "${!#}")
       /usr/bin/install -m 0644 -- "$source" "$destination"
     fi
+    ;;
+  touch)
+    [ "$failure" != lock-setup ] || exit 50
+    [ "$#" -eq 2 ] && [ "$1" = -- ] || exit 51
+    /usr/bin/touch -- "$(map_path "$2")"
+    ;;
+  chown)
+    [ "$#" -eq 3 ] && [ "$1" = root:root ] && [ "$2" = -- ] || exit 52
+    ;;
+  chmod)
+    [ "$#" -eq 3 ] && [ "$1" = 0644 ] && [ "$2" = -- ] || exit 53
     ;;
   sync)
     target=$(map_path "${!#}")
@@ -133,15 +148,6 @@ case "$command" in
   rm)
     /bin/rm -f -- "$(map_path "${!#}")"
     ;;
-  /usr/bin/flock)
-    [ "$failure" != lock ] || exit 50
-    [ "$#" -eq 5 ] && [ "$1" = --exclusive ] && [ "$2" = -- ] || exit 51
-    lock=$(map_path "$3")
-    mkdir -p "$(dirname "$lock")"
-    [ "$failure" != lock-helper ] || exit 52
-    [ "$4" = /usr/bin/tee ] && [ "$5" = /dev/null ] || exit 53
-    exec /usr/bin/flock --exclusive -- "$lock" "$4" "$5"
-    ;;
   *) exit 45 ;;
 esac"#,
         );
@@ -163,6 +169,28 @@ esac"#,
         )
     }
 
+    fn execute_operation_with_lock(
+        &self,
+        operation: &operations::Operation,
+        lock: &Path,
+    ) -> anyhow::Result<()> {
+        let env = [
+            ("HOME".into(), self.home.as_os_str().to_owned()),
+            ("USER".into(), "tester".into()),
+            ("LOG".into(), self.log.as_os_str().to_owned()),
+            ("ROOT".into(), self.root.as_os_str().to_owned()),
+            (
+                "TMPDIR".into(),
+                self._dir.path().join("tmp").into_os_string(),
+            ),
+            (
+                "PATH".into(),
+                format!("{}:/usr/bin:/bin", self.bin.display()).into(),
+            ),
+        ];
+        operations::execute_with_docker_lock_for_test(operation, &env, lock)
+    }
+
     fn execute_operation_as_with_path(
         &self,
         operation: &operations::Operation,
@@ -182,7 +210,11 @@ esac"#,
             ),
             ("PATH".into(), path.into()),
         ];
-        operations::execute(operation, &env)
+        operations::execute_with_docker_lock_for_test(
+            operation,
+            &env,
+            &self.root.join("run/cozydot/docker-daemon.lock"),
+        )
     }
 
     fn run_with_path(&self, step: &Step, path: String) -> std::process::Output {
@@ -210,7 +242,11 @@ esac"#,
                     self.home.join(".local/share").into_os_string(),
                 ),
             ];
-            let result = operations::execute(operation, &env);
+            let result = operations::execute_with_docker_lock_for_test(
+                operation,
+                &env,
+                &self.root.join("run/cozydot/docker-daemon.lock"),
+            );
             let mut command = Command::new("sh");
             if let Err(error) = result {
                 command
@@ -409,6 +445,11 @@ fn docker_local_log_step(max_size: Option<&str>) -> Step {
     ))
 }
 
+fn assert_lock_released(path: &Path) {
+    let file = fs::File::open(path).unwrap();
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+}
+
 fn vscode_extension_step(extensions: &[&str]) -> Step {
     Step::workflow(operations::Operation::VsCodeExtensionSet(
         operations::VsCodeExtensionOperation::new(
@@ -499,10 +540,9 @@ exit 54"#,
 
 #[test]
 fn typed_integration_display_and_input_validation_are_operation_owned() {
-    assert_eq!(
-        docker_local_log_step(Some("10m")).display(),
-        "workflow docker-local-log 10m"
-    );
+    let docker_display = docker_local_log_step(Some("10m")).display();
+    assert_eq!(docker_display, "workflow docker-local-log 10m");
+    assert!(!docker_display.contains("docker-daemon.lock"));
     assert_eq!(
         vscode_extension_step(&["rust-lang.rust-analyzer", "ms-vscode.cpptools"]).display(),
         "workflow vscode-extension-set rust-lang.rust-analyzer ms-vscode.cpptools"
@@ -840,6 +880,7 @@ fn docker_publication_failures_preserve_old_bytes_and_postcondition_is_required(
             .status
             .success());
         assert_eq!(fs::read(destination).unwrap(), old, "{failure}");
+        assert_lock_released(&host.root.join("run/cozydot/docker-daemon.lock"));
     }
 
     let host = Host::new();
@@ -856,28 +897,30 @@ fn docker_publication_failures_preserve_old_bytes_and_postcondition_is_required(
     )
     .unwrap();
     assert!(!host.run(&docker_local_log_step(None)).status.success());
+    assert_lock_released(&host.root.join("run/cozydot/docker-daemon.lock"));
 }
 
 #[test]
 fn docker_lock_failures_precede_reads_and_parent_sync_failure_keeps_publication() {
-    for failure in ["lock", "lock-helper"] {
-        let host = Host::new();
-        host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
-        host.atomic_sudo();
-        let destination = host.root.join("etc/docker/daemon.json");
-        fs::create_dir_all(destination.parent().unwrap()).unwrap();
-        fs::write(&destination, b"{\"keep\":true}").unwrap();
-        fs::write(host._dir.path().join("tmp/publication-failure"), failure).unwrap();
+    let host = Host::new();
+    host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+    host.atomic_sudo();
+    let destination = host.root.join("etc/docker/daemon.json");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, b"{\"keep\":true}").unwrap();
+    fs::write(
+        host._dir.path().join("tmp/publication-failure"),
+        "lock-setup",
+    )
+    .unwrap();
 
-        assert!(!host.run(&docker_local_log_step(None)).status.success());
-        assert_eq!(fs::read(&destination).unwrap(), b"{\"keep\":true}");
-        let log = host.log();
-        assert!(
-            log.contains("sudo /usr/bin/flock --exclusive -- /run/cozydot/docker-daemon.lock /usr/bin/tee /dev/null")
-        );
-        assert!(!log.contains("sudo stat"), "{failure}: {log}");
-        assert!(!log.contains("sudo cat"), "{failure}: {log}");
-    }
+    assert!(!host.run(&docker_local_log_step(None)).status.success());
+    assert_eq!(fs::read(&destination).unwrap(), b"{\"keep\":true}");
+    let log = host.log();
+    assert!(log.contains("sudo touch -- /run/cozydot/docker-daemon.lock"));
+    assert!(!log.contains("sudo stat --format=%f -- /etc/docker/daemon.json"));
+    assert!(!log.contains("sudo cat -- /etc/docker/daemon.json"));
+    assert!(!log.contains("/usr/bin/flock"));
 
     let host = Host::new();
     host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
@@ -892,10 +935,120 @@ fn docker_lock_failures_precede_reads_and_parent_sync_failure_keeps_publication(
     .unwrap();
 
     assert!(!host.run(&docker_local_log_step(None)).status.success());
-    let published: serde_json::Value =
-        serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    let published_bytes = fs::read(&destination).unwrap();
+    let published: serde_json::Value = serde_json::from_slice(&published_bytes).unwrap();
     assert_eq!(published["log-driver"], "local");
     assert!(destination.exists());
+
+    fs::remove_file(host._dir.path().join("tmp/publication-failure")).unwrap();
+    host.run_ok(&docker_local_log_step(None));
+    assert_eq!(fs::read(&destination).unwrap(), published_bytes);
+    assert_lock_released(&host.root.join("run/cozydot/docker-daemon.lock"));
+    assert_eq!(
+        host.log()
+            .lines()
+            .filter(|line| *line == "sudo sync -- /etc/docker")
+            .count(),
+        2,
+        "{}",
+        host.log()
+    );
+}
+
+#[test]
+fn docker_lock_open_and_type_failures_precede_config_reads() {
+    for failure in ["open", "type"] {
+        let host = Host::new();
+        host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+        host.atomic_sudo();
+        let configured_lock = host.root.join("run/cozydot/docker-daemon.lock");
+        let open_path = if failure == "open" {
+            host.root.join("missing/docker-daemon.lock")
+        } else {
+            fs::create_dir_all(&configured_lock).unwrap();
+            configured_lock.clone()
+        };
+        let operation = operations::Operation::DockerLocalLog(
+            operations::DockerLocalLogOperation::new(None).unwrap(),
+        );
+
+        assert!(host
+            .execute_operation_with_lock(&operation, &open_path)
+            .is_err());
+        let log = host.log();
+        assert!(
+            !log.contains("sudo stat --format=%f -- /etc/docker/daemon.json"),
+            "{failure}: {log}"
+        );
+        assert!(
+            !log.contains("sudo cat -- /etc/docker/daemon.json"),
+            "{failure}: {log}"
+        );
+    }
+}
+
+#[test]
+fn two_docker_operations_serialize_on_the_descriptor_held_inode() {
+    let host = Host::new();
+    host.fake("docker", "printf 'Docker version 28.3.2, build abcdef0\n'");
+    host.atomic_sudo();
+    let destination = host.root.join("etc/docker/daemon.json");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, b"{}\n").unwrap();
+    fs::write(
+        host._dir.path().join("tmp/publication-pause-after-read"),
+        "",
+    )
+    .unwrap();
+
+    let spawn_operation = |max_size: Option<&str>| {
+        let home = host.home.clone();
+        let log = host.log.clone();
+        let root = host.root.clone();
+        let temp = host._dir.path().join("tmp");
+        let path = format!("{}:/usr/bin:/bin", host.bin.display());
+        let max_size = max_size.map(str::to_owned);
+        std::thread::spawn(move || {
+            let docker_lock = root.join("run/cozydot/docker-daemon.lock");
+            let env = [
+                ("HOME".into(), home.into_os_string()),
+                ("USER".into(), "tester".into()),
+                ("LOG".into(), log.into_os_string()),
+                ("ROOT".into(), root.into_os_string()),
+                ("TMPDIR".into(), temp.into_os_string()),
+                ("PATH".into(), path.into()),
+            ];
+            let operation = operations::Operation::DockerLocalLog(
+                operations::DockerLocalLogOperation::new(max_size).unwrap(),
+            );
+            operations::execute_with_docker_lock_for_test(&operation, &env, &docker_lock)
+        })
+    };
+
+    let first = spawn_operation(Some("10m"));
+    let observed = host._dir.path().join("tmp/publication-read-observed");
+    for _ in 0..500 {
+        if observed.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(observed.exists());
+
+    let second = spawn_operation(None);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(!second.is_finished(), "second operation bypassed the flock");
+    assert_eq!(
+        fs::read_to_string(host._dir.path().join("tmp/publication-cat-count")).unwrap(),
+        "1"
+    );
+
+    fs::write(host._dir.path().join("tmp/publication-read-release"), "").unwrap();
+    first.join().unwrap().unwrap();
+    second.join().unwrap().unwrap();
+    let state: serde_json::Value = serde_json::from_slice(&fs::read(destination).unwrap()).unwrap();
+    assert_eq!(state["log-driver"], "local");
+    assert_eq!(state["log-opts"]["max-size"], "10m");
 }
 
 #[test]
@@ -921,6 +1074,7 @@ fn docker_transaction_lock_preserves_a_contending_unrelated_edit() {
         operations::DockerLocalLogOperation::new(Some("10m".into())).unwrap(),
     );
     let worker = std::thread::spawn(move || {
+        let docker_lock = root.join("run/cozydot/docker-daemon.lock");
         let env = [
             ("HOME".into(), home.into_os_string()),
             ("USER".into(), "spoofed".into()),
@@ -929,7 +1083,7 @@ fn docker_transaction_lock_preserves_a_contending_unrelated_edit() {
             ("TMPDIR".into(), temp.into_os_string()),
             ("PATH".into(), path.into()),
         ];
-        operations::execute(&operation, &env)
+        operations::execute_with_docker_lock_for_test(&operation, &env, &docker_lock)
     });
 
     let observed = host._dir.path().join("tmp/publication-read-observed");

@@ -3,7 +3,10 @@ use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use super::{repository::publish_bytes, Host};
+use super::{
+    repository::{publish_bytes, sync_parent},
+    Host,
+};
 
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 
@@ -72,6 +75,11 @@ pub(crate) fn docker_local_log(host: &Host<'_>, operation: &DockerLocalLogOperat
         log_options.insert("max-size".into(), Value::String(max_size.clone()));
     }
     if requested == current {
+        sync_parent(
+            host,
+            Path::new(DOCKER_DAEMON_CONFIG),
+            "Docker daemon config publication",
+        )?;
         return Ok(());
     }
 
