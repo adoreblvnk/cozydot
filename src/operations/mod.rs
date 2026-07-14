@@ -25,11 +25,11 @@ pub use npm::{NpmPackageMode, NpmPackageOperation};
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
-    fs,
-    io::{self, BufRead, BufReader, Write},
+    fs::{self, File},
+    io::{self, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Child, Command, Output, Stdio},
+    process::{Command, Output, Stdio},
     thread,
     time::Duration,
 };
@@ -37,7 +37,6 @@ use std::{
 const ETXTBSY: i32 = 26;
 const COZYDOT_RUNTIME_DIRECTORY: &str = "/run/cozydot";
 const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
-const DOCKER_LOCK_READY: &str = "cozydot-docker-lock-ready";
 const ETXTBSY_BACKOFFS: [Duration; 4] = [
     Duration::from_millis(20),
     Duration::from_millis(40),
@@ -254,7 +253,31 @@ impl Operation {
 }
 
 pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()> {
-    let host = Host { env };
+    execute_on_host(
+        operation,
+        Host {
+            env,
+            docker_lock_open_path: Path::new(DOCKER_LOCK),
+        },
+    )
+}
+
+#[doc(hidden)]
+pub fn execute_with_docker_lock_for_test(
+    operation: &Operation,
+    env: &[(OsString, OsString)],
+    docker_lock_open_path: &Path,
+) -> Result<()> {
+    execute_on_host(
+        operation,
+        Host {
+            env,
+            docker_lock_open_path,
+        },
+    )
+}
+
+fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
     match operation {
         Operation::AptBootstrapPackages { packages } => apt::bootstrap_packages(&host, packages),
         Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
@@ -321,6 +344,7 @@ pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()
 
 pub(crate) struct Host<'a> {
     env: &'a [(OsString, OsString)],
+    docker_lock_open_path: &'a Path,
 }
 
 impl Host<'_> {
@@ -454,7 +478,12 @@ impl Host<'_> {
             .or_else(|| std::env::var_os(name))
     }
 
-    pub fn acquire_docker_lock(&self) -> Result<PrivilegedLock> {
+    pub fn acquire_docker_lock(&self) -> Result<File> {
+        self.require(
+            "Docker transaction lock directory symlink check",
+            "sudo",
+            ["test", "!", "-L", COZYDOT_RUNTIME_DIRECTORY],
+        )?;
         self.require(
             "Docker transaction lock directory",
             "sudo",
@@ -471,69 +500,73 @@ impl Host<'_> {
                 COZYDOT_RUNTIME_DIRECTORY,
             ],
         )?;
-        let mut command = Command::new("sudo");
-        command
-            .args([
-                OsStr::new("/usr/bin/flock"),
-                OsStr::new("--exclusive"),
-                OsStr::new("--"),
-                OsStr::new(DOCKER_LOCK),
-                OsStr::new("/usr/bin/tee"),
-                OsStr::new("/dev/null"),
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (key, value) in self.env {
-            command.env(key, value);
+        self.require(
+            "Docker transaction lock symlink check",
+            "sudo",
+            ["test", "!", "-L", DOCKER_LOCK],
+        )?;
+        self.require(
+            "Docker transaction lock creation",
+            "sudo",
+            ["touch", "--", DOCKER_LOCK],
+        )?;
+        let kind = self.require(
+            "Docker transaction lock type check",
+            "sudo",
+            ["stat", "--format=%f", "--", DOCKER_LOCK],
+        )?;
+        let mode = std::str::from_utf8(&kind.stdout)
+            .context("Docker transaction lock stat returned non-UTF-8 output")?
+            .trim_end();
+        let mode = u32::from_str_radix(mode, 16)
+            .context("Docker transaction lock stat returned malformed mode output")?;
+        if mode & 0o170000 != 0o100000 {
+            bail!("Docker transaction lock is not a regular file");
         }
-        let mut child = command
-            .spawn()
-            .context("Docker transaction lock: start sudo flock")?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .context("Docker transaction lock: helper stdin unavailable")?;
-        writeln!(stdin, "{DOCKER_LOCK_READY}")
-            .context("Docker transaction lock: send readiness probe")?;
-        stdin
-            .flush()
-            .context("Docker transaction lock: flush readiness probe")?;
-        let mut ready = String::new();
-        let read = BufReader::new(
-            child
-                .stdout
-                .take()
-                .context("Docker transaction lock: helper stdout unavailable")?,
-        )
-        .read_line(&mut ready);
-        if read.is_err() || ready != format!("{DOCKER_LOCK_READY}\n") {
-            drop(stdin);
-            let output = child
-                .wait_with_output()
-                .context("Docker transaction lock: wait for failed helper")?;
-            bail!(
-                "Docker transaction lock helper failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+        self.require(
+            "Docker transaction lock ownership",
+            "sudo",
+            ["chown", "root:root", "--", DOCKER_LOCK],
+        )?;
+        self.require(
+            "Docker transaction lock permissions",
+            "sudo",
+            ["chmod", "0644", "--", DOCKER_LOCK],
+        )?;
+        let state = self.require(
+            "Docker transaction lock state check",
+            "sudo",
+            ["stat", "--format=%f:%u:%g", "--", DOCKER_LOCK],
+        )?;
+        let state = std::str::from_utf8(&state.stdout)
+            .context("Docker transaction lock state returned non-UTF-8 output")?
+            .trim_end();
+        let mut fields = state.split(':');
+        let mode = fields
+            .next()
+            .and_then(|value| u32::from_str_radix(value, 16).ok());
+        let uid = fields.next().and_then(|value| value.parse::<u32>().ok());
+        let gid = fields.next().and_then(|value| value.parse::<u32>().ok());
+        if fields.next().is_some()
+            || mode.is_none_or(|mode| mode & 0o170000 != 0o100000 || mode & 0o7777 != 0o0644)
+            || uid != Some(0)
+            || gid != Some(0)
+        {
+            bail!("Docker transaction lock has mismatched type, ownership, or permissions");
         }
-        Ok(PrivilegedLock {
-            child,
-            stdin: Some(stdin),
-        })
-    }
-}
-
-pub(crate) struct PrivilegedLock {
-    child: Child,
-    stdin: Option<std::process::ChildStdin>,
-}
-
-impl Drop for PrivilegedLock {
-    fn drop(&mut self) {
-        drop(self.stdin.take());
-        let _ = self.child.wait();
+        let lock = File::open(self.docker_lock_open_path)
+            .context("Docker transaction lock: open fixed regular lock file")?;
+        if !lock
+            .metadata()
+            .context("Docker transaction lock: inspect opened lock file")?
+            .file_type()
+            .is_file()
+        {
+            bail!("Docker transaction lock opened inode is not a regular file");
+        }
+        rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
+            .context("Docker transaction lock: acquire exclusive flock")?;
+        Ok(lock)
     }
 }
 

@@ -182,11 +182,7 @@ pub(crate) fn publish_bytes(
                 destination_arg,
             ],
         )?;
-        host.require(
-            operation,
-            "sudo",
-            [OsStr::new("sync"), OsStr::new("--"), parent_arg],
-        )?;
+        sync_parent(host, destination, operation)?;
         Ok(())
     })();
     if result.is_err() {
@@ -201,6 +197,18 @@ pub(crate) fn publish_bytes(
         );
     }
     result
+}
+
+pub(crate) fn sync_parent(host: &Host<'_>, destination: &Path, operation: &str) -> Result<()> {
+    let parent = destination
+        .parent()
+        .context("publication destination has no parent")?;
+    host.require(
+        operation,
+        "sudo",
+        [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()],
+    )?;
+    Ok(())
 }
 
 fn validate_destination(destination: &str, directory: &str, suffix: &str) -> Result<PathBuf> {
