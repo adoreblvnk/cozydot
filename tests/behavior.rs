@@ -257,6 +257,83 @@ fn direct_step(
     ))
 }
 
+fn cargo_package_step(packages: &[&str], mode: operations::CargoPackageMode) -> Step {
+    Step::workflow(operations::Operation::CargoPackageSet(
+        operations::CargoPackageOperation::new(
+            packages.iter().map(|package| (*package).into()).collect(),
+            mode,
+        )
+        .unwrap(),
+    ))
+}
+
+fn npm_package_step(packages: &[&str], mode: operations::NpmPackageMode) -> Step {
+    Step::workflow(operations::Operation::NpmPackageSet(
+        operations::NpmPackageOperation::new(
+            packages.iter().map(|package| (*package).into()).collect(),
+            mode,
+        )
+        .unwrap(),
+    ))
+}
+
+fn configure_cargo_package_fakes(host: &Host, state: &str) {
+    fs::write(host._dir.path().join("tmp/cargo-state"), state).unwrap();
+    host.fake(
+        "cargo",
+        r#"{ printf 'cargo'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = install ] && [ "$2" = --list ]; then cat "$TMPDIR/cargo-state"; exit; fi
+if [ "$1" = install ] && [ "$2" = cargo-binstall ]; then
+  [ ! -f "$TMPDIR/cargo-bootstrap-failure" ] || exit 41
+  mkdir -p "$CARGO_HOME/bin"
+  cat >"$CARGO_HOME/bin/cargo-binstall" <<'BINSTALL'
+#!/bin/bash
+set -euo pipefail
+{ printf 'cargo-binstall'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+[ ! -f "$TMPDIR/cargo-mutation-failure" ] || exit 42
+for package in "$@"; do
+  case "$package" in --*) continue ;; esac
+  if ! grep -q "^$package v" "$TMPDIR/cargo-state"; then
+    printf '%s v1.0.0:\n    %s\n' "$package" "$package" >>"$TMPDIR/cargo-state"
+  fi
+done
+BINSTALL
+  chmod +x "$CARGO_HOME/bin/cargo-binstall"
+  exit
+fi
+exit 43"#,
+    );
+}
+
+fn configure_npm_package_fakes(host: &Host, version: &[u8], state: &[u8], post_state: &[u8]) {
+    let tmp = host._dir.path().join("tmp");
+    fs::write(tmp.join("fnm-version"), version).unwrap();
+    fs::write(tmp.join("npm-state"), state).unwrap();
+    fs::write(tmp.join("npm-post-state"), post_state).unwrap();
+    host.fake(
+        "fnm",
+        r#"{ printf 'fnm'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = default ]; then cat "$TMPDIR/fnm-version"; exit; fi
+[ "$1" = exec ] && [ "$2" = --using ] && [ "$4" = -- ] && [ "$5" = npm ] || exit 51
+shift 5
+if [ "$1" = list ]; then
+  [ ! -f "$TMPDIR/npm-query-failure" ] || exit 52
+  cat "$TMPDIR/npm-state"
+  exit
+fi
+if [ "$1" = install ] || [ "$1" = update ]; then
+  [ ! -f "$TMPDIR/npm-mutation-failure" ] || exit 53
+  cp "$TMPDIR/npm-post-state" "$TMPDIR/npm-state"
+  exit
+fi
+exit 54"#,
+    );
+    host.fake(
+        "npm",
+        "printf 'ambient-npm <%s>\\n' \"$*\" >>\"$LOG\"; exit 90",
+    );
+}
+
 #[test]
 fn latest_go_ignores_prereleases_and_verifies_matching_stable_checksum() {
     let host = Host::new();
@@ -409,6 +486,176 @@ fn configured_cargo_packages_fail_when_bootstrap_did_not_create_cargo() {
         force: false,
     });
     assert!(!host.run(&step).status.success());
+}
+
+#[test]
+fn schema_v1_cargo_ensure_installs_only_missing_packages_in_order_and_is_retry_safe() {
+    let host = Host::new();
+    configure_cargo_package_fakes(&host, "present v1.2.3:\n    present\n");
+    let step = cargo_package_step(
+        &["missing_one", "present", "missing-two"],
+        operations::CargoPackageMode::EnsurePresent,
+    );
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let log = host.log();
+    assert_eq!(log.matches("cargo <install> <--list>").count(), 3, "{log}");
+    assert_eq!(
+        log.matches("cargo <install> <cargo-binstall> <--locked>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("cargo-binstall <--no-confirm> <missing_one> <missing-two>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert!(
+        !log.contains("cargo-binstall <--no-confirm> <present>"),
+        "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_cargo_installed_ensure_is_a_single_query_noop() {
+    let host = Host::new();
+    configure_cargo_package_fakes(&host, "bat v0.25.0:\n    bat\nripgrep v14.1.0:\n    rg\n");
+    host.run_ok(&cargo_package_step(
+        &["bat", "ripgrep"],
+        operations::CargoPackageMode::EnsurePresent,
+    ));
+    let log = host.log();
+    assert_eq!(
+        log.lines().collect::<Vec<_>>(),
+        ["cargo <install> <--list>"]
+    );
+}
+
+#[test]
+fn schema_v1_cargo_update_forces_exactly_the_configured_batch() {
+    let host = Host::new();
+    configure_cargo_package_fakes(
+        &host,
+        "unrelated v9.0.0:\n    unrelated\nbat v0.1.0:\n    bat\nripgrep v0.1.0:\n    rg\n",
+    );
+    host.fake(
+        "cargo-binstall",
+        "{ printf 'cargo-binstall'; printf ' <%s>' \"$@\"; printf '\\n'; } >>\"$LOG\"",
+    );
+    host.run_ok(&cargo_package_step(
+        &["ripgrep", "bat"],
+        operations::CargoPackageMode::UpdateCurrent,
+    ));
+    let log = host.log();
+    assert!(
+        log.contains("cargo-binstall <--no-confirm> <--force> <ripgrep> <bat>"),
+        "{log}"
+    );
+    assert!(!log.contains("--force unrelated"), "{log}");
+    assert_eq!(log.matches("cargo <install> <--list>").count(), 2, "{log}");
+}
+
+#[test]
+fn schema_v1_cargo_rejects_invalid_duplicate_and_injection_inputs_before_execution() {
+    for packages in [
+        Vec::<String>::new(),
+        vec!["bat".into(), "bat".into()],
+        vec!["bat --locked".into()],
+        vec!["bat;touch-pwned".into()],
+        vec!["--force".into()],
+    ] {
+        assert!(operations::CargoPackageOperation::new(
+            packages,
+            operations::CargoPackageMode::EnsurePresent
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn schema_v1_cargo_state_failures_are_fatal() {
+    for body in [
+        "printf 'malformed\\n'",
+        "printf 'bat v01.2.3:\\n'",
+        "printf '\\377'",
+        "printf 'fatal\\n' >&2; exit 61",
+    ] {
+        let host = Host::new();
+        host.fake(
+            "cargo",
+            &format!(
+                "if [ \"$1\" = install ] && [ \"$2\" = --list ]; then {body}; else exit 62; fi"
+            ),
+        );
+        assert!(
+            !host
+                .run(&cargo_package_step(
+                    &["bat"],
+                    operations::CargoPackageMode::EnsurePresent,
+                ))
+                .status
+                .success(),
+            "body unexpectedly succeeded: {body}"
+        );
+    }
+}
+
+#[test]
+fn schema_v1_cargo_requires_an_executable_cargo_without_using_real_state() {
+    let host = Host::new();
+    let output = host.run_with_path(
+        &cargo_package_step(&["bat"], operations::CargoPackageMode::EnsurePresent),
+        host.bin.display().to_string(),
+    );
+    assert!(!output.status.success());
+}
+
+#[test]
+fn schema_v1_cargo_propagates_bootstrap_mutation_and_postcondition_failures() {
+    for failure in ["bootstrap", "mutation", "postcondition"] {
+        let host = Host::new();
+        configure_cargo_package_fakes(&host, "");
+        match failure {
+            "bootstrap" => {
+                fs::write(host._dir.path().join("tmp/cargo-bootstrap-failure"), b"1").unwrap()
+            }
+            "mutation" => {
+                fs::write(host._dir.path().join("tmp/cargo-mutation-failure"), b"1").unwrap()
+            }
+            "postcondition" => host.fake(
+                "cargo-binstall",
+                "printf 'cargo-binstall %s\\n' \"$*\" >>\"$LOG\"",
+            ),
+            _ => unreachable!(),
+        }
+        let output = host.run(&cargo_package_step(
+            &["bat"],
+            operations::CargoPackageMode::EnsurePresent,
+        ));
+        assert!(!output.status.success(), "{failure} unexpectedly succeeded");
+    }
+}
+
+#[test]
+fn schema_v1_cargo_bootstrap_must_publish_an_executable_binstall() {
+    let host = Host::new();
+    host.fake(
+        "cargo",
+        r#"if [ "$1" = install ] && [ "$2" = --list ]; then exit; fi
+if [ "$1" = install ] && [ "$2" = cargo-binstall ]; then exit; fi
+exit 63"#,
+    );
+    assert!(!host
+        .run(&cargo_package_step(
+            &["bat"],
+            operations::CargoPackageMode::EnsurePresent,
+        ))
+        .status
+        .success());
 }
 
 #[test]
@@ -2684,6 +2931,264 @@ if [ "${1:-}" = install ]; then touch "$TMPDIR/npm-standalone-installed"; fi"#,
         log.matches("npm install --global opencode-ai").count(),
         1,
         "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_npm_ensure_uses_selected_fnm_node_and_installs_ordered_missing_subset() {
+    let host = Host::new();
+    configure_npm_package_fakes(
+        &host,
+        b"v22.14.0\n",
+        br#"{"dependencies":{"present":{"version":"1.0.0"}}}"#,
+        br#"{"dependencies":{"present":{"version":"1.0.0"},"missing-one":{"version":"2.0.0"},"@scope/tool":{"version":"3.0.0"}}}"#,
+    );
+    let step = npm_package_step(
+        &["missing-one", "present", "@scope/tool"],
+        operations::NpmPackageMode::EnsurePresent,
+    );
+
+    host.run_ok(&step);
+    host.run_ok(&step);
+
+    let log = host.log();
+    assert_eq!(log.matches("fnm <default>").count(), 2, "{log}");
+    assert_eq!(
+        log.matches(
+            "fnm <exec> <--using> <v22.14.0> <--> <npm> <list> <--global> <--depth=0> <--json>"
+        )
+        .count(),
+        3,
+        "{log}"
+    );
+    assert_eq!(
+        log.matches("fnm <exec> <--using> <v22.14.0> <--> <npm> <install> <--global> <--> <missing-one> <@scope/tool>")
+            .count(),
+        1,
+        "{log}"
+    );
+    assert!(!log.contains("ambient-npm"), "{log}");
+}
+
+#[test]
+fn schema_v1_npm_installed_ensure_is_a_single_state_query_noop() {
+    let host = Host::new();
+    let state = br#"{"dependencies":{"opencode-ai":{"version":"1.0.0"},"@scope/tool":{"version":"2.0.0"}}}"#;
+    configure_npm_package_fakes(&host, b"v20.11.1\n", state, state);
+    host.run_ok(&npm_package_step(
+        &["opencode-ai", "@scope/tool"],
+        operations::NpmPackageMode::EnsurePresent,
+    ));
+    let log = host.log();
+    assert_eq!(log.matches("<list>").count(), 1, "{log}");
+    assert!(!log.contains("<install>"), "{log}");
+    assert!(!log.contains("<update>"), "{log}");
+    assert!(!log.contains("ambient-npm"), "{log}");
+}
+
+#[test]
+fn schema_v1_npm_update_targets_every_configured_package_and_no_unrelated_package() {
+    let host = Host::new();
+    let state = br#"{"dependencies":{"unrelated":{"version":"9.0.0"},"tool-two":{"version":"1.0.0"},"@scope/tool":{"version":"1.0.0"}}}"#;
+    configure_npm_package_fakes(&host, b"v24.1.0\n", state, state);
+    host.run_ok(&npm_package_step(
+        &["@scope/tool", "tool-two"],
+        operations::NpmPackageMode::UpdateCurrent,
+    ));
+    let log = host.log();
+    assert!(
+        log.contains("fnm <exec> <--using> <v24.1.0> <--> <npm> <update> <--global> <--> <@scope/tool> <tool-two>"),
+        "{log}"
+    );
+    assert!(
+        !log.contains("<update> <--global> <--> <unrelated>"),
+        "{log}"
+    );
+    assert!(!log.contains("ambient-npm"), "{log}");
+}
+
+#[test]
+fn schema_v1_npm_rejects_invalid_duplicate_and_injection_inputs_before_execution() {
+    for packages in [
+        Vec::<String>::new(),
+        vec!["tool".into(), "tool".into()],
+        vec!["Tool".into()],
+        vec!["tool@latest".into()],
+        vec!["tool;touch-pwned".into()],
+        vec!["@scope/".into()],
+        vec!["--force".into()],
+    ] {
+        assert!(operations::NpmPackageOperation::new(
+            packages,
+            operations::NpmPackageMode::EnsurePresent
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn schema_v1_npm_rejects_absent_or_invalid_default_node() {
+    let absent = Host::new();
+    assert!(!absent
+        .run_with_path(
+            &npm_package_step(&["tool"], operations::NpmPackageMode::EnsurePresent,),
+            absent.bin.display().to_string(),
+        )
+        .status
+        .success());
+
+    for version in [
+        b"none\n".as_slice(),
+        b"default\n".as_slice(),
+        b"22.1.0\n".as_slice(),
+        b"v22.1\n".as_slice(),
+        b"v022.1.0\n".as_slice(),
+        b"v22.1.0\nv20.0.0\n".as_slice(),
+        b"v22.1.0\r\n".as_slice(),
+        b"\xff\n".as_slice(),
+    ] {
+        let host = Host::new();
+        configure_npm_package_fakes(
+            &host,
+            version,
+            br#"{"dependencies":{}}"#,
+            br#"{"dependencies":{"tool":{"version":"1.0.0"}}}"#,
+        );
+        assert!(
+            !host
+                .run(&npm_package_step(
+                    &["tool"],
+                    operations::NpmPackageMode::EnsurePresent,
+                ))
+                .status
+                .success(),
+            "invalid version unexpectedly accepted: {version:?}"
+        );
+    }
+}
+
+#[test]
+fn schema_v1_npm_uses_the_accepted_xdg_fnm_path() {
+    let host = Host::new();
+    let state = br#"{"dependencies":{"tool":{"version":"1.0.0"}}}"#;
+    configure_npm_package_fakes(&host, b"v22.1.0\n", state, state);
+    let managed_dir = host.home.join(".local/share/fnm");
+    fs::create_dir_all(&managed_dir).unwrap();
+    fs::rename(host.bin.join("fnm"), managed_dir.join("fnm")).unwrap();
+    host.run_ok(&npm_package_step(
+        &["tool"],
+        operations::NpmPackageMode::EnsurePresent,
+    ));
+    assert!(!host.log().contains("ambient-npm"), "{}", host.log());
+}
+
+#[test]
+fn schema_v1_npm_query_failures_and_bad_json_are_fatal() {
+    let cases = [
+        br#"not-json"#.as_slice(),
+        br#"[]"#.as_slice(),
+        br#"{}"#.as_slice(),
+        br#"{"dependencies":[]}"#.as_slice(),
+        br#"{"dependencies":{"BAD":{}}}"#.as_slice(),
+        br#"{"dependencies":{"tool":{}}}"#.as_slice(),
+        br#"{"dependencies":{"tool":null}}"#.as_slice(),
+        br#"{"dependencies":{"tool":{"invalid":true}}}"#.as_slice(),
+        br#"{"dependencies":{"tool":{"problems":["broken"]}}}"#.as_slice(),
+        br#"{"dependencies":{},"problems":["missing: tool"]}"#.as_slice(),
+        br#"{"dependencies":{},"error":{"code":"EFAIL"}}"#.as_slice(),
+        b"\xff".as_slice(),
+    ];
+    for state in cases {
+        let host = Host::new();
+        configure_npm_package_fakes(
+            &host,
+            b"v22.1.0\n",
+            state,
+            br#"{"dependencies":{"tool":{"version":"1.0.0"}}}"#,
+        );
+        assert!(
+            !host
+                .run(&npm_package_step(
+                    &["tool"],
+                    operations::NpmPackageMode::EnsurePresent,
+                ))
+                .status
+                .success(),
+            "bad npm state unexpectedly accepted: {state:?}"
+        );
+    }
+
+    let host = Host::new();
+    configure_npm_package_fakes(
+        &host,
+        b"v22.1.0\n",
+        br#"{"dependencies":{}}"#,
+        br#"{"dependencies":{"tool":{"version":"1.0.0"}}}"#,
+    );
+    fs::write(host._dir.path().join("tmp/npm-query-failure"), b"1").unwrap();
+    assert!(!host
+        .run(&npm_package_step(
+            &["tool"],
+            operations::NpmPackageMode::EnsurePresent,
+        ))
+        .status
+        .success());
+}
+
+#[test]
+fn schema_v1_npm_propagates_default_mutation_and_postcondition_failures() {
+    let default_failure = Host::new();
+    default_failure.fake("fnm", "[ \"$1\" != default ] || exit 71");
+    assert!(!default_failure
+        .run(&npm_package_step(
+            &["tool"],
+            operations::NpmPackageMode::EnsurePresent,
+        ))
+        .status
+        .success());
+
+    for failure in ["mutation", "postcondition"] {
+        let host = Host::new();
+        configure_npm_package_fakes(
+            &host,
+            b"v22.1.0\n",
+            br#"{"dependencies":{}}"#,
+            if failure == "postcondition" {
+                br#"{"dependencies":{}}"#
+            } else {
+                br#"{"dependencies":{"tool":{"version":"1.0.0"}}}"#
+            },
+        );
+        if failure == "mutation" {
+            fs::write(host._dir.path().join("tmp/npm-mutation-failure"), b"1").unwrap();
+        }
+        assert!(
+            !host
+                .run(&npm_package_step(
+                    &["tool"],
+                    operations::NpmPackageMode::EnsurePresent,
+                ))
+                .status
+                .success(),
+            "{failure} unexpectedly succeeded"
+        );
+        assert!(!host.log().contains("ambient-npm"), "{}", host.log());
+    }
+}
+
+#[test]
+fn schema_v1_package_operation_display_forms_include_typed_modes() {
+    assert_eq!(
+        cargo_package_step(
+            &["bat", "ripgrep"],
+            operations::CargoPackageMode::UpdateCurrent,
+        )
+        .display(),
+        "workflow cargo-package-set update-current bat ripgrep"
+    );
+    assert_eq!(
+        npm_package_step(&["opencode-ai"], operations::NpmPackageMode::EnsurePresent,).display(),
+        "workflow npm-package-set ensure-present opencode-ai"
     );
 }
 
