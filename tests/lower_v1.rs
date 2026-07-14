@@ -126,3 +126,16 @@ fn desktop_mismatch_remains_a_planner_skip_during_lowering() {
 fn minimal_config_lowers_to_no_steps() {
     assert!(lowered("schema: 1\n", "none").is_empty());
 }
+
+#[test]
+fn every_bundled_preset_parses_plans_and_lowers_for_ubuntu() {
+    for name in ["default", "cli", "full", "vm"] {
+        let path = format!("configs/{name}.yaml");
+        let yaml = std::fs::read_to_string(&path).unwrap();
+        let config = ConfigV1::parse(&yaml).unwrap_or_else(|error| panic!("{path}: {error:#}"));
+        let plan = plan(&config, &ubuntu("gnome"), Path::new("/dotfiles"))
+            .unwrap_or_else(|error| panic!("{path}: {error:#}"));
+        let steps = lower(&plan).unwrap_or_else(|error| panic!("{path}: {error:#}"));
+        assert!(!steps.is_empty(), "{path}");
+    }
+}

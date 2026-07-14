@@ -1,6 +1,6 @@
 # Rust rewrite
 
-cozydot is now a Rust binary; the legacy root Bash executable is not restored. The implementation is split into CLI parsing, tagged-YAML validation, platform mappings, command planning, and process execution.
+cozydot is a Rust binary with one strict schema-v1 configuration. The implementation is split into CLI parsing, recursive typed validation, platform resolution, domain planning, fixed-operation lowering, and process execution.
 
 ## Compatibility
 
@@ -11,24 +11,19 @@ The public CLI is intentionally small:
 - `cozydot apply` applies `${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml`.
 - Preset selection, profile inheritance, planning, and multi-command execution are not public interfaces.
 
-`apply` intentionally runs the legacy install and configure phases, including their configured checks. The legacy update phase remains an internal planner path for compatibility testing and is not run by `apply`; recurring upgrades are therefore not an implicit side effect of provisioning.
+`apply` parses and validates the complete file, resolves and validates the host platform, builds typed intents, and lowers every intent before executing side effects. Unknown fields, wrong types, YAML extensions, interpolation, unsafe paths, malformed identifiers, and unsupported platform combinations fail with contextual field paths.
 
-Tagged config values are validated before planning. Unknown fields, mistyped fields, unsafe paths, unsupported binary suffixes, malformed versions, and unsupported URL lookup forms fail with contextual errors instead of panics. `!enabled` executes a section and `!disabled` skips it while preserving the data.
-
-Repository variables (`UPSTREAM_DISTRO`, `VERSION_CODENAME`, `UNAME_ARCH`, `GO_ARCH`, `LINUX_ARCH`, `X64_ARCH`, `ARM64_SUFFIX`) are expanded from detected platform data. Apt repo entries also resolve the legacy `$(dpkg --print-architecture)` expression to the planned Debian architecture instead of writing it literally.
+Managers and repository paths are fixed implementation choices. YAML cannot select commands, shell source, managers, lock paths, plugins, profiles, or interpolation variables.
 
 ## Behavior Covered
 
-The planner covers the legacy host-facing flows from `3b98859:cozydot`:
+The typed planner and operations cover:
 
-- distro preparation for Ubuntu, Linux Mint, and Debian, including snap cleanup, nosnap pinning, auto-upgrade disabling, Debian sources, and per-package apt guards;
-- apt purge/dependency installs, Rustup bootstrap, appimaged cleanup/install, dynamic FUSE package selection, and Nerd Font install;
-- third-party apt signing keys, repo files, exact pinning stdin, and package installs with per-package guards;
-- Flatpak, Cargo/cargo-binstall, release binaries, Go, FNM/Node, npm, pyenv update/pip, and uv self-update/managed-Python behavior;
-- apt/Flatpak/Rustup/Cargo/Go/Node update behavior with command/state guards;
-- Stow override/backup, Docker daemon preservation, Docker/VirtualBox groups, VS Code extension idempotency, terminal selection, GNOME settings, extension install/enable, dock keys, and rounded-corner settings.
+- explicit managed or preserved APT sources, administrative membership, unattended upgrades, Ubuntu Snap/codecs, package removal/install, repositories, and scoped updates;
+- per-user Flathub applications, Rustup/Rust, official Go archives, FNM/Node, UV/Python, Cargo, NPM, direct Debian/AppImage packages, and Nerd Fonts;
+- one backup-before-Stow policy, existing-product-only Docker/VirtualBox/VS Code integrations, GNOME/Cinnamon settings, GNOME extensions, dock, and rounded corners.
 
-Config-derived values are passed as process arguments or stdin to fixed command snippets. GitHub, Go, GNOME, and Docker JSON is parsed by internal Rust helpers; `yq` is not required. The remaining shell snippets are static and are used for state checks or tightly scoped workflows that need shell features; YAML values are not interpolated into generated shell source.
+Config-derived values are passed as arguments to typed fixed operations. GitHub, Go, GNOME, NPM, and Docker state is parsed by internal Rust helpers; `yq` and generated shell source are not used by schema-v1 lowering.
 
 ## Packaging
 

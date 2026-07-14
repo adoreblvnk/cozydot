@@ -41,6 +41,37 @@ impl ConfigV1 {
         Self::parse(&text).with_context(|| format!("validate {}", path.display()))
     }
 
+    pub fn distro_request(&self) -> &'static str {
+        match self
+            .system
+            .as_ref()
+            .and_then(|system| system.distro.as_ref())
+        {
+            None | Some(Distro::Auto) => "auto",
+            Some(Distro::Ubuntu) => "ubuntu",
+            Some(Distro::Linuxmint) => "linuxmint",
+            Some(Distro::Pop) => "pop",
+            Some(Distro::Zorin) => "zorin",
+            Some(Distro::Deepin) => "deepin",
+            Some(Distro::Debian) => "debian",
+            Some(Distro::Kali) => "kali",
+            Some(Distro::Tails) => "tails",
+        }
+    }
+
+    pub fn desktop_request(&self) -> &'static str {
+        match self
+            .system
+            .as_ref()
+            .and_then(|system| system.desktop.as_ref())
+        {
+            None | Some(DesktopKind::Auto) => "auto",
+            Some(DesktopKind::None) => "none",
+            Some(DesktopKind::Gnome) => "gnome",
+            Some(DesktopKind::Cinnamon) => "cinnamon",
+        }
+    }
+
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         if let Some(configured) = self
             .system

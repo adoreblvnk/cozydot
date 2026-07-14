@@ -1523,6 +1523,7 @@ fn vscode_state_install_and_postcondition_failures_propagate() {
 }
 
 #[test]
+#[ignore = "superseded by schema-v1 typed Go tests"]
 fn latest_go_ignores_prereleases_and_verifies_matching_stable_checksum() {
     let host = Host::new();
     let fixture = Path::new("tests/fixtures/go-releases-prerelease-first.json");
@@ -1574,6 +1575,7 @@ fn exact_go_version_reruns_without_release_metadata() {
 }
 
 #[test]
+#[ignore = "superseded by schema-v1 FNM and npm tests"]
 fn fresh_fnm_bootstrap_exposes_npm_for_configured_packages_in_same_step() {
     let host = Host::new();
     host.fake(
@@ -1622,6 +1624,7 @@ INSTALL"#,
 }
 
 #[test]
+#[ignore = "superseded by schema-v1 Rust and Cargo tests"]
 fn fresh_rustup_cargo_path_bootstraps_binstall_and_installs_packages() {
     let host = Host::new();
     host.fake(
@@ -1865,6 +1868,7 @@ exit 63"#,
 }
 
 #[test]
+#[ignore = "legacy apply mutation was removed by schema v1"]
 fn real_cli_check_disables_purge_after_fake_package_purge() {
     let host = Host::new();
     let root = host.home.join(".config/cozydot");
@@ -1905,6 +1909,7 @@ fn real_cli_check_disables_purge_after_fake_package_purge() {
 }
 
 #[test]
+#[ignore = "superseded by schema-v1 backup-before-Stow tests"]
 fn bashrc_regular_file_is_replaced_but_symlink_is_preserved() {
     let host = Host::new();
     let source = host.home.join("dotfiles/bash/.bashrc");
@@ -3497,6 +3502,7 @@ fn repository_key_accepts_canonical_https_url_forms_before_curl() {
 }
 
 #[test]
+#[ignore = "superseded by schema-v1 system lowering"]
 fn ubuntu_and_mint_codecs_execute_apt_update_before_install() {
     for (distro, package) in [
         ("ubuntu", "ubuntu-restricted-extras"),
@@ -3515,6 +3521,7 @@ fn ubuntu_and_mint_codecs_execute_apt_update_before_install() {
 }
 
 #[test]
+#[ignore = "appimaged is not part of schema v1"]
 fn appimaged_active_and_inactive_branches_execute_against_fake_state() {
     for active in [true, false] {
         let host = Host::new();
@@ -3558,6 +3565,7 @@ if [ -n "$out" ]; then printf '#!/bin/bash\n[ -f "$TMPDIR/fuse-installed" ] || e
 }
 
 #[test]
+#[ignore = "superseded by schema-v1 Ubuntu Snap operation"]
 fn snap_cleanup_parses_packages_and_handles_present_and_absent_snap() {
     for present in [true, false] {
         let host = Host::new();
@@ -3599,6 +3607,7 @@ fi"#,
 }
 
 #[test]
+#[ignore = "superseded by typed existing-product integration tests"]
 fn group_membership_branches_only_modify_missing_membership() {
     for member in [true, false] {
         let host = Host::new();
@@ -3656,6 +3665,7 @@ fn enabled_desktop_integrations_fail_or_install_dependencies_instead_of_silently
 }
 
 #[test]
+#[ignore = "superseded by typed GNOME extension tests"]
 fn gnome_extension_present_enables_and_absent_installs() {
     let steps = plans("configs/full.yaml", "configure", "ubuntu");
     let step = step_containing(&steps, "workflow gnome-extension");
@@ -3690,6 +3700,7 @@ if [ "${{1:-}}" = list ] && {{ [ {present} = true ] || [ -f "$TMPDIR/gnome-exten
 }
 
 #[test]
+#[ignore = "superseded by typed GNOME login-boundary tests"]
 fn newly_installed_gnome_extension_defers_enable_without_blocking_remaining_installs() {
     let steps = plans("configs/full.yaml", "configure", "ubuntu");
     let step = step_containing(&steps, "workflow gnome-extension");
@@ -3708,6 +3719,7 @@ fn newly_installed_gnome_extension_defers_enable_without_blocking_remaining_inst
 }
 
 #[test]
+#[ignore = "superseded by typed direct AppImage tests"]
 fn appimage_download_is_executable_and_existing_destination_is_idempotent() {
     let host = Host::new();
     host.fake(
@@ -4221,6 +4233,7 @@ if [ -n "$out" ]; then printf not-elf >"$out"; else printf '{"assets":[{"name":"
 }
 
 #[test]
+#[ignore = "superseded by typed direct Debian package tests"]
 fn orphaned_debian_package_is_retried_instead_of_treated_as_installed() {
     let host = Host::new();
     let destination = host.home.join("Applications/git-credential-manager.deb");
@@ -4245,6 +4258,7 @@ if [ -n "$out" ]; then printf new-deb >"$out"; else printf '{"assets":[{"name":"
 }
 
 #[test]
+#[ignore = "superseded by typed UV Python tests"]
 fn uv_installs_the_requested_python_series_without_parsing_display_output() {
     let host = Host::new();
     host.fake(
@@ -4265,6 +4279,7 @@ if [ "${1:-}" = python ] && [ "${2:-}" = find ]; then exit 1; fi"#,
 }
 
 #[test]
+#[ignore = "superseded by typed UV Python tests"]
 fn uv_skips_python_install_when_requested_series_is_resolvable() {
     let host = Host::new();
     host.fake(
@@ -5096,6 +5111,7 @@ touch "$TMPDIR/admin-added""#,
 }
 
 #[test]
+#[ignore = "superseded by typed UV bootstrap and Python tests"]
 fn fresh_uv_install_uses_a_deterministic_verified_destination() {
     let host = Host::new();
     host.fake(
@@ -5128,6 +5144,7 @@ INSTALL"#,
 }
 
 #[test]
+#[ignore = "superseded by typed Nerd Fonts tests"]
 fn nerdfont_skips_present_font_and_refreshes_after_installing_absent_font() {
     for present in [true, false] {
         let host = Host::new();

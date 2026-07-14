@@ -1,234 +1,127 @@
-metadata:
-  description: All features enabled & apps installed.
+schema: 1
+
+system:
   distro: auto
-  DE: auto
-check:
-  distroCfg: true
-  purge: !disabled
-    # docker installed via aptAltSources
-    - docker.io
-    - docker-doc
-    - docker-compose
-    - docker-compose-v2
-    - podman-docker
-    - containerd
-    - runc
-    - "*firefox*" # firefox installed via aptAltSources
-    - "*libreoffice*" # libreoffice replaced with onlyoffice
-  deps: !enabled
-    # essential packages
-    - apt-transport-https
+  desktop: auto
+  ensure_admin: true
+  apt:
+    sources: preserve
+    unattended_upgrades: false
+  ubuntu:
+    snap: false
+    codecs: true
+
+packages:
+  apt:
     - bash-completion
     - build-essential
-    - ca-certificates
     - cmake
     - curl
-    - ffmpeg
-    - flatpak
-    - git
-    - pinentry-tty
-    - stow
-    - ttf-mscorefonts-installer
-    - unzip
-    # pyenv dependencies
-    - libbz2-dev
-    - libffi-dev
-    - liblzma-dev
-    - libncurses-dev # libncursesw5-dev is a transitional pkg
-    - libreadline-dev
-    - libsqlite3-dev
-    - libssl-dev
-    - libxml2-dev
-    - libxmlsec1-dev
-    - tk-dev
-    - xz-utils
-    - zlib1g-dev
-    # imagemagick dependencies
-    - libjpeg-dev
-    - libpng-dev
-    - libtiff-dev
-  rustupCheck: true
-  appimaged: true
-  nerdfont: !enabled GeistMono
-install:
-  check: true
-  apt: !enabled
     - default-jdk
+    - ffmpeg
     - figlet
-    - gnupg2
-    - imagemagick # image converter
+    - git
+    - imagemagick
     - lolcat
     - openssh-server
-    - pandoc # document converter
+    - pandoc
     - pass
     - trash-cli
+    - unzip
     - vim
     - vlc
-  addRepos: !enabled
-    - sourceName: docker
-      remoteKey: https://download.docker.com/linux/${UPSTREAM_DISTRO}/gpg
-      keyPath: /etc/apt/keyrings/docker.asc
-      repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${UPSTREAM_DISTRO} $VERSION_CODENAME stable
-      pinning: false
-      packages:
-        - docker-ce
-        - docker-ce-cli
-        - containerd.io
-        - docker-buildx-plugin
-        - docker-compose-plugin
-    - sourceName: debian-griffo
-      remoteKey: https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc
-      keyPath: /etc/apt/keyrings/debian-griffo.gpg
-      repo: deb [signed-by=/etc/apt/keyrings/debian-griffo.gpg] https://debian.griffo.io/apt $VERSION_CODENAME main
-      pinning: false
-      packages:
-        - eza
-        - fzf
-        - yazi
-        - zoxide
-    - sourceName: github-cli
-      remoteKey: https://cli.github.com/packages/githubcli-archive-keyring.gpg
-      keyPath: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-      repo: deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main
-      pinning: false
-      packages:
-        - gh
-    - sourceName: helium
-      remoteKey: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
-      keyPath: /usr/share/keyrings/helium.gpg
-      repo: deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/helium.gpg] https://pkg.helium.computer/deb stable main
-      pinning: false
-      packages:
-        - helium-bin
-    - sourceName: onlyoffice
-      remoteKey: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-      keyPath: /usr/share/keyrings/onlyoffice.gpg
-      repo: deb [signed-by=/usr/share/keyrings/onlyoffice.gpg] https://download.onlyoffice.com/repo/debian squeeze main
-      pinning: false
-      packages:
-        - onlyoffice-desktopeditors
-    - sourceName: virtualbox
-      remoteKey: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-      keyPath: /usr/share/keyrings/oracle-virtualbox-2016.asc
-      repo: deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.asc] https://download.virtualbox.org/virtualbox/debian $VERSION_CODENAME contrib
-      pinning: false
-      packages:
-        - virtualbox-7.0
-    - sourceName: vscode
-      remoteKey: https://packages.microsoft.com/keys/microsoft.asc
-      keyPath: /etc/apt/keyrings/packages.microsoft.gpg
-      repo: deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main
-      pinning: false
-      packages:
-        - code
-    - sourceName: wezterm
-      remoteKey: https://apt.fury.io/wez/gpg.key
-      keyPath: /usr/share/keyrings/wezterm-fury.asc
-      repo: deb [signed-by=/usr/share/keyrings/wezterm-fury.asc] https://apt.fury.io/wez/ * *
-      pinning: false
-      packages:
-        - wezterm-nightly
-  flatpak: !enabled
+    - xz-utils
+  repositories:
+    - name: github-cli
+      key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+      source:
+        urls:
+          default: https://cli.github.com/packages
+        suite: stable
+        components: [main]
+      packages: [gh]
+    - name: vscode
+      key: https://packages.microsoft.com/keys/microsoft.asc
+      source:
+        urls:
+          default: https://packages.microsoft.com/repos/code
+        suite: stable
+        components: [main]
+      packages: [code]
+  flatpak:
     - com.bitwarden.desktop
     - com.discordapp.Discord
-    - com.obsproject.Studio # video recorder & live streaming software
-    - io.bassi.Amberol # music player
+    - com.obsproject.Studio
+    - io.bassi.Amberol
     - net.sapples.LiveCaptions
     - org.gimp.GIMP
     - org.qbittorrent.qBittorrent
-    - org.shotcut.Shotcut # video editor
+    - org.shotcut.Shotcut
     - org.telegram.desktop
-  cargo: !enabled
-    - bat --locked # cat replacement
-    - bottom --locked # process / system monitor
-    - du-dust # du alternative
-    - fd-find # find alternative
-    - starship --locked
+  cargo:
+    - bat
+    - bottom
+    - du-dust
+    - fd-find
+    - presenterm
+    - starship
     - tealdeer
-    - presenterm --locked
-  npm: !enabled
-    - opencode-ai
-  binaries: !enabled
-    - name: drawio.deb
-      url:
-        repo: jgraph/drawio-desktop
-        asset: "*${GO_ARCH}*.deb"
-    - name: fastfetch.deb
-      url: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-${LINUX_ARCH}.deb
-    - name: git-credential-manager.deb
-      url:
-        repo: git-ecosystem/git-credential-manager
-        asset: "*linux-${X64_ARCH}-*.deb"
-    - name: Obsidian.AppImage
-      url:
-        repo: obsidianmd/obsidian-releases
-        asset: "Obsidian-*${ARM64_SUFFIX}.AppImage"
-    - name: zen.AppImage
-      url: https://github.com/zen-browser/desktop/releases/latest/download/zen-${UNAME_ARCH}.AppImage
-  languages:
-    goVersion: !enabled latest
-    nodeVersion: !enabled latest
-    pyenv: !disabled
-      update: true
-      version: 3
-      pip: true
-    uv: !enabled
-      version: !enabled 3.13
-update:
-  check: true
-  apt: !enabled
-    aptFull: true
-  flatpak: true
-  cargo: true
-  other:
-    go: false
-    node: false
-configure:
-  check: true
-  dotfiles: !enabled
-    stowMode: override
-    packages:
-      - bash
-      - bin
-      - bat
-      - bottom
-      - fastfetch
-      - starship
-      - vscode
-      - wezterm
-      - yazi
-  apps:
-    docker: true
-    virtualbox: true
-    vscodeExtensions: !enabled
+  npm: [opencode-ai]
+
+tools:
+  rust: stable
+  go: latest
+  node: lts
+  python: "3.13"
+
+fonts:
+  nerd: [GeistMono]
+
+dotfiles:
+  packages: [bash, bin, bat, bottom, fastfetch, starship, vscode, wezterm, yazi]
+
+integrations:
+  vscode:
+    extensions:
       - catppuccin.catppuccin-vsc
       - charliermarsh.ruff
       - christian-kohler.path-intellisense
       - eamodio.gitlens
       - ecmel.vscode-html-css
-      - prettier.prettier-vscode
-      - ms-python.debugpy
-      - ms-python.python
-      - ms-python.vscode-pylance
-      - redhat.vscode-yaml
-      - streetsidesoftware.code-spell-checker
-      - wayou.vscode-todo-highlight
-      - yzhang.markdown-all-in-one
       - foxundermoon.shell-format
       - golang.go
       - llvm-vs-code-extensions.vscode-clangd
+      - ms-python.debugpy
+      - ms-python.python
+      - ms-python.vscode-pylance
+      - prettier.prettier-vscode
+      - redhat.vscode-yaml
       - rust-lang.rust-analyzer
+      - streetsidesoftware.code-spell-checker
       - timonwong.shellcheck
-  desktopEnvironment: !enabled
-    common: !enabled
-      defaultTerm: !enabled wezterm
-    gnome: !enabled
-      settings: true
-      extensions: !enabled
-        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-        - blur-my-shell@aunetx
-        - netspeedsimplified@prateekmedia.extension
-        - rounded-window-corners@fxgn
-      MacOSDock: true
-      smoothRoundedCorners: true
-    cinnamon: !enabled
+      - wayou.vscode-todo-highlight
+      - yzhang.markdown-all-in-one
+
+desktop:
+  theme: dark
+  terminal: x-terminal-emulator
+  idle:
+    timeout: 15m
+    dim: false
+  gnome:
+    extensions:
+      - blur-my-shell@aunetx
+      - netspeedsimplified@prateekmedia.extension
+    dock: true
+    rounded_corners: true
+
+updates:
+  apt: full
+  flatpak: true
+  tools:
+    rust: true
+    go: true
+    node: true
+  packages:
+    cargo: true
+    npm: true

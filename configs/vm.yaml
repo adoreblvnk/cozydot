@@ -1,133 +1,63 @@
-metadata:
-  description: Lightweight config with minimal utilities / apps installed for virtual machines.
+schema: 1
+
+system:
   distro: auto
-  DE: auto
-check:
-  distroCfg: true
-  purge: !disabled
-    # docker installed via aptAltSources
-    - docker.io
-    - docker-doc
-    - docker-compose
-    - docker-compose-v2
-    - podman-docker
-    - containerd
-    - runc
-    - "*firefox*" # firefox installed via aptAltSources
-    - "*libreoffice*" # libreoffice replaced with onlyoffice
-  deps: !enabled
-    # essential packages
-    - apt-transport-https
+  desktop: auto
+  ensure_admin: true
+  apt:
+    sources: preserve
+    unattended_upgrades: false
+  ubuntu:
+    snap: false
+
+packages:
+  apt:
     - bash-completion
     - build-essential
-    - ca-certificates
-    - cmake
     - curl
-    - ffmpeg
-    - flatpak
     - git
-    - pinentry-tty
-    - stow
-    - unzip
-    # pyenv dependencies
-    - libbz2-dev
-    - libffi-dev
-    - liblzma-dev
-    - libncurses-dev # libncursesw5-dev is a transitional pkg
-    - libreadline-dev
-    - libsqlite3-dev
-    - libssl-dev
-    - libxml2-dev
-    - libxmlsec1-dev
-    - tk-dev
-    - xz-utils
-    - zlib1g-dev
-    # imagemagick dependencies
-    - libjpeg-dev
-    - libpng-dev
-    - libtiff-dev
-  rustupCheck: true
-  appimaged: true
-  nerdfont: !enabled GeistMono
-install:
-  check: true
-  apt: !enabled
-    - default-jdk
-    - figlet
-    - gnupg2
-    - imagemagick # image converter
-    - lolcat
     - openssh-server
-    - pandoc # document converter
-    - pass
-    - trash-cli
+    - unzip
     - vim
-    - vlc
-  addRepos: !enabled
-    - sourceName: vscode
-      remoteKey: https://packages.microsoft.com/keys/microsoft.asc
-      keyPath: /etc/apt/keyrings/packages.microsoft.gpg
-      repo: deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main
-      pinning: false
-      packages:
-        - code
-  flatpak: !disabled []
-  cargo: !enabled
-    - bat --locked # cat replacement
-    - bottom --locked # process / system monitor
-    - starship --locked
-  npm: !enabled
-    - opencode-ai
-  binaries: !enabled
-    - name: git-credential-manager.deb
-      url:
-        repo: git-ecosystem/git-credential-manager
-        asset: "*linux-${X64_ARCH}-*.deb"
-  languages:
-    goVersion: !enabled latest
-    nodeVersion: !enabled latest
-    pyenv: !disabled
-      update: false
-      version: 3
-      pip: true
-    uv: !enabled
-      version: !enabled 3.13
-update:
-  check: true
-  apt: !enabled
-    aptFull: false
-  flatpak: true
-  cargo: false
-  other:
-    go: false
-    node: false
-configure:
-  check: true
-  dotfiles: !enabled
-    stowMode: override
-    packages:
-      - bash
-      - bin
-      - bat
-      - bottom
-      - fastfetch
-      - starship
-      - vscode
-  apps:
-    docker: false
-    virtualbox: false
-    vscodeExtensions: !enabled
-      - catppuccin.catppuccin-vsc
-  desktopEnvironment: !enabled
-    common: !disabled
-      defaultTerm: !disabled wezterm
-    gnome: !enabled
-      settings: true
-      extensions: !enabled
-        # - dash-to-dock@micxgx.gmail.com # Ubuntu already has a conflicting pkg
-        - blur-my-shell@aunetx
-        - netspeedsimplified@prateekmedia.extension
-        - rounded-window-corners@fxgn
-      MacOSDock: false
-      smoothRoundedCorners: true
-    cinnamon: !enabled
+    - xz-utils
+  repositories:
+    - name: vscode
+      key: https://packages.microsoft.com/keys/microsoft.asc
+      source:
+        urls:
+          default: https://packages.microsoft.com/repos/code
+        suite: stable
+        components: [main]
+      packages: [code]
+  cargo: [bat, bottom, starship]
+  npm: [opencode-ai]
+
+tools:
+  rust: stable
+  go: latest
+  node: lts
+  python: "3.13"
+
+fonts:
+  nerd: [GeistMono]
+
+dotfiles:
+  packages: [bash, bin, bat, bottom, fastfetch, starship, vscode]
+
+integrations:
+  vscode:
+    extensions: [catppuccin.catppuccin-vsc]
+
+desktop:
+  theme: dark
+  idle:
+    timeout: 15m
+    dim: false
+  gnome:
+    extensions:
+      - blur-my-shell@aunetx
+      - netspeedsimplified@prateekmedia.extension
+    rounded_corners: true
+
+updates:
+  apt: standard
