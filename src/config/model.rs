@@ -69,7 +69,8 @@ impl Config {
 
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
-        let (distro, upstream) = validate_platform_identity(platform)?;
+        let identity = resolve_platform_identity(platform)?;
+        let (distro, upstream) = (identity.distro, identity.upstream);
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
         if let Some(require) = self
@@ -243,12 +244,18 @@ impl Distro {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Family {
+pub(crate) enum Family {
     Ubuntu,
     Debian,
 }
 
-fn validate_platform_identity(platform: &Platform) -> Result<(Distro, Family)> {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PlatformIdentity {
+    pub distro: Distro,
+    pub upstream: Family,
+}
+
+pub(crate) fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity> {
     let distro = Distro::parse_platform(&platform.distro)?;
     let upstream = match platform.upstream.as_str() {
         "ubuntu" => Family::Ubuntu,
@@ -269,7 +276,7 @@ fn validate_platform_identity(platform: &Platform) -> Result<(Distro, Family)> {
             platform.upstream
         );
     }
-    Ok((distro, upstream))
+    Ok(PlatformIdentity { distro, upstream })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -413,23 +420,36 @@ impl OfficialSources {
                 platform.distro
             );
         }
+        let identity = PlatformIdentity { distro, upstream };
+        self.resolve_managed(platform, identity)?;
+        Ok(())
+    }
+
+    pub(crate) fn resolve_managed(
+        &self,
+        platform: &Platform,
+        identity: PlatformIdentity,
+    ) -> Result<Option<crate::platform::ManagedAptSources>> {
+        if self.mode == SourceMode::Preserve {
+            return Ok(None);
+        }
         let components = self
             .components
             .as_ref()
             .expect("validated managed components");
-        let (_, selected) = select_distro_map(components, distro, upstream).ok_or_else(|| {
-            anyhow::anyhow!(
-                "system.apt.sources.components: no entry for distribution {:?}, upstream {:?}, or default",
-                platform.distro,
-                platform.upstream
-            )
-        })?;
+        let (_, selected) = select_distro_map(components, identity.distro, identity.upstream)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "system.apt.sources.components: no entry for distribution {:?}, upstream {:?}, or default",
+                    platform.distro,
+                    platform.upstream
+                )
+            })?;
         let names = selected
             .iter()
             .map(AptComponent::as_str)
             .collect::<Vec<_>>();
-        platform.managed_apt_sources(&names)?;
-        Ok(())
+        platform.managed_apt_sources(&names).map(Some)
     }
 }
 
@@ -759,28 +779,60 @@ impl Repository {
         distro: Distro,
         upstream: Family,
     ) -> Result<()> {
-        let (key, _) = select_distro_map(&self.urls, distro, upstream).ok_or_else(|| {
-            anyhow::anyhow!(
-                "packages.apt.repositories[{index}].urls: no URL for distribution {:?}, upstream {:?}, or default",
-                platform.distro,
-                platform.upstream
-            )
-        })?;
+        let identity = PlatformIdentity { distro, upstream };
+        let resolved = self.resolve_for_platform(index, platform, identity)?;
         if self.suite.as_deref() == Some("system") {
-            if key == DistroMapKey::Default {
-                bail!("packages.apt.repositories[{index}].suite: system cannot use a default URL because it has no repository-family codename");
-            }
-            let codename = if key == DistroMapKey::from_distro(distro) {
-                &platform.distro_codename
-            } else {
-                &platform.base_codename
-            };
             validate_apt_token(
-                codename,
+                resolved.suite.expect("resolved system suite").as_str(),
                 &format!("packages.apt.repositories[{index}].suite resolved codename"),
             )?;
         }
         Ok(())
+    }
+
+    pub(crate) fn resolve_for_platform(
+        &self,
+        index: usize,
+        platform: &Platform,
+        identity: PlatformIdentity,
+    ) -> Result<ResolvedRepository<'_>> {
+        let (key, source_url) = select_distro_map(&self.urls, identity.distro, identity.upstream)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "packages.apt.repositories[{index}].urls: no URL for distribution {:?}, upstream {:?}, or default",
+                    platform.distro,
+                    platform.upstream
+                )
+            })?;
+        let suite = match self.suite.as_deref() {
+            Some("system") => {
+                let codename = selected_repository_codename(key, platform, identity.distro)
+                    .ok_or_else(|| anyhow::anyhow!("packages.apt.repositories[{index}].suite: system cannot use a default URL because it has no repository-family codename"))?;
+                Some(AptToken(codename.to_owned()))
+            }
+            Some(value) => Some(AptToken(value.to_owned())),
+            None => None,
+        };
+        Ok(ResolvedRepository { source_url, suite })
+    }
+}
+
+pub(crate) struct ResolvedRepository<'a> {
+    pub source_url: &'a HttpsUrl,
+    pub suite: Option<AptToken>,
+}
+
+fn selected_repository_codename(
+    key: DistroMapKey,
+    platform: &Platform,
+    distro: Distro,
+) -> Option<&str> {
+    if key == DistroMapKey::Default {
+        None
+    } else if key == DistroMapKey::from_distro(distro) {
+        Some(&platform.distro_codename)
+    } else {
+        Some(&platform.base_codename)
     }
 }
 
@@ -869,21 +921,45 @@ impl BinarySource {
     }
 
     fn require_architecture(&self, architecture: Architecture) -> Result<()> {
-        let present = match self {
-            Self::Github { assets, .. } => assets.contains(architecture),
-            Self::Url { urls, sha256 } => {
-                urls.contains(architecture) && sha256.contains(architecture)
-            }
-        };
-        if !present {
-            bail!("missing native architecture selector");
-        }
-        Ok(())
+        self.resolve_native(architecture).map(|_| ())
     }
 
     fn is_github(&self) -> bool {
         matches!(self, Self::Github { .. })
     }
+
+    pub(crate) fn resolve_native(
+        &self,
+        architecture: Architecture,
+    ) -> Result<ResolvedNativeBinary<'_>> {
+        match self {
+            Self::Github { repository, assets } => Ok(ResolvedNativeBinary::Github {
+                repository,
+                selector: assets
+                    .get(architecture)
+                    .ok_or_else(|| anyhow::anyhow!("missing native architecture selector"))?,
+            }),
+            Self::Url { urls, sha256 } => Ok(ResolvedNativeBinary::Url {
+                url: urls
+                    .get(architecture)
+                    .ok_or_else(|| anyhow::anyhow!("missing native architecture selector"))?,
+                sha256: sha256
+                    .get(architecture)
+                    .ok_or_else(|| anyhow::anyhow!("missing native architecture selector"))?,
+            }),
+        }
+    }
+}
+
+pub(crate) enum ResolvedNativeBinary<'a> {
+    Github {
+        repository: &'a str,
+        selector: &'a AssetSelector,
+    },
+    Url {
+        url: &'a HttpsUrl,
+        sha256: &'a Sha256,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -917,12 +993,12 @@ impl AssetMap {
         ]
     }
 
-    fn contains(&self, architecture: Architecture) -> bool {
+    fn get(&self, architecture: Architecture) -> Option<&AssetSelector> {
         match architecture {
-            Architecture::Amd64 => self.amd64.is_some(),
-            Architecture::Arm64 => self.arm64.is_some(),
-            Architecture::Arm32 => self.arm32.is_some(),
-            Architecture::Riscv64 => self.riscv64.is_some(),
+            Architecture::Amd64 => self.amd64.as_ref(),
+            Architecture::Arm64 => self.arm64.as_ref(),
+            Architecture::Arm32 => self.arm32.as_ref(),
+            Architecture::Riscv64 => self.riscv64.as_ref(),
         }
     }
 }
@@ -1006,8 +1082,13 @@ impl ArchitectureUrls {
         )
     }
 
-    fn contains(&self, architecture: Architecture) -> bool {
-        self.keys().contains(&architecture)
+    fn get(&self, architecture: Architecture) -> Option<&HttpsUrl> {
+        match architecture {
+            Architecture::Amd64 => self.amd64.as_ref(),
+            Architecture::Arm64 => self.arm64.as_ref(),
+            Architecture::Arm32 => self.arm32.as_ref(),
+            Architecture::Riscv64 => self.riscv64.as_ref(),
+        }
     }
 }
 
@@ -1047,8 +1128,13 @@ impl ArchitectureHashes {
         )
     }
 
-    fn contains(&self, architecture: Architecture) -> bool {
-        self.keys().contains(&architecture)
+    fn get(&self, architecture: Architecture) -> Option<&Sha256> {
+        match architecture {
+            Architecture::Amd64 => self.amd64.as_ref(),
+            Architecture::Arm64 => self.arm64.as_ref(),
+            Architecture::Arm32 => self.arm32.as_ref(),
+            Architecture::Riscv64 => self.riscv64.as_ref(),
+        }
     }
 }
 
