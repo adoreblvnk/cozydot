@@ -132,18 +132,10 @@ fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
         };
         let (version, source) = record
             .split_once(" (")
-            .map_or((record, None), |(version, source)| {
-                (version, source.strip_suffix(')'))
-            });
+            .map_or((record, None), |parts| (parts.0, parts.1.strip_suffix(')')));
         if !valid_semver(version)
             || record.contains(" (") && source.is_none()
-            || source.is_some_and(|source| {
-                source.is_empty()
-                    || source.chars().any(char::is_control)
-                    || !["git+", "path+", "registry+"]
-                        .iter()
-                        .any(|prefix| source.starts_with(prefix))
-            })
+            || source.is_some_and(|source| !valid_display_source(source))
         {
             bail!("cargo returned malformed installed package state: {line:?}");
         }
@@ -152,6 +144,26 @@ fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
         }
     }
     Ok(installed)
+}
+
+fn valid_display_source(source: &str) -> bool {
+    if source.is_empty() || source.chars().any(char::is_control) {
+        return false;
+    }
+    let mut depth = 0_u32;
+    for character in source.chars() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                let Some(next) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next;
+            }
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
 fn require_packages(packages: &[String], installed: &BTreeSet<String>) -> Result<()> {
@@ -254,8 +266,7 @@ mod tests {
 
     #[test]
     fn cargo_state_accepts_registry_records_and_ignores_binaries_and_other_sources() {
-        let output =
-            b"bat v0.25.0:\n    bat\nother v1.2.3 (git+https://example.test/repo):\n    other\n";
+        let output = b"bat v0.25.0:\n    bat\npath-probe v1.2.3 (/tmp/hermes-cargo-probe):\n    path-probe\ngit-probe v2.3.4 (https://github.com/example/repo?rev=main):\n    git-probe\nnested-probe v3.4.5 (/tmp/probe (safe)):\n    nested-probe\n";
         let installed = installed_packages(output).unwrap();
         assert_eq!(installed.into_iter().collect::<Vec<_>>(), ["bat"]);
     }
@@ -267,6 +278,9 @@ mod tests {
             b"bat v01.2.3:\n".as_slice(),
             b"bat v1.2.3\n".as_slice(),
             b"bat v1.2.3 ():\n".as_slice(),
+            b"bat v1.2.3 (/tmp/probe (broken):\n".as_slice(),
+            b"bat v1.2.3 (/tmp/probe ) broken ():\n".as_slice(),
+            b"bat v1.2.3 (/tmp/probe\tbroken):\n".as_slice(),
             b"bat v1.2.3:\nbat v1.2.4:\n".as_slice(),
         ] {
             assert!(installed_packages(output).is_err());

@@ -58,11 +58,7 @@ pub(crate) fn execute(host: &Host<'_>, operation: &NpmPackageOperation) -> Resul
         return Ok(());
     }
 
-    let command = match operation.mode {
-        NpmPackageMode::EnsurePresent => "install",
-        NpmPackageMode::UpdateCurrent => "update",
-    };
-    let mut npm_args = vec![command.to_owned(), "--global".into(), "--".into()];
+    let mut npm_args = vec!["install".to_owned(), "--global".into(), "--".into()];
     npm_args.extend(selected);
     run_npm_required(host, &fnm, &version, "npm package mutation", npm_args)?;
 
@@ -143,10 +139,12 @@ fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
     if root.contains_key("error") {
         bail!("npm global package state reported an error");
     }
-    let dependencies = root
-        .get("dependencies")
-        .and_then(Value::as_object)
-        .context("npm global package state dependencies must be a JSON object")?;
+    let dependencies = match root.get("dependencies") {
+        Some(dependencies) => dependencies
+            .as_object()
+            .context("npm global package state dependencies must be a JSON object")?,
+        None => return Ok(BTreeSet::new()),
+    };
     let mut installed = BTreeSet::new();
     for (package, metadata) in dependencies {
         validate_package(package).map_err(|_| {
@@ -286,10 +284,15 @@ mod tests {
     }
 
     #[test]
+    fn npm_state_accepts_real_empty_global_root() {
+        assert!(installed_packages(br#"{"name":"lib"}"#).unwrap().is_empty());
+    }
+
+    #[test]
     fn npm_state_rejects_reported_and_malformed_dependency_state() {
         for output in [
             br#"[]"#.as_slice(),
-            br#"{}"#.as_slice(),
+            br#"{"dependencies":null}"#.as_slice(),
             br#"{"dependencies":[]}"#.as_slice(),
             br#"{"dependencies":{"BAD":{}}}"#.as_slice(),
             br#"{"dependencies":{"tool":{}}}"#.as_slice(),
