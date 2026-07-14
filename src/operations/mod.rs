@@ -169,13 +169,7 @@ impl Operation {
 }
 
 pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()> {
-    execute_on_host(
-        operation,
-        Host {
-            env,
-            docker_lock_open_path: Path::new(DOCKER_LOCK),
-        },
-    )
+    execute_on_host(operation, Host::new(env, Path::new(DOCKER_LOCK))?)
 }
 
 #[doc(hidden)]
@@ -184,13 +178,7 @@ pub fn execute_with_docker_lock_for_test(
     env: &[(OsString, OsString)],
     docker_lock_open_path: &Path,
 ) -> Result<()> {
-    execute_on_host(
-        operation,
-        Host {
-            env,
-            docker_lock_open_path,
-        },
-    )
+    execute_on_host(operation, Host::new(env, docker_lock_open_path)?)
 }
 
 fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
@@ -242,9 +230,19 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
 pub(crate) struct Host<'a> {
     env: &'a [(OsString, OsString)],
     docker_lock_open_path: &'a Path,
+    home: PathBuf,
 }
 
-impl Host<'_> {
+impl<'a> Host<'a> {
+    fn new(env: &'a [(OsString, OsString)], docker_lock_open_path: &'a Path) -> Result<Self> {
+        let home = resolve_home(env, std::env::var_os("HOME"))?;
+        Ok(Self {
+            env,
+            docker_lock_open_path,
+            home,
+        })
+    }
+
     pub fn run<I, S>(&self, program: &str, args: I) -> Result<Output>
     where
         I: IntoIterator<Item = S>,
@@ -316,9 +314,7 @@ impl Host<'_> {
     }
 
     pub fn home(&self) -> PathBuf {
-        self.value("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("~"))
+        self.home.clone()
     }
 
     pub fn temp_dir(&self) -> PathBuf {
@@ -540,10 +536,28 @@ fn display(program: &str, args: &[OsString]) -> String {
         .join(" ")
 }
 
+fn resolve_home(env: &[(OsString, OsString)], process_home: Option<OsString>) -> Result<PathBuf> {
+    env.iter()
+        .rev()
+        .find(|(key, _)| key == "HOME")
+        .map(|(_, value)| PathBuf::from(value))
+        .or_else(|| process_home.map(PathBuf::from))
+        .context("HOME is not set")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::publish_file;
-    use std::{fs, os::unix::fs::MetadataExt};
+    use super::{publish_file, resolve_home};
+    use std::{ffi::OsString, fs, os::unix::fs::MetadataExt, path::PathBuf};
+
+    #[test]
+    fn operations_require_home_without_a_literal_fallback() {
+        assert_eq!(
+            resolve_home(&[], Some(OsString::from("/home/process"))).unwrap(),
+            PathBuf::from("/home/process")
+        );
+        assert!(resolve_home(&[], None).is_err());
+    }
 
     #[test]
     fn downloaded_files_publish_across_filesystems() {

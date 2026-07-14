@@ -1,8 +1,4 @@
-use cozydot::{
-    operations,
-    platform::Architecture,
-    runner::{command_exists_in, Condition, Step},
-};
+use cozydot::{operations, platform::Architecture, runner::Step};
 use std::{
     fs,
     io::Write,
@@ -233,87 +229,43 @@ esac"#,
     }
 
     fn run_with_path(&self, step: &Step, path: String) -> std::process::Output {
-        if let Step::Workflow(operation) = step {
-            let env = [
-                ("HOME".into(), self.home.as_os_str().to_owned()),
-                (
-                    "CARGO_HOME".into(),
-                    self.home.join(".cargo").into_os_string(),
-                ),
-                ("USER".into(), "tester".into()),
-                ("LOG".into(), self.log.as_os_str().to_owned()),
-                ("ROOT".into(), self.root.as_os_str().to_owned()),
-                (
-                    "TMPDIR".into(),
-                    self._dir.path().join("tmp").into_os_string(),
-                ),
-                ("PATH".into(), path.clone().into()),
-                (
-                    "XDG_CONFIG_HOME".into(),
-                    self.home.join(".config").into_os_string(),
-                ),
-                (
-                    "XDG_DATA_HOME".into(),
-                    self.home.join(".local/share").into_os_string(),
-                ),
-            ];
-            let result = operations::execute_with_docker_lock_for_test(
-                operation,
-                &env,
-                &self.root.join("run/cozydot/docker-daemon.lock"),
-            );
-            let mut command = Command::new("sh");
-            if let Err(error) = result {
-                command
-                    .args(["-c", "printf '%s\\n' \"$ERROR\" >&2; exit 1"])
-                    .env("ERROR", format!("{error:#}"));
-            } else {
-                command.args(["-c", "exit 0"]);
-            }
-            return command.output().unwrap();
+        let env = [
+            ("HOME".into(), self.home.as_os_str().to_owned()),
+            (
+                "CARGO_HOME".into(),
+                self.home.join(".cargo").into_os_string(),
+            ),
+            ("USER".into(), "tester".into()),
+            ("LOG".into(), self.log.as_os_str().to_owned()),
+            ("ROOT".into(), self.root.as_os_str().to_owned()),
+            (
+                "TMPDIR".into(),
+                self._dir.path().join("tmp").into_os_string(),
+            ),
+            ("PATH".into(), path.into()),
+            (
+                "XDG_CONFIG_HOME".into(),
+                self.home.join(".config").into_os_string(),
+            ),
+            (
+                "XDG_DATA_HOME".into(),
+                self.home.join(".local/share").into_os_string(),
+            ),
+        ];
+        let result = operations::execute_with_docker_lock_for_test(
+            step.operation(),
+            &env,
+            &self.root.join("run/cozydot/docker-daemon.lock"),
+        );
+        let mut command = Command::new("sh");
+        if let Err(error) = result {
+            command
+                .args(["-c", "printf '%s\\n' \"$ERROR\" >&2; exit 1"])
+                .env("ERROR", format!("{error:#}"));
+        } else {
+            command.args(["-c", "exit 0"]);
         }
-        if let Step::Conditional { condition, action } = step {
-            if !self.condition_matches(condition) {
-                return Command::new("sh").args(["-c", "exit 0"]).output().unwrap();
-            }
-            return self.run_with_path(action, path);
-        }
-        let command_step = step.command().expect("command or shell step");
-        let mut command = Command::new(&command_step.program);
-        command
-            .args(&command_step.args)
-            .env("HOME", &self.home)
-            .env("USER", "tester")
-            .env("LOG", &self.log)
-            .env("ROOT", &self.root)
-            .env("TMPDIR", self._dir.path().join("tmp"))
-            .env("PATH", path)
-            .env("XDG_CONFIG_HOME", self.home.join(".config"))
-            .env("XDG_DATA_HOME", self.home.join(".local/share"))
-            .env_remove("CARGO_HOME");
         command.output().unwrap()
-    }
-
-    fn condition_matches(&self, condition: &Condition) -> bool {
-        let command = |program: &str, args: &[&str]| {
-            Command::new(self.bin.join(program))
-                .args(args)
-                .env("HOME", &self.home)
-                .env("USER", "tester")
-                .env("LOG", &self.log)
-                .status()
-                .map(|status| status.success())
-                .unwrap_or(false)
-        };
-        match condition {
-            Condition::CommandExists(name) => command_exists_in(name, self.bin.as_os_str()),
-            Condition::CommandMissing(name) => !command_exists_in(name, self.bin.as_os_str()),
-            Condition::PackageInstalled(name) => command("dpkg-query", &["-W", name]),
-            Condition::PackageMissing(name) => !command("dpkg-query", &["-W", name]),
-            Condition::FileExists(path) => path.exists(),
-            Condition::FileMissing(path) => !path.exists(),
-            other => panic!("condition not used by behavior harness: {other:?}"),
-        }
     }
 
     fn run_ok(&self, step: &Step) {

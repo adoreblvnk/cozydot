@@ -46,7 +46,6 @@ fn every_preset_is_schema_v1_and_lowers_on_ubuntu_and_debian() {
         ] {
             let steps = preset(name, &resolved);
             assert!(!steps.is_empty(), "{name}");
-            assert!(steps.iter().all(|step| matches!(step, Step::Workflow(_))));
         }
     }
 }
