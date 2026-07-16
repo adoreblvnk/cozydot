@@ -1,5 +1,4 @@
 version: 1.0.0
-
 system:
   ensure_admin: true
   apt:
@@ -8,7 +7,6 @@ system:
     unattended_upgrades: disabled
   ubuntu:
     snap: disabled
-
 packages:
   apt:
     install:
@@ -41,19 +39,15 @@ packages:
     - starship
     - tealdeer
   npm: [opencode-ai]
-
 tools:
   rust: stable
   go: latest
   node: lts
   python: "3.13"
-
 fonts:
   nerd: [GeistMono]
-
 dotfiles:
   packages: [bash, bin, bat, bottom, fastfetch, starship, yazi]
-
 updates:
   apt: standard
   tools:

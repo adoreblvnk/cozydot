@@ -151,8 +151,8 @@ fn repositories_publish_before_one_refresh_and_keep_later_groups_in_declaration_
     let plan = planned(FULL, &ubuntu("gnome", "amd64"));
     let repositories = plan.phase(PlanPhaseKind::ThirdPartyRepositories).actions();
     let groups = plan.phase(PlanPhaseKind::RepositoryPackages).actions();
-    assert_eq!(repositories.len(), 8);
-    assert_eq!(groups.len(), 8);
+    assert_eq!(repositories.len(), 7);
+    assert_eq!(groups.len(), 7);
     assert_eq!(
         plan.phase(PlanPhaseKind::AptMetadataRefresh)
             .actions()
@@ -170,7 +170,6 @@ fn repositories_publish_before_one_refresh_and_keep_later_groups_in_declaration_
         names,
         [
             "docker",
-            "debian-griffo",
             "github-cli",
             "helium",
             "onlyoffice",
@@ -524,13 +523,17 @@ fn tools_packages_fonts_and_updates_retain_moving_selectors_and_targets() {
         action,
         PlannedAction::Update(UpdateIntent::Cargo(packages))
             if packages.iter().map(String::as_str).eq([
-                "bat", "bottom", "du-dust", "fd-find", "presenterm", "starship", "tealdeer"
+                "bat", "bottom", "du-dust", "eza", "fd-find", "presenterm", "starship",
+                "tealdeer", "yazi-fm", "zoxide"
             ])
     )));
     assert!(updates.iter().any(|action| matches!(
         action,
         PlannedAction::Update(UpdateIntent::Npm(packages))
-            if packages.iter().map(String::as_str).eq(["opencode-ai"])
+            if packages
+                .iter()
+                .map(String::as_str)
+                .eq(["@playwright/cli", "opencode-ai", "skills"])
     )));
     assert!(updates.iter().any(|action| matches!(
         action,
@@ -679,7 +682,8 @@ fn declared_order_is_preserved_and_intents_contain_no_generic_commands_or_interp
     let dotfiles = &plan.phase(PlanPhaseKind::Dotfiles).actions()[0];
     assert!(
         matches!(dotfiles, PlannedAction::Dotfiles(intent) if intent.packages == [
-            "bash", "bin", "bat", "bottom", "fastfetch", "starship", "vscode", "wezterm", "yazi"
+            "bash", "bin", "bat", "bottom", "fastfetch", "opencode", "starship", "vscode",
+            "wezterm", "yazi"
         ])
     );
 }

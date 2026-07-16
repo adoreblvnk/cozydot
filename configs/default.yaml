@@ -1,5 +1,4 @@
 version: 1.0.0
-
 system:
   ensure_admin: true
   apt:
@@ -9,7 +8,6 @@ system:
   ubuntu:
     snap: disabled
     codecs: installed
-
 packages:
   apt:
     install:
@@ -62,16 +60,13 @@ packages:
     - opencode-ai
     - skills
     - "@playwright/cli"
-
 tools:
   rust: stable
   go: latest
   node: lts
   python: "3.13"
-
 fonts:
   nerd: [GeistMono]
-
 dotfiles:
   packages:
     - bash
@@ -84,7 +79,6 @@ dotfiles:
     - vscode
     - wezterm
     - yazi
-
 integrations:
   vscode:
     extensions:
@@ -94,7 +88,6 @@ integrations:
       - ms-python.python
       - redhat.vscode-yaml
       - yzhang.markdown-all-in-one
-
 desktop:
   theme: dark
   terminal: x-terminal-emulator
@@ -107,7 +100,6 @@ desktop:
       - netspeedsimplified@prateekmedia.extension
     dock: true
     rounded_corners: true
-
 updates:
   apt: standard
   flatpak: true
