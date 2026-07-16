@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{collections::BTreeSet, ffi::OsStr, fs, path::Path};
 use url::Url;
 
 use super::{Host, TempDir, TempPath};
@@ -123,7 +123,7 @@ fn install_family(host: &Host<'_>, family: &str) -> Result<()> {
     if let Err(error) = postcondition {
         rollback_family(stage.path(), &destination, replacing)
             .with_context(|| format!("Nerd Font mutation failed and rollback failed: {error:#}"))?;
-        host.require("Nerd Font rollback cache refresh", "fc-cache", ["--force"])
+        refresh_cache(host, "Nerd Font rollback cache refresh", &parent)
             .with_context(|| format!("Nerd Font mutation failed: {error:#}"))?;
         return Err(error);
     }
@@ -158,10 +158,25 @@ fn refresh_and_verify(
     destination: &Path,
 ) -> Result<()> {
     sync_publication_directories(stage, destination)?;
-    host.require("Nerd Font cache refresh", "fc-cache", ["--force"])?;
+    refresh_cache(
+        host,
+        "Nerd Font cache refresh",
+        destination
+            .parent()
+            .context("Nerd Font destination has no parent")?,
+    )?;
     if !font_present(host, family)? {
         bail!("Nerd Font mutation did not publish family {family:?}");
     }
+    Ok(())
+}
+
+fn refresh_cache(host: &Host<'_>, operation: &str, directory: &Path) -> Result<()> {
+    host.require(
+        operation,
+        "fc-cache",
+        [OsStr::new("--force"), directory.as_os_str()],
+    )?;
     Ok(())
 }
 
