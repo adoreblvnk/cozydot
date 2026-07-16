@@ -32,7 +32,7 @@ pub use direct::{
     DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
 };
 pub use dotfiles::DotfilesOperation;
-pub use fonts::NerdFontsOperation;
+pub use fonts::{NerdFontsMode, NerdFontsOperation};
 pub use integrations::{DockerLocalLogOperation, VsCodeExtensionOperation};
 pub use managed_apt::ManagedAptSourcesOperation;
 pub use npm::{NpmPackageMode, NpmPackageOperation};

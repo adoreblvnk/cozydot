@@ -490,10 +490,11 @@ fn cargo_binstall_bootstrap_step(architecture: Architecture) -> Step {
     ))
 }
 
-fn nerd_fonts_step(families: &[&str]) -> Step {
+fn nerd_fonts_step(families: &[&str], mode: operations::NerdFontsMode) -> Step {
     Step::workflow(operations::Operation::NerdFonts(
         operations::NerdFontsOperation::new(
             families.iter().map(|family| (*family).into()).collect(),
+            mode,
         )
         .unwrap(),
     ))
@@ -644,6 +645,41 @@ exit 41"#,
     );
     fs::create_dir_all(host.home.join(".local/bin")).unwrap();
     fs::rename(host.bin.join("uv"), host.home.join(".local/bin/uv")).unwrap();
+}
+
+fn configure_nerd_font_fakes(host: &Host) {
+    fs::write(host._dir.path().join("tmp/font-generation"), b"v1").unwrap();
+    host.fake(
+        "fc-list",
+        r#"{ printf 'fc-list'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+family=${!#}; family=${family#:family=}; family=${family% Nerd Font}
+if [ -f "$TMPDIR/font-cached-$family" ]; then printf '%s Nerd Font,%s Nerd Font Mono\n' "$family" "$family"; fi"#,
+    );
+    host.fake(
+        "curl",
+        r###"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; --) shift; url=$1; shift ;; *) shift ;; esac; done
+[ -n "$out" ] && [ -n "${url:-}" ] || exit 40
+asset=${url##*/}; family=${asset%.tar.xz}
+printf '%s:%s' "$family" "$(cat "$TMPDIR/font-generation")" >"$out""###,
+    );
+    host.fake(
+        "tar",
+        r###"{ printf 'tar'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+listing=false; archive=''; directory=''
+while [ "$#" -gt 0 ]; do case "$1" in --list) listing=true; shift ;; --file) archive=$2; shift 2 ;; --directory) directory=$2; shift 2 ;; *) shift ;; esac; done
+[ -n "$archive" ] || exit 41
+payload=$(cat "$archive"); family=${payload%%:*}; generation=${payload#*:}
+if $listing; then printf '%sNerdFont-Regular.ttf\n' "$family"; exit; fi
+[ -n "$directory" ] || exit 42
+printf '%s' "$generation" >"$directory/${family}NerdFont-Regular.ttf""###,
+    );
+    host.fake(
+        "fc-cache",
+        r#"{ printf 'fc-cache'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ -f "$TMPDIR/font-cache-failure" ]; then rm "$TMPDIR/font-cache-failure"; exit 71; fi
+for path in "$HOME/.local/share/fonts/cozydot/"*; do [ -d "$path" ] || continue; touch "$TMPDIR/font-cached-${path##*/}"; done"#,
+    );
 }
 
 fn configure_system_state_fakes(host: &Host) {
@@ -5725,32 +5761,8 @@ esac"#,
 #[test]
 fn schema_v1_nerd_fonts_publish_user_local_files_and_verify_fontconfig_state() {
     let host = Host::new();
-    host.fake(
-        "fc-list",
-        r#"{ printf 'fc-list'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
-if [ -f "$TMPDIR/font-cached" ]; then printf 'GeistMono Nerd Font,GeistMono Nerd Font Mono\n'; fi"#,
-    );
-    host.fake(
-        "curl",
-        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
-while [ "$#" -gt 0 ]; do if [ "$1" = --output ]; then : >"$2"; exit; fi; shift; done
-exit 40"#,
-    );
-    host.fake(
-        "tar",
-        r#"{ printf 'tar'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
-for argument in "$@"; do [ "$argument" != --list ] || { printf 'GeistMonoNerdFont-Regular.ttf\n'; exit; }; done
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = --directory ]; then mkdir -p "$2"; printf 'font' >"$2/GeistMonoNerdFont-Regular.ttf"; exit; fi
-  shift
-done
-exit 41"#,
-    );
-    host.fake(
-        "fc-cache",
-        "{ printf 'fc-cache'; printf ' <%s>' \"$@\"; printf '\n'; } >>\"$LOG\"; touch \"$TMPDIR/font-cached\"",
-    );
-    let step = nerd_fonts_step(&["GeistMono"]);
+    configure_nerd_font_fakes(&host);
+    let step = nerd_fonts_step(&["GeistMono"], operations::NerdFontsMode::EnsurePresent);
 
     host.run_ok(&step);
     host.run_ok(&step);
@@ -5758,7 +5770,7 @@ exit 41"#,
     let installed = host
         .home
         .join(".local/share/fonts/cozydot/GeistMono/GeistMonoNerdFont-Regular.ttf");
-    assert_eq!(fs::read(installed).unwrap(), b"font");
+    assert_eq!(fs::read(installed).unwrap(), b"v1");
     let log = host.log();
     assert_eq!(log.matches("fc-cache <--force>").count(), 1, "{log}");
     assert_eq!(log.matches("curl <").count(), 1, "{log}");
@@ -5767,6 +5779,67 @@ exit 41"#,
             "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/GeistMono.tar.xz"
         ),
         "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_nerd_font_update_replaces_only_configured_families() {
+    let host = Host::new();
+    configure_nerd_font_fakes(&host);
+    host.run_ok(&nerd_fonts_step(
+        &["GeistMono"],
+        operations::NerdFontsMode::EnsurePresent,
+    ));
+    let unrelated = host
+        .home
+        .join(".local/share/fonts/cozydot/JetBrainsMono/JetBrainsMonoNerdFont-Regular.ttf");
+    fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+    fs::write(&unrelated, b"unrelated").unwrap();
+    fs::write(host._dir.path().join("tmp/font-generation"), b"v2").unwrap();
+
+    host.run_ok(&nerd_fonts_step(
+        &["GeistMono"],
+        operations::NerdFontsMode::Update,
+    ));
+
+    assert_eq!(
+        fs::read(
+            host.home
+                .join(".local/share/fonts/cozydot/GeistMono/GeistMonoNerdFont-Regular.ttf")
+        )
+        .unwrap(),
+        b"v2"
+    );
+    assert_eq!(fs::read(unrelated).unwrap(), b"unrelated");
+    let log = host.log();
+    assert_eq!(log.matches("curl <").count(), 2, "{log}");
+    assert!(!log.contains("JetBrainsMono.tar.xz"), "{log}");
+}
+
+#[test]
+fn schema_v1_nerd_font_failed_update_restores_old_files_and_retries() {
+    let host = Host::new();
+    configure_nerd_font_fakes(&host);
+    let ensure = nerd_fonts_step(&["GeistMono"], operations::NerdFontsMode::EnsurePresent);
+    let update = nerd_fonts_step(&["GeistMono"], operations::NerdFontsMode::Update);
+    let installed = host
+        .home
+        .join(".local/share/fonts/cozydot/GeistMono/GeistMonoNerdFont-Regular.ttf");
+    host.run_ok(&ensure);
+    fs::write(host._dir.path().join("tmp/font-generation"), b"v2").unwrap();
+    fs::write(host._dir.path().join("tmp/font-cache-failure"), b"1").unwrap();
+
+    assert!(!host.run(&update).status.success());
+    assert_eq!(fs::read(&installed).unwrap(), b"v1");
+
+    host.run_ok(&update);
+    assert_eq!(fs::read(installed).unwrap(), b"v2");
+    let log = host.log();
+    assert_eq!(log.matches("curl <").count(), 3, "{log}");
+    assert_eq!(
+        log.matches("fc-cache <--force>").count(),
+        4,
+        "initial, failed, rollback, and retry refreshes: {log}"
     );
 }
 
@@ -5813,8 +5886,16 @@ done
 #[test]
 fn schema_v1_local_state_operation_display_forms_are_typed() {
     assert_eq!(
-        nerd_fonts_step(&["GeistMono", "JetBrainsMono"]).display(),
-        "workflow nerd-fonts GeistMono JetBrainsMono"
+        nerd_fonts_step(
+            &["GeistMono", "JetBrainsMono"],
+            operations::NerdFontsMode::EnsurePresent,
+        )
+        .display(),
+        "workflow nerd-fonts ensure-present GeistMono JetBrainsMono"
+    );
+    assert_eq!(
+        nerd_fonts_step(&["GeistMono"], operations::NerdFontsMode::Update).display(),
+        "workflow nerd-fonts update GeistMono"
     );
     assert_eq!(
         dotfiles_step(Path::new("/dotfiles"), &["bash", "starship"]).display(),

@@ -11,10 +11,10 @@ use crate::{
         DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
         DockerLocalLogOperation, DotfilesOperation, EnsureAdminOperation, GithubRepository,
         GnomeDockOperation, GnomeExtensionsOperation, GnomeRoundedCornersOperation,
-        GoToolchainOperation, GoToolchainSelector, ManagedAptSourcesOperation, NerdFontsOperation,
-        NodeToolchainOperation, NodeToolchainSelector, NpmPackageMode, NpmPackageOperation,
-        Operation, PythonToolchainOperation, RustToolchainOperation, RustToolchainSelector,
-        ToolMutationMode, UbuntuSnapOperation, UnattendedUpgradesOperation,
+        GoToolchainOperation, GoToolchainSelector, ManagedAptSourcesOperation, NerdFontsMode,
+        NerdFontsOperation, NodeToolchainOperation, NodeToolchainSelector, NpmPackageMode,
+        NpmPackageOperation, Operation, PythonToolchainOperation, RustToolchainOperation,
+        RustToolchainSelector, ToolMutationMode, UbuntuSnapOperation, UnattendedUpgradesOperation,
         VsCodeExtensionOperation,
     },
     runner::Step,
@@ -123,7 +123,10 @@ fn lower_action(
         ),
         PlannedAction::NerdFonts(families) => push(
             steps,
-            Operation::NerdFonts(NerdFontsOperation::new(families.clone())?),
+            Operation::NerdFonts(NerdFontsOperation::new(
+                families.clone(),
+                NerdFontsMode::EnsurePresent,
+            )?),
         ),
         PlannedAction::Dotfiles(dotfiles) => push(
             steps,
