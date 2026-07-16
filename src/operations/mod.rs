@@ -448,7 +448,7 @@ impl<'a> Host<'a> {
     }
 }
 
-pub(crate) struct TempDir(PathBuf);
+pub(crate) struct TempDir(tempfile::TempDir);
 
 impl TempDir {
     pub fn new(host: &Host<'_>, stem: &str) -> Result<Self> {
@@ -456,29 +456,19 @@ impl TempDir {
     }
 
     pub fn new_in(parent: &Path, stem: &str) -> Result<Self> {
-        for attempt in 0..100 {
-            let path = parent.join(format!("{stem}.{}.{attempt}", std::process::id()));
-            match std::fs::create_dir(&path) {
-                Ok(()) => return Ok(Self(path)),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error).context("create operation temporary directory"),
-            }
-        }
-        bail!("could not allocate operation temporary directory")
+        tempfile::Builder::new()
+            .prefix(stem)
+            .tempdir_in(parent)
+            .map(Self)
+            .context("create operation temporary directory")
     }
 
     pub fn path(&self) -> &Path {
-        &self.0
+        self.0.path()
     }
 }
 
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-pub(crate) struct TempPath(PathBuf);
+pub(crate) struct TempPath(tempfile::TempPath);
 
 impl TempPath {
     pub fn new(host: &Host<'_>, stem: &str) -> Result<Self> {
@@ -486,31 +476,16 @@ impl TempPath {
     }
 
     pub fn new_with_suffix(host: &Host<'_>, stem: &str, suffix: &str) -> Result<Self> {
-        for attempt in 0..100 {
-            let path = host
-                .temp_dir()
-                .join(format!("{stem}.{}.{attempt}{suffix}", std::process::id()));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(_) => return Ok(Self(path)),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error).context("create operation temporary file"),
-            }
-        }
-        bail!("could not allocate operation temporary file")
+        tempfile::Builder::new()
+            .prefix(stem)
+            .suffix(suffix)
+            .tempfile_in(host.temp_dir())
+            .map(|file| Self(file.into_temp_path()))
+            .context("create operation temporary file")
     }
 
     pub fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempPath {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        self.0.as_ref()
     }
 }
 
