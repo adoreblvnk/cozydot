@@ -215,9 +215,11 @@ pub enum ToolchainIntent {
     },
     Node {
         selector: NodeSelector,
+        architecture: Architecture,
     },
     Python {
         selector: PinnedSelector,
+        architecture: Architecture,
     },
 }
 
@@ -390,6 +392,7 @@ pub enum UpdateIntent {
     },
     Node {
         selector: NodeSelector,
+        architecture: Architecture,
     },
     Cargo(Vec<String>),
     Npm(Vec<String>),
@@ -744,6 +747,7 @@ fn plan_tools(
             PlanPhaseKind::LanguageToolchains,
             PlannedAction::Toolchain(ToolchainIntent::Node {
                 selector: node_selector(selector),
+                architecture: platform.architecture,
             }),
         );
     }
@@ -755,6 +759,7 @@ fn plan_tools(
             PlanPhaseKind::LanguageToolchains,
             PlannedAction::Toolchain(ToolchainIntent::Python {
                 selector: PinnedSelector(selector.clone()),
+                architecture: platform.architecture,
             }),
         );
     }
@@ -1002,6 +1007,7 @@ fn plan_updates(
                             .and_then(|tools| tools.node.as_deref())
                             .expect("validated update target"),
                     ),
+                    architecture: platform.architecture,
                 },
             );
         }

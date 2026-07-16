@@ -6,12 +6,12 @@ use super::v1::{
 use crate::{
     config::v1::{DirectFormat, Theme},
     operations::{
-        AptUpgradePolicy, CargoPackageMode, CargoPackageOperation, DesktopEnvironment,
-        DesktopSetting, DesktopSettingOperation, DesktopTheme, DirectPackageFormat,
-        DirectPackageMode, DirectPackageOperation, DirectPackageSelector, DockerLocalLogOperation,
-        DotfilesOperation, EnsureAdminOperation, GithubRepository, GnomeDockOperation,
-        GnomeExtensionsOperation, GnomeRoundedCornersOperation, GoToolchainOperation,
-        GoToolchainSelector, ManagedAptSourcesOperation, NerdFontsOperation,
+        AptUpgradePolicy, CargoBinstallBootstrapOperation, CargoPackageMode, CargoPackageOperation,
+        DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme,
+        DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
+        DockerLocalLogOperation, DotfilesOperation, EnsureAdminOperation, GithubRepository,
+        GnomeDockOperation, GnomeExtensionsOperation, GnomeRoundedCornersOperation,
+        GoToolchainOperation, GoToolchainSelector, ManagedAptSourcesOperation, NerdFontsOperation,
         NodeToolchainOperation, NodeToolchainSelector, NpmPackageMode, NpmPackageOperation,
         Operation, PythonToolchainOperation, RustToolchainOperation, RustToolchainSelector,
         ToolMutationMode, UbuntuSnapOperation, UnattendedUpgradesOperation,
@@ -24,15 +24,25 @@ use std::collections::BTreeSet;
 
 pub fn lower(plan: &PlanV1) -> Result<Vec<Step>> {
     let mut steps = Vec::new();
+    let cargo_binstall_architecture = plan.actions.iter().find_map(|action| match action {
+        PlannedAction::Tool(ToolInstall::Rust { architecture, .. }) => Some(*architecture),
+        _ => None,
+    });
     for action in &plan.actions {
-        lower_action(action, &mut steps)?;
+        lower_action(action, cargo_binstall_architecture, &mut steps)?;
     }
     Ok(steps)
 }
 
-fn lower_action(action: &PlannedAction, steps: &mut Vec<Step>) -> Result<()> {
+fn lower_action(
+    action: &PlannedAction,
+    cargo_binstall_architecture: Option<crate::platform::Architecture>,
+    steps: &mut Vec<Step>,
+) -> Result<()> {
     match action {
-        PlannedAction::Bootstrap(bootstrap) => lower_bootstrap(&bootstrap.prerequisites, steps),
+        PlannedAction::Bootstrap(bootstrap) => {
+            lower_bootstrap(&bootstrap.prerequisites, cargo_binstall_architecture, steps)?
+        }
         PlannedAction::System(action) => lower_system(action, steps)?,
         PlannedAction::AptMetadataRefresh => push(steps, Operation::AptMetadataRefresh),
         PlannedAction::RemovePackages(packages) => push(
@@ -129,7 +139,11 @@ fn lower_action(action: &PlannedAction, steps: &mut Vec<Step>) -> Result<()> {
     Ok(())
 }
 
-fn lower_bootstrap(prerequisites: &BTreeSet<Prerequisite>, steps: &mut Vec<Step>) {
+fn lower_bootstrap(
+    prerequisites: &BTreeSet<Prerequisite>,
+    cargo_binstall_architecture: Option<crate::platform::Architecture>,
+    steps: &mut Vec<Step>,
+) -> Result<()> {
     let mut packages = BTreeSet::new();
     for prerequisite in prerequisites {
         packages.extend(match prerequisite {
@@ -137,7 +151,7 @@ fn lower_bootstrap(prerequisites: &BTreeSet<Prerequisite>, steps: &mut Vec<Step>
             Prerequisite::OpenPgpRepositorySupport => ["gnupg"].as_slice(),
             Prerequisite::FlatpakFlathub => ["flatpak"].as_slice(),
             Prerequisite::Rustup => [].as_slice(),
-            Prerequisite::CargoBinstall => ["build-essential"].as_slice(),
+            Prerequisite::CargoBinstall => [].as_slice(),
             Prerequisite::GoArchives => ["tar"].as_slice(),
             Prerequisite::FnmNpm => ["unzip"].as_slice(),
             Prerequisite::Uv => [].as_slice(),
@@ -158,6 +172,15 @@ fn lower_bootstrap(prerequisites: &BTreeSet<Prerequisite>, steps: &mut Vec<Step>
     if prerequisites.contains(&Prerequisite::Rustup) {
         push(steps, Operation::RustupBootstrap);
     }
+    if prerequisites.contains(&Prerequisite::CargoBinstall) {
+        push(
+            steps,
+            Operation::CargoBinstallBootstrap(CargoBinstallBootstrapOperation::new(
+                cargo_binstall_architecture
+                    .context("cargo-binstall bootstrap requires a planned Rust architecture")?,
+            )),
+        );
+    }
     if prerequisites.contains(&Prerequisite::FnmNpm) {
         push(steps, Operation::FnmBootstrap);
     }
@@ -167,6 +190,7 @@ fn lower_bootstrap(prerequisites: &BTreeSet<Prerequisite>, steps: &mut Vec<Step>
     if prerequisites.contains(&Prerequisite::FlatpakFlathub) {
         push(steps, Operation::FlatpakEnsureFlathub);
     }
+    Ok(())
 }
 
 fn lower_system(action: &SystemAction, steps: &mut Vec<Step>) -> Result<()> {
@@ -219,13 +243,21 @@ fn lower_tool_install(tool: &ToolInstall) -> Result<Operation> {
             *architecture,
             ToolMutationMode::EnsurePresent,
         )?),
-        ToolInstall::Node { selector } => Operation::NodeToolchain(NodeToolchainOperation::new(
+        ToolInstall::Node {
+            selector,
+            architecture,
+        } => Operation::NodeToolchain(NodeToolchainOperation::new(
             node_selector(selector),
+            *architecture,
             ToolMutationMode::EnsurePresent,
         )?),
-        ToolInstall::Python { version } => {
-            Operation::PythonToolchain(PythonToolchainOperation::new(version.clone())?)
-        }
+        ToolInstall::Python {
+            version,
+            architecture,
+        } => Operation::PythonToolchain(PythonToolchainOperation::new(
+            version.clone(),
+            *architecture,
+        )?),
     })
 }
 
@@ -359,8 +391,12 @@ fn lower_tool_update(tool: &ToolUpdate) -> Result<Operation> {
             *architecture,
             ToolMutationMode::UpdateMoving,
         )?),
-        ToolUpdate::Node { selector } => Operation::NodeToolchain(NodeToolchainOperation::new(
+        ToolUpdate::Node {
+            selector,
+            architecture,
+        } => Operation::NodeToolchain(NodeToolchainOperation::new(
             node_selector(selector),
+            *architecture,
             ToolMutationMode::UpdateMoving,
         )?),
     })

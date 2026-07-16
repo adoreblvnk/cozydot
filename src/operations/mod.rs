@@ -1,6 +1,7 @@
 mod apt;
 mod binary;
 mod cargo;
+mod cargo_binstall;
 mod desktop;
 mod direct;
 mod dotfiles;
@@ -22,6 +23,7 @@ pub use binary::{
     BinarySha256, BinarySourceOperation, GithubRepository,
 };
 pub use cargo::{CargoPackageMode, CargoPackageOperation};
+pub use cargo_binstall::CargoBinstallBootstrapOperation;
 pub use desktop::{
     DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, GnomeDockOperation,
     GnomeExtensionsOperation, GnomeRoundedCornersOperation,
@@ -101,6 +103,7 @@ pub enum Operation {
         destination: String,
     },
     RustupBootstrap,
+    CargoBinstallBootstrap(CargoBinstallBootstrapOperation),
     RustToolchain(RustToolchainOperation),
     CargoPackageSet(CargoPackageOperation),
     NodeToolchain(NodeToolchainOperation),
@@ -165,6 +168,7 @@ impl Operation {
                 vec!["repository-key".into(), destination.clone()]
             }
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
+            Self::CargoBinstallBootstrap(operation) => operation.display_args(),
             Self::RustToolchain(operation) => operation.display_args(),
             Self::CargoPackageSet(operation) => operation.display_args(),
             Self::NodeToolchain(operation) => operation.display_args(),
@@ -225,6 +229,7 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
         Operation::NerdFonts(operation) => fonts::execute(&host, operation),
         Operation::RepositoryKey { url, destination } => repository::key(&host, url, destination),
         Operation::RustupBootstrap => provisioning::rustup(&host),
+        Operation::CargoBinstallBootstrap(operation) => cargo_binstall::execute(&host, operation),
         Operation::RustToolchain(operation) => tools::execute_rust(&host, operation),
         Operation::CargoPackageSet(operation) => cargo::execute(&host, operation),
         Operation::NodeToolchain(operation) => tools::execute_node(&host, operation),
@@ -334,12 +339,6 @@ impl<'a> Host<'a> {
         self.value("TMPDIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-    }
-
-    pub fn command_exists(&self, name: &str) -> bool {
-        self.value("PATH")
-            .and_then(|path| std::env::split_paths(&path).find(|dir| dir.join(name).is_file()))
-            .is_some()
     }
 
     pub fn value(&self, name: &str) -> Option<OsString> {

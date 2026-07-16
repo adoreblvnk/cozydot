@@ -8,8 +8,11 @@ pub fn fnm_bootstrap(host: &Host<'_>) -> Result<()> {
         .value("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| host.home().join(".local/share"));
+    if !data_home.is_absolute() {
+        bail!("FNM managed data directory must be absolute");
+    }
     let installed = data_home.join("fnm/fnm");
-    if host.command_exists("fnm") || executable_file(&installed) {
+    if executable_file(&installed) {
         return Ok(());
     }
     let installer = TempPath::new(host, "fnm-install")?;
@@ -38,9 +41,15 @@ pub fn fnm_bootstrap(host: &Host<'_>) -> Result<()> {
 }
 
 pub fn uv_bootstrap(host: &Host<'_>) -> Result<()> {
-    let install_dir = host.home().join(".local/bin");
+    let install_dir = host
+        .value("UV_INSTALL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| host.home().join(".local/bin"));
+    if !install_dir.is_absolute() {
+        bail!("UV managed install directory must be absolute");
+    }
     let installed = install_dir.join("uv");
-    if host.command_exists("uv") || executable_file(&installed) {
+    if executable_file(&installed) {
         return Ok(());
     }
     let installer = TempPath::new(host, "uv-install")?;
@@ -74,6 +83,7 @@ pub fn uv_bootstrap(host: &Host<'_>) -> Result<()> {
 }
 
 fn executable_file(path: &std::path::Path) -> bool {
-    std::fs::metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0
+    })
 }

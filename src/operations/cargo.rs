@@ -45,6 +45,9 @@ pub(crate) fn execute(host: &Host<'_>, operation: &CargoPackageOperation) -> Res
         .value("CARGO_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| host.home().join(".cargo"));
+    if !cargo_home.is_absolute() {
+        bail!("Cargo package operation requires an absolute CARGO_HOME");
+    }
     let cargo = resolve_cargo(host, &cargo_home)?;
     let installed = inspect_installed(host, &cargo)?;
     let selected = match operation.mode {
@@ -60,7 +63,9 @@ pub(crate) fn execute(host: &Host<'_>, operation: &CargoPackageOperation) -> Res
         return Ok(());
     }
 
-    let binstall = ensure_binstall(host, &cargo, &cargo_home)?;
+    let binstall = resolve_binstall(&cargo_home)?.context(
+        "Cargo package operation: managed cargo-binstall is unavailable after bootstrap",
+    )?;
     let mut args = vec!["--no-confirm".to_owned()];
     if operation.mode == CargoPackageMode::UpdateCurrent {
         args.push("--force".into());
@@ -72,36 +77,20 @@ pub(crate) fn execute(host: &Host<'_>, operation: &CargoPackageOperation) -> Res
     require_packages(&operation.packages, &installed)
 }
 
-fn resolve_cargo(host: &Host<'_>, cargo_home: &Path) -> Result<String> {
+fn resolve_cargo(_host: &Host<'_>, cargo_home: &Path) -> Result<String> {
     let managed = cargo_home.join("bin/cargo");
     if executable_file(&managed) {
         return path_program(&managed, "Cargo executable path");
     }
-    executable_on_path(host, "cargo")
-        .map(|_| "cargo".to_owned())
-        .context("Cargo package operation: cargo is not available in CARGO_HOME/bin or PATH")
+    bail!("Cargo package operation: managed Cargo is unavailable after Rust bootstrap")
 }
 
-fn ensure_binstall(host: &Host<'_>, cargo: &str, cargo_home: &Path) -> Result<String> {
-    if let Some(program) = resolve_binstall(host, cargo_home)? {
-        return Ok(program);
-    }
-    host.require(
-        "cargo-binstall bootstrap",
-        cargo,
-        ["install", "cargo-binstall", "--locked"],
-    )?;
-    resolve_binstall(host, cargo_home)?.context(
-        "cargo-binstall bootstrap: cargo install succeeded but cargo-binstall is unavailable",
-    )
-}
-
-fn resolve_binstall(host: &Host<'_>, cargo_home: &Path) -> Result<Option<String>> {
+fn resolve_binstall(cargo_home: &Path) -> Result<Option<String>> {
     let managed = cargo_home.join("bin/cargo-binstall");
     if executable_file(&managed) {
         return path_program(&managed, "cargo-binstall executable path").map(Some);
     }
-    Ok(executable_on_path(host, "cargo-binstall").map(|_| "cargo-binstall".to_owned()))
+    Ok(None)
 }
 
 fn inspect_installed(host: &Host<'_>, cargo: &str) -> Result<BTreeSet<String>> {
@@ -238,14 +227,6 @@ fn valid_semver_identifiers(value: &str, reject_numeric_leading_zero: bool) -> b
             && (!reject_numeric_leading_zero
                 || !identifier.bytes().all(|byte| byte.is_ascii_digit())
                 || valid_numeric_component(identifier))
-    })
-}
-
-fn executable_on_path(host: &Host<'_>, name: &str) -> Option<PathBuf> {
-    host.value("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|directory| directory.join(name))
-            .find(|path| executable_file(path))
     })
 }
 

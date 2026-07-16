@@ -129,9 +129,11 @@ pub enum ToolInstall {
     },
     Node {
         selector: NodeSelector,
+        architecture: Architecture,
     },
     Python {
         version: String,
+        architecture: Architecture,
     },
 }
 
@@ -312,6 +314,7 @@ pub enum ToolUpdate {
     },
     Node {
         selector: NodeSelector,
+        architecture: Architecture,
     },
 }
 
@@ -548,12 +551,14 @@ fn plan_tools(
         prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::FnmNpm]);
         actions.push(PlannedAction::Tool(ToolInstall::Node {
             selector: node_selector(selector),
+            architecture: platform.architecture,
         }));
     }
     if let Some(version) = tools.python.as_ref() {
         prerequisites.extend([Prerequisite::HttpsDownloader, Prerequisite::Uv]);
         actions.push(PlannedAction::Tool(ToolInstall::Python {
             version: version.clone(),
+            architecture: platform.architecture,
         }));
     }
 }
@@ -748,6 +753,7 @@ fn plan_updates(
                 actions.push(PlannedAction::Update(UpdateAction::Tool(
                     ToolUpdate::Node {
                         selector: node_selector(selector),
+                        architecture: platform.architecture,
                     },
                 )));
             }

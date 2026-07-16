@@ -67,13 +67,13 @@ pub(crate) fn execute(host: &Host<'_>, operation: &NpmPackageOperation) -> Resul
 }
 
 fn resolve_fnm(host: &Host<'_>) -> Result<String> {
-    if executable_on_path(host, "fnm").is_some() {
-        return Ok("fnm".into());
-    }
     let data_home = host
         .value("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| host.home().join(".local/share"));
+    if !data_home.is_absolute() {
+        bail!("npm package operation requires an absolute managed FNM data directory");
+    }
     let managed = data_home.join("fnm/fnm");
     if executable_file(&managed) {
         return managed
@@ -81,7 +81,7 @@ fn resolve_fnm(host: &Host<'_>) -> Result<String> {
             .map(str::to_owned)
             .context("managed fnm executable path is not UTF-8");
     }
-    bail!("npm package operation: fnm is not available in PATH or the XDG data directory")
+    bail!("npm package operation: managed fnm is unavailable after bootstrap")
 }
 
 fn selected_version(host: &Host<'_>, fnm: &str) -> Result<String> {
@@ -255,14 +255,6 @@ fn valid_node_version(version: &str) -> bool {
                 && part.bytes().all(|byte| byte.is_ascii_digit())
                 && (*part == "0" || !part.starts_with('0'))
         })
-}
-
-fn executable_on_path(host: &Host<'_>, name: &str) -> Option<PathBuf> {
-    host.value("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|directory| directory.join(name))
-            .find(|path| executable_file(path))
-    })
 }
 
 fn executable_file(path: &Path) -> bool {
