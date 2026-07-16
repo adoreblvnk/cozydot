@@ -24,8 +24,6 @@ cozydot apply
 
 The schema and field reference is in [`docs/config-schema-v1.md`](docs/config-schema-v1.md). Managers, lock paths, shell commands, profiles, and plugins are implementation details and cannot be selected from YAML.
 
-Legacy tagged YAML is unsupported and is not converted automatically. See the [0.0.1 release notes](docs/release-notes-v0.0.1.md) before replacing an existing configuration.
-
 ## Development
 
 ```bash

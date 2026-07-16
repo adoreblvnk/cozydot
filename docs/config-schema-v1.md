@@ -4,10 +4,8 @@ Cozydot uses one public configuration format: exact version `1.0.0`.
 
 ## 1. Status
 
-- Version `1.0.0` is a clean, breaking replacement contract.
-- Superseded configuration formats are not parsed, converted, migrated, or accepted at runtime.
-- There are no aliases for superseded field names.
-- Superseded and legacy tagged formats are evidence for requirements only.
+- Version `1.0.0` is the only accepted configuration contract.
+- There are no aliases for other field names or versions.
 - This contract defines user-visible configuration, not implementation structure.
 
 ## 2. Product goals
@@ -32,7 +30,7 @@ Version `1.0.0` does not provide:
 - user-selectable package managers or manager flags;
 - hooks, plugins, rollback policy, or arbitrary file writes;
 - raw APT source lines, configurable keyring paths, or configurable privileged destinations;
-- automatic migration or compatibility parsing for superseded formats;
+- automatic migration or compatibility parsing;
 - generic archives or installer scripts in `packages.binaries`.
 
 ## 4. Canonical top-level structure
@@ -229,7 +227,7 @@ Repository fields:
 
 ### 7.5 Binary packages
 
-`packages.binaries` is the sole typed mechanism for artifacts installed outside package repositories. The unclear `direct` name belongs only to a superseded format and is not accepted.
+`packages.binaries` is the sole typed mechanism for artifacts installed outside package repositories.
 
 Canonical GitHub form:
 
@@ -467,65 +465,8 @@ No planner or lowerer may reorder operations across these dependency boundaries 
 - Multi-operation workflows are failure-preserving but not advertised as transactional rollback.
 - Partial success is reported precisely; Cozydot never prints global success after a failed or skipped required operation.
 
-## 17. Canonical artifacts
+## 17. Examples
 
-Configuration version `1.0.0` has three different documentation artifacts:
-
-1. **Generated beginner config** — concise, conservative, and safe for a broadly supported host.
-2. **Comprehensive real config** — a realistic Ubuntu/Debian 13 GNOME workstation containing the complete intended software set.
-3. **Exhaustive parser fixture** — synthetic coverage of mutually exclusive and unusual forms such as fixed URLs and exact-path repositories.
-
-The real full config is never distorted merely to exercise every parser field. The exhaustive fixture is never presented as a recommended workstation.
-
-## 18. Coverage disposition
-
-Version `1.0.0` coverage is deliberate rather than a mechanical copy of superseded fields.
-
-Retained and redesigned:
-
-- automatic platform detection with optional distro/desktop allowlists;
-- official APT preservation or management;
-- unattended upgrades, Ubuntu Snap, and codecs;
-- APT purge/install, third-party repositories, Flatpak, Cargo, NPM, and release binaries;
-- Rust, Go, Node, Python, Nerd Fonts, and Stow dotfiles;
-- Docker, VirtualBox, and VS Code integration;
-- theme, terminal, idle, GNOME extension, dock, and rounded-corner state;
-- granular updates without unrelated package sweeps.
-
-Improved in version `1.0.0`:
-
-- APT fields are grouped by manager;
-- WezTerm's official `* *` repository is represented natively;
-- true exact-path repositories use the mutually exclusive typed `path` form;
-- upstream distro/codename resolution is explicit;
-- `binaries` replaces the unclear `direct` term;
-- binary sources support latest GitHub releases and checksummed fixed URLs;
-- changed binary declarations cannot be hidden by an unrelated command in `PATH`;
-- destructive service/package states use explicit words rather than overloaded booleans;
-- Nerd Font updates become an explicit configured target;
-- `null`, redundant no-op structures, and explicit false update leaves are rejected.
-
-Removed intentionally:
-
-- `appimaged`: Cozydot owns AppImage placement, links, state, and updates directly;
-- `pyenv`: Python uses one fixed Cozydot-managed backend;
-- `yq`: configuration and release metadata are parsed internally;
-- package-manager flags embedded in package strings;
-- user-listed bootstrap dependencies that Cozydot can infer;
-- raw binary URLs without checksums;
-- legacy tags, shell substitutions, raw repository lines, and post-apply YAML mutation.
-
-The comprehensive full YAML restores the legacy intended applications: Docker CE, eza/fzf/yazi/zoxide, GitHub CLI, Helium, OnlyOffice, VirtualBox, VS Code, WezTerm Nightly, the Flatpak set, Cargo/NPM tools, draw.io, Fastfetch, Git Credential Manager, Obsidian, and Zen Browser. Dependencies omitted from that YAML are omitted because version `1.0.0` assigns them to Cozydot's inferred prerequisites, not because the applications were dropped.
-
-## 19. Approval record
-
-The user approved implementation of:
-
-- this field hierarchy and naming;
-- the beginner config;
-- the comprehensive config;
-- destructive and omission semantics;
-- repository layouts;
-- binary providers and latest-release update semantics;
-- update scopes;
-- platform claims and non-goals.
+- [`config-v1-beginner.yaml`](examples/config-v1-beginner.yaml) is a concise starting point.
+- [`config-v1-full.yaml`](examples/config-v1-full.yaml) is a realistic Ubuntu/Debian 13 GNOME workstation.
+- [`config-v1-exhaustive.yaml`](examples/config-v1-exhaustive.yaml) demonstrates unusual and mutually exclusive forms. It is a parser example, not a recommended workstation configuration.
