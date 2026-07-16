@@ -339,6 +339,40 @@ esac"#,
         command.output().unwrap()
     }
 
+    fn outcome(&self, step: &Step) -> anyhow::Result<operations::OperationOutcome> {
+        let env = [
+            ("HOME".into(), self.home.as_os_str().to_owned()),
+            (
+                "CARGO_HOME".into(),
+                self.home.join(".cargo").into_os_string(),
+            ),
+            ("USER".into(), "tester".into()),
+            ("LOG".into(), self.log.as_os_str().to_owned()),
+            ("ROOT".into(), self.root.as_os_str().to_owned()),
+            (
+                "TMPDIR".into(),
+                self._dir.path().join("tmp").into_os_string(),
+            ),
+            (
+                "PATH".into(),
+                format!("{}:/usr/bin:/bin", self.bin.display()).into(),
+            ),
+            (
+                "XDG_CONFIG_HOME".into(),
+                self.home.join(".config").into_os_string(),
+            ),
+            (
+                "XDG_DATA_HOME".into(),
+                self.home.join(".local/share").into_os_string(),
+            ),
+        ];
+        operations::execute_with_outcome_for_test(
+            step.operation(),
+            &env,
+            &self.root.join("run/cozydot/docker-daemon.lock"),
+        )
+    }
+
     fn run_ok(&self, step: &Step) {
         let output = self.run(step);
         assert!(
@@ -679,6 +713,46 @@ printf '%s' "$generation" >"$directory/${family}NerdFont-Regular.ttf""###,
         r#"{ printf 'fc-cache'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
 if [ -f "$TMPDIR/font-cache-failure" ]; then rm "$TMPDIR/font-cache-failure"; exit 71; fi
 for path in "$HOME/.local/share/fonts/cozydot/"*; do [ -d "$path" ] || continue; touch "$TMPDIR/font-cached-${path##*/}"; done"#,
+    );
+}
+
+fn configure_gnome_provider_fakes(host: &Host, extension: &str) {
+    fs::write(host._dir.path().join("tmp/gnome-provider"), extension).unwrap();
+    host.fake(
+        "gnome-extensions",
+        r#"{ printf 'gnome-extensions'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+case "$1" in
+  list)
+    if [ "${2:-}" = --enabled ]; then [ ! -f "$TMPDIR/gnome-enabled" ] || cat "$TMPDIR/gnome-enabled"; else [ ! -f "$TMPDIR/gnome-installed" ] || cat "$TMPDIR/gnome-installed"; fi
+    ;;
+  install)
+    [ ! -f "$TMPDIR/gnome-install-failure" ] || exit 71
+    [ -f "$TMPDIR/gnome-registration-deferred" ] || { cat "$TMPDIR/gnome-provider"; printf '\n'; } >"$TMPDIR/gnome-installed"
+    ;;
+  enable)
+    [ ! -f "$TMPDIR/gnome-enable-failure" ] || exit 72
+    grep -Fx -- "$2" "$TMPDIR/gnome-installed" >/dev/null
+    [ -f "$TMPDIR/gnome-enablement-deferred" ] || printf '%s\n' "$2" >"$TMPDIR/gnome-enabled"
+    ;;
+  *) exit 40 ;;
+esac"#,
+    );
+    host.fake("gnome-shell", "printf 'GNOME Shell 48.4\\n'");
+    host.fake(
+        "curl",
+        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+if [ "$1" = -fsSL ]; then printf '{"shell_version_map":{"48":{"version":13}}}\n'; exit; fi
+while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then : >"$2"; exit; fi; shift; done
+exit 41"#,
+    );
+    host.fake(
+        "dconf",
+        r#"{ printf 'dconf'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+name=$(printf '%s' "$2" | tr -c 'A-Za-z0-9' '_')
+state="$TMPDIR/dconf-$name"
+if [ "$1" = read ]; then [ ! -f "$state" ] || cat "$state"; exit; fi
+if [ "$1" = write ]; then printf '%s\n' "$3" >"$state"; exit; fi
+exit 40"#,
     );
 }
 
@@ -5981,8 +6055,14 @@ exit 41"#,
     );
     let step = gnome_extensions_step(&["blur-my-shell@aunetx"]);
 
-    host.run_ok(&step);
-    host.run_ok(&step);
+    assert_eq!(
+        host.outcome(&step).unwrap(),
+        operations::OperationOutcome::Completed
+    );
+    assert_eq!(
+        host.outcome(&step).unwrap(),
+        operations::OperationOutcome::Completed
+    );
 
     let log = host.log();
     assert_eq!(
@@ -6004,21 +6084,54 @@ exit 41"#,
 }
 
 #[test]
-fn schema_v1_gnome_dconf_layouts_write_once_and_verify_every_apply() {
-    for step in [gnome_dock_step(), gnome_rounded_corners_step()] {
-        let host = Host::new();
-        host.fake(
-            "dconf",
-            r#"{ printf 'dconf'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
-name=$(printf '%s' "$2" | tr -c 'A-Za-z0-9' '_')
-state="$TMPDIR/dconf-$name"
-if [ "$1" = read ]; then [ ! -f "$state" ] || cat "$state"; exit; fi
-if [ "$1" = write ]; then printf '%s\n' "$3" >"$state"; exit; fi
-exit 40"#,
-        );
+fn schema_v1_gnome_extension_login_boundary_is_typed_and_retryable() {
+    let host = Host::new();
+    configure_gnome_provider_fakes(&host, "blur-my-shell@aunetx");
+    fs::write(
+        host._dir.path().join("tmp/gnome-registration-deferred"),
+        b"1",
+    )
+    .unwrap();
+    let step = gnome_extensions_step(&["blur-my-shell@aunetx"]);
 
-        host.run_ok(&step);
-        host.run_ok(&step);
+    assert_eq!(
+        host.outcome(&step).unwrap(),
+        operations::OperationOutcome::LoginRequired
+    );
+    assert!(!host.log().contains("gnome-extensions <enable>"));
+
+    fs::write(
+        host._dir.path().join("tmp/gnome-installed"),
+        b"blur-my-shell@aunetx\n",
+    )
+    .unwrap();
+    fs::remove_file(host._dir.path().join("tmp/gnome-registration-deferred")).unwrap();
+    assert_eq!(
+        host.outcome(&step).unwrap(),
+        operations::OperationOutcome::Completed
+    );
+    assert!(host
+        .log()
+        .contains("gnome-extensions <enable> <blur-my-shell@aunetx>"));
+}
+
+#[test]
+fn schema_v1_gnome_dconf_layouts_write_once_and_verify_every_apply() {
+    for (step, provider) in [
+        (gnome_dock_step(), "dash-to-dock@micxgx.gmail.com"),
+        (gnome_rounded_corners_step(), "rounded-window-corners@fxgn"),
+    ] {
+        let host = Host::new();
+        configure_gnome_provider_fakes(&host, provider);
+
+        assert_eq!(
+            host.outcome(&step).unwrap(),
+            operations::OperationOutcome::Completed
+        );
+        assert_eq!(
+            host.outcome(&step).unwrap(),
+            operations::OperationOutcome::Completed
+        );
 
         let log = host.log();
         let expected_writes = if step.display().contains("rounded") {
@@ -6036,6 +6149,82 @@ exit 40"#,
             expected_writes * 4,
             "{log}"
         );
+        assert_eq!(
+            log.matches("gnome-extensions <install> <--force>").count(),
+            1,
+            "{log}"
+        );
+        assert_eq!(
+            log.matches(&format!("gnome-extensions <enable> <{provider}>"))
+                .count(),
+            1,
+            "{log}"
+        );
+        assert!(
+            log.find(&format!("gnome-extensions <enable> <{provider}>"))
+                .unwrap()
+                < log.find("dconf <read>").unwrap(),
+            "{log}"
+        );
+    }
+}
+
+#[test]
+fn schema_v1_gnome_provider_login_boundary_precedes_dependent_dconf() {
+    let host = Host::new();
+    let provider = "dash-to-dock@micxgx.gmail.com";
+    configure_gnome_provider_fakes(&host, provider);
+    fs::write(host._dir.path().join("tmp/gnome-enablement-deferred"), b"1").unwrap();
+    let step = gnome_dock_step();
+
+    assert_eq!(
+        host.outcome(&step).unwrap(),
+        operations::OperationOutcome::LoginRequired
+    );
+    assert!(!host.log().contains("dconf <"), "{}", host.log());
+
+    fs::remove_file(host._dir.path().join("tmp/gnome-enablement-deferred")).unwrap();
+    assert_eq!(
+        host.outcome(&step).unwrap(),
+        operations::OperationOutcome::Completed
+    );
+    assert!(host.log().contains("dconf <write>"), "{}", host.log());
+}
+
+#[test]
+fn schema_v1_gnome_provider_failure_stops_before_dependent_dconf() {
+    for (step, provider) in [
+        (gnome_dock_step(), "dash-to-dock@micxgx.gmail.com"),
+        (gnome_rounded_corners_step(), "rounded-window-corners@fxgn"),
+    ] {
+        let install_failure = Host::new();
+        configure_gnome_provider_fakes(&install_failure, provider);
+        fs::write(
+            install_failure
+                ._dir
+                .path()
+                .join("tmp/gnome-install-failure"),
+            b"1",
+        )
+        .unwrap();
+        assert!(install_failure.outcome(&step).is_err());
+        assert!(
+            !install_failure.log().contains("dconf <"),
+            "{}",
+            install_failure.log()
+        );
+
+        let host = Host::new();
+        configure_gnome_provider_fakes(&host, provider);
+        fs::write(
+            host._dir.path().join("tmp/gnome-installed"),
+            format!("{provider}\n"),
+        )
+        .unwrap();
+        fs::write(host._dir.path().join("tmp/gnome-enable-failure"), b"1").unwrap();
+
+        assert!(host.outcome(&step).is_err());
+        assert!(!host.log().contains("dconf <"), "{}", host.log());
     }
 }
 

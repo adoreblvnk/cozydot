@@ -116,6 +116,12 @@ pub enum Operation {
     VsCodeExtensionSet(VsCodeExtensionOperation),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperationOutcome {
+    Completed,
+    LoginRequired,
+}
+
 impl Operation {
     pub fn display_args(&self) -> Vec<String> {
         match self {
@@ -183,7 +189,7 @@ impl Operation {
     }
 }
 
-pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<()> {
+pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<OperationOutcome> {
     execute_on_host(operation, Host::new(env, Path::new(DOCKER_LOCK))?)
 }
 
@@ -193,56 +199,83 @@ pub fn execute_with_docker_lock_for_test(
     env: &[(OsString, OsString)],
     docker_lock_open_path: &Path,
 ) -> Result<()> {
+    execute_on_host(operation, Host::new(env, docker_lock_open_path)?).map(|_| ())
+}
+
+#[doc(hidden)]
+pub fn execute_with_outcome_for_test(
+    operation: &Operation,
+    env: &[(OsString, OsString)],
+    docker_lock_open_path: &Path,
+) -> Result<OperationOutcome> {
     execute_on_host(operation, Host::new(env, docker_lock_open_path)?)
 }
 
-fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
+fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<OperationOutcome> {
     match operation {
-        Operation::AptBootstrapPackages { packages } => apt::bootstrap_packages(&host, packages),
-        Operation::AptMetadataRefresh => apt::metadata_refresh(&host),
-        Operation::AptRepository(operation) => repository::execute(&host, operation),
-        Operation::ManagedAptSources(operation) => managed_apt::execute(&host, operation),
-        Operation::AptPackages { packages } => apt::packages(&host, packages),
-        Operation::AptPurge { packages } => apt::purge(&host, packages),
-        Operation::AptUpgrade { policy } => apt::upgrade(&host, *policy),
+        Operation::AptBootstrapPackages { packages } => {
+            completed(apt::bootstrap_packages(&host, packages))
+        }
+        Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
+        Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
+        Operation::ManagedAptSources(operation) => {
+            completed(managed_apt::execute(&host, operation))
+        }
+        Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
+        Operation::AptPurge { packages } => completed(apt::purge(&host, packages)),
+        Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
         Operation::AptSource {
             destination,
             contents,
-        } => repository::source(&host, destination, contents),
-        Operation::DockerGroup => integrations::docker_group(&host),
-        Operation::DockerLocalLog(operation) => integrations::docker_local_log(&host, operation),
-        Operation::DesktopSetting(operation) => desktop::desktop_setting(&host, operation),
-        Operation::BinaryPackage(package) => binary::execute(&host, package),
-        Operation::DirectPackage(package) => direct::execute(&host, package),
-        Operation::Dotfiles(operation) => dotfiles::execute(&host, operation),
-        Operation::FlatpakEnsureFlathub => flatpak::ensure_flathub(&host),
-        Operation::FlatpakEnsureApps { refs } => flatpak::ensure_apps(&host, refs),
-        Operation::FlatpakUpdateApps { refs } => flatpak::update_apps(&host, refs),
-        Operation::FnmBootstrap => languages::fnm_bootstrap(&host),
-        Operation::EnsureAdmin(operation) => system::ensure_admin(&host, operation),
+        } => completed(repository::source(&host, destination, contents)),
+        Operation::DockerGroup => completed(integrations::docker_group(&host)),
+        Operation::DockerLocalLog(operation) => {
+            completed(integrations::docker_local_log(&host, operation))
+        }
+        Operation::DesktopSetting(operation) => {
+            completed(desktop::desktop_setting(&host, operation))
+        }
+        Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
+        Operation::DirectPackage(package) => completed(direct::execute(&host, package)),
+        Operation::Dotfiles(operation) => completed(dotfiles::execute(&host, operation)),
+        Operation::FlatpakEnsureFlathub => completed(flatpak::ensure_flathub(&host)),
+        Operation::FlatpakEnsureApps { refs } => completed(flatpak::ensure_apps(&host, refs)),
+        Operation::FlatpakUpdateApps { refs } => completed(flatpak::update_apps(&host, refs)),
+        Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
+        Operation::EnsureAdmin(operation) => completed(system::ensure_admin(&host, operation)),
         Operation::GnomeExtensions(operation) => desktop::gnome_extensions(&host, operation),
         Operation::GnomeDock(operation) => desktop::gnome_dock(&host, operation),
         Operation::GnomeRoundedCorners(operation) => {
             desktop::gnome_rounded_corners(&host, operation)
         }
-        Operation::GoToolchain(operation) => tools::execute_go(&host, operation),
-        Operation::NerdFonts(operation) => fonts::execute(&host, operation),
-        Operation::RepositoryKey { url, destination } => repository::key(&host, url, destination),
-        Operation::RustupBootstrap => provisioning::rustup(&host),
-        Operation::CargoBinstallBootstrap(operation) => cargo_binstall::execute(&host, operation),
-        Operation::RustToolchain(operation) => tools::execute_rust(&host, operation),
-        Operation::CargoPackageSet(operation) => cargo::execute(&host, operation),
-        Operation::NodeToolchain(operation) => tools::execute_node(&host, operation),
-        Operation::NpmPackageSet(operation) => npm::execute(&host, operation),
-        Operation::UbuntuSnap(operation) => system::ubuntu_snap(&host, operation),
-        Operation::UnattendedUpgrades(operation) => system::unattended_upgrades(&host, operation),
-        Operation::UvBootstrap => languages::uv_bootstrap(&host),
-        Operation::PythonToolchain(operation) => tools::execute_python(&host, operation),
-        Operation::VirtualBoxGroup => integrations::virtualbox_group(&host),
+        Operation::GoToolchain(operation) => completed(tools::execute_go(&host, operation)),
+        Operation::NerdFonts(operation) => completed(fonts::execute(&host, operation)),
+        Operation::RepositoryKey { url, destination } => {
+            completed(repository::key(&host, url, destination))
+        }
+        Operation::RustupBootstrap => completed(provisioning::rustup(&host)),
+        Operation::CargoBinstallBootstrap(operation) => {
+            completed(cargo_binstall::execute(&host, operation))
+        }
+        Operation::RustToolchain(operation) => completed(tools::execute_rust(&host, operation)),
+        Operation::CargoPackageSet(operation) => completed(cargo::execute(&host, operation)),
+        Operation::NodeToolchain(operation) => completed(tools::execute_node(&host, operation)),
+        Operation::NpmPackageSet(operation) => completed(npm::execute(&host, operation)),
+        Operation::UbuntuSnap(operation) => completed(system::ubuntu_snap(&host, operation)),
+        Operation::UnattendedUpgrades(operation) => {
+            completed(system::unattended_upgrades(&host, operation))
+        }
+        Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
+        Operation::PythonToolchain(operation) => completed(tools::execute_python(&host, operation)),
+        Operation::VirtualBoxGroup => completed(integrations::virtualbox_group(&host)),
         Operation::VsCodeExtensionSet(operation) => {
-            integrations::vscode_extensions(&host, operation)
+            completed(integrations::vscode_extensions(&host, operation))
         }
     }
+}
+
+fn completed(result: Result<()>) -> Result<OperationOutcome> {
+    result.map(|()| OperationOutcome::Completed)
 }
 
 pub(crate) struct Host<'a> {
