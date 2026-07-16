@@ -20,7 +20,7 @@ Managers and repository paths are fixed implementation choices. YAML cannot sele
 The typed planner and operations cover:
 
 - explicit managed or preserved APT sources, administrative membership, unattended upgrades, Ubuntu Snap/codecs, package removal/install, repositories, and scoped updates;
-- per-user Flathub applications, Rustup/Rust, official Go archives, FNM/Node, UV/Python, Cargo, NPM, direct Debian/AppImage packages, and Nerd Fonts;
+- per-user Flathub applications, Rustup/Rust, official Go archives, FNM/Node, UV/Python, Cargo, NPM, managed Debian/AppImage binaries, and Nerd Fonts;
 - one backup-before-Stow policy, existing-product-only Docker/VirtualBox/VS Code integrations, GNOME/Cinnamon settings, GNOME extensions, dock, and rounded corners.
 
 Config-derived values are passed as arguments to typed fixed operations. GitHub, Go, GNOME, NPM, and Docker state is parsed by internal Rust helpers; `yq` and generated shell source are not used by version `1.0.0` lowering.
@@ -48,4 +48,4 @@ scripts/package-release.sh
 bash -n dotfiles/bash/.bashrc
 ```
 
-Privileged downloads use fail-fast curl options, unique temporary files, and stage destructive replacements only after archive validation succeeds. Go archives are matched against and verified with the official SHA-256 published by `go.dev/dl/?mode=json&include=all`. Other upstream installers and mutable release assets currently provide no checksum in the preset schema; executing those HTTPS-delivered installers/assets remains an explicit trust boundary. The project does not claim end-to-end integrity for them and does not fabricate hashes.
+Privileged downloads use fail-fast curl options, unique temporary files, and stage destructive replacements only after archive validation succeeds. Go archives are matched against and verified with the official SHA-256 published by `go.dev/dl/?mode=json&include=all`. Fixed-URL binary sources require configured SHA-256 values, and GitHub binaries verify configured and API-published digests when available. Upstream manager installers and GitHub assets without an available digest remain explicit HTTPS trust boundaries; the project does not fabricate hashes for them.
