@@ -89,6 +89,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "predicates",
+ "regex",
  "rustix",
  "serde",
  "serde_json",

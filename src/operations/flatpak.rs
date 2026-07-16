@@ -161,6 +161,9 @@ fn validate_flathub(remotes: &BTreeMap<String, UserRemote>) -> Result<bool> {
 fn user_remotes(output: &[u8]) -> Result<BTreeMap<String, UserRemote>> {
     let output =
         std::str::from_utf8(output).context("flatpak returned non-UTF-8 per-user remote state")?;
+    if output.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
     let mut remotes = BTreeMap::new();
     for line in output.lines() {
         let mut fields = line.split('\t');

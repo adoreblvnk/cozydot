@@ -276,9 +276,7 @@ pub enum GithubReleasePolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubAssetSelector {
-    pub include: String,
-    pub exclude: Vec<String>,
-    pub declared_sha256: Option<String>,
+    pub pattern: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -777,12 +775,7 @@ fn binary_intent(
             repository: repository.to_owned(),
             release: GithubReleasePolicy::LatestNonDraftNonPrerelease,
             selector: GithubAssetSelector {
-                include: selector.include.clone(),
-                exclude: selector.exclude.clone().unwrap_or_default(),
-                declared_sha256: selector
-                    .sha256
-                    .as_ref()
-                    .map(|hash| hash.as_str().to_owned()),
+                pattern: selector.to_owned(),
             },
         },
         ResolvedNativeBinary::Url { url, sha256 } => BinarySourceIntent::FixedUrl {

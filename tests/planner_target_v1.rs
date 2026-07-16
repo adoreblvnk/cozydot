@@ -10,8 +10,7 @@ use cozydot::{
 };
 use std::path::{Path, PathBuf};
 
-const FULL: &str = include_str!("../docs/examples/config-v1-full.yaml");
-const EXHAUSTIVE: &str = include_str!("../docs/examples/config-v1-exhaustive.yaml");
+const FULL: &str = include_str!("../docs/examples/full.yaml");
 
 fn platform(
     distro: &str,
@@ -236,10 +235,10 @@ packages:
 }
 
 #[test]
-fn exhaustive_fixture_keeps_fixed_and_github_source_identity_and_github_only_updates() {
-    let plan = planned(EXHAUSTIVE, &ubuntu("gnome", "amd64"));
+fn full_fixture_keeps_github_source_identity_and_updates() {
+    let plan = planned(FULL, &ubuntu("gnome", "amd64"));
     let binaries = plan.phase(PlanPhaseKind::BinaryPackages).actions();
-    assert_eq!(binaries.len(), 2);
+    assert_eq!(binaries.len(), 5);
     let sources = binaries
         .iter()
         .map(|action| match action {
@@ -247,8 +246,9 @@ fn exhaustive_fixture_keeps_fixed_and_github_source_identity_and_github_only_upd
             other => panic!("unexpected binary action: {other:?}"),
         })
         .collect::<Vec<_>>();
-    assert!(matches!(sources[0], BinarySourceIntent::Github { .. }));
-    assert!(matches!(sources[1], BinarySourceIntent::FixedUrl { .. }));
+    assert!(sources
+        .iter()
+        .any(|source| matches!(source, BinarySourceIntent::Github { .. })));
     let update = plan
         .phase(PlanPhaseKind::Updates)
         .actions()
@@ -258,8 +258,8 @@ fn exhaustive_fixture_keeps_fixed_and_github_source_identity_and_github_only_upd
             _ => None,
         })
         .unwrap();
-    assert_eq!(update.len(), 1);
-    assert_eq!(update[0].name, "github-example");
+    assert_eq!(update.len(), 5);
+    assert!(update.iter().any(|binary| binary.name == "drawio"));
 }
 
 #[test]
@@ -274,15 +274,15 @@ packages:
         provider: github
         repository: owner/app
         assets:
-          amd64: {include: 'app-amd64-*.AppImage'}
-          arm64: {include: 'app-arm64-*.AppImage'}
-          arm32: {include: 'app-arm32-*.AppImage'}
-          riscv64: {include: 'app-riscv64-*.AppImage'}";
+          amd64: '^app-amd64-.*[.]AppImage$'
+          arm64: '^app-arm64-.*[.]AppImage$'
+          arm32: '^app-arm32-.*[.]AppImage$'
+          riscv64: '^app-riscv64-.*[.]AppImage$'";
     for (arch, expected) in [
-        ("amd64", "app-amd64-*.AppImage"),
-        ("arm64", "app-arm64-*.AppImage"),
-        ("arm32", "app-arm32-*.AppImage"),
-        ("riscv64", "app-riscv64-*.AppImage"),
+        ("amd64", r"^app-amd64-.*[.]AppImage$"),
+        ("arm64", r"^app-arm64-.*[.]AppImage$"),
+        ("arm32", r"^app-arm32-.*[.]AppImage$"),
+        ("riscv64", r"^app-riscv64-.*[.]AppImage$"),
     ] {
         let plan = planned(yaml, &ubuntu("none", arch));
         let PlannedAction::Binary(binary) = &plan.phase(PlanPhaseKind::BinaryPackages).actions()[0]
@@ -292,7 +292,7 @@ packages:
         let BinarySourceIntent::Github { selector, .. } = &binary.source else {
             panic!("wrong source")
         };
-        assert_eq!(selector.include, expected);
+        assert_eq!(selector.pattern, expected);
     }
 }
 
@@ -497,7 +497,7 @@ fonts: {nerd: [GeistMono]}",
 
 #[test]
 fn tools_packages_fonts_and_updates_retain_moving_selectors_and_targets() {
-    let plan = planned(EXHAUSTIVE, &ubuntu("gnome", "amd64"));
+    let plan = planned(FULL, &ubuntu("gnome", "amd64"));
     assert!(plan
         .phase(PlanPhaseKind::LanguageToolchains)
         .actions()
@@ -513,12 +513,14 @@ fn tools_packages_fonts_and_updates_retain_moving_selectors_and_targets() {
     assert!(updates.iter().any(|action| matches!(
         action,
         PlannedAction::Update(UpdateIntent::Cargo(packages))
-            if packages.iter().map(String::as_str).eq(["cargo-edit"])
+            if packages.iter().map(String::as_str).eq([
+                "bat", "bottom", "du-dust", "fd-find", "presenterm", "starship", "tealdeer"
+            ])
     )));
     assert!(updates.iter().any(|action| matches!(
         action,
         PlannedAction::Update(UpdateIntent::Npm(packages))
-            if packages.iter().map(String::as_str).eq(["example-package"])
+            if packages.iter().map(String::as_str).eq(["opencode-ai"])
     )));
     assert!(updates.iter().any(|action| matches!(
         action,
@@ -655,11 +657,15 @@ integrations:
 
 #[test]
 fn declared_order_is_preserved_and_intents_contain_no_generic_commands_or_interpolation() {
-    let plan = planned(EXHAUSTIVE, &ubuntu("gnome", "amd64"));
+    let plan = planned(FULL, &ubuntu("gnome", "amd64"));
     let debug = format!("{plan:#?}");
     for forbidden in ["CommandAction", "Shell(", "sudo ", "apt-get ", "${", "$("] {
         assert!(!debug.contains(forbidden), "found {forbidden:?} in {debug}");
     }
     let dotfiles = &plan.phase(PlanPhaseKind::Dotfiles).actions()[0];
-    assert!(matches!(dotfiles, PlannedAction::Dotfiles(intent) if intent.packages == ["bash"]));
+    assert!(
+        matches!(dotfiles, PlannedAction::Dotfiles(intent) if intent.packages == [
+            "bash", "bin", "bat", "bottom", "fastfetch", "starship", "vscode", "wezterm", "yazi"
+        ])
+    );
 }

@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Copy selected WSL files to the Samsung SSD as ordinary files."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HOME = Path.home().resolve()
+SOURCES = (HOME / "Documents", HOME / ".cozydot")
+MOUNT = Path("/mnt/d")
+DESTINATION = MOUNT / "backup/vivobook-16x-wsl"
+
+
+def fail(message: str, code: int = 1) -> None:
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def run_git(repo: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ("git", "-C", os.fspath(repo), *arguments),
+        check=check,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def containing_repo(directory: Path, repositories: list[Path]) -> Path | None:
+    matches = (repo for repo in repositories if directory == repo or repo in directory.parents)
+    return max(matches, key=lambda path: len(path.parts), default=None)
+
+
+def parent_is_ignored(repo: Path, parent: Path) -> bool:
+    if parent == repo:
+        return False
+    relative = parent.relative_to(repo).as_posix()
+    result = run_git(repo, "check-ignore", "--no-index", "-q", "--", relative, check=False)
+    if result.returncode not in (0, 1):
+        fail(result.stderr.decode(errors="replace").strip() or f"git check-ignore failed in {repo}")
+    return result.returncode == 0
+
+
+def add_path(selected: set[str], path: Path) -> None:
+    if path.is_symlink() or not path.is_file():
+        return
+    relative = path.relative_to(HOME).as_posix()
+    if "\n" in relative:
+        fail(f"filename contains a newline and cannot be passed safely to rclone: {path}")
+    selected.add(relative)
+
+
+def add_git_selected_files(selected: set[str], repo: Path) -> None:
+    result = run_git(repo, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+    for raw_path in result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        path = repo / os.fsdecode(raw_path)
+        add_path(selected, path)
+
+
+def build_manifest() -> list[str]:
+    selected: set[str] = set()
+    repositories: list[Path] = []
+
+    for source in SOURCES:
+        if not source.is_dir():
+            fail(f"source directory does not exist: {source}")
+
+        for current_raw, directories, files in os.walk(source, topdown=True, followlinks=False):
+            current = Path(current_raw)
+            has_git_marker = ".git" in directories or ".git" in files
+            if has_git_marker:
+                repositories.append(current)
+                add_git_selected_files(selected, current)
+
+            directories[:] = [name for name in directories if name != ".git"]
+            repo = containing_repo(current, repositories)
+
+            if repo is None:
+                for name in files:
+                    add_path(selected, current / name)
+                continue
+
+            # Final policy override: include an exact .env when its parent
+            # directory itself was not excluded. Never traverse/copy .git.
+            if ".env" in files and not parent_is_ignored(repo, current):
+                add_path(selected, current / ".env")
+
+    return sorted(selected)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Back up selected WSL files to the Samsung SSD as ordinary files.",
+        epilog=(
+            "Sources:\n"
+            "  ~/Documents\n"
+            "  ~/.cozydot\n\n"
+            "Destination:\n"
+            "  /mnt/d/backup/vivobook-16x-wsl\n"
+            "  (Windows: D:\\backup\\vivobook-16x-wsl)\n\n"
+            "Filtering:\n"
+            "  Git selects tracked and non-ignored untracked files.\n"
+            "  .git internals are excluded. Exact .env files are restored when\n"
+            "  their parent directory is not ignored.\n\n"
+            "Mount before backup:\n"
+            "  sudo mkdir -p /mnt/d\n"
+            "  sudo mount -t drvfs D: /mnt/d -o \"uid=$(id -u),gid=$(id -g)\"\n"
+            "  stat -c '%U:%G %a %n' /mnt/d\n\n"
+            "Examples:\n"
+            "  backup-wsl --list-files   Inspect selected paths\n"
+            "  backup-wsl --dry-run      Preview without copying\n"
+            "  backup-wsl                Run the non-destructive rclone copy\n\n"
+            "Unmount after backup:\n"
+            "  while mountpoint -q /mnt/d; do sudo umount /mnt/d; done\n"
+            "  mountpoint -q /mnt/d || echo \"SSD safely unmounted from WSL\""
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--dry-run", action="store_true", help="show what rclone would copy")
+    parser.add_argument("--list-files", action="store_true", help="print selected source paths and exit")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+
+    if subprocess.run(("mountpoint", "-q", os.fspath(MOUNT))).returncode != 0 and not args.list_files:
+        fail(f"Samsung backup SSD is not mounted at {MOUNT}", 2)
+
+    manifest = build_manifest()
+    if not manifest:
+        fail("manifest is empty; refusing to run rclone", 3)
+
+    if args.list_files:
+        print(*manifest, sep="\n")
+        return 0
+
+    DESTINATION.mkdir(parents=True, exist_ok=True)
+    print(f"Selected {len(manifest):,} files")
+    print(f"Destination: {DESTINATION}")
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="backup-wsl-", delete=False) as handle:
+        manifest_path = Path(handle.name)
+        handle.write("\n".join(manifest))
+        handle.write("\n")
+
+    try:
+        command = [
+            "rclone",
+            "copy",
+            os.fspath(HOME),
+            os.fspath(DESTINATION),
+            "--files-from-raw",
+            os.fspath(manifest_path),
+            "--transfers",
+            "16",
+            "--checkers",
+            "32",
+            "--progress",
+            "--stats",
+            "1s",
+        ]
+        if args.dry_run:
+            command.append("--dry-run")
+        return subprocess.run(command).returncode
+    finally:
+        manifest_path.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

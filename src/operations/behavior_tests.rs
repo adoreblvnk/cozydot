@@ -420,11 +420,7 @@ fn binary_step(
 fn github_source(sha256: Option<&str>) -> operations::BinarySourceOperation {
     operations::BinarySourceOperation::GithubLatest {
         repository: operations::GithubRepository::parse("owner/repo").unwrap(),
-        selector: operations::BinaryPackageSelector::new(
-            "sample-amd64-*",
-            vec!["sample-amd64-debug-*".into()],
-        )
-        .unwrap(),
+        selector: operations::BinaryPackageSelector::new(r"^sample-amd64-v[0-9]+$").unwrap(),
         sha256: sha256
             .map(operations::BinarySha256::parse)
             .transpose()
@@ -2575,6 +2571,31 @@ fn apt_upgrade_policies_have_fixed_order_and_stop_on_failure() {
 }
 
 #[test]
+fn flatpak_flathub_blank_only_absent_state_converges() {
+    let host = Host::new();
+    host.fake(
+        "flatpak",
+        r#"printf 'flatpak %s\n' "$*" >>"$LOG"
+case "$*" in
+  '--user remotes --show-disabled --columns=name,url,options,filter')
+    if [ ! -f "$TMPDIR/flathub-added" ]; then
+      printf '\n'
+    else
+      printf 'flathub\thttps://dl.flathub.org/repo/\tcollection-id=org.flathub.Stable\t-\n'
+    fi
+    ;;
+  '--user remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo')
+    touch "$TMPDIR/flathub-added"
+    ;;
+  '--user remote-modify --use-for-deps flathub') ;;
+  *) exit 42 ;;
+esac"#,
+    );
+    host.run_ok(&Step::workflow(operations::Operation::FlatpakEnsureFlathub));
+    assert_eq!(host.log().matches(" remote-add ").count(), 1);
+}
+
+#[test]
 fn flatpak_flathub_absent_converges_and_second_apply_does_not_add_again() {
     let host = Host::new();
     host.fake(
@@ -4107,7 +4128,7 @@ fn binary_deb_strict_metadata_native_and_all_then_offline_ensure() {
     for architecture in ["amd64", "all"] {
         let host = Host::new();
         host.fake("curl", r#"printf 'curl\n' >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf deb >"$out""#);
-        host.fake("dpkg-deb", &format!(r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'sample\n{architecture}\n'; fi"#));
+        host.fake("dpkg-deb", &format!(r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'Package: sample\nArchitecture: {architecture}\n'; fi"#));
         host.fake("sudo", r#"printf 'sudo %s\n' "$*" >>"$LOG"; bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#);
         let step = binary_step(
             operations::BinaryPackageFormat::Deb,
@@ -4131,9 +4152,10 @@ fn binary_deb_strict_metadata_native_and_all_then_offline_ensure() {
 #[test]
 fn binary_deb_rejects_wrong_or_malformed_metadata_before_sudo() {
     for fields in [
-        "sample\narm64\n",
-        "Bad_Name\namd64\n",
-        "sample\namd64\nextra\n",
+        "Package: sample\nArchitecture: arm64\n",
+        "Package: Bad_Name\nArchitecture: amd64\n",
+        "Package: sample\nArchitecture: amd64\nextra\n",
+        "sample\namd64\n",
         "sample amd64\n",
     ] {
         let host = Host::new();
@@ -4167,7 +4189,7 @@ fn binary_no_state_does_not_adopt_path_command() {
     host.fake("curl", r#"printf 'curl\n' >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf deb >"$out""#);
     host.fake(
         "dpkg-deb",
-        r#"if [ "$1" = --field ]; then printf 'sample\namd64\n'; fi"#,
+        r#"if [ "$1" = --field ]; then printf 'Package: sample\nArchitecture: amd64\n'; fi"#,
     );
     host.logging_fake("sudo");
     let output = host.run(&binary_step(
@@ -4215,7 +4237,7 @@ if [ -n "$out" ]; then cat "$TMPDIR/binary-bytes" >"$out"; else printf '{"draft"
     );
     host.fake(
         "dpkg-deb",
-        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'sample\namd64\n'; fi"#,
+        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'Package: sample\nArchitecture: amd64\n'; fi"#,
     );
     host.fake("sudo", r#"printf 'sudo %s\n' "$*" >>"$LOG"; exit 73"#);
     let step = binary_step(
@@ -4255,7 +4277,7 @@ if [ -n "$out" ]; then printf deb-one >"$out"; else printf '{"draft":false,"prer
     );
     host.fake(
         "dpkg-deb",
-        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'sample\namd64\n'; fi"#,
+        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'Package: sample\nArchitecture: amd64\n'; fi"#,
     );
     host.fake(
         "sudo",

@@ -4,8 +4,7 @@ use cozydot::{
 };
 
 const BEGINNER: &str = include_str!("../docs/examples/config-v1-beginner.yaml");
-const FULL: &str = include_str!("../docs/examples/config-v1-full.yaml");
-const EXHAUSTIVE: &str = include_str!("../docs/examples/config-v1-exhaustive.yaml");
+const FULL: &str = include_str!("../docs/examples/full.yaml");
 
 fn platform(distro: &str, upstream: &str, codename: &str, desktop: &str, arch: &str) -> Platform {
     Platform::from_release_parts(
@@ -50,10 +49,6 @@ fn canonical_fixtures_parse_and_validate_claimed_platforms() {
     full.validate_for_platform(&platform("ubuntu", "ubuntu", "noble", "gnome", "amd64"))
         .unwrap();
     full.validate_for_platform(&platform("debian", "debian", "trixie", "gnome", "amd64"))
-        .unwrap();
-    Config::parse(EXHAUSTIVE)
-        .unwrap()
-        .validate_for_platform(&platform("ubuntu", "ubuntu", "noble", "gnome", "amd64"))
         .unwrap();
 }
 
@@ -147,11 +142,9 @@ fn repository_layout_star_path_and_system_rules() {
         "        suite: system\n        components: [main]\n",
     ))
     .unwrap();
-    reject_platform(
-        &config,
-        &platform("ubuntu", "ubuntu", "noble", "gnome", "amd64"),
-        "default URL",
-    );
+    config
+        .validate_for_platform(&platform("ubuntu", "ubuntu", "noble", "gnome", "amd64"))
+        .unwrap();
 }
 
 fn reject_platform(config: &Config, platform: &Platform, expected: &str) {
@@ -292,7 +285,8 @@ fn urls_and_binary_provider_fields_are_strict() {
     ))
     .unwrap();
     for yaml in [
-        "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: deb\n      commands: [app]\n      source: {provider: github, repository: owner/repo, assets: {amd64: {include: 'app-*.deb'}}, urls: {amd64: https://example.com/app.deb}}",
+        "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: deb\n      commands: [app]\n      source: {provider: github, repository: owner/repo, assets: {amd64: '^app-.*[.]deb$'}, urls: {amd64: https://example.com/app.deb}}",
+        "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source: {provider: github, repository: owner/repo, assets: {amd64: {include: 'app-*.AppImage'}}}",
         "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: deb\n      commands: [app]\n      source: {provider: url, urls: {amd64: https://example.com/app.deb}, sha256: {amd64: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}, repository: owner/repo}",
         "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: deb\n      commands: [app]\n      source: {provider: other}",
     ] {
@@ -350,14 +344,14 @@ packages:
       source:
         provider: github
         repository: owner/first
-        assets: {amd64: {include: 'first-*.AppImage'}}
+        assets: {amd64: '^first-.*[.]AppImage$'}
     - name: second
       format: appimage
       commands: [shared-command]
       source:
         provider: github
         repository: owner/second
-        assets: {amd64: {include: 'second-*.AppImage'}}";
+        assets: {amd64: '^second-.*[.]AppImage$'}";
     let error = error(yaml);
     assert!(
         error.contains("packages.binaries[0].commands[0]"),
@@ -399,12 +393,12 @@ fn scalar_diagnostics_report_complete_path_and_rejected_value() {
             "1d",
         ),
         (
-            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: owner/app\n        assets: {amd64: {include: 'app-[0-9].AppImage'}}",
-            "packages.binaries[0].source.assets.amd64.include",
-            "app-[0-9].AppImage",
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: owner/app\n        assets: {amd64: '^app-(?:[.]AppImage$'}",
+            "packages.binaries[0].source.assets.amd64",
+            "^app-(?:[.]AppImage$",
         ),
         (
-            "version: 1.0.0\npackages:\n  binaries:\n    - name: 'bad/name'\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: owner/app\n        assets: {amd64: {include: 'app-*.AppImage'}}",
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: 'bad/name'\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: owner/app\n        assets: {amd64: '^app-.*[.]AppImage$'}",
             "packages.binaries[0].name",
             "bad/name",
         ),

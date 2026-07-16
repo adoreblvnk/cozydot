@@ -109,3 +109,9 @@ if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
 # display system info
 if command -v fastfetch &>/dev/null; then fastfetch; fi
+
+export NVM_DIR="$HOME/.nvm"
+source "$NVM_DIR/nvm.sh"
+
+
+

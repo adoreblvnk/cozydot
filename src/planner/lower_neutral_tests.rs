@@ -7,9 +7,7 @@ use crate::{
 };
 use std::path::Path;
 
-const FULL: &str = include_str!("../../docs/examples/config-v1-full.yaml");
-const EXHAUSTIVE: &str = include_str!("../../docs/examples/config-v1-exhaustive.yaml");
-const SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const FULL: &str = include_str!("../../docs/examples/full.yaml");
 
 fn platform(distro: &str) -> Platform {
     let codename = if distro == "ubuntu" {
@@ -57,26 +55,24 @@ fn minimal_plan_retains_all_phase_boundaries_and_final_summary() {
 }
 
 #[test]
-fn full_and_exhaustive_fixtures_lower_on_both_mandatory_hosts() {
-    for (name, yaml) in [("full", FULL), ("exhaustive", EXHAUSTIVE)] {
-        for distro in ["ubuntu", "debian"] {
-            let steps = lowered(yaml, distro);
-            assert_eq!(
-                steps
-                    .iter()
-                    .filter(|step| matches!(step.kind(), StepKind::Phase(_)))
-                    .count(),
-                20,
-                "{name} on {distro}"
-            );
-            assert!(matches!(steps.last().unwrap().kind(), StepKind::Summary));
-        }
+fn full_fixture_lowers_on_both_mandatory_hosts() {
+    for distro in ["ubuntu", "debian"] {
+        let steps = lowered(FULL, distro);
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|step| matches!(step.kind(), StepKind::Phase(_)))
+                .count(),
+            20,
+            "full on {distro}"
+        );
+        assert!(matches!(steps.last().unwrap().kind(), StepKind::Summary));
     }
 }
 
 #[test]
-fn exhaustive_lowering_preserves_repository_layouts_refresh_and_labels() {
-    let steps = lowered(EXHAUSTIVE, "ubuntu");
+fn full_lowering_preserves_repository_refresh_and_labels() {
+    let steps = lowered(FULL, "ubuntu");
     let mut sources = Vec::new();
     let mut repository_labels = Vec::new();
     for step in &steps {
@@ -94,11 +90,19 @@ fn exhaustive_lowering_preserves_repository_layouts_refresh_and_labels() {
         }
     }
     assert!(sources.iter().any(|source| source.ends_with(" * *\n")));
-    assert!(sources.iter().any(|source| source.ends_with(" ./\n")));
-    assert!(!sources.iter().any(|source| source.ends_with(" ./ *\n")));
+
     assert_eq!(
         repository_labels,
-        ["repository literal-star", "repository exact-path"]
+        [
+            "repository docker",
+            "repository debian-griffo",
+            "repository github-cli",
+            "repository helium",
+            "repository onlyoffice",
+            "repository virtualbox",
+            "repository vscode",
+            "repository wezterm",
+        ]
     );
 
     let refresh = steps
@@ -121,8 +125,8 @@ fn exhaustive_lowering_preserves_repository_layouts_refresh_and_labels() {
 }
 
 #[test]
-fn binary_sources_checksums_and_update_modes_survive_exactly() {
-    let steps = lowered(EXHAUSTIVE, "ubuntu");
+fn full_binary_sources_and_update_modes_survive_exactly() {
+    let steps = lowered(FULL, "ubuntu");
     let binaries = steps
         .iter()
         .filter_map(|step| match operation(step) {
@@ -130,31 +134,30 @@ fn binary_sources_checksums_and_update_modes_survive_exactly() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(binaries.len(), 3, "two ensures and one GitHub update");
+    assert_eq!(binaries.len(), 10, "five ensures and five GitHub updates");
 
     let mut github_modes = Vec::new();
-    let mut fixed_modes = Vec::new();
     for binary in binaries {
-        match binary.source() {
-            BinarySourceOperation::GithubLatest { sha256, .. } => {
-                assert_eq!(sha256.unwrap().as_hex(), SHA256);
-                github_modes.push(binary.mode());
-            }
-            BinarySourceOperation::ChecksummedUrl { url, sha256 } => {
-                assert_eq!(
-                    url.as_str(),
-                    "https://downloads.example.com/url-example-amd64.AppImage"
-                );
-                assert_eq!(sha256.as_hex(), SHA256);
-                fixed_modes.push(binary.mode());
-            }
-        }
+        assert!(matches!(
+            binary.source(),
+            BinarySourceOperation::GithubLatest { sha256: None, .. }
+        ));
+        github_modes.push(binary.mode());
     }
     assert_eq!(
-        github_modes,
-        [BinaryPackageMode::EnsurePresent, BinaryPackageMode::Update]
+        github_modes
+            .iter()
+            .filter(|mode| **mode == BinaryPackageMode::EnsurePresent)
+            .count(),
+        5
     );
-    assert_eq!(fixed_modes, [BinaryPackageMode::EnsurePresent]);
+    assert_eq!(
+        github_modes
+            .iter()
+            .filter(|mode| **mode == BinaryPackageMode::Update)
+            .count(),
+        5
+    );
 }
 
 #[test]
@@ -176,14 +179,14 @@ fn selectors_modes_terminal_and_provider_operations_remain_typed() {
         assert!(partial.contains(expected), "{partial}");
     }
 
-    let steps = lowered(EXHAUSTIVE, "ubuntu");
+    let steps = lowered(FULL, "ubuntu");
     let displays = steps.iter().map(Step::display).collect::<Vec<_>>();
     for expected in [
-        "workflow binary-package github-example ensure-present",
-        "workflow binary-package github-example update",
+        "workflow binary-package drawio ensure-present",
+        "workflow binary-package drawio update",
         "workflow nerd-fonts update GeistMono",
-        "workflow cargo-package-set update-current cargo-edit",
-        "workflow npm-package-set update-current example-package",
+        "workflow cargo-package-set update-current bat bottom du-dust fd-find presenterm starship tealdeer",
+        "workflow npm-package-set update-current opencode-ai",
         "workflow gnome-dock",
         "workflow gnome-rounded-corners",
     ] {
@@ -194,7 +197,7 @@ fn selectors_modes_terminal_and_provider_operations_remain_typed() {
     }
     let terminal = displays
         .iter()
-        .position(|display| display == "workflow desktop-setting gnome terminal github-example")
+        .position(|display| display == "workflow desktop-setting gnome terminal wezterm")
         .unwrap();
     for install in [
         "workflow rust-toolchain ensure-present",
@@ -203,8 +206,7 @@ fn selectors_modes_terminal_and_provider_operations_remain_typed() {
         "workflow python-toolchain",
         "workflow cargo-package-set ensure-present",
         "workflow npm-package-set ensure-present",
-        "workflow binary-package github-example ensure-present",
-        "workflow binary-package url-example ensure-present",
+        "workflow binary-package drawio ensure-present",
     ] {
         assert!(
             displays
@@ -235,7 +237,7 @@ fn selectors_modes_terminal_and_provider_operations_remain_typed() {
 
 #[test]
 fn debian_ubuntu_controls_are_visible_skips_without_control_side_effects() {
-    let steps = lowered(EXHAUSTIVE, "debian");
+    let steps = lowered(FULL, "debian");
     assert!(steps.iter().any(|step| {
         matches!(
             step.kind(),

@@ -18,3 +18,7 @@ call plug#end()
 set termguicolors
 silent! colorscheme catppuccin_mocha " catppuccin_frappe, catppuccin_latte, catppuccin_macchiato, catppuccin_mocha
 
+set expandtab     " tab to space
+set shiftwidth=2  " indent by 2 spaces
+set softtabstop=2 " insert 2 spaces for tab
+set tabstop=2     " convert existing \t to 2 spaces
