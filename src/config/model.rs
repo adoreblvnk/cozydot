@@ -150,9 +150,11 @@ impl Config {
                     platform.desktop
                 );
             }
-            if configured.gnome.is_some() && desktop != DesktopKind::Gnome {
+            if configured.gnome.is_some()
+                && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
+            {
                 bail!(
-                    "desktop.gnome: requires resolved GNOME desktop; detected {:?}",
+                    "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
                 );
             }

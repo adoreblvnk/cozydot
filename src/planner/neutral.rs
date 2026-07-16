@@ -897,28 +897,30 @@ fn plan_desktop(
             desktop_action(phases, DesktopIntent::IdleDim { target, enabled });
         }
     }
-    if let Some(gnome) = &desktop.gnome {
-        if let Some(extensions) = &gnome.extensions {
-            prerequisites.insert(SystemPrerequisite::GnomeExtensionManagement);
-            desktop_action(phases, DesktopIntent::GnomeExtensions(extensions.clone()));
-        }
-        if gnome.dock == Some(true) {
-            prerequisites.insert(SystemPrerequisite::GnomeExtensionManagement);
-            desktop_action(
-                phases,
-                DesktopIntent::GnomeDock(
-                    ProviderConvergence::EnsureFixedProviderThenConfigureAndVerify,
-                ),
-            );
-        }
-        if gnome.rounded_corners == Some(true) {
-            prerequisites.insert(SystemPrerequisite::GnomeExtensionManagement);
-            desktop_action(
-                phases,
-                DesktopIntent::GnomeRoundedCorners(
-                    ProviderConvergence::EnsureFixedProviderThenConfigureAndVerify,
-                ),
-            );
+    if target == DesktopTarget::Gnome {
+        if let Some(gnome) = &desktop.gnome {
+            if let Some(extensions) = &gnome.extensions {
+                prerequisites.insert(SystemPrerequisite::GnomeExtensionManagement);
+                desktop_action(phases, DesktopIntent::GnomeExtensions(extensions.clone()));
+            }
+            if gnome.dock == Some(true) {
+                prerequisites.insert(SystemPrerequisite::GnomeExtensionManagement);
+                desktop_action(
+                    phases,
+                    DesktopIntent::GnomeDock(
+                        ProviderConvergence::EnsureFixedProviderThenConfigureAndVerify,
+                    ),
+                );
+            }
+            if gnome.rounded_corners == Some(true) {
+                prerequisites.insert(SystemPrerequisite::GnomeExtensionManagement);
+                desktop_action(
+                    phases,
+                    DesktopIntent::GnomeRoundedCorners(
+                        ProviderConvergence::EnsureFixedProviderThenConfigureAndVerify,
+                    ),
+                );
+            }
         }
     }
 }

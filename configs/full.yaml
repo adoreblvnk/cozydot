@@ -1,20 +1,17 @@
 # Full Cozydot configuration version 1.0.0 reference.
 # This single valid document demonstrates a complete practical configuration.
 # Comments name scalar alternatives that cannot coexist in one valid document.
-# Validated reference hosts: Ubuntu amd64 GNOME and Debian 13 amd64 GNOME.
+# Supported targets: Ubuntu, Debian, Pop!_OS, and Linux Mint on GNOME or Cinnamon.
 version: 1.0.0
 
 system:
   require:
-    distros: [ubuntu, debian]
-    desktops: [gnome]
+    distros: [ubuntu, debian, pop, linuxmint]
+    desktops: [gnome, cinnamon]
   ensure_admin: true
   apt:
     sources:
-      mode: managed # preserve
-      components:
-        ubuntu: [main, restricted, universe, multiverse]
-        debian: [main, contrib, non-free, non-free-firmware]
+      mode: preserve # managed is limited to pure Ubuntu, Debian, and Kali
     unattended_upgrades: disabled # enabled
   ubuntu:
     snap: disabled # enabled
@@ -24,9 +21,9 @@ packages:
   apt:
     remove:
       - docker.io
-      - docker-doc
       - docker-compose
       - docker-compose-v2
+      - docker-doc
       - podman-docker
       - containerd
       - runc

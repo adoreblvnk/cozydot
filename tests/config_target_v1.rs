@@ -4,7 +4,7 @@ use cozydot::{
 };
 
 const BEGINNER: &str = include_str!("../docs/examples/config-v1-beginner.yaml");
-const FULL: &str = include_str!("../docs/examples/full.yaml");
+const FULL: &str = include_str!("../configs/full.yaml");
 
 fn platform(distro: &str, upstream: &str, codename: &str, desktop: &str, arch: &str) -> Platform {
     Platform::from_release_parts(
@@ -46,10 +46,18 @@ fn reject_with_path_and_value(yaml: &str, expected_path: &str, invalid_value: &s
 fn canonical_fixtures_parse_and_validate_claimed_platforms() {
     Config::parse(BEGINNER).unwrap();
     let full = Config::parse(FULL).unwrap();
-    full.validate_for_platform(&platform("ubuntu", "ubuntu", "noble", "gnome", "amd64"))
-        .unwrap();
-    full.validate_for_platform(&platform("debian", "debian", "trixie", "gnome", "amd64"))
-        .unwrap();
+    for target in [
+        platform("ubuntu", "ubuntu", "noble", "gnome", "amd64"),
+        platform("ubuntu", "ubuntu", "noble", "cinnamon", "amd64"),
+        platform("debian", "debian", "trixie", "gnome", "amd64"),
+        platform("debian", "debian", "trixie", "cinnamon", "amd64"),
+        platform("pop", "ubuntu", "noble", "gnome", "amd64"),
+        platform("pop", "ubuntu", "noble", "cinnamon", "amd64"),
+        platform("linuxmint", "ubuntu", "noble", "gnome", "amd64"),
+        platform("linuxmint", "ubuntu", "noble", "cinnamon", "amd64"),
+    ] {
+        full.validate_for_platform(&target).unwrap();
+    }
 }
 
 #[test]
@@ -245,10 +253,13 @@ fn platform_requirements_components_and_desktop_rules() {
         .validate_for_platform(&platform("ubuntu", "ubuntu", "noble", "cinnamon", "amd64"))
         .unwrap();
     let gnome = Config::parse("version: 1.0.0\ndesktop:\n  gnome: {dock: true}").unwrap();
+    gnome
+        .validate_for_platform(&platform("ubuntu", "ubuntu", "noble", "cinnamon", "amd64"))
+        .unwrap();
     reject_platform(
         &gnome,
-        &platform("ubuntu", "ubuntu", "noble", "cinnamon", "amd64"),
-        "requires resolved GNOME",
+        &platform("ubuntu", "ubuntu", "noble", "none", "amd64"),
+        "requires GNOME or Cinnamon",
     );
 }
 
@@ -464,7 +475,7 @@ fn planner_facing_model_surface_is_public_and_typed() {
             .and_then(|system| system.apt.as_ref())
             .and_then(|apt| apt.sources.as_ref())
             .map(|sources| sources.mode),
-        Some(SourceMode::Managed)
+        Some(SourceMode::Preserve)
     );
     assert_eq!(
         config.desktop.as_ref().and_then(|desktop| desktop.theme),

@@ -381,7 +381,7 @@ desktop:
 - `theme`, `terminal`, and `idle` are backend-neutral desired-state intents owned by the resolved desktop backend. GNOME and Cinnamon each have a separate typed lowerer/operation implementation; these fields are never translated by constructing schema names dynamically from unvalidated desktop text.
 - The `gnome` mapping owns only GNOME-specific extensions, dock, and rounded-corner behavior. No `cinnamon` mapping exists in version `1.0.0` because there are no Cinnamon-only public fields.
 - Each backend preflights its required schema/CLI before mutation and fails rather than claiming an unsupported setting.
-- A present `gnome` section requires resolved GNOME; it is not silently emulated on another desktop.
+- A present `gnome` section is applied only when GNOME is resolved and is skipped as inapplicable when Cinnamon is resolved. It is never emulated through Cinnamon, and other detected desktop states remain invalid for a configuration containing desktop intent.
 - `gnome.extensions`: non-empty unique extension UUID sequence.
 - Newly installed GNOME extensions that require shell re-registration produce an explicit login-required result; Cozydot never reports them as already enabled. After one logout/login, the next apply enables and verifies them.
 - `gnome.dock: true` ensures Cozydot’s fixed supported dock provider for the resolved GNOME platform before applying and verifying dock behavior. Omission preserves dock state; explicit `false` is invalid until a reversible disabled state is defined.
@@ -465,4 +465,4 @@ No planner or lowerer may reorder operations across these dependency boundaries 
 ## 17. Examples
 
 - [`config-v1-beginner.yaml`](examples/config-v1-beginner.yaml) is a concise starting point.
-- [`full.yaml`](examples/full.yaml) is the single practical comprehensive reference; comments list scalar alternatives that cannot coexist in one valid document.
+- [`full.yaml`](../configs/full.yaml) is the single practical comprehensive reference; comments list scalar alternatives that cannot coexist in one valid document.

@@ -10,7 +10,7 @@ use cozydot::{
 };
 use std::path::{Path, PathBuf};
 
-const FULL: &str = include_str!("../docs/examples/full.yaml");
+const FULL: &str = include_str!("../configs/full.yaml");
 
 fn platform(
     distro: &str,
@@ -99,9 +99,18 @@ fn public_neutral_api_exposes_read_only_fixed_phase_traversal() {
 }
 
 #[test]
-fn full_fixture_plans_on_both_mandatory_reference_hosts() {
+fn full_fixture_plans_on_all_declared_release_distros_and_desktops() {
     let config = Config::parse(FULL).unwrap();
-    for target in [ubuntu("gnome", "amd64"), debian("gnome")] {
+    for target in [
+        ubuntu("gnome", "amd64"),
+        ubuntu("cinnamon", "amd64"),
+        debian("gnome"),
+        debian("cinnamon"),
+        platform("pop", "ubuntu", "cosmic", "noble", "gnome", "amd64"),
+        platform("pop", "ubuntu", "cosmic", "noble", "cinnamon", "amd64"),
+        platform("linuxmint", "ubuntu", "wilma", "noble", "gnome", "amd64"),
+        platform("linuxmint", "ubuntu", "wilma", "noble", "cinnamon", "amd64"),
+    ] {
         let plan = plan(&config, &target, Path::new("/dotfiles")).unwrap();
         assert_eq!(plan.phases().len(), 20);
         assert_eq!(
@@ -114,7 +123,7 @@ fn full_fixture_plans_on_both_mandatory_reference_hosts() {
 }
 
 #[test]
-fn full_fixture_observes_every_execution_phase_boundary_in_order() {
+fn full_fixture_preserves_every_phase_boundary_and_only_expected_phases_are_empty() {
     let plan = planned(FULL, &ubuntu("gnome", "amd64"));
     assert_eq!(
         plan.phases()
@@ -123,17 +132,18 @@ fn full_fixture_observes_every_execution_phase_boundary_in_order() {
             .collect::<Vec<_>>(),
         PlanPhaseKind::ORDERED
     );
-    for phase in &plan.phases()[..19] {
-        assert!(
-            !phase.actions().is_empty(),
-            "empty required phase: {:?}",
+    for phase in plan.phases() {
+        let expected_empty = matches!(
+            phase.kind(),
+            PlanPhaseKind::OfficialAptSources | PlanPhaseKind::FinalVerification
+        );
+        assert_eq!(
+            phase.actions().is_empty(),
+            expected_empty,
+            "unexpected occupancy for phase {:?}",
             phase.kind()
         );
     }
-    assert!(plan
-        .phase(PlanPhaseKind::FinalVerification)
-        .actions()
-        .is_empty());
 }
 
 #[test]
@@ -590,7 +600,11 @@ desktop:
 desktop:
   theme: dark
   terminal: wezterm
-  idle: {timeout: 0s, dim: false}",
+  idle: {timeout: 0s, dim: false}
+  gnome:
+    extensions: [example@example.com]
+    dock: true
+    rounded_corners: true",
         &ubuntu("cinnamon", "amd64"),
     );
     assert!(cinnamon
