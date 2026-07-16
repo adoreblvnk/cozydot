@@ -40,7 +40,7 @@ fn text(steps: &[Step]) -> String {
 
 #[test]
 fn every_preset_uses_version_1_0_0_and_lowers_on_ubuntu_and_debian() {
-    for name in ["default", "cli", "full", "vm"] {
+    for name in ["cozydot", "cli", "full", "vm"] {
         for resolved in [
             platform("ubuntu", "ubuntu", "gnome"),
             platform("debian", "debian", "gnome"),
@@ -52,14 +52,23 @@ fn every_preset_uses_version_1_0_0_and_lowers_on_ubuntu_and_debian() {
 }
 
 #[test]
-fn only_full_explicitly_configures_existing_docker_and_virtualbox_products() {
+fn presets_configure_only_their_declared_existing_products() {
     let resolved = platform("ubuntu", "ubuntu", "gnome");
-    for name in ["default", "cli", "vm"] {
+    for name in ["cli", "vm"] {
         let plan = text(&preset(name, &resolved));
         for product in ["docker", "virtualbox"] {
             assert!(!plan.contains(product), "{name}: {plan}");
         }
     }
+
+    let cozydot = text(&preset("cozydot", &resolved));
+    for expected in ["docker-group", "docker-local-log 10m"] {
+        assert!(
+            cozydot.contains(expected),
+            "cozydot: missing {expected}: {cozydot}"
+        );
+    }
+    assert!(!cozydot.contains("virtualbox"), "cozydot: {cozydot}");
 
     let full = text(&preset("full", &resolved));
     for expected in ["docker-group", "docker-local-log 10m", "virtualbox-group"] {

@@ -1,22 +1,30 @@
-# Full Cozydot VM configuration version 1.0.0.
-# Derived from configs/full.yaml for a Debian 13 or Ubuntu GNOME amd64 VM.
-# VirtualBox installation and host-group integration are intentionally omitted.
 version: 1.0.0
 system:
-  require:
-    distros: [ubuntu, debian]
-    desktops: [gnome]
   ensure_admin: true
   apt:
     sources:
-      mode: managed # preserve
+      mode: managed
       components:
-        ubuntu: [main, restricted, universe, multiverse]
-        debian: [main, contrib, non-free, non-free-firmware]
-    unattended_upgrades: disabled # enabled
+        ubuntu:
+          - main
+          - restricted
+          - universe
+          - multiverse
+        debian:
+          - main
+          - contrib
+          - non-free
+          - non-free-firmware
+    unattended_upgrades: disabled
   ubuntu:
-    snap: disabled # enabled
+    snap: disabled
     codecs: installed
+  require:
+    distros:
+      - ubuntu
+      - debian
+    desktops:
+      - gnome
 packages:
   apt:
     install:
@@ -27,6 +35,7 @@ packages:
       - default-jdk
       - ffmpeg
       - figlet
+      - fzf
       - git
       - imagemagick
       - lolcat
@@ -52,9 +61,11 @@ packages:
         key: https://apt.fury.io/wez/gpg.key
         urls:
           default: https://apt.fury.io/wez/
-        suite: "*"
-        components: ["*"]
-        packages: [wezterm-nightly]
+        suite: '*'
+        components:
+          - '*'
+        packages:
+          - wezterm-nightly
   flatpak:
     - com.bitwarden.desktop
   cargo:
@@ -67,32 +78,33 @@ packages:
   binaries:
     - name: fastfetch
       format: deb
-      commands: [fastfetch]
+      commands:
+        - fastfetch
       source:
         provider: github
         repository: fastfetch-cli/fastfetch
         assets:
-          amd64: '^fastfetch-linux-amd64\.deb$'
-          arm64: '^fastfetch-linux-aarch64\.deb$'
-          arm32: '^fastfetch-linux-armv7l.*\.deb$'
-          riscv64: '^fastfetch-linux-riscv64.*\.deb$'
+          amd64: ^fastfetch-linux-amd64\.deb$
+          arm64: ^fastfetch-linux-aarch64\.deb$
+          arm32: ^fastfetch-linux-armv7l.*\.deb$
+          riscv64: ^fastfetch-linux-riscv64.*\.deb$
     - name: git-credential-manager
       format: deb
-      commands: [git-credential-manager]
+      commands:
+        - git-credential-manager
       source:
         provider: github
         repository: git-ecosystem/git-credential-manager
         assets:
-          amd64: '^gcm-linux-x64-.*\.deb$'
-          arm64: '^gcm-linux-arm64-.*\.deb$'
+          amd64: ^gcm-linux-x64-.*\.deb$
+          arm64: ^gcm-linux-arm64-.*\.deb$
 tools:
-  rust: stable # beta, nightly, nightly-YYYY-MM-DD, or numeric version
-  go: latest # or numeric version
-  node: latest # lts or numeric version
+  rust: stable
+  go: latest
+  node: latest
   python: "3.13"
 fonts:
-  nerd:
-    - GeistMono
+  nerd: [GeistMono]
 dotfiles:
   packages:
     - bash
@@ -109,10 +121,10 @@ integrations:
     extensions:
       - catppuccin.catppuccin-vsc
 desktop:
-  theme: dark # light
+  theme: dark
   terminal: wezterm
   idle:
-    timeout: 15m # 0s disables the timeout; s, m, and h units are accepted
+    timeout: 15m
     dim: false
   gnome:
     extensions:
@@ -121,7 +133,7 @@ desktop:
     dock: true
     rounded_corners: true
 updates:
-  apt: full # standard
+  apt: full
   flatpak: true
   tools:
     rust: true

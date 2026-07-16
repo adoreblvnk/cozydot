@@ -16,12 +16,18 @@ fn main() {
 fn generate() -> io::Result<()> {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let mut records = BTreeMap::new();
-    add_file(
-        &root.join("configs/default.yaml"),
-        Path::new("cozydot.yaml"),
-        &mut records,
-    )?;
     walk(&root.join("dotfiles"), Path::new("dotfiles"), &mut records)?;
+
+    let mut presets = BTreeMap::new();
+    for name in ["cozydot", "full", "cli", "vm"] {
+        let source = root.join("configs").join(format!("{name}.yaml"));
+        println!("cargo:rerun-if-changed={}", source.display());
+        let metadata = fs::symlink_metadata(&source)?;
+        if !metadata.file_type().is_file() {
+            return Err(invalid(&source, "preset is not a regular file"));
+        }
+        presets.insert(name, fs::read(source)?);
+    }
 
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("bundle.rs");
     let mut file = fs::File::create(output)?;
@@ -31,6 +37,14 @@ fn generate() -> io::Result<()> {
         writeln!(
             file,
             "    Record {{ path: {path:?}, bytes: &{bytes:?}, mode: {mode:#o} }},"
+        )?;
+    }
+    writeln!(file, "];")?;
+    writeln!(file, "pub static PRESETS: &[PresetRecord] = &[")?;
+    for (name, bytes) in presets {
+        writeln!(
+            file,
+            "    PresetRecord {{ name: {name:?}, bytes: &{bytes:?} }},"
         )?;
     }
     writeln!(file, "];")

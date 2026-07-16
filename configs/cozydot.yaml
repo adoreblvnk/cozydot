@@ -44,7 +44,6 @@ packages:
       - pass
       - pinentry-tty
       - trash-cli
-      - ttf-mscorefonts-installer
       - unzip
       - vim
       - vlc
@@ -71,33 +70,6 @@ packages:
         suite: stable
         components: [main]
         packages: [gh]
-      - name: helium
-        key: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
-        urls:
-          default: https://pkg.helium.computer/deb
-        suite: stable
-        components:
-          - main
-        packages:
-          - helium-bin
-      - name: onlyoffice
-        key: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-        urls:
-          default: https://download.onlyoffice.com/repo/debian
-        suite: squeeze
-        components:
-          - main
-        packages:
-          - onlyoffice-desktopeditors
-      - name: virtualbox
-        key: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-        urls:
-          default: https://download.virtualbox.org/virtualbox/debian
-        suite: system
-        components:
-          - contrib
-        packages:
-          - virtualbox-7.1
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
         urls:
@@ -122,7 +94,6 @@ packages:
     - net.sapples.LiveCaptions
     - org.gimp.GIMP
     - org.qbittorrent.qBittorrent
-    - org.shotcut.Shotcut
     - org.telegram.desktop
   cargo:
     - bat
@@ -140,16 +111,6 @@ packages:
     - opencode-ai
     - skills
   binaries:
-    - name: drawio
-      format: deb
-      commands:
-        - drawio
-      source:
-        provider: github
-        repository: jgraph/drawio-desktop
-        assets:
-          amd64: ^drawio-amd64-.*\.deb$
-          arm64: ^drawio-arm64-.*\.deb$
     - name: fastfetch
       format: deb
       commands:
@@ -216,29 +177,15 @@ integrations:
     extensions:
       - catppuccin.catppuccin-vsc
       - charliermarsh.ruff
-      - christian-kohler.path-intellisense
       - eamodio.gitlens
-      - ecmel.vscode-html-css
-      - foxundermoon.shell-format
-      - golang.go
-      - llvm-vs-code-extensions.vscode-clangd
-      - ms-python.debugpy
       - ms-python.python
-      - ms-python.vscode-pylance
-      - prettier.prettier-vscode
       - redhat.vscode-yaml
-      - rust-lang.rust-analyzer
-      - streetsidesoftware.code-spell-checker
-      - timonwong.shellcheck
-      - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
   docker:
     add_user_to_group: true
     logging:
       driver: local
       max_size: 10m
-  virtualbox:
-    add_user_to_group: true
 desktop:
   theme: dark
   terminal: wezterm
@@ -252,7 +199,7 @@ desktop:
     dock: true
     rounded_corners: true
 updates:
-  apt: full
+  apt: standard
   flatpak: true
   tools:
     rust: true

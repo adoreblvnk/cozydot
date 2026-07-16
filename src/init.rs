@@ -10,9 +10,49 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub fn run() -> Result<PathBuf> {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Preset {
+    #[default]
+    Cozydot,
+    Full,
+    Cli,
+    Vm,
+}
+
+impl Preset {
+    pub const NAMES: &'static str = "cozydot, full, cli, vm";
+
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "cozydot" => Ok(Self::Cozydot),
+            "full" => Ok(Self::Full),
+            "cli" => Ok(Self::Cli),
+            "vm" => Ok(Self::Vm),
+            _ => bail!("unknown preset '{value}'; expected one of: {}", Self::NAMES),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Cozydot => "cozydot",
+            Self::Full => "full",
+            Self::Cli => "cli",
+            Self::Vm => "vm",
+        }
+    }
+}
+
+pub fn run(preset: Preset) -> Result<PathBuf> {
     let root = config_root()?;
-    sync(&root, bundle::records())?;
+    let preset = bundle::preset(preset.name()).context("embedded preset is missing")?;
+    let mut records = Vec::with_capacity(bundle::records().len() + 1);
+    records.push(Record {
+        path: "cozydot.yaml",
+        bytes: preset.bytes,
+        mode: 0o644,
+    });
+    records.extend_from_slice(bundle::records());
+    sync(&root, &records)?;
     Ok(root)
 }
 
