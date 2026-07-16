@@ -83,6 +83,32 @@ fn init_emits_version_1_0_0_and_dry_apply_uses_the_only_runtime_path() {
 }
 
 #[test]
+fn init_uses_home_fallback_when_xdg_config_home_is_empty() {
+    let home = tempfile::tempdir().unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .arg("init")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", "")
+        .assert()
+        .success();
+
+    assert!(home.path().join(".config/cozydot/cozydot.yaml").is_file());
+}
+
+#[test]
+fn init_requires_home_when_xdg_config_home_is_empty() {
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .arg("init")
+        .env_remove("HOME")
+        .env("XDG_CONFIG_HOME", "")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("HOME is not set"));
+}
+
+#[test]
 fn init_materializes_each_embedded_preset() {
     for (preset, expected) in [
         ("cozydot", include_str!("../configs/cozydot.yaml")),
