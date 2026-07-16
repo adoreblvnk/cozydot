@@ -45,10 +45,10 @@ fi
 # force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
-# load env vars from ~/.config/cozydot.env if exists
-if [[ -r ~/.config/cozydot.env ]]; then
+# load env vars from ~/.config/cozydot/.env if exists
+if [[ -r ~/.config/cozydot/.env ]]; then
   set -a
-  source ~/.config/cozydot.env
+  source ~/.config/cozydot/.env
   set +a
 fi
 

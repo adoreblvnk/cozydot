@@ -1,0 +1,60 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    // "superpowers@git+https://github.com/obra/superpowers.git",
+    "cursor-acp"
+  ],
+  "provider": {
+    "cursor-acp": {
+      "name": "Cursor",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:32124/v1"
+      },
+      "models": {
+        "auto": {
+          "name": "Auto",
+          "cost": {
+            "input": 1.25,
+            "output": 6,
+            "cache_read": 0.25,
+            "cache_write": 1.25
+          }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest"],
+      "enabled": false
+    },
+    "pdf-reader": {
+      "type": "local",
+      "command": ["npx", "@sylphx/pdf-reader-mcp"],
+      "enabled": true
+    },
+    "repomix": {
+      "type": "local",
+      "command": ["npx", "-y", "repomix", "--mcp"],
+      "enabled": true
+    },
+    "a11y-accessibility": {
+      "type": "local",
+      "command": ["npx", "-y", "a11y-mcp-server"],
+      "enabled": false
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": { "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}" },
+      "enabled": true
+    },
+    "searchcode": {
+      "type": "remote",
+      "url": "https://api.searchcode.com/v1/mcp",
+      "enabled": false
+    }
+  }
+}
