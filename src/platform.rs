@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
-use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use os_release::OsRelease;
+use std::{path::Path, process::Command};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
@@ -114,7 +115,7 @@ impl ManagedAptSources {
 
 impl Platform {
     pub fn detect() -> Result<Self> {
-        let os = parse_os_release(Path::new("/etc/os-release"))?;
+        let os = read_os_release(Path::new("/etc/os-release"))?;
         let uname = Command::new("uname")
             .arg("-m")
             .output()
@@ -157,19 +158,17 @@ impl Platform {
         })
     }
 
-    fn from_os_release(os: &BTreeMap<String, String>, desktop: String, arch: &str) -> Result<Self> {
-        let distro = os.get("ID").cloned().unwrap_or_default();
-        let upstream: String = upstream(&distro, os.get("ID_LIKE").map(String::as_str))?.into();
-        let distro_codename = os.get("VERSION_CODENAME").cloned().unwrap_or_default();
+    fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
+        let distro = os.id.clone();
+        let upstream: String = upstream(&distro, Some(&os.id_like))?.into();
+        let distro_codename = os.version_codename.clone();
         let base_codename = match upstream.as_str() {
-            "ubuntu" => os
-                .get("UBUNTU_CODENAME")
-                .cloned()
-                .unwrap_or_else(|| distro_codename.clone()),
-            "debian" => os
-                .get("DEBIAN_CODENAME")
-                .cloned()
-                .unwrap_or_else(|| distro_codename.clone()),
+            "ubuntu" => {
+                extra_codename(os, "UBUNTU_CODENAME").unwrap_or_else(|| distro_codename.clone())
+            }
+            "debian" => {
+                extra_codename(os, "DEBIAN_CODENAME").unwrap_or_else(|| distro_codename.clone())
+            }
             _ => unreachable!(),
         };
         Self::from_release_parts(
@@ -393,13 +392,15 @@ fn normalize_desktop(value: &str) -> String {
         .unwrap_or("none")
         .into()
 }
-fn parse_os_release(path: &Path) -> Result<BTreeMap<String, String>> {
-    let text = fs::read_to_string(path).context("read os-release")?;
-    Ok(text
-        .lines()
-        .filter_map(|l| l.split_once('='))
-        .map(|(k, v)| (k.into(), v.trim_matches('"').into()))
-        .collect())
+
+fn read_os_release(path: &Path) -> Result<OsRelease> {
+    OsRelease::new_from(path).context("read os-release")
+}
+
+fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
+    os.extra
+        .get(key)
+        .map(|value| value.trim_matches('"').to_owned())
 }
 
 #[cfg(test)]
@@ -560,41 +561,55 @@ mod tests {
     }
 
     #[test]
-    fn os_release_preserves_distribution_and_base_codenames() {
-        let detected = |values: &[(&str, &str)]| {
-            let os = values
-                .iter()
-                .map(|(key, value)| ((*key).into(), (*value).into()))
-                .collect();
+    fn os_release_file_preserves_distribution_and_base_codenames() {
+        let detected = |contents: &str| {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), contents).unwrap();
+            let os = read_os_release(file.path()).unwrap();
             Platform::from_os_release(&os, "none".into(), "amd64").unwrap()
         };
-        let mint = detected(&[
-            ("ID", "linuxmint"),
-            ("ID_LIKE", "ubuntu debian"),
-            ("VERSION_CODENAME", "wilma"),
-            ("UBUNTU_CODENAME", "noble"),
-        ]);
+        let mint = detected(
+            "ID=linuxmint\nID_LIKE=\"debian ubuntu\"\nVERSION_CODENAME=wilma\nUBUNTU_CODENAME=\"noble\"\n",
+        );
         assert_eq!(mint.upstream, "ubuntu");
         assert_eq!(mint.distro_codename, "wilma");
         assert_eq!(mint.base_codename, "noble");
 
-        let lmde = detected(&[
-            ("ID", "linuxmint"),
-            ("ID_LIKE", "debian"),
-            ("VERSION_CODENAME", "gigi"),
-            ("DEBIAN_CODENAME", "bookworm"),
-        ]);
+        let lmde = detected(
+            "ID=linuxmint\nID_LIKE=debian\nVERSION_CODENAME=\"gigi\"\nDEBIAN_CODENAME=\"bookworm\"\n",
+        );
         assert_eq!(lmde.upstream, "debian");
         assert_eq!(lmde.distro_codename, "gigi");
         assert_eq!(lmde.base_codename, "bookworm");
 
-        let deepin = detected(&[
-            ("ID", "deepin"),
-            ("ID_LIKE", "debian"),
-            ("VERSION_CODENAME", "crimson"),
-        ]);
+        let deepin = detected("ID=deepin\nID_LIKE=debian\nVERSION_CODENAME=crimson\n");
         assert_eq!(deepin.upstream, "debian");
         assert_eq!(deepin.distro_codename, "crimson");
+        assert_eq!(deepin.base_codename, "crimson");
+    }
+
+    #[test]
+    fn os_release_file_requires_a_supported_linux_mint_id_like() {
+        for id_like in [None, Some("arch"), Some("ubuntuish debianish")] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            let contents = format!(
+                "ID=linuxmint\nVERSION_CODENAME=wilma\n{}",
+                id_like
+                    .map(|value| format!("ID_LIKE=\"{value}\"\n"))
+                    .unwrap_or_default()
+            );
+            std::fs::write(file.path(), contents).unwrap();
+            let os = read_os_release(file.path()).unwrap();
+            assert!(Platform::from_os_release(&os, "none".into(), "amd64").is_err());
+        }
+    }
+
+    #[test]
+    fn os_release_read_errors_keep_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let error = read_os_release(&directory.path().join("missing-os-release")).unwrap_err();
+        assert_eq!(error.to_string(), "read os-release");
+        assert!(format!("{error:#}").contains("unable to open file"));
     }
 
     #[test]
