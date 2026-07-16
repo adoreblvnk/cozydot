@@ -1,6 +1,11 @@
 use anyhow::{bail, Context, Result};
 use os_release::OsRelease;
-use std::{path::Path, process::Command};
+use std::{
+    fs::File,
+    io::{self, Read},
+    path::Path,
+    process::Command,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
@@ -394,7 +399,17 @@ fn normalize_desktop(value: &str) -> String {
 }
 
 fn read_os_release(path: &Path) -> Result<OsRelease> {
-    OsRelease::new_from(path).context("read os-release")
+    let mut file = File::open(path)
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("unable to open file at {path:?}: {error}"),
+            )
+        })
+        .context("read os-release")?;
+    let mut text = String::new();
+    file.read_to_string(&mut text).context("read os-release")?;
+    Ok(text.lines().map(str::to_owned).collect())
 }
 
 fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
@@ -610,6 +625,16 @@ mod tests {
         let error = read_os_release(&directory.path().join("missing-os-release")).unwrap_err();
         assert_eq!(error.to_string(), "read os-release");
         assert!(format!("{error:#}").contains("unable to open file"));
+    }
+
+    #[test]
+    fn os_release_rejects_malformed_utf8_between_valid_lines() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), b"ID=ubuntu\n\xff\nVERSION_CODENAME=noble\n").unwrap();
+
+        let error = read_os_release(file.path()).unwrap_err();
+        assert_eq!(error.to_string(), "read os-release");
+        assert!(format!("{error:#}").contains("stream did not contain valid UTF-8"));
     }
 
     #[test]
