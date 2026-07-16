@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use semver::Version;
 use std::{
     collections::BTreeSet,
     os::unix::fs::PermissionsExt,
@@ -122,7 +123,7 @@ fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
         let (version, source) = record
             .split_once(" (")
             .map_or((record, None), |parts| (parts.0, parts.1.strip_suffix(')')));
-        if !valid_semver(version)
+        if Version::parse(version).is_err()
             || record.contains(" (") && source.is_none()
             || source.is_some_and(|source| !valid_display_source(source))
         {
@@ -196,40 +197,6 @@ fn validate_package(package: &str) -> Result<()> {
     Ok(())
 }
 
-fn valid_semver(version: &str) -> bool {
-    let (version, build) = version
-        .split_once('+')
-        .map_or((version, None), |(version, build)| (version, Some(build)));
-    let (core, prerelease) = version
-        .split_once('-')
-        .map_or((version, None), |(core, prerelease)| {
-            (core, Some(prerelease))
-        });
-    let parts = core.split('.').collect::<Vec<_>>();
-    parts.len() == 3
-        && parts.iter().all(|part| valid_numeric_component(part))
-        && prerelease.is_none_or(|value| valid_semver_identifiers(value, true))
-        && build.is_none_or(|value| valid_semver_identifiers(value, false))
-}
-
-fn valid_numeric_component(part: &str) -> bool {
-    !part.is_empty()
-        && part.bytes().all(|byte| byte.is_ascii_digit())
-        && (part == "0" || !part.starts_with('0'))
-}
-
-fn valid_semver_identifiers(value: &str, reject_numeric_leading_zero: bool) -> bool {
-    value.split('.').all(|identifier| {
-        !identifier.is_empty()
-            && identifier
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            && (!reject_numeric_leading_zero
-                || !identifier.bytes().all(|byte| byte.is_ascii_digit())
-                || valid_numeric_component(identifier))
-    })
-}
-
 fn executable_file(path: &Path) -> bool {
     std::fs::metadata(path)
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
@@ -247,7 +214,7 @@ mod tests {
 
     #[test]
     fn cargo_state_accepts_registry_records_and_ignores_binaries_and_other_sources() {
-        let output = b"bat v0.25.0:\n    bat\npath-probe v1.2.3 (/tmp/hermes-cargo-probe):\n    path-probe\ngit-probe v2.3.4 (https://github.com/example/repo?rev=main):\n    git-probe\nnested-probe v3.4.5 (/tmp/probe (safe)):\n    nested-probe\n";
+        let output = b"bat v0.25.0:\n    bat\npath-probe v1.2.3 (/tmp/hermes-cargo-probe):\n    path-probe\ngit-probe v2.3.4 (https://github.com/example/repo?rev=main):\n    git-probe\nnested-probe v3.4.5 (/tmp/probe (safe)):\n    nested-probe\nprerelease-probe v1.2.3-alpha.1+build.7 (/tmp/prerelease-probe):\n    prerelease-probe\n";
         let installed = installed_packages(output).unwrap();
         assert_eq!(installed.into_iter().collect::<Vec<_>>(), ["bat"]);
     }
@@ -257,6 +224,7 @@ mod tests {
         for output in [
             b"bat\n".as_slice(),
             b"bat v01.2.3:\n".as_slice(),
+            b"bat v1.2.3-01:\n".as_slice(),
             b"bat v1.2.3\n".as_slice(),
             b"bat v1.2.3 ():\n".as_slice(),
             b"bat v1.2.3 (/tmp/probe (broken):\n".as_slice(),
