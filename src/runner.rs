@@ -27,6 +27,7 @@ pub enum ExecutionPhase {
 }
 
 impl ExecutionPhase {
+    #[cfg(test)]
     pub const ORDERED: [Self; 20] = [
         Self::SystemPrerequisites,
         Self::ManagerBootstraps,
@@ -161,11 +162,11 @@ impl Step {
         &self.0
     }
 
-    pub fn operation(&self) -> &Operation {
-        let StepKind::Operation { operation, .. } = &self.0 else {
-            panic!("runner step is not an operation")
-        };
-        operation.as_ref()
+    pub(crate) fn operation(&self) -> Option<&Operation> {
+        match &self.0 {
+            StepKind::Operation { operation, .. } => Some(operation.as_ref()),
+            _ => None,
+        }
     }
 
     pub fn display(&self) -> String {
@@ -332,7 +333,10 @@ where
             StepKind::Operation { .. } if dry_run => {
                 report.push(step.clone(), StepOutcome::Planned)
             }
-            StepKind::Operation { operation, .. } => match run(operation) {
+            StepKind::Operation { .. } => match run(step
+                .operation()
+                .expect("matched operation step must contain an operation"))
+            {
                 Ok(OperationOutcome::Completed) => {
                     report.push(step.clone(), StepOutcome::Completed)
                 }
@@ -443,6 +447,21 @@ mod tests {
         .unwrap();
         assert_eq!(dry.summary.planned, 1);
         assert_eq!(dry.summary.completed, 0);
+    }
+
+    #[test]
+    fn non_operation_access_is_panic_free_for_phase_skip_and_summary() {
+        for step in [
+            Step::phase(ExecutionPhase::SystemPrerequisites),
+            Step::skip(SkippedAction::UbuntuSnap, SkipReason::RequiresUbuntuFamily),
+            Step::summary(),
+        ] {
+            assert_eq!(step.operation(), None);
+        }
+        assert_eq!(
+            operation("apt").operation(),
+            Some(&Operation::AptMetadataRefresh)
+        );
     }
 
     #[test]

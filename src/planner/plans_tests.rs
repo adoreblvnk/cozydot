@@ -1,4 +1,4 @@
-use cozydot::{
+use crate::{
     config::Config,
     planner::{lower_neutral::lower, plan},
     platform::Platform,

@@ -35,7 +35,7 @@ The checksum is published separately. At build time, `configs/default.yaml` and 
 
 ## Safety and Testing
 
-Provisioning side effects cross the existing `Runner` trait. Init uses typed Rust filesystem modules, SHA-256 ownership records, a minimal interruption journal, and symlink-ancestor checks.
+Provisioning side effects are dispatched by matching each lowered typed `Operation` and invoking its fixed Rust executor. The operation and step types are crate-internal: the shipped library exposes the high-level `apply` boundary, so external callers cannot construct raw operations or arbitrary executable steps. Init uses typed Rust filesystem modules, SHA-256 ownership records, a minimal interruption journal, and symlink-ancestor checks.
 
 Development gates:
 

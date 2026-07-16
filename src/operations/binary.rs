@@ -142,10 +142,12 @@ impl BinaryPackageOperation {
         ]
     }
 
+    #[cfg(test)]
     pub fn source(&self) -> &BinarySourceOperation {
         &self.source
     }
 
+    #[cfg(test)]
     pub fn mode(&self) -> BinaryPackageMode {
         self.mode
     }

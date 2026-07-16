@@ -1,4 +1,4 @@
-use cozydot::{
+use crate::{
     config::Config,
     operations::{BinaryPackageMode, BinarySourceOperation, Operation},
     planner::{lower_neutral::lower, plan},
@@ -7,8 +7,8 @@ use cozydot::{
 };
 use std::path::Path;
 
-const FULL: &str = include_str!("../docs/examples/config-v1-full.yaml");
-const EXHAUSTIVE: &str = include_str!("../docs/examples/config-v1-exhaustive.yaml");
+const FULL: &str = include_str!("../../docs/examples/config-v1-full.yaml");
+const EXHAUSTIVE: &str = include_str!("../../docs/examples/config-v1-exhaustive.yaml");
 const SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn platform(distro: &str) -> Platform {

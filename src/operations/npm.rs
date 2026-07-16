@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::Host;
+use super::{managed_state::parse_strict_json, Host};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NpmPackageMode {
@@ -131,7 +131,8 @@ where
 fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
     let output =
         std::str::from_utf8(output).context("npm returned non-UTF-8 global package state")?;
-    let root: Value = serde_json::from_str(output).context("npm returned malformed JSON state")?;
+    let root: Value =
+        parse_strict_json(output.as_bytes()).context("npm returned malformed JSON state")?;
     let root = root
         .as_object()
         .context("npm global package state must be a JSON object")?;
@@ -304,5 +305,18 @@ mod tests {
         ] {
             assert!(installed_packages(output).is_err());
         }
+    }
+
+    #[test]
+    fn npm_state_rejects_root_duplicate_that_would_hide_a_reported_error() {
+        let output = br#"{"error":{"code":"EFAIL"},"error":null,"dependencies":{"tool":{"version":"1.0.0"}}}"#;
+        assert!(installed_packages(output).is_err());
+    }
+
+    #[test]
+    fn npm_state_rejects_nested_duplicate_that_would_hide_missing_state() {
+        let output =
+            br#"{"dependencies":{"tool":{"version":"1.0.0","missing":true,"missing":false}}}"#;
+        assert!(installed_packages(output).is_err());
     }
 }

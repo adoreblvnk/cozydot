@@ -20,6 +20,7 @@ pub struct ManagedAptSourcesOperation {
 }
 
 impl ManagedAptSourcesOperation {
+    #[cfg(test)]
     pub fn new(
         distro: String,
         release: String,

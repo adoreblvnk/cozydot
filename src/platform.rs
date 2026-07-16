@@ -64,48 +64,6 @@ impl Architecture {
             Self::Riscv64 => "riscv64gc-unknown-linux-gnu",
         }
     }
-
-    pub fn release_asset_aliases(self) -> &'static [&'static str] {
-        match self {
-            Self::Amd64 => &["amd64", "x86_64", "x64"],
-            Self::Arm64 => &["arm64", "aarch64"],
-            Self::Arm32 => &["arm32", "armv7", "armv7l", "armhf"],
-            Self::Riscv64 => &["riscv64", "riscv64gc"],
-        }
-    }
-
-    pub fn uname(self) -> &'static str {
-        match self {
-            Self::Amd64 => "x86_64",
-            Self::Arm64 => "aarch64",
-            Self::Arm32 => "armv7l",
-            Self::Riscv64 => "riscv64",
-        }
-    }
-
-    fn linux_release(self) -> &'static str {
-        match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "aarch64",
-            Self::Arm32 => "armv7l",
-            Self::Riscv64 => "riscv64",
-        }
-    }
-
-    fn x64_release(self) -> &'static str {
-        match self {
-            Self::Amd64 => "x64",
-            other => other.canonical(),
-        }
-    }
-
-    fn arm64_suffix(self) -> &'static str {
-        if self == Self::Arm64 {
-            "-arm64"
-        } else {
-            ""
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,29 +301,6 @@ impl Platform {
             stanzas,
         })
     }
-
-    pub fn expand(&self, input: &str) -> String {
-        let architecture = self.architecture;
-        [
-            ("UPSTREAM_DISTRO", self.upstream.as_str()),
-            ("VERSION_CODENAME", self.base_codename.as_str()),
-            ("UNAME_ARCH", architecture.uname()),
-            ("GO_ARCH", architecture.go_archive()),
-            ("LINUX_ARCH", architecture.linux_release()),
-            ("X64_ARCH", architecture.x64_release()),
-            ("ARM64_SUFFIX", architecture.arm64_suffix()),
-        ]
-        .into_iter()
-        .fold(input.to_owned(), |s, (k, v)| {
-            s.replace(&format!("${{{k}}}"), v)
-                .replace(&format!("${k}"), v)
-        })
-    }
-
-    pub fn expand_shell_arch(&self, input: &str) -> String {
-        self.expand(input)
-            .replace("$(dpkg --print-architecture)", self.architecture.debian())
-    }
 }
 fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
     if !success {
@@ -530,19 +465,6 @@ mod tests {
             assert_eq!(architecture.go(), go);
             assert_eq!(architecture.go_archive(), go_archive);
             assert_eq!(architecture.rust_target(), rust_target);
-        }
-    }
-
-    #[test]
-    fn exposes_common_release_asset_aliases() {
-        let cases: &[(Architecture, &[&str])] = &[
-            (Architecture::Amd64, &["amd64", "x86_64", "x64"]),
-            (Architecture::Arm64, &["arm64", "aarch64"]),
-            (Architecture::Arm32, &["arm32", "armv7", "armv7l", "armhf"]),
-            (Architecture::Riscv64, &["riscv64", "riscv64gc"]),
-        ];
-        for &(architecture, aliases) in cases {
-            assert_eq!(architecture.release_asset_aliases(), aliases);
         }
     }
 
