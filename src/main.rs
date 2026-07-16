@@ -38,7 +38,6 @@ fn apply() -> Result<()> {
         dry_run: std::env::var_os("COZYDOT_DRY_RUN").is_some(),
     };
     execute(&mut runner, &steps)?;
-    println!("Finished cozydot apply");
     Ok(())
 }
 
