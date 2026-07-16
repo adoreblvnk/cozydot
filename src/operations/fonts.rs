@@ -4,28 +4,42 @@ use url::Url;
 
 use super::{Host, TempDir, TempPath};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NerdFontsMode {
+    EnsurePresent,
+    Update,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NerdFontsOperation {
     families: Vec<String>,
+    mode: NerdFontsMode,
 }
 
 impl NerdFontsOperation {
-    pub fn new(families: Vec<String>) -> Result<Self> {
+    pub fn new(families: Vec<String>, mode: NerdFontsMode) -> Result<Self> {
         validate_families(&families)?;
-        Ok(Self { families })
+        Ok(Self { families, mode })
     }
 
     pub(crate) fn display_args(&self) -> Vec<String> {
-        std::iter::once("nerd-fonts".into())
-            .chain(self.families.iter().cloned())
-            .collect()
+        [
+            "nerd-fonts".into(),
+            match self.mode {
+                NerdFontsMode::EnsurePresent => "ensure-present".into(),
+                NerdFontsMode::Update => "update".into(),
+            },
+        ]
+        .into_iter()
+        .chain(self.families.iter().cloned())
+        .collect()
     }
 }
 
 pub(crate) fn execute(host: &Host<'_>, operation: &NerdFontsOperation) -> Result<()> {
     validate_families(&operation.families).context("validate Nerd Fonts operation")?;
     for family in &operation.families {
-        if !font_present(host, family)? {
+        if operation.mode == NerdFontsMode::Update || !font_present(host, family)? {
             install_family(host, family)?;
         }
     }
@@ -37,6 +51,9 @@ fn install_family(host: &Host<'_>, family: &str) -> Result<()> {
         .value("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| host.home().join(".local/share"));
+    if !data_home.is_absolute() {
+        bail!("Nerd Fonts XDG data directory must be absolute");
+    }
     let parent = data_home.join("fonts/cozydot");
     fs::create_dir_all(&parent).context("create Nerd Fonts destination directory")?;
     let destination = parent.join(family);
@@ -78,7 +95,7 @@ fn install_family(host: &Host<'_>, family: &str) -> Result<()> {
         ],
     )?;
     validate_archive_listing(&listing.stdout)?;
-    let stage = TempDir::new_in(&parent, "nerd-font-stage")?;
+    let stage = TempDir::new_in(&data_home, ".cozydot-font-stage")?;
     host.require(
         "Nerd Font archive extraction",
         "tar",
@@ -92,23 +109,73 @@ fn install_family(host: &Host<'_>, family: &str) -> Result<()> {
         ],
     )?;
     validate_extracted_tree(stage.path())?;
-    match fs::symlink_metadata(&destination) {
-        Ok(metadata) if metadata.file_type().is_dir() => {
-            fs::remove_dir_all(&destination).context("remove previous managed Nerd Font family")?
-        }
+    let replacing = match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_dir() => true,
         Ok(_) => bail!(
             "Nerd Font destination conflict at {}",
             destination.display()
         ),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error).context("inspect Nerd Font destination"),
+    };
+    publish_family(stage.path(), &destination, replacing)?;
+    let postcondition = refresh_and_verify(host, family, stage.path(), &destination);
+    if let Err(error) = postcondition {
+        rollback_family(stage.path(), &destination, replacing)
+            .with_context(|| format!("Nerd Font mutation failed and rollback failed: {error:#}"))?;
+        host.require("Nerd Font rollback cache refresh", "fc-cache", ["--force"])
+            .with_context(|| format!("Nerd Font mutation failed: {error:#}"))?;
+        return Err(error);
     }
-    fs::rename(stage.path(), &destination).context("publish Nerd Font family")?;
+    Ok(())
+}
+
+fn publish_family(stage: &Path, destination: &Path, replacing: bool) -> Result<()> {
+    let flags = if replacing {
+        rustix::fs::RenameFlags::EXCHANGE
+    } else {
+        rustix::fs::RenameFlags::NOREPLACE
+    };
+    rustix::fs::renameat_with(rustix::fs::CWD, stage, rustix::fs::CWD, destination, flags)
+        .context("atomically publish Nerd Font family")
+}
+
+fn rollback_family(stage: &Path, destination: &Path, replacing: bool) -> Result<()> {
+    let flags = if replacing {
+        rustix::fs::RenameFlags::EXCHANGE
+    } else {
+        rustix::fs::RenameFlags::NOREPLACE
+    };
+    rustix::fs::renameat_with(rustix::fs::CWD, destination, rustix::fs::CWD, stage, flags)
+        .context("atomically restore previous Nerd Font family")?;
+    sync_publication_directories(stage, destination)
+}
+
+fn refresh_and_verify(
+    host: &Host<'_>,
+    family: &str,
+    stage: &Path,
+    destination: &Path,
+) -> Result<()> {
+    sync_publication_directories(stage, destination)?;
     host.require("Nerd Font cache refresh", "fc-cache", ["--force"])?;
     if !font_present(host, family)? {
         bail!("Nerd Font mutation did not publish family {family:?}");
     }
     Ok(())
+}
+
+fn sync_publication_directories(stage: &Path, destination: &Path) -> Result<()> {
+    let stage_parent = stage.parent().context("Nerd Font stage has no parent")?;
+    let destination_parent = destination
+        .parent()
+        .context("Nerd Font destination has no parent")?;
+    fs::File::open(stage_parent)?
+        .sync_all()
+        .context("sync Nerd Font staging directory")?;
+    fs::File::open(destination_parent)?
+        .sync_all()
+        .context("sync Nerd Font destination directory")
 }
 
 fn font_present(host: &Host<'_>, family: &str) -> Result<bool> {
@@ -196,10 +263,16 @@ fn validate_families(families: &[String]) -> Result<()> {
     }
     let mut seen = BTreeSet::new();
     for family in families {
-        let mut components = Path::new(family).components();
-        if !matches!(components.next(), Some(std::path::Component::Normal(_)))
-            || components.next().is_some()
-            || family.contains(['\n', '\r'])
+        let bytes = family.as_bytes();
+        if bytes
+            .first()
+            .is_none_or(|byte| !byte.is_ascii_alphanumeric())
+            || bytes
+                .last()
+                .is_none_or(|byte| !byte.is_ascii_alphanumeric())
+            || !bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(byte))
         {
             bail!("invalid Nerd Font family name {family:?}");
         }
@@ -225,5 +298,23 @@ mod tests {
         ] {
             assert!(validate_archive_listing(listing).is_err());
         }
+    }
+
+    #[test]
+    fn family_names_use_the_frozen_definition_grammar() {
+        validate_families(&["GeistMono".into(), "JetBrains-Mono_2.0".into()]).unwrap();
+        for family in [
+            "",
+            ".Hidden",
+            "Trailing-",
+            "Has Space",
+            "Cascadia+Code",
+            "dir/font",
+            "NerdFont!",
+            "Unicode-λ",
+        ] {
+            assert!(validate_families(&[family.into()]).is_err(), "{family:?}");
+        }
+        assert!(validate_families(&["GeistMono".into(), "GeistMono".into()]).is_err());
     }
 }

@@ -55,7 +55,7 @@ fn complete_plan_lowers_every_action_to_fixed_workflows() {
         "workflow cargo-package-set ensure-present bat starship",
         "workflow npm-package-set ensure-present opencode-ai",
         "workflow binary-package obsidian ensure-present",
-        "workflow nerd-fonts GeistMono",
+        "workflow nerd-fonts ensure-present GeistMono",
         "workflow dotfiles-backup-stow bash starship",
         "workflow docker-group",
         "workflow docker-local-log 10m",
