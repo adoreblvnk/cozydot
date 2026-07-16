@@ -1,4 +1,7 @@
-use super::{Host, TempPath};
+use super::{Host, OperationOutcome, TempPath};
+
+const DASH_TO_DOCK_UUID: &str = "dash-to-dock@micxgx.gmail.com";
+const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
 use crate::json_helpers;
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
@@ -141,40 +144,22 @@ pub(crate) fn desktop_setting(host: &Host<'_>, operation: &DesktopSettingOperati
 pub(crate) fn gnome_extensions(
     host: &Host<'_>,
     operation: &GnomeExtensionsOperation,
-) -> Result<()> {
+) -> Result<OperationOutcome> {
     validate_extensions(&operation.extensions).context("validate GNOME extensions operation")?;
-    let mut installed = extension_state(host, false)?;
-    let mut needs_login_boundary = false;
+    let mut outcome = OperationOutcome::Completed;
     for extension in &operation.extensions {
-        if !installed.contains(extension) {
-            install_extension(host, extension)?;
-            installed = extension_state(host, false)?;
-            if !installed.contains(extension) {
-                needs_login_boundary = true;
-                continue;
-            }
-        }
-        let enabled = extension_state(host, true)?;
-        if !enabled.contains(extension) {
-            host.require(
-                "GNOME extension enable",
-                "gnome-extensions",
-                ["enable", extension],
-            )?;
-        }
-        if !extension_state(host, true)?.contains(extension) {
-            bail!("GNOME extension {extension:?} was not enabled");
+        if ensure_extension(host, extension)? == OperationOutcome::LoginRequired {
+            outcome = OperationOutcome::LoginRequired;
         }
     }
-    if needs_login_boundary {
-        eprintln!(
-            "cozydot: GNOME registered newly installed extensions after a login boundary; log out and back in once, then rerun `cozydot apply`"
-        );
-    }
-    Ok(())
+    Ok(outcome)
 }
 
-pub(crate) fn gnome_dock(host: &Host<'_>, _: &GnomeDockOperation) -> Result<()> {
+pub(crate) fn gnome_dock(host: &Host<'_>, _: &GnomeDockOperation) -> Result<OperationOutcome> {
+    let outcome = ensure_extension(host, DASH_TO_DOCK_UUID)?;
+    if outcome == OperationOutcome::LoginRequired {
+        return Ok(outcome);
+    }
     let settings = [
         ("dock-position", "'BOTTOM'"),
         ("dash-max-icon-size", "32"),
@@ -193,19 +178,47 @@ pub(crate) fn gnome_dock(host: &Host<'_>, _: &GnomeDockOperation) -> Result<()> 
             value,
         )?;
     }
-    Ok(())
+    Ok(OperationOutcome::Completed)
 }
 
 pub(crate) fn gnome_rounded_corners(
     host: &Host<'_>,
     _: &GnomeRoundedCornersOperation,
-) -> Result<()> {
+) -> Result<OperationOutcome> {
+    let outcome = ensure_extension(host, ROUNDED_CORNERS_UUID)?;
+    if outcome == OperationOutcome::LoginRequired {
+        return Ok(outcome);
+    }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
     ensure_dconf(
         host,
         "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings",
         value,
-    )
+    )?;
+    Ok(OperationOutcome::Completed)
+}
+
+fn ensure_extension(host: &Host<'_>, extension: &str) -> Result<OperationOutcome> {
+    validate_extension(extension).context("validate fixed GNOME extension provider")?;
+    let installed = extension_state(host, false)?;
+    let newly_installed = !installed.contains(extension);
+    if newly_installed {
+        install_extension(host, extension)?;
+        if !extension_state(host, false)?.contains(extension) {
+            return Ok(OperationOutcome::LoginRequired);
+        }
+    }
+    if !extension_state(host, true)?.contains(extension) {
+        host.require(
+            "GNOME extension enable",
+            "gnome-extensions",
+            ["enable", extension],
+        )?;
+    }
+    if !extension_state(host, true)?.contains(extension) {
+        return Ok(OperationOutcome::LoginRequired);
+    }
+    Ok(OperationOutcome::Completed)
 }
 
 fn ensure_gsetting(host: &Host<'_>, schema: &str, key: &str, expected: &str) -> Result<()> {
