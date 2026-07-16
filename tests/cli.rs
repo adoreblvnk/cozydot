@@ -11,7 +11,6 @@ fn help_has_public_contract_only() {
         .stdout(
             predicate::str::contains("init")
                 .and(predicate::str::contains("apply"))
-                .and(predicate::str::contains("--preset"))
                 .and(predicate::str::contains("--config").not())
                 .and(predicate::str::contains("plan").not()),
         );
@@ -37,7 +36,9 @@ fn removed_commands_are_rejected() {
         .arg("--list-configs")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("unknown command"));
+        .stderr(predicate::str::contains(
+            "unexpected argument '--list-configs'",
+        ));
 }
 
 #[test]
@@ -114,7 +115,10 @@ fn init_rejects_unknown_preset() {
         .args(["init", "--preset", "unknown"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("unknown preset 'unknown'"));
+        .stderr(
+            predicate::str::contains("invalid value 'unknown'")
+                .and(predicate::str::contains("cozydot, full, cli, vm")),
+        );
 }
 
 #[test]

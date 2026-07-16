@@ -1,5 +1,6 @@
 use crate::bundle::{self, Record};
 use anyhow::{bail, Context, Result};
+use clap::ValueEnum;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -10,7 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum Preset {
     #[default]
     Cozydot,
@@ -20,18 +21,6 @@ pub enum Preset {
 }
 
 impl Preset {
-    pub const NAMES: &'static str = "cozydot, full, cli, vm";
-
-    pub fn parse(value: &str) -> Result<Self> {
-        match value {
-            "cozydot" => Ok(Self::Cozydot),
-            "full" => Ok(Self::Full),
-            "cli" => Ok(Self::Cli),
-            "vm" => Ok(Self::Vm),
-            _ => bail!("unknown preset '{value}'; expected one of: {}", Self::NAMES),
-        }
-    }
-
     fn name(self) -> &'static str {
         match self {
             Self::Cozydot => "cozydot",

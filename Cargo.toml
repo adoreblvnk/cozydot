@@ -9,6 +9,7 @@ repository = "https://github.com/adoreblvnk/cozydot"
 
 [dependencies]
 anyhow = "1"
+clap = { version = "4.6", features = ["derive", "wrap_help"] }
 serde = { version = "1", features = ["derive"] }
 serde_path_to_error = "0.1"
 serde_yaml = "0.9"
