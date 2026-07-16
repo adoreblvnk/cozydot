@@ -113,7 +113,10 @@ pub struct ExplicitSkip {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StepKind {
     Phase(ExecutionPhase),
-    Operation(Box<Operation>),
+    Operation {
+        operation: Box<Operation>,
+        label: Option<String>,
+    },
     Skip(ExplicitSkip),
     Summary,
 }
@@ -123,7 +126,23 @@ pub struct Step(StepKind);
 
 impl Step {
     pub fn workflow(operation: Operation) -> Self {
-        Self(StepKind::Operation(Box::new(operation)))
+        Self(StepKind::Operation {
+            operation: Box::new(operation),
+            label: None,
+        })
+    }
+
+    pub fn labeled_workflow(operation: Operation, label: impl Into<String>) -> Result<Self> {
+        let label = label.into();
+        if label.is_empty() || label.chars().any(char::is_control) {
+            return Err(anyhow::anyhow!(
+                "runner operation label must be nonempty printable text"
+            ));
+        }
+        Ok(Self(StepKind::Operation {
+            operation: Box::new(operation),
+            label: Some(label),
+        }))
     }
 
     pub fn phase(phase: ExecutionPhase) -> Self {
@@ -143,7 +162,7 @@ impl Step {
     }
 
     pub fn operation(&self) -> &Operation {
-        let StepKind::Operation(operation) = &self.0 else {
+        let StepKind::Operation { operation, .. } = &self.0 else {
             panic!("runner step is not an operation")
         };
         operation.as_ref()
@@ -152,13 +171,22 @@ impl Step {
     pub fn display(&self) -> String {
         match &self.0 {
             StepKind::Phase(phase) => format!("phase {}", phase.name()),
-            StepKind::Operation(operation) => {
+            StepKind::Operation { operation, .. } => {
                 format!("workflow {}", operation.display_args().join(" "))
             }
             StepKind::Skip(skip) => {
                 format!("skip {} {}", skip.action.name(), skip.reason.description())
             }
             StepKind::Summary => "summary".into(),
+        }
+    }
+
+    fn report_name(&self) -> String {
+        match &self.0 {
+            StepKind::Operation {
+                label: Some(label), ..
+            } => format!("{label}: {}", self.display()),
+            _ => self.display(),
         }
     }
 }
@@ -203,22 +231,22 @@ impl ExecutionReport {
                 (StepKind::Phase(phase), StepOutcome::PhaseStarted) => {
                     format!("== phase: {}", phase.name())
                 }
-                (StepKind::Operation(_), StepOutcome::Completed) => {
-                    format!("completed: {}", report.step.display())
+                (StepKind::Operation { .. }, StepOutcome::Completed) => {
+                    format!("completed: {}", report.step.report_name())
                 }
-                (StepKind::Operation(_), StepOutcome::LoginRequired) => {
-                    format!("login-required: {}", report.step.display())
+                (StepKind::Operation { .. }, StepOutcome::LoginRequired) => {
+                    format!("login-required: {}", report.step.report_name())
                 }
-                (StepKind::Operation(_), StepOutcome::Planned) => {
-                    format!("planned: {}", report.step.display())
+                (StepKind::Operation { .. }, StepOutcome::Planned) => {
+                    format!("planned: {}", report.step.report_name())
                 }
                 (StepKind::Skip(skip), StepOutcome::Skipped) => format!(
                     "skipped: {} ({})",
                     skip.action.name(),
                     skip.reason.description()
                 ),
-                (StepKind::Operation(_), StepOutcome::Failed(error)) => {
-                    format!("failed: {} ({error})", report.step.display())
+                (StepKind::Operation { .. }, StepOutcome::Failed(error)) => {
+                    format!("failed: {} ({error})", report.step.report_name())
                 }
                 _ => format!("invalid-report: {}", report.step.display()),
             })
@@ -301,8 +329,10 @@ where
             StepKind::Phase(_) => report.push(step.clone(), StepOutcome::PhaseStarted),
             StepKind::Skip(_) => report.push(step.clone(), StepOutcome::Skipped),
             StepKind::Summary => {}
-            StepKind::Operation(_) if dry_run => report.push(step.clone(), StepOutcome::Planned),
-            StepKind::Operation(operation) => match run(operation) {
+            StepKind::Operation { .. } if dry_run => {
+                report.push(step.clone(), StepOutcome::Planned)
+            }
+            StepKind::Operation { operation, .. } => match run(operation) {
                 Ok(OperationOutcome::Completed) => {
                     report.push(step.clone(), StepOutcome::Completed)
                 }

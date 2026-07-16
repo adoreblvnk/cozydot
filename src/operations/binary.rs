@@ -141,6 +141,14 @@ impl BinaryPackageOperation {
             .into(),
         ]
     }
+
+    pub fn source(&self) -> &BinarySourceOperation {
+        &self.source
+    }
+
+    pub fn mode(&self) -> BinaryPackageMode {
+        self.mode
+    }
     fn validate(&self) -> Result<()> {
         validate_definition_name(&self.name)?;
         if self.commands.is_empty() {
