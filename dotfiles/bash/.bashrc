@@ -45,6 +45,13 @@ fi
 # force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
+# load env vars from ~/.config/cozydot.env if exists
+if [[ -r ~/.config/cozydot.env ]]; then
+  set -a
+  source ~/.config/cozydot.env
+  set +a
+fi
+
 # tells wezterm the current cwd (for tabs) & command status
 # uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
 if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
@@ -112,6 +119,3 @@ if command -v fastfetch &>/dev/null; then fastfetch; fi
 
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
-
-
-
