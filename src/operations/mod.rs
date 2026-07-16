@@ -1,4 +1,5 @@
 mod apt;
+mod binary;
 mod cargo;
 mod desktop;
 mod direct;
@@ -8,6 +9,7 @@ mod fonts;
 mod integrations;
 mod languages;
 mod managed_apt;
+mod managed_state;
 mod npm;
 mod provisioning;
 mod repository;
@@ -15,6 +17,10 @@ mod system;
 mod tools;
 
 pub use apt::AptUpgradePolicy;
+pub use binary::{
+    BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector,
+    BinarySha256, BinarySourceOperation, GithubRepository,
+};
 pub use cargo::{CargoPackageMode, CargoPackageOperation};
 pub use desktop::{
     DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, GnomeDockOperation,
@@ -22,7 +28,6 @@ pub use desktop::{
 };
 pub use direct::{
     DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
-    GithubRepository,
 };
 pub use dotfiles::DotfilesOperation;
 pub use fonts::NerdFontsOperation;
@@ -41,9 +46,8 @@ pub use tools::{
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
-    fs::{self, File},
+    fs::File,
     io::Write,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -75,6 +79,7 @@ pub enum Operation {
     DockerGroup,
     DockerLocalLog(DockerLocalLogOperation),
     DesktopSetting(DesktopSettingOperation),
+    BinaryPackage(BinaryPackageOperation),
     DirectPackage(DirectPackageOperation),
     Dotfiles(DotfilesOperation),
     FlatpakEnsureFlathub,
@@ -139,6 +144,7 @@ impl Operation {
             Self::DockerGroup => vec!["docker-group".into()],
             Self::DockerLocalLog(operation) => operation.display_args(),
             Self::DesktopSetting(operation) => operation.display_args(),
+            Self::BinaryPackage(package) => package.display_args(),
             Self::DirectPackage(package) => package.display_args(),
             Self::Dotfiles(operation) => operation.display_args(),
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
@@ -202,6 +208,7 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<()> {
         Operation::DockerGroup => integrations::docker_group(&host),
         Operation::DockerLocalLog(operation) => integrations::docker_local_log(&host, operation),
         Operation::DesktopSetting(operation) => desktop::desktop_setting(&host, operation),
+        Operation::BinaryPackage(package) => binary::execute(&host, package),
         Operation::DirectPackage(package) => direct::execute(&host, package),
         Operation::Dotfiles(operation) => dotfiles::execute(&host, operation),
         Operation::FlatpakEnsureFlathub => flatpak::ensure_flathub(&host),
@@ -473,31 +480,6 @@ impl Drop for TempDir {
     }
 }
 
-fn publish_file(source: &Path, destination: &Path, mode: u32) -> Result<()> {
-    let parent = destination
-        .parent()
-        .context("downloaded file destination has no parent")?;
-    fs::create_dir_all(parent).context("create downloaded file destination directory")?;
-    let mut source_file = fs::File::open(source).context("open downloaded file")?;
-    let mut staged = tempfile::NamedTempFile::new_in(parent)
-        .context("stage downloaded file on destination filesystem")?;
-    std::io::copy(&mut source_file, staged.as_file_mut()).context("copy downloaded file")?;
-    staged
-        .as_file_mut()
-        .set_permissions(fs::Permissions::from_mode(mode))
-        .context("set downloaded file permissions")?;
-    staged
-        .as_file_mut()
-        .sync_all()
-        .context("sync downloaded file")?;
-    let staged_path = staged.into_temp_path();
-    staged_path
-        .persist(destination)
-        .map_err(|error| error.error)
-        .context("publish downloaded file")?;
-    Ok(())
-}
-
 pub(crate) struct TempPath(PathBuf);
 
 impl TempPath {
@@ -553,8 +535,8 @@ fn resolve_home(env: &[(OsString, OsString)], process_home: Option<OsString>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{publish_file, resolve_home};
-    use std::{ffi::OsString, fs, os::unix::fs::MetadataExt, path::PathBuf};
+    use super::resolve_home;
+    use std::{ffi::OsString, path::PathBuf};
 
     #[test]
     fn operations_require_home_without_a_literal_fallback() {
@@ -563,30 +545,5 @@ mod tests {
             PathBuf::from("/home/process")
         );
         assert!(resolve_home(&[], None).is_err());
-    }
-
-    #[test]
-    fn downloaded_files_publish_across_filesystems() {
-        let source_dir = tempfile::tempdir().unwrap();
-        let Ok(destination_dir) = tempfile::tempdir_in("/dev/shm") else {
-            return;
-        };
-        if fs::metadata(source_dir.path()).unwrap().dev()
-            == fs::metadata(destination_dir.path()).unwrap().dev()
-        {
-            return;
-        }
-        let source = source_dir.path().join("download");
-        let destination = destination_dir.path().join("installed");
-        fs::write(&source, b"complete artifact").unwrap();
-        assert_eq!(
-            fs::rename(&source, &destination)
-                .unwrap_err()
-                .raw_os_error(),
-            Some(18)
-        );
-
-        publish_file(&source, &destination, 0o755).unwrap();
-        assert_eq!(fs::read(&destination).unwrap(), b"complete artifact");
     }
 }

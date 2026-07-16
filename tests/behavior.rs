@@ -222,6 +222,35 @@ esac"#,
         )
     }
 
+    fn execute_operation_with_xdg_roots(
+        &self,
+        operation: &operations::Operation,
+        data_home: &Path,
+        bin_home: &Path,
+    ) -> anyhow::Result<()> {
+        let env = [
+            ("HOME".into(), self.home.as_os_str().to_owned()),
+            ("USER".into(), "tester".into()),
+            ("LOG".into(), self.log.as_os_str().to_owned()),
+            ("ROOT".into(), self.root.as_os_str().to_owned()),
+            (
+                "TMPDIR".into(),
+                self._dir.path().join("tmp").into_os_string(),
+            ),
+            (
+                "PATH".into(),
+                format!("{}:/usr/bin:/bin", self.bin.display()).into(),
+            ),
+            ("XDG_DATA_HOME".into(), data_home.as_os_str().to_owned()),
+            ("XDG_BIN_HOME".into(), bin_home.as_os_str().to_owned()),
+        ];
+        operations::execute_with_docker_lock_for_test(
+            operation,
+            &env,
+            &self.root.join("run/cozydot/docker-daemon.lock"),
+        )
+    }
+
     fn execute_operation_with_lock(
         &self,
         operation: &operations::Operation,
@@ -356,6 +385,47 @@ fn direct_step(
         )
         .unwrap(),
     ))
+}
+
+fn binary_step(
+    format: operations::BinaryPackageFormat,
+    commands: &[&str],
+    source: operations::BinarySourceOperation,
+    mode: operations::BinaryPackageMode,
+) -> Step {
+    Step::workflow(operations::Operation::BinaryPackage(
+        operations::BinaryPackageOperation::new(
+            "sample",
+            format,
+            commands.iter().map(|value| (*value).into()).collect(),
+            Architecture::Amd64,
+            source,
+            mode,
+        )
+        .unwrap(),
+    ))
+}
+
+fn github_source(sha256: Option<&str>) -> operations::BinarySourceOperation {
+    operations::BinarySourceOperation::GithubLatest {
+        repository: operations::GithubRepository::parse("owner/repo").unwrap(),
+        selector: operations::BinaryPackageSelector::new(
+            "sample-amd64-*",
+            vec!["sample-amd64-debug-*".into()],
+        )
+        .unwrap(),
+        sha256: sha256
+            .map(operations::BinarySha256::parse)
+            .transpose()
+            .unwrap(),
+    }
+}
+
+fn fixed_source(url: &str, sha256: &str) -> operations::BinarySourceOperation {
+    operations::BinarySourceOperation::ChecksummedUrl {
+        url: serde_yaml::from_str(url).unwrap(),
+        sha256: operations::BinarySha256::parse(sha256).unwrap(),
+    }
 }
 
 fn cargo_package_step(packages: &[&str], mode: operations::CargoPackageMode) -> Step {
@@ -3967,483 +4037,906 @@ fn repository_key_accepts_canonical_https_url_forms_before_curl() {
 }
 
 #[test]
-fn direct_appimage_ensure_skips_network_but_update_forces_resolution() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    let links = [
-        host.home.join(".local/bin/sample"),
-        host.home.join(".local/bin/sample-cli"),
-    ];
-    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    fs::create_dir_all(links[0].parent().unwrap()).unwrap();
-    fs::write(&artifact, b"\x7fELFold").unwrap();
-    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-    for link in &links {
-        symlink(&artifact, link).unwrap();
-    }
-    host.fake(
-        "curl",
-        r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
-    );
-
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample", "sample-cli"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-    assert!(host.log().is_empty());
-
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample", "sample-cli"],
-        operations::DirectPackageMode::Update,
-    ));
-    assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFnew");
-    for link in &links {
-        assert_eq!(fs::read_link(link).unwrap(), artifact);
-    }
-    let log = host.log();
-    assert!(log.contains("api.github.com/repos/owner/repo/releases/latest"));
-    assert!(log.contains("--proto =https"), "{log}");
-    assert!(log.contains("User-Agent: cozydot/0.0.1"), "{log}");
-}
-
-#[test]
-fn direct_appimage_ensure_repairs_missing_managed_link_despite_path_executable() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    let link = host.home.join(".local/bin/sample");
-    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    fs::write(&artifact, b"\x7fELFold").unwrap();
-    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-    host.fake("sample", "exit 0");
-    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
-
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-
-    assert_eq!(fs::read_link(link).unwrap(), artifact);
-    assert!(host.log().is_empty());
-}
-
-#[test]
-fn direct_appimage_ensure_restores_all_missing_managed_links_without_network() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    fs::write(&artifact, b"\x7fELFold").unwrap();
-    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
-
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample", "sample-cli"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-
-    for provide in ["sample", "sample-cli"] {
-        assert_eq!(
-            fs::read_link(host.home.join(".local/bin").join(provide)).unwrap(),
-            artifact
-        );
-    }
-    assert!(host.log().is_empty());
-}
-
-#[test]
-fn direct_appimage_ensure_repairs_only_missing_managed_link_without_network() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    let existing = host.home.join(".local/bin/sample");
-    let missing = host.home.join(".local/bin/sample-cli");
-    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    fs::create_dir_all(existing.parent().unwrap()).unwrap();
-    fs::write(&artifact, b"\x7fELFold").unwrap();
-    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-    symlink(&artifact, &existing).unwrap();
-    let existing_inode = fs::symlink_metadata(&existing).unwrap().ino();
-    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
-
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample", "sample-cli"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-
-    assert_eq!(
-        fs::symlink_metadata(&existing).unwrap().ino(),
-        existing_inode
-    );
-    assert_eq!(fs::read_link(&existing).unwrap(), artifact);
-    assert_eq!(fs::read_link(&missing).unwrap(), artifact);
-    assert!(host.log().is_empty());
-}
-
-#[test]
-fn direct_appimage_ensure_rejects_foreign_link_despite_path_executable() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    let link = host.home.join(".local/bin/sample");
-    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    fs::create_dir_all(link.parent().unwrap()).unwrap();
-    fs::write(&artifact, b"\x7fELFold").unwrap();
-    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-    symlink("/foreign", &link).unwrap();
-    host.fake("sample", "exit 0");
-    host.fake("curl", "printf 'curl\n' >>\"$LOG\"; exit 97");
-
-    let output = host.run(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("link conflict"));
-    assert_eq!(fs::read_link(link).unwrap(), Path::new("/foreign"));
-    assert!(host.log().is_empty());
-}
-
-#[test]
-fn direct_appimage_ensure_replaces_symlink_and_non_elf_artifacts() {
-    for state in ["elf-symlink", "non-elf-symlink", "regular-non-elf", "fifo"] {
-        let host = Host::new();
-        let artifact = host
-            .home
-            .join(".local/share/cozydot/direct/sample.AppImage");
-        let link = host.home.join(".local/bin/sample");
-        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-        fs::create_dir_all(link.parent().unwrap()).unwrap();
-        match state {
-            "elf-symlink" | "non-elf-symlink" => {
-                let target = host.home.join(format!("{state}.target"));
-                fs::write(
-                    &target,
-                    if state == "elf-symlink" {
-                        b"\x7fELFold".as_slice()
-                    } else {
-                        b"not-elf".as_slice()
-                    },
-                )
-                .unwrap();
-                fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
-                symlink(target, &artifact).unwrap();
-            }
-            "regular-non-elf" => {
-                fs::write(&artifact, b"not-elf").unwrap();
-                fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            "fifo" => {
-                assert!(Command::new("mkfifo")
-                    .arg(&artifact)
-                    .status()
-                    .unwrap()
-                    .success());
-            }
-            _ => unreachable!(),
-        }
-        symlink(&artifact, &link).unwrap();
-        host.fake(
-            "curl",
-            r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
-        );
-
-        host.run_ok(&direct_step(
-            operations::DirectPackageFormat::AppImage,
-            &["sample"],
-            operations::DirectPackageMode::EnsurePresent,
-        ));
-        assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFnew", "{state}");
-        assert!(
-            fs::symlink_metadata(&artifact)
-                .unwrap()
-                .file_type()
-                .is_file(),
-            "{state}"
-        );
-        assert!(!host.log().is_empty(), "{state}");
-    }
-}
-
-#[test]
-fn direct_appimage_directory_artifact_does_not_satisfy_managed_state() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    let link = host.home.join(".local/bin/sample");
-    fs::create_dir_all(&artifact).unwrap();
-    fs::create_dir_all(link.parent().unwrap()).unwrap();
-    symlink(&artifact, &link).unwrap();
-    host.fake(
-        "curl",
-        r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf '\177ELFnew' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
-    );
-
-    let output = host.run(&direct_step(
-        operations::DirectPackageFormat::AppImage,
-        &["sample"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-    assert!(!output.status.success());
-    assert!(artifact.is_dir());
-    assert!(!host.log().is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("publish direct AppImage"));
-}
-
-#[test]
-fn direct_appimage_failed_downloads_preserve_old_artifact_and_links() {
-    for failure in ["interrupted", "empty", "checksum"] {
-        let host = Host::new();
-        let artifact = host
-            .home
-            .join(".local/share/cozydot/direct/sample.AppImage");
-        let link = host.home.join(".local/bin/sample");
-        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-        fs::create_dir_all(link.parent().unwrap()).unwrap();
-        fs::write(&artifact, b"\x7fELFold").unwrap();
-        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
-        symlink(&artifact, &link).unwrap();
-        let digest = if failure == "checksum" {
-            r#", "digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000""#
-        } else {
-            ""
-        };
-        host.fake(
-            "curl",
-            &format!(
-                r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -z "$out" ]; then printf '{{"assets":[{{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"{digest}}}]}}'; exit 0; fi
-case {failure} in interrupted) printf partial >"$out"; exit 42 ;; empty) : >"$out" ;; checksum) printf '\177ELFnew' >"$out" ;; esac"#
-            ),
-        );
-
-        let output = host.run(&direct_step(
-            operations::DirectPackageFormat::AppImage,
-            &["sample"],
-            operations::DirectPackageMode::Update,
-        ));
-        assert!(!output.status.success(), "{failure}");
-        assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFold", "{failure}");
-        assert_eq!(fs::read_link(&link).unwrap(), artifact, "{failure}");
-    }
-}
-
-#[test]
-fn direct_debian_preflight_install_and_post_install_verification_are_fixed() {
+fn binary_fixed_url_verifies_checksum_never_queries_github_and_is_offline_when_complete() {
     let host = Host::new();
     host.fake(
         "curl",
         r#"printf 'curl %s\n' "$*" >>"$LOG"
 out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.deb","browser_download_url":"https://example.test/sample.deb"}]}'; fi"#,
+[ -n "$out" ]; printf '\177ELFpayload' >"$out""#,
     );
-    host.fake(
-        "dpkg-deb",
-        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"
-[ "$1" = --info ] && [ "$2" = -- ]"#,
-    );
-    host.fake(
-        "sudo",
-        r#"printf 'sudo-arg <%s>\n' "$@" >>"$LOG"
-[ "$#" -eq 7 ] && [ "$1" = DEBIAN_FRONTEND=noninteractive ] && [ "$2" = apt-get ] && [ "$3" = install ] && [ "$4" = -y ] && [ "$5" = -qq ] && [ "$6" = -- ] && [[ "$7" = *.deb ]]
-bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#,
-    );
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::Deb,
-        &["sample"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-    let log = host.log();
-    assert!(log.contains("dpkg-deb --info -- "), "{log}");
-    assert!(
-        log.lines()
-            .find(|line| line.starts_with("dpkg-deb "))
-            .is_some_and(|line| line.ends_with(".deb")),
-        "{log}"
-    );
-    let sudo_args = log
-        .lines()
-        .filter(|line| line.starts_with("sudo-arg "))
-        .collect::<Vec<_>>();
-    assert_eq!(sudo_args.len(), 7, "{log}");
-    assert_eq!(sudo_args[0], "sudo-arg <DEBIAN_FRONTEND=noninteractive>");
-    assert_eq!(sudo_args[1], "sudo-arg <apt-get>");
-    assert_eq!(sudo_args[2], "sudo-arg <install>");
-    assert_eq!(sudo_args[3], "sudo-arg <-y>");
-    assert_eq!(sudo_args[4], "sudo-arg <-qq>");
-    assert_eq!(sudo_args[5], "sudo-arg <-->");
-    assert!(sudo_args[6].ends_with(".deb>"), "{log}");
-    assert!(!log.contains("apt-get update"), "{log}");
-
-    let skipped_log = host.log();
-    host.run_ok(&direct_step(
-        operations::DirectPackageFormat::Deb,
-        &["sample"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-    assert_eq!(host.log(), skipped_log);
-}
-
-#[test]
-fn direct_debian_install_failure_propagates_before_provides_verification() {
-    let host = Host::new();
-    host.fake(
-        "curl",
-        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.deb","browser_download_url":"https://example.test/sample.deb"}]}'; fi"#,
-    );
-    host.fake("dpkg-deb", r#"[ "$1" = --info ] && [ "$2" = -- ]"#);
-    host.fake(
-        "sudo",
-        r#"printf 'sudo-arg <%s>\n' "$@" >>"$LOG"
-[ "$#" -eq 7 ] && [ "$1" = DEBIAN_FRONTEND=noninteractive ] && [ "$2" = apt-get ] && [ "$3" = install ] && [ "$4" = -y ] && [ "$5" = -qq ] && [ "$6" = -- ] && [[ "$7" = *.deb ]]
-exit 42"#,
-    );
-
-    let output = host.run(&direct_step(
-        operations::DirectPackageFormat::Deb,
-        &["sample"],
-        operations::DirectPackageMode::EnsurePresent,
-    ));
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("direct Debian install"), "{stderr}");
-    assert!(!stderr.contains("remain unavailable"), "{stderr}");
-    let log = host.log();
-    assert_eq!(
-        log.lines()
-            .filter(|line| line.starts_with("sudo-arg "))
-            .count(),
-        7,
-        "{log}"
-    );
-}
-
-#[test]
-fn direct_debian_preflight_failure_prevents_sudo_and_missing_provide_fails() {
-    for preflight_succeeds in [false, true] {
-        let host = Host::new();
-        host.fake(
-            "curl",
-            r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf deb >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.deb","browser_download_url":"https://example.test/sample.deb"}]}'; fi"#,
-        );
-        host.fake(
-            "dpkg-deb",
-            &format!(
-                "printf 'dpkg-deb %s\\n' \"$*\" >>\"$LOG\"; exit {}",
-                if preflight_succeeds { 0 } else { 42 }
-            ),
-        );
-        host.logging_fake("sudo");
-        let output = host.run(&direct_step(
-            operations::DirectPackageFormat::Deb,
-            &["sample"],
-            operations::DirectPackageMode::EnsurePresent,
-        ));
-        assert!(!output.status.success());
-        assert_eq!(
-            host.log()
-                .contains("sudo DEBIAN_FRONTEND=noninteractive apt-get"),
-            preflight_succeeds
-        );
-        if preflight_succeeds {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("remain unavailable"));
-        }
-    }
-}
-
-#[test]
-fn direct_appimage_publishes_elf_mode_and_multiple_retry_safe_links() {
-    let host = Host::new();
-    let artifact = host
-        .home
-        .join(".local/share/cozydot/direct/sample.AppImage");
-    let first_link = host.home.join(".local/bin/sample");
-    fs::create_dir_all(first_link.parent().unwrap()).unwrap();
-    symlink(&artifact, &first_link).unwrap();
-    host.fake(
-        "curl",
-        r#"printf 'curl %s\n' "$*" >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf '\177ELFpayload' >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage","digest":"sha256:f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb"}]}'; fi"#,
-    );
-    let step = direct_step(
-        operations::DirectPackageFormat::AppImage,
+    let step = binary_step(
+        operations::BinaryPackageFormat::AppImage,
         &["sample", "sample-cli"],
-        operations::DirectPackageMode::EnsurePresent,
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
     );
     host.run_ok(&step);
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
     assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFpayload");
     assert_eq!(
         fs::metadata(&artifact).unwrap().permissions().mode() & 0o777,
         0o755
     );
-    assert_eq!(fs::read_link(&first_link).unwrap(), artifact);
-    assert_eq!(
-        fs::read_link(host.home.join(".local/bin/sample-cli")).unwrap(),
-        artifact
-    );
-    let first_log = host.log();
+    for command in ["sample", "sample-cli"] {
+        assert_eq!(
+            fs::read_link(host.home.join(".local/bin").join(command)).unwrap(),
+            artifact
+        );
+    }
+    let first = host.log();
+    assert!(!first.contains("api.github.com"));
+    host.fake("curl", "exit 99");
     host.run_ok(&step);
-    assert_eq!(host.log(), first_log);
+    assert_eq!(host.log(), first);
 }
 
 #[test]
-fn direct_appimage_rejects_non_elf_and_link_conflicts_without_publication() {
-    for conflict in ["regular", "directory", "symlink", "none"] {
+fn binary_fixed_url_checksum_failure_and_foreign_destinations_fail_before_mutation() {
+    for conflict in ["none", "file", "symlink"] {
         let host = Host::new();
-        let artifact = host
-            .home
-            .join(".local/share/cozydot/direct/sample.AppImage");
         let link = host.home.join(".local/bin/sample");
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         match conflict {
-            "regular" => fs::write(&link, b"foreign").unwrap(),
-            "directory" => fs::create_dir(&link).unwrap(),
+            "file" => fs::write(&link, b"foreign").unwrap(),
             "symlink" => symlink("/foreign", &link).unwrap(),
-            "none" => {}
-            _ => unreachable!(),
+            _ => {}
         }
-        host.fake(
-            "curl",
-            r#"printf 'curl\n' >>"$LOG"
-out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
-if [ -n "$out" ]; then printf not-elf >"$out"; else printf '{"assets":[{"name":"sample-amd64-1.AppImage","browser_download_url":"https://example.test/sample.AppImage"}]}'; fi"#,
-        );
-        let output = host.run(&direct_step(
-            operations::DirectPackageFormat::AppImage,
+        host.fake("curl", r#"printf 'curl\n' >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFpayload' >"$out""#);
+        let output = host.run(&binary_step(
+            operations::BinaryPackageFormat::AppImage,
             &["sample"],
-            operations::DirectPackageMode::EnsurePresent,
+            fixed_source("https://example.test/sample.AppImage", &"00".repeat(32)),
+            operations::BinaryPackageMode::EnsurePresent,
         ));
         assert!(!output.status.success(), "{conflict}");
-        assert!(!artifact.exists(), "{conflict}");
+        assert!(!host
+            .home
+            .join(".local/share/cozydot/binaries/sample.AppImage")
+            .exists());
         if conflict == "none" {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("ELF magic"));
+            assert!(host.log().contains("curl"));
         } else {
-            assert!(host.log().is_empty(), "{conflict}: {}", host.log());
+            assert!(host.log().is_empty());
         }
     }
+}
+
+#[test]
+fn binary_appimage_missing_link_repairs_offline_and_command_changes_remove_only_owned_stale_links()
+{
+    let host = Host::new();
+    host.fake("curl", r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFpayload' >"$out""#);
+    let initial = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-old"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&initial);
+    fs::remove_file(host.home.join(".local/bin/sample")).unwrap();
+    host.fake("curl", "exit 98");
+    host.run_ok(&initial);
+    assert!(fs::symlink_metadata(host.home.join(".local/bin/sample"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFpayload' >"$out""#,
+    );
+
+    let changed = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-new"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&changed);
+    assert!(!host.home.join(".local/bin/sample-old").exists());
+    assert!(host.home.join(".local/bin/sample-new").exists());
+}
+
+#[test]
+fn binary_stale_modified_link_is_preserved_and_prevents_completion() {
+    let host = Host::new();
+    host.fake("curl", r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFpayload' >"$out""#);
+    let initial = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-old"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&initial);
+    let stale = host.home.join(".local/bin/sample-old");
+    fs::remove_file(&stale).unwrap();
+    fs::write(&stale, b"foreign").unwrap();
+    let changed = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-new"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    let output = host.run(&changed);
+    assert!(!output.status.success());
+    assert_eq!(fs::read(&stale).unwrap(), b"foreign");
+    assert!(!host.home.join(".local/bin/sample-new").exists());
+}
+
+#[test]
+fn binary_github_update_uses_stable_identity_and_checksum_composition() {
+    let host = Host::new();
+    host.fake("curl", r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFpayload' >"$out"; else printf '{"draft":false,"prerelease":false,"tag_name":"v1","assets":[{"name":"sample-amd64-v1","browser_download_url":"https://example.test/sample.AppImage","digest":"sha256:f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb"}]}'; fi"#);
+    let ensure = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        github_source(Some(
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        )),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&ensure);
+    fs::write(&host.log, b"").unwrap();
+    let update = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        github_source(Some(
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        )),
+        operations::BinaryPackageMode::Update,
+    );
+    host.run_ok(&update);
+    let log = host.log();
+    assert_eq!(log.matches("curl ").count(), 1, "{log}");
+    assert!(log.contains("api.github.com/repos/owner/repo/releases/latest"));
+}
+
+#[test]
+fn binary_github_declared_api_mismatch_fails_before_download() {
+    let host = Host::new();
+    host.fake("curl", r#"printf 'curl %s\n' "$*" >>"$LOG"; printf '{"draft":false,"prerelease":false,"tag_name":"v1","assets":[{"name":"sample-amd64-v1","browser_download_url":"https://example.test/sample.AppImage","digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}'"#);
+    let output = host.run(&binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        github_source(Some(&"22".repeat(32))),
+        operations::BinaryPackageMode::EnsurePresent,
+    ));
+    assert!(!output.status.success());
+    assert_eq!(host.log().matches("curl ").count(), 1);
+}
+
+#[test]
+fn binary_github_api_only_and_declaration_only_checksums_verify_downloads() {
+    const PAYLOAD_SHA256: &str = "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb";
+    for source in ["api", "declaration"] {
+        let host = Host::new();
+        let digest = if source == "api" {
+            format!(r#","digest":"sha256:{PAYLOAD_SHA256}""#)
+        } else {
+            String::new()
+        };
+        host.fake(
+            "curl",
+            &format!(
+                r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFpayload' >"$out"; else printf '{{"draft":false,"prerelease":false,"tag_name":"v1","assets":[{{"name":"sample-amd64-v1","browser_download_url":"https://example.test/sample.AppImage"{digest}}}]}}'; fi"#
+            ),
+        );
+        let declared = (source == "declaration").then_some(PAYLOAD_SHA256);
+        host.run_ok(&binary_step(
+            operations::BinaryPackageFormat::AppImage,
+            &["sample"],
+            github_source(declared),
+            operations::BinaryPackageMode::EnsurePresent,
+        ));
+        let record =
+            fs::read_to_string(host.home.join(".local/state/cozydot/binaries/sample.json"))
+                .unwrap();
+        assert!(record.contains(&format!("\"effective_sha256\":\"{PAYLOAD_SHA256}\"")));
+    }
+
+    for source in ["api", "declaration"] {
+        let host = Host::new();
+        let bad_checksum = "00".repeat(32);
+        let digest = if source == "api" {
+            format!(r#","digest":"sha256:{bad_checksum}""#)
+        } else {
+            String::new()
+        };
+        host.fake(
+            "curl",
+            &format!(
+                r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf '\177ELFpayload' >"$out"; else printf '{{"draft":false,"prerelease":false,"tag_name":"v1","assets":[{{"name":"sample-amd64-v1","browser_download_url":"https://example.test/sample.AppImage"{digest}}}]}}'; fi"#
+            ),
+        );
+        let declared = (source == "declaration").then_some(bad_checksum.as_str());
+        assert!(!host
+            .run(&binary_step(
+                operations::BinaryPackageFormat::AppImage,
+                &["sample"],
+                github_source(declared),
+                operations::BinaryPackageMode::EnsurePresent,
+            ))
+            .status
+            .success());
+        assert_eq!(host.log().matches("curl ").count(), 2);
+        assert!(!host
+            .home
+            .join(".local/share/cozydot/binaries/sample.AppImage")
+            .exists());
+    }
+}
+
+#[test]
+fn binary_deb_strict_metadata_native_and_all_then_offline_ensure() {
+    for architecture in ["amd64", "all"] {
+        let host = Host::new();
+        host.fake("curl", r#"printf 'curl\n' >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf deb >"$out""#);
+        host.fake("dpkg-deb", &format!(r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'sample\n{architecture}\n'; fi"#));
+        host.fake("sudo", r#"printf 'sudo %s\n' "$*" >>"$LOG"; bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#);
+        let step = binary_step(
+            operations::BinaryPackageFormat::Deb,
+            &["sample"],
+            fixed_source(
+                "https://example.test/sample.deb",
+                "9cfa1468c93fc18652e34a000f0c6614b0fa18f6f4887477ad9b0d36ca6a7eaa",
+            ),
+            operations::BinaryPackageMode::EnsurePresent,
+        );
+        host.run_ok(&step);
+        let first = host.log();
+        assert!(first.contains("dpkg-deb --info --"));
+        assert!(first.contains("dpkg-deb --field --"));
+        host.fake("curl", "exit 99");
+        host.run_ok(&step);
+        assert_eq!(host.log(), first);
+    }
+}
+
+#[test]
+fn binary_deb_rejects_wrong_or_malformed_metadata_before_sudo() {
+    for fields in [
+        "sample\narm64\n",
+        "Bad_Name\namd64\n",
+        "sample\namd64\nextra\n",
+        "sample amd64\n",
+    ] {
+        let host = Host::new();
+        host.fake("curl", r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf deb >"$out""#);
+        host.fake(
+            "dpkg-deb",
+            &format!(
+                r#"if [ "$1" = --field ]; then printf '%b' '{}'; fi"#,
+                fields
+            ),
+        );
+        host.logging_fake("sudo");
+        let output = host.run(&binary_step(
+            operations::BinaryPackageFormat::Deb,
+            &["sample"],
+            fixed_source(
+                "https://example.test/sample.deb",
+                "9cfa1468c93fc18652e34a000f0c6614b0fa18f6f4887477ad9b0d36ca6a7eaa",
+            ),
+            operations::BinaryPackageMode::EnsurePresent,
+        ));
+        assert!(!output.status.success(), "{fields:?}");
+        assert!(!host.log().contains("sudo"), "{}", host.log());
+    }
+}
+
+#[test]
+fn binary_no_state_does_not_adopt_path_command_and_legacy_adapter_uses_binary_display() {
+    let host = Host::new();
+    host.fake("sample", "exit 0");
+    host.fake("curl", r#"printf 'curl\n' >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf deb >"$out""#);
+    host.fake(
+        "dpkg-deb",
+        r#"if [ "$1" = --field ]; then printf 'sample\namd64\n'; fi"#,
+    );
+    host.logging_fake("sudo");
+    let output = host.run(&binary_step(
+        operations::BinaryPackageFormat::Deb,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample.deb",
+            "9cfa1468c93fc18652e34a000f0c6614b0fa18f6f4887477ad9b0d36ca6a7eaa",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    ));
+    assert!(output.status.success());
+    assert!(host.log().contains("curl"));
+    assert!(direct_step(
+        operations::DirectPackageFormat::Deb,
+        &["sample"],
+        operations::DirectPackageMode::EnsurePresent
+    )
+    .display()
+    .contains("binary-package"));
+}
+
+#[test]
+fn binary_unsafe_state_hierarchy_and_records_fail_before_network() {
+    let host = Host::new();
+    let state = host.home.join(".local/state");
+    fs::create_dir_all(state.join("target")).unwrap();
+    symlink("target", state.join("cozydot")).unwrap();
+    host.logging_fake("curl");
+    let output = host.run(&binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "f9eef27e57ba7160224b739c77d4fa1dd7169c5ca8bb7247b899a17cd4370bfb",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    ));
+    assert!(!output.status.success());
+    assert!(host.log().is_empty());
+}
+
+#[test]
+fn binary_pending_retry_pins_checksumless_github_bytes() {
+    let host = Host::new();
+    fs::write(host._dir.path().join("tmp/binary-bytes"), b"deb-one").unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then cat "$TMPDIR/binary-bytes" >"$out"; else printf '{"draft":false,"prerelease":false,"tag_name":"v1","assets":[{"name":"sample-amd64-v1","browser_download_url":"https://example.test/sample-v1.deb"}]}'; fi"#,
+    );
+    host.fake(
+        "dpkg-deb",
+        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'sample\namd64\n'; fi"#,
+    );
+    host.fake("sudo", r#"printf 'sudo %s\n' "$*" >>"$LOG"; exit 73"#);
+    let step = binary_step(
+        operations::BinaryPackageFormat::Deb,
+        &["sample"],
+        github_source(None),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+
+    assert!(!host.run(&step).status.success());
+    let record = host.home.join(".local/state/cozydot/binaries/sample.json");
+    let pending = fs::read_to_string(&record).unwrap();
+    assert!(pending.contains("\"status\":\"pending_initial\""));
+    assert!(pending.contains("418902f4c16dd75525b5b2b8af23678d8c0a1ae085e05138402702523ad4ba07"));
+
+    fs::write(host.log.as_path(), b"").unwrap();
+    fs::write(host._dir.path().join("tmp/binary-bytes"), b"deb-two").unwrap();
+    assert!(!host.run(&step).status.success());
+    let log = host.log();
+    assert_eq!(log.matches("curl ").count(), 1, "{log}");
+    assert!(!log.contains("api.github.com"), "{log}");
+    assert!(!log.contains("dpkg-deb"), "{log}");
+    assert!(!log.contains("sudo"), "{log}");
+    assert!(fs::read_to_string(record)
+        .unwrap()
+        .contains("\"status\":\"pending_initial\""));
+}
+
+#[test]
+fn binary_completed_deb_reinstalls_the_recorded_github_source_without_resolution() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf deb-one >"$out"; else printf '{"draft":false,"prerelease":false,"tag_name":"v1","assets":[{"name":"sample-amd64-v1","browser_download_url":"https://example.test/sample-v1.deb"}]}'; fi"#,
+    );
+    host.fake(
+        "dpkg-deb",
+        r#"printf 'dpkg-deb %s\n' "$*" >>"$LOG"; if [ "$1" = --field ]; then printf 'sample\namd64\n'; fi"#,
+    );
+    host.fake(
+        "sudo",
+        r#"printf 'sudo %s\n' "$*" >>"$LOG"; bin=${PATH%%:*}; printf '#!/bin/sh\n' >"$bin/sample"; chmod 0755 "$bin/sample""#,
+    );
+    let step = binary_step(
+        operations::BinaryPackageFormat::Deb,
+        &["sample"],
+        github_source(None),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&step);
+    fs::remove_file(host.bin.join("sample")).unwrap();
+    fs::write(host.log.as_path(), b"").unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"; [[ " $* " != *api.github.com* ]] || exit 91; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf deb-one >"$out""#,
+    );
+
+    host.run_ok(&step);
+    let log = host.log();
+    assert_eq!(log.matches("curl ").count(), 1, "{log}");
+    assert!(!log.contains("api.github.com"), "{log}");
+    assert!(log.contains("dpkg-deb --field"), "{log}");
+    assert!(log.contains("sudo "), "{log}");
+}
+
+#[test]
+fn binary_github_changed_identity_updates_appimage_bytes() {
+    let host = Host::new();
+    fs::write(host._dir.path().join("tmp/release-tag"), b"v1").unwrap();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+tag=$(cat "$TMPDIR/release-tag")
+if [ -n "$out" ]; then if [ "$tag" = v1 ]; then printf '\177ELFone' >"$out"; else printf '\177ELFtwo' >"$out"; fi
+else printf '{"draft":false,"prerelease":false,"tag_name":"%s","assets":[{"name":"sample-amd64-%s","browser_download_url":"https://example.test/sample-%s.AppImage"}]}' "$tag" "$tag" "$tag"; fi"#,
+    );
+    let ensure = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        github_source(None),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&ensure);
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
+    assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFone");
+
+    fs::write(host._dir.path().join("tmp/release-tag"), b"v2").unwrap();
+    fs::write(host.log.as_path(), b"").unwrap();
+    let update = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        github_source(None),
+        operations::BinaryPackageMode::Update,
+    );
+    host.run_ok(&update);
+    assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFtwo");
+    let log = host.log();
+    assert_eq!(log.matches("curl ").count(), 2, "{log}");
+    assert!(log.contains("sample-v2.AppImage"), "{log}");
+    assert!(
+        fs::read_to_string(host.home.join(".local/state/cozydot/binaries/sample.json"))
+            .unwrap()
+            .contains("\"tag\":\"v2\"")
+    );
+}
+
+#[test]
+fn binary_appimage_initial_and_update_races_preserve_foreign_artifacts() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf foreign-initial >"$XDG_DATA_HOME/cozydot/binaries/sample.AppImage"; printf '\177ELFone' >"$out""#,
+    );
+    let initial = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample-one.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    assert!(!host.run(&initial).status.success());
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
+    assert_eq!(fs::read(&artifact).unwrap(), b"foreign-initial");
+    assert!(
+        fs::read_to_string(host.home.join(".local/state/cozydot/binaries/sample.json"))
+            .unwrap()
+            .contains("\"status\":\"pending_initial\"")
+    );
+    fs::write(host.log.as_path(), b"").unwrap();
+    host.logging_fake("curl");
+    assert!(!host.run(&initial).status.success());
+    assert!(host.log().is_empty());
+    assert_eq!(fs::read(&artifact).unwrap(), b"foreign-initial");
+
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFone' >"$out""#,
+    );
+    host.run_ok(&initial);
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
+    host.fake(
+        "curl",
+        r#"printf 'curl %s\n' "$*" >>"$LOG"; out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; rm -f "$XDG_DATA_HOME/cozydot/binaries/sample.AppImage"; printf foreign-update >"$XDG_DATA_HOME/cozydot/binaries/sample.AppImage"; printf '\177ELFtwo' >"$out""#,
+    );
+    let changed = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample-two.AppImage",
+            "733b31227555fba7435fae977758297e9787f01201757b7a8b9c4bbbd75635b5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    assert!(!host.run(&changed).status.success());
+    assert_eq!(fs::read(&artifact).unwrap(), b"foreign-update");
+    assert!(
+        fs::read_to_string(host.home.join(".local/state/cozydot/binaries/sample.json"))
+            .unwrap()
+            .contains("\"status\":\"pending_update\"")
+    );
+    fs::write(host.log.as_path(), b"").unwrap();
+    host.logging_fake("curl");
+    assert!(!host.run(&changed).status.success());
+    assert!(host.log().is_empty());
+    assert_eq!(fs::read(&artifact).unwrap(), b"foreign-update");
+}
+
+#[test]
+fn binary_new_command_conflict_precedes_download_and_artifact_replacement() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFone' >"$out""#,
+    );
+    let initial = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample-one.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&initial);
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
+    fs::write(host.home.join(".local/bin/sample-new"), b"foreign").unwrap();
+    fs::write(host.log.as_path(), b"").unwrap();
+    host.logging_fake("curl");
+    let changed = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-new"],
+        fixed_source(
+            "https://example.test/sample-two.AppImage",
+            "733b31227555fba7435fae977758297e9787f01201757b7a8b9c4bbbd75635b5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+
+    assert!(!host.run(&changed).status.success());
+    assert!(host.log().is_empty());
+    assert_eq!(fs::read(&artifact).unwrap(), b"\x7fELFone");
+    assert_eq!(
+        fs::read(host.home.join(".local/bin/sample-new")).unwrap(),
+        b"foreign"
+    );
+    assert!(
+        fs::read_to_string(host.home.join(".local/state/cozydot/binaries/sample.json"))
+            .unwrap()
+            .contains("\"status\":\"completed\"")
+    );
+}
+
+#[test]
+fn binary_stale_cleanup_retry_accepts_absence_only_from_pending_update() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFone' >"$out""#,
+    );
+    let initial = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-old"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&initial);
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
+    let stale = host.home.join(".local/bin/sample-old");
+    fs::remove_file(&stale).unwrap();
+    fs::write(host.log.as_path(), b"").unwrap();
+    host.fake("curl", "exit 99");
+    let changed = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample", "sample-new"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    assert!(!host.run(&changed).status.success());
+    assert!(host.log().is_empty());
+    assert!(!host.home.join(".local/bin/sample-new").exists());
+
+    symlink(&artifact, &stale).unwrap();
+    let record = host.home.join(".local/state/cozydot/binaries/sample.json");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+    let previous = serde_json::json!({
+        "declaration": value["declaration"].clone(),
+        "resolved": value["resolved"].clone(),
+    });
+    value["status"] = serde_json::json!("pending_update");
+    value["declaration"]["commands"] = serde_json::json!(["sample", "sample-new"]);
+    value["previous"] = previous;
+    fs::write(&record, serde_json::to_vec(&value).unwrap()).unwrap();
+    fs::remove_file(&stale).unwrap();
+    fs::write(&stale, b"foreign-after-cleanup").unwrap();
+    assert!(!host.run(&changed).status.success());
+    assert_eq!(fs::read(&stale).unwrap(), b"foreign-after-cleanup");
+    assert!(host.log().is_empty());
+
+    fs::remove_file(&stale).unwrap();
+    host.run_ok(&changed);
+    assert!(!stale.exists());
+    assert_eq!(
+        fs::read_link(host.home.join(".local/bin/sample-new")).unwrap(),
+        artifact
+    );
+    assert!(fs::read_to_string(record)
+        .unwrap()
+        .contains("\"status\":\"completed\""));
+    assert!(host.log().is_empty());
+}
+
+#[test]
+fn binary_rejects_unsafe_data_and_command_roots_before_network() {
+    for kind in [
+        "data-symlink",
+        "bin-symlink",
+        "data-writable",
+        "bin-writable",
+    ] {
+        let host = Host::new();
+        let local = host.home.join(".local");
+        let data = local.join("share");
+        let bin = local.join("bin");
+        fs::create_dir_all(&local).unwrap();
+        let target = host._dir.path().join(format!("{kind}-target"));
+        match kind {
+            "data-symlink" => {
+                fs::create_dir(&target).unwrap();
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+                symlink(&target, &data).unwrap();
+            }
+            "bin-symlink" => {
+                fs::create_dir(&target).unwrap();
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+                symlink(&target, &bin).unwrap();
+            }
+            "data-writable" => {
+                fs::create_dir(&data).unwrap();
+                fs::set_permissions(&data, fs::Permissions::from_mode(0o777)).unwrap();
+            }
+            "bin-writable" => {
+                fs::create_dir(&bin).unwrap();
+                fs::set_permissions(&bin, fs::Permissions::from_mode(0o777)).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        host.logging_fake("curl");
+        let output = host.run(&binary_step(
+            operations::BinaryPackageFormat::AppImage,
+            &["sample"],
+            fixed_source(
+                "https://example.test/sample.AppImage",
+                "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+            ),
+            operations::BinaryPackageMode::EnsurePresent,
+        ));
+        assert!(!output.status.success(), "{kind}");
+        assert!(host.log().is_empty(), "{kind}: {}", host.log());
+    }
+
+    let host = Host::new();
+    host.logging_fake("curl");
+    let operation = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    for (data, bin) in [
+        (PathBuf::from("relative-data"), host.home.join("bin-one")),
+        (host.home.join("data-two"), PathBuf::from("relative-bin")),
+    ] {
+        assert!(host
+            .execute_operation_with_xdg_roots(operation.operation(), &data, &bin)
+            .is_err());
+        assert!(host.log().is_empty());
+    }
+}
+
+#[test]
+fn binary_created_roots_are_mode_0700_under_permissive_umask() {
+    const CHILD: &str = "COZYDOT_TEST_BINARY_PERMISSIVE_UMASK";
+    if std::env::var_os(CHILD).is_none() {
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg("umask 000; exec \"$@\"")
+            .arg("sh")
+            .arg(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("binary_created_roots_are_mode_0700_under_permissive_umask")
+            .arg("--nocapture")
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFone' >"$out""#,
+    );
+    host.run_ok(&binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    ));
+    for path in [
+        host.home.join(".local/share"),
+        host.home.join(".local/share/cozydot"),
+        host.home.join(".local/share/cozydot/binaries"),
+        host.home.join(".local/bin"),
+        host.home.join(".local/state"),
+        host.home.join(".local/state/cozydot"),
+        host.home.join(".local/state/cozydot/binaries"),
+    ] {
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "{}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn binary_rejects_hostile_records_and_hardlinked_artifacts_before_network() {
+    for kind in [
+        "duplicate",
+        "unknown",
+        "unsupported-version",
+        "noncanonical-url",
+        "mismatched-checksum",
+        "invalid-status",
+        "symlink",
+        "directory",
+        "wrong-mode",
+        "hardlink",
+    ] {
+        let host = Host::new();
+        host.fake(
+            "curl",
+            r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFone' >"$out""#,
+        );
+        let step = binary_step(
+            operations::BinaryPackageFormat::AppImage,
+            &["sample"],
+            fixed_source(
+                "https://example.test/sample.AppImage",
+                "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+            ),
+            operations::BinaryPackageMode::EnsurePresent,
+        );
+        host.run_ok(&step);
+        let record = host.home.join(".local/state/cozydot/binaries/sample.json");
+        match kind {
+            "duplicate" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen("\"version\":1", "\"version\":1,\"version\":1", 1),
+                )
+                .unwrap();
+            }
+            "unknown" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen('{', "{\"unknown\":true,", 1)).unwrap();
+            }
+            "unsupported-version" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen("\"version\":1", "\"version\":2", 1)).unwrap();
+            }
+            "noncanonical-url" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen("https://example.test", "https://EXAMPLE.test", 1),
+                )
+                .unwrap();
+            }
+            "mismatched-checksum" => {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+                value["resolved"]["effective_sha256"] = serde_json::json!("00".repeat(32));
+                fs::write(&record, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            "invalid-status" => {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+                value["status"] = serde_json::json!("pending_update");
+                fs::write(&record, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            "symlink" => {
+                fs::remove_file(&record).unwrap();
+                symlink("missing", &record).unwrap();
+            }
+            "directory" => {
+                fs::remove_file(&record).unwrap();
+                fs::create_dir(&record).unwrap();
+            }
+            "wrong-mode" => {
+                fs::set_permissions(&record, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            "hardlink" => {
+                fs::hard_link(&record, record.with_extension("linked")).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        fs::write(host.log.as_path(), b"").unwrap();
+        host.logging_fake("curl");
+        assert!(!host.run(&step).status.success(), "{kind}");
+        assert!(host.log().is_empty(), "{kind}: {}", host.log());
+    }
+
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done; printf '\177ELFone' >"$out""#,
+    );
+    let step = binary_step(
+        operations::BinaryPackageFormat::AppImage,
+        &["sample"],
+        fixed_source(
+            "https://example.test/sample.AppImage",
+            "d4923526ab32944a1a0ffd7c71764d647911e5701a016abf69c370d1da8b0ff5",
+        ),
+        operations::BinaryPackageMode::EnsurePresent,
+    );
+    host.run_ok(&step);
+    let artifact = host
+        .home
+        .join(".local/share/cozydot/binaries/sample.AppImage");
+    fs::hard_link(&artifact, artifact.with_extension("linked")).unwrap();
+    fs::write(host.log.as_path(), b"").unwrap();
+    host.logging_fake("curl");
+    assert!(!host.run(&step).status.success());
+    assert!(host.log().is_empty());
 }
 
 #[test]

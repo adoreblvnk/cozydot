@@ -11,16 +11,14 @@ use std::{
     ffi::OsStr,
     fmt, fs,
     fs::File,
-    io::{Read, Write},
-    os::unix::{ffi::OsStrExt, fs::MetadataExt},
+    io::Write,
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 const KEYRINGS_DIRECTORY: &str = "/etc/apt/keyrings";
 const MANAGED_STATE_VERSION: u64 = 1;
-static MANAGED_TEMP_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepositoryToken(String);
@@ -641,242 +639,46 @@ impl ManagedDeclaration {
     }
 }
 
-struct ManagedState {
-    directory: File,
-    record_name: String,
-    lock_name: String,
-}
+struct ManagedState(super::managed_state::ManagedState);
 
 impl ManagedState {
     fn open(host: &Host<'_>, stem: &str) -> Result<Self> {
-        let state_home = host
-            .value("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/state"));
-        if !state_home.is_absolute() {
-            bail!("APT repository state directory must be absolute");
-        }
-
-        let root_existed = fs::symlink_metadata(&state_home).is_ok();
-        fs::create_dir_all(&state_home).context("create selected managed-state root")?;
-        let mut directory = open_directory_path(&state_home, "selected managed-state root")?;
-        if !root_existed {
-            rustix::fs::fchmod(&directory, rustix::fs::Mode::from_bits_truncate(0o700))
-                .context("restrict selected managed-state root")?;
-        }
-        validate_state_directory(&directory, "selected managed-state root")?;
-        directory = open_or_create_state_directory(&directory, "cozydot")?;
-        directory = open_or_create_state_directory(&directory, "apt-repositories")?;
-
-        Ok(Self {
-            directory,
-            record_name: format!("{stem}.json"),
-            lock_name: format!("{stem}.lock"),
-        })
+        Ok(Self(super::managed_state::ManagedState::open(
+            host,
+            "apt-repositories",
+            stem,
+            "APT repository",
+        )?))
     }
 
     fn acquire_lock(&self) -> Result<File> {
-        let create_flags = rustix::fs::OFlags::RDWR
-            | rustix::fs::OFlags::CREATE
-            | rustix::fs::OFlags::EXCL
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC;
-        let (lock, created): (File, bool) = match rustix::fs::openat(
-            &self.directory,
-            self.lock_name.as_str(),
-            create_flags,
-            rustix::fs::Mode::from_bits_truncate(0o600),
-        ) {
-            Ok(lock) => (lock.into(), true),
-            Err(rustix::io::Errno::EXIST) => (
-                rustix::fs::openat(
-                    &self.directory,
-                    self.lock_name.as_str(),
-                    rustix::fs::OFlags::RDWR
-                        | rustix::fs::OFlags::NOFOLLOW
-                        | rustix::fs::OFlags::CLOEXEC,
-                    rustix::fs::Mode::empty(),
-                )
-                .context("open existing APT repository managed-state lock without following links")?
-                .into(),
-                false,
-            ),
-            Err(error) => {
-                return Err(error)
-                    .context("create APT repository managed-state lock without following links")
-            }
-        };
-        if created {
-            rustix::fs::fchmod(&lock, rustix::fs::Mode::from_bits_truncate(0o600))?;
-        }
-        validate_state_file(&lock, "APT repository managed-state lock")?;
-        rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
-            .context("lock APT repository managed state")?;
-        self.validate_lock_entry(&lock)?;
-        Ok(lock)
+        self.0.acquire_lock()
     }
 
     fn validate_lock_entry(&self, lock: &File) -> Result<()> {
-        validate_state_file(lock, "APT repository managed-state lock")?;
-        let entry = rustix::fs::statat(
-            &self.directory,
-            self.lock_name.as_str(),
-            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
-        )
-        .context("reinspect APT repository managed-state lock entry")?;
-        let metadata = lock.metadata()?;
-        if entry.st_dev != metadata.dev() || entry.st_ino != metadata.ino() {
-            bail!("APT repository managed-state lock entry was replaced");
-        }
-        Ok(())
+        self.0.validate_lock_entry(lock)
     }
 
     fn read_record(&self) -> Result<Option<ManagedRecord>> {
-        let descriptor = match rustix::fs::openat(
-            &self.directory,
-            self.record_name.as_str(),
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-        ) {
-            Ok(descriptor) => descriptor,
-            Err(rustix::io::Errno::NOENT) => return Ok(None),
-            Err(error) => {
-                return Err(error)
-                    .context("open APT repository managed record without following links")
-            }
-        };
-        read_record_descriptor(descriptor.into()).map(Some)
+        self.0
+            .read()?
+            .map(|bytes| {
+                let value: StrictJson = serde_json::from_slice(&bytes)
+                    .context("parse strict APT repository managed record")?;
+                let record = parse_managed_record(value)
+                    .context("validate APT repository managed record")?;
+                validate_managed_declaration(&record.declaration)
+                    .context("validate APT repository managed declaration")?;
+                Ok(record)
+            })
+            .transpose()
     }
 
     fn publish_record(&self, record: &ManagedRecord) -> Result<()> {
-        let bytes =
-            serde_json::to_vec(record).context("serialize APT repository managed record")?;
-        let temporary_name = format!(
-            ".{}.{}.{}.tmp",
-            self.record_name,
-            std::process::id(),
-            MANAGED_TEMP_NONCE.fetch_add(1, Ordering::Relaxed)
-        );
-        let mut temporary: File = rustix::fs::openat(
-            &self.directory,
-            temporary_name.as_str(),
-            rustix::fs::OFlags::WRONLY
-                | rustix::fs::OFlags::CREATE
-                | rustix::fs::OFlags::EXCL
-                | rustix::fs::OFlags::NOFOLLOW
-                | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::from_bits_truncate(0o600),
+        self.0.publish(
+            &serde_json::to_vec(record).context("serialize APT repository managed record")?,
         )
-        .context("create APT repository managed-record staging file")?
-        .into();
-        let result = (|| {
-            rustix::fs::fchmod(&temporary, rustix::fs::Mode::from_bits_truncate(0o600))?;
-            validate_state_file(&temporary, "APT repository managed-record staging file")?;
-            temporary.write_all(&bytes)?;
-            temporary.sync_all()?;
-            rustix::fs::renameat(
-                &self.directory,
-                temporary_name.as_str(),
-                &self.directory,
-                self.record_name.as_str(),
-            )
-            .context("publish APT repository managed record")?;
-            self.directory
-                .sync_all()
-                .context("sync APT repository managed-state directory")?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = rustix::fs::unlinkat(
-                &self.directory,
-                temporary_name.as_str(),
-                rustix::fs::AtFlags::empty(),
-            );
-        }
-        result
     }
-}
-
-fn read_record_descriptor(mut record_file: File) -> Result<ManagedRecord> {
-    validate_state_file(&record_file, "APT repository managed record")?;
-    let mut bytes = Vec::new();
-    record_file
-        .read_to_end(&mut bytes)
-        .context("read APT repository managed record descriptor")?;
-    let value: StrictJson =
-        serde_json::from_slice(&bytes).context("parse strict APT repository managed record")?;
-    let record = parse_managed_record(value).context("validate APT repository managed record")?;
-    validate_managed_declaration(&record.declaration)
-        .context("validate APT repository managed declaration")?;
-    Ok(record)
-}
-
-fn open_directory_path(path: &Path, label: &str) -> Result<File> {
-    Ok(rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    )
-    .with_context(|| format!("open {label} without following links"))?
-    .into())
-}
-
-fn open_or_create_state_directory(parent: &File, name: &str) -> Result<File> {
-    let created =
-        match rustix::fs::mkdirat(parent, name, rustix::fs::Mode::from_bits_truncate(0o700)) {
-            Ok(()) => true,
-            Err(rustix::io::Errno::EXIST) => false,
-            Err(error) => {
-                return Err(error).with_context(|| format!("create managed-state {name}"))
-            }
-        };
-    let directory: File = rustix::fs::openat(
-        parent,
-        name,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    )
-    .with_context(|| format!("open managed-state {name} without following links"))?
-    .into();
-    validate_state_directory(&directory, &format!("managed-state {name}"))?;
-    if created {
-        rustix::fs::fchmod(&directory, rustix::fs::Mode::from_bits_truncate(0o700))?;
-        validate_state_directory(&directory, &format!("managed-state {name}"))?;
-    }
-    Ok(directory)
-}
-
-fn validate_state_directory(directory: &File, label: &str) -> Result<()> {
-    let metadata = directory
-        .metadata()
-        .with_context(|| format!("inspect {label}"))?;
-    if !metadata.file_type().is_dir()
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.mode() & 0o022 != 0
-    {
-        bail!("{label} has unsafe type, owner, or permissions");
-    }
-    Ok(())
-}
-
-fn validate_state_file(file: &File, label: &str) -> Result<()> {
-    let metadata = file
-        .metadata()
-        .with_context(|| format!("inspect {label}"))?;
-    if !metadata.file_type().is_file()
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.mode() & 0o7777 != 0o600
-        || metadata.nlink() != 1
-    {
-        bail!("{label} has unsafe type, owner, permissions, or link count");
-    }
-    Ok(())
 }
 
 fn validate_managed_declaration(declaration: &ManagedDeclaration) -> Result<()> {
@@ -1479,62 +1281,5 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<StrictJson>(value).is_err());
         }
-    }
-
-    #[test]
-    fn record_reader_uses_the_single_nofollow_descriptor_after_entry_replacement() {
-        use std::os::unix::fs::{symlink, PermissionsExt};
-
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("record.json");
-        let expected = ManagedRecord {
-            version: MANAGED_STATE_VERSION,
-            status: ManagedStatus::PendingInitial,
-            declaration: ManagedDeclaration::from_operation(&operation(
-                Architecture::Amd64,
-                AptRepositorySourceLayout::SuiteComponents {
-                    suite: token("stable"),
-                    components: vec![token("main")],
-                },
-            )),
-        };
-        fs::write(&path, serde_json::to_vec(&expected).unwrap()).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-        let descriptor: File = rustix::fs::open(
-            &path,
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-        )
-        .unwrap()
-        .into();
-        let held_path = directory.path().join("held-record.json");
-        fs::rename(&path, &held_path).unwrap();
-        fs::write(directory.path().join("foreign"), b"not json").unwrap();
-        symlink("foreign", &path).unwrap();
-
-        assert_eq!(read_record_descriptor(descriptor).unwrap(), expected);
-    }
-
-    #[test]
-    fn lock_entry_replacement_is_detected_against_the_held_descriptor() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
-        let state = ManagedState {
-            directory: open_directory_path(directory.path(), "test state").unwrap(),
-            record_name: "vendor.json".into(),
-            lock_name: "vendor.lock".into(),
-        };
-        let lock = state.acquire_lock().unwrap();
-        fs::remove_file(directory.path().join("vendor.lock")).unwrap();
-        fs::write(directory.path().join("vendor.lock"), b"").unwrap();
-        fs::set_permissions(
-            directory.path().join("vendor.lock"),
-            fs::Permissions::from_mode(0o600),
-        )
-        .unwrap();
-
-        assert!(state.validate_lock_entry(&lock).is_err());
     }
 }

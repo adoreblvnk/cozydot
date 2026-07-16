@@ -53,7 +53,7 @@ fn complete_plan_lowers_every_action_to_fixed_workflows() {
         "workflow python-toolchain 3.13",
         "workflow cargo-package-set ensure-present bat starship",
         "workflow npm-package-set ensure-present opencode-ai",
-        "workflow direct-package obsidian ensure-present",
+        "workflow binary-package obsidian ensure-present",
         "workflow nerd-fonts GeistMono",
         "workflow dotfiles-backup-stow bash starship",
         "workflow docker-group",
@@ -71,7 +71,7 @@ fn complete_plan_lowers_every_action_to_fixed_workflows() {
         "workflow flatpak-update-apps com.bitwarden.desktop",
         "workflow cargo-package-set update-current bat starship",
         "workflow npm-package-set update-current opencode-ai",
-        "workflow direct-package obsidian update",
+        "workflow binary-package obsidian update",
     ] {
         assert!(text.contains(expected), "missing {expected:?}:\n{text}");
     }
