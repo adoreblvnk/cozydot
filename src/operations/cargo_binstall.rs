@@ -351,7 +351,15 @@ fn ensure_managed_directory(path: &Path) -> Result<()> {
     if !existed {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     }
-    let metadata = fs::symlink_metadata(path)?;
+    let mut metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_dir()
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.permissions().mode() & 0o022 != 0
+    {
+        let mode = metadata.permissions().mode() & 0o7777 & !0o022;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+        metadata = fs::symlink_metadata(path)?;
+    }
     if !metadata.file_type().is_dir()
         || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.permissions().mode() & 0o022 != 0
@@ -505,6 +513,23 @@ fn validate_executable(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rustup_created_group_writable_directory_is_hardened() {
+        let root = tempfile::tempdir().unwrap();
+        let cargo_home = root.path().join(".cargo");
+        fs::create_dir(&cargo_home).unwrap();
+        fs::set_permissions(&cargo_home, fs::Permissions::from_mode(0o775)).unwrap();
+
+        ensure_managed_directory(&cargo_home).unwrap();
+
+        let mode = fs::symlink_metadata(&cargo_home)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(mode, 0o755);
+    }
 
     #[test]
     fn target_matrix_is_explicit() {
