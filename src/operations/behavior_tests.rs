@@ -72,6 +72,8 @@ case "$command" in
     destination=$(map_path "${!#}")
     if [ "$1" = --format=%f:%u:%g ]; then
       printf '%s:0:0\n' "$(/usr/bin/stat --format=%f -- "$destination")"
+    elif [ "$1" = --dereference ] && [ "$2" = --format=%f:%s ]; then
+      /usr/bin/stat --dereference --format=%f:%s -- "$destination"
     elif [ "$1" = --format=%f:%s ]; then
       /usr/bin/stat --format=%f:%s -- "$destination"
     else
@@ -3137,8 +3139,34 @@ fn managed_apt_partial_multi_file_failure_keeps_backups_and_retry_converges() {
 }
 
 #[test]
+fn managed_apt_accepts_package_managed_keyring_symlink() {
+    let host = Host::new();
+    host.atomic_sudo();
+    let apt = host.root.join("etc/apt");
+    let directory = host.root.join("usr/share/keyrings");
+    fs::create_dir_all(apt.join("sources.list.d")).unwrap();
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("debian-archive-keyring.pgp"), b"archive key").unwrap();
+    symlink(
+        "debian-archive-keyring.pgp",
+        directory.join("debian-archive-keyring.gpg"),
+    )
+    .unwrap();
+    fs::write(
+        apt.join("sources.list"),
+        b"deb https://deb.debian.org/debian trixie main\n",
+    )
+    .unwrap();
+
+    let step = managed_apt_sources_step("debian", "trixie", Architecture::Amd64, &["main"]);
+    host.run_ok(&step);
+
+    assert!(apt.join("sources.list.d/cozydot-base.sources").is_file());
+}
+
+#[test]
 fn managed_apt_keyring_preflight_fails_before_source_inspection_or_backup() {
-    for keyring_kind in ["missing", "symlink"] {
+    for keyring_kind in ["missing", "empty"] {
         let host = Host::new();
         host.atomic_sudo();
         let apt = host.root.join("etc/apt");
@@ -3148,15 +3176,10 @@ fn managed_apt_keyring_preflight_fails_before_source_inspection_or_backup() {
             b"deb https://deb.debian.org/debian trixie main\n",
         )
         .unwrap();
-        if keyring_kind == "symlink" {
+        if keyring_kind == "empty" {
             let directory = host.root.join("usr/share/keyrings");
             fs::create_dir_all(&directory).unwrap();
-            fs::write(directory.join("foreign-keyring"), b"foreign").unwrap();
-            symlink(
-                "foreign-keyring",
-                directory.join("debian-archive-keyring.gpg"),
-            )
-            .unwrap();
+            fs::write(directory.join("debian-archive-keyring.gpg"), b"").unwrap();
         }
         let step = managed_apt_sources_step("debian", "trixie", Architecture::Amd64, &["main"]);
 
