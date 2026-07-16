@@ -2,7 +2,6 @@
 # Derived from configs/full.yaml for a Debian 13 or Ubuntu GNOME amd64 VM.
 # VirtualBox installation and host-group integration are intentionally omitted.
 version: 1.0.0
-
 system:
   require:
     distros: [ubuntu, debian]
@@ -18,7 +17,6 @@ system:
   ubuntu:
     snap: disabled # enabled
     codecs: installed
-
 packages:
   apt:
     install:
@@ -42,7 +40,6 @@ packages:
       - vim
       - vlc
       - xz-utils
-
     repositories:
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
@@ -51,7 +48,6 @@ packages:
         suite: stable
         components: [main]
         packages: [code]
-
       - name: wezterm
         key: https://apt.fury.io/wez/gpg.key
         urls:
@@ -59,19 +55,15 @@ packages:
         suite: "*"
         components: ["*"]
         packages: [wezterm-nightly]
-
   flatpak:
     - com.bitwarden.desktop
-
   cargo:
     - bat
     - fd-find
     - starship
     - tealdeer
-
   npm:
     - opencode-ai
-
   binaries:
     - name: fastfetch
       format: deb
@@ -84,7 +76,6 @@ packages:
           arm64: '^fastfetch-linux-aarch64\.deb$'
           arm32: '^fastfetch-linux-armv7l.*\.deb$'
           riscv64: '^fastfetch-linux-riscv64.*\.deb$'
-
     - name: git-credential-manager
       format: deb
       commands: [git-credential-manager]
@@ -94,17 +85,14 @@ packages:
         assets:
           amd64: '^gcm-linux-x64-.*\.deb$'
           arm64: '^gcm-linux-arm64-.*\.deb$'
-
 tools:
   rust: stable # beta, nightly, nightly-YYYY-MM-DD, or numeric version
   go: latest # or numeric version
   node: latest # lts or numeric version
   python: "3.13"
-
 fonts:
   nerd:
     - GeistMono
-
 dotfiles:
   packages:
     - bash
@@ -116,12 +104,10 @@ dotfiles:
     - vscode
     - wezterm
     - yazi
-
 integrations:
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc
-
 desktop:
   theme: dark # light
   terminal: wezterm
@@ -134,7 +120,6 @@ desktop:
       - netspeedsimplified@prateekmedia.extension
     dock: true
     rounded_corners: true
-
 updates:
   apt: full # standard
   flatpak: true

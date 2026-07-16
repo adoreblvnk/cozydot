@@ -1,9 +1,4 @@
-# Full Cozydot configuration version 1.0.0 reference.
-# This single valid document demonstrates a complete practical configuration.
-# Comments name scalar alternatives that cannot coexist in one valid document.
-# Supported targets: Ubuntu, Debian, Pop!_OS, and Linux Mint on GNOME or Cinnamon.
 version: 1.0.0
-
 system:
   require:
     distros: [ubuntu, debian, pop, linuxmint]
@@ -16,7 +11,6 @@ system:
   ubuntu:
     snap: disabled # enabled
     codecs: installed
-
 packages:
   apt:
     remove:
@@ -27,7 +21,6 @@ packages:
       - podman-docker
       - containerd
       - runc
-
     install:
       - bash-completion
       - build-essential
@@ -36,6 +29,7 @@ packages:
       - default-jdk
       - ffmpeg
       - figlet
+      - fzf
       - git
       - imagemagick
       - lolcat
@@ -49,7 +43,6 @@ packages:
       - vim
       - vlc
       - xz-utils
-
     repositories:
       - name: docker
         key: https://download.docker.com/linux/ubuntu/gpg
@@ -64,15 +57,6 @@ packages:
           - containerd.io
           - docker-buildx-plugin
           - docker-compose-plugin
-
-      - name: debian-griffo
-        key: https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc
-        urls:
-          default: https://debian.griffo.io/apt
-        suite: system
-        components: [main]
-        packages: [eza, fzf, yazi, zoxide]
-
       - name: github-cli
         key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
         urls:
@@ -80,7 +64,6 @@ packages:
         suite: stable
         components: [main]
         packages: [gh]
-
       - name: helium
         key: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
         urls:
@@ -88,7 +71,6 @@ packages:
         suite: stable
         components: [main]
         packages: [helium-bin]
-
       - name: onlyoffice
         key: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
         urls:
@@ -96,7 +78,6 @@ packages:
         suite: squeeze
         components: [main]
         packages: [onlyoffice-desktopeditors]
-
       - name: virtualbox
         key: https://www.virtualbox.org/download/oracle_vbox_2016.asc
         urls:
@@ -104,7 +85,6 @@ packages:
         suite: system
         components: [contrib]
         packages: [virtualbox-7.1]
-
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
         urls:
@@ -112,7 +92,6 @@ packages:
         suite: stable
         components: [main]
         packages: [code]
-
       - name: wezterm
         key: https://apt.fury.io/wez/gpg.key
         urls:
@@ -120,7 +99,6 @@ packages:
         suite: "*"
         components: ["*"]
         packages: [wezterm-nightly]
-
   flatpak:
     - com.bitwarden.desktop
     - com.discordapp.Discord
@@ -131,19 +109,21 @@ packages:
     - org.qbittorrent.qBittorrent
     - org.shotcut.Shotcut
     - org.telegram.desktop
-
   cargo:
     - bat
     - bottom
     - du-dust
+    - eza
     - fd-find
     - presenterm
     - starship
     - tealdeer
-
+    - yazi-fm
+    - zoxide
   npm:
+    - "@playwright/cli"
     - opencode-ai
-
+    - skills
   binaries:
     - name: drawio
       format: deb
@@ -154,7 +134,6 @@ packages:
         assets:
           amd64: '^drawio-amd64-.*\.deb$'
           arm64: '^drawio-arm64-.*\.deb$'
-
     - name: fastfetch
       format: deb
       commands: [fastfetch]
@@ -166,7 +145,6 @@ packages:
           arm64: '^fastfetch-linux-aarch64\.deb$'
           arm32: '^fastfetch-linux-armv7l.*\.deb$'
           riscv64: '^fastfetch-linux-riscv64.*\.deb$'
-
     - name: git-credential-manager
       format: deb
       commands: [git-credential-manager]
@@ -176,7 +154,6 @@ packages:
         assets:
           amd64: '^gcm-linux-x64-.*\.deb$'
           arm64: '^gcm-linux-arm64-.*\.deb$'
-
     - name: obsidian
       format: appimage
       commands: [obsidian]
@@ -186,7 +163,6 @@ packages:
         assets:
           amd64: '^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$'
           arm64: '^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$'
-
     - name: zen-browser
       format: appimage
       commands: [zen]
@@ -196,17 +172,13 @@ packages:
         assets:
           amd64: '^zen-x86_6[0-9]\.AppImage$'
           arm64: '^zen-aarch6[0-9]\.AppImage$'
-
 tools:
   rust: stable # beta, nightly, nightly-YYYY-MM-DD, or numeric version
   go: latest # or numeric version
   node: latest # lts or numeric version
   python: "3.13"
-
 fonts:
-  nerd:
-    - GeistMono
-
+  nerd: [GeistMono]
 dotfiles:
   packages:
     - bash
@@ -214,11 +186,11 @@ dotfiles:
     - bat
     - bottom
     - fastfetch
+    - opencode
     - starship
     - vscode
     - wezterm
     - yazi
-
 integrations:
   docker:
     add_user_to_group: true
@@ -247,7 +219,6 @@ integrations:
       - timonwong.shellcheck
       - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
-
 desktop:
   theme: dark # light
   terminal: wezterm
@@ -260,7 +231,6 @@ desktop:
       - netspeedsimplified@prateekmedia.extension
     dock: true
     rounded_corners: true
-
 updates:
   apt: full # standard
   flatpak: true

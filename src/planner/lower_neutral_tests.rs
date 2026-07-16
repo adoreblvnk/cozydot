@@ -95,7 +95,6 @@ fn full_lowering_preserves_repository_refresh_and_labels() {
         repository_labels,
         [
             "repository docker",
-            "repository debian-griffo",
             "repository github-cli",
             "repository helium",
             "repository onlyoffice",
@@ -185,8 +184,8 @@ fn selectors_modes_terminal_and_provider_operations_remain_typed() {
         "workflow binary-package drawio ensure-present",
         "workflow binary-package drawio update",
         "workflow nerd-fonts update GeistMono",
-        "workflow cargo-package-set update-current bat bottom du-dust fd-find presenterm starship tealdeer",
-        "workflow npm-package-set update-current opencode-ai",
+        "workflow cargo-package-set update-current bat bottom du-dust eza fd-find presenterm starship tealdeer yazi-fm zoxide",
+        "workflow npm-package-set update-current @playwright/cli opencode-ai skills",
         "workflow gnome-dock",
         "workflow gnome-rounded-corners",
     ] {
