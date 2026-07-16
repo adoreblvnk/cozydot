@@ -2,7 +2,7 @@ use serde_yaml::{Mapping, Value};
 use std::collections::BTreeSet;
 
 const BEGINNER: &str = include_str!("../docs/examples/config-v1-beginner.yaml");
-const FULL: &str = include_str!("../docs/examples/full.yaml");
+const FULL: &str = include_str!("../configs/full.yaml");
 
 fn parse(document: &str) -> Value {
     serde_yaml::from_str(document).expect("canonical contract fixture must be valid YAML")
@@ -103,7 +103,7 @@ fn full_fixture_uses_flat_typed_apt_repositories() {
 }
 
 #[test]
-fn full_fixture_requires_ubuntu_or_debian_and_gnome() {
+fn full_fixture_requires_the_four_release_distros_and_supported_desktops() {
     let root = parse(FULL);
     let root = mapping(&root, "full");
     let system = mapping(field(root, "system", "full"), "system");
@@ -114,14 +114,14 @@ fn full_fixture_requires_ubuntu_or_debian_and_gnome() {
             field(require, "distros", "system.require"),
             "system.require.distros"
         ),
-        BTreeSet::from(["debian", "ubuntu"])
+        BTreeSet::from(["debian", "linuxmint", "pop", "ubuntu"])
     );
     assert_eq!(
         string_set(
             field(require, "desktops", "system.require"),
             "system.require.desktops"
         ),
-        BTreeSet::from(["gnome"])
+        BTreeSet::from(["cinnamon", "gnome"])
     );
 }
 

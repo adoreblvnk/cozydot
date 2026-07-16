@@ -23,11 +23,7 @@ fn platform(distro: &str, upstream: &str, desktop: &str) -> Platform {
 }
 
 fn preset(name: &str, platform: &Platform) -> Vec<Step> {
-    let path = if name == "full" {
-        "docs/examples/full.yaml".to_owned()
-    } else {
-        format!("configs/{name}.yaml")
-    };
+    let path = format!("configs/{name}.yaml");
     let config = Config::load(Path::new(&path)).unwrap();
     let plan = plan(&config, platform, Path::new("/dotfiles")).unwrap();
     lower(&plan).unwrap()

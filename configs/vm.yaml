@@ -1,5 +1,5 @@
 # Full Cozydot VM configuration version 1.0.0.
-# Derived from docs/examples/full.yaml for a Debian 13 or Ubuntu GNOME amd64 VM.
+# Derived from configs/full.yaml for a Debian 13 or Ubuntu GNOME amd64 VM.
 # VirtualBox installation and host-group integration are intentionally omitted.
 version: 1.0.0
 

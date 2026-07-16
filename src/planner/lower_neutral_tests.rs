@@ -7,7 +7,7 @@ use crate::{
 };
 use std::path::Path;
 
-const FULL: &str = include_str!("../../docs/examples/full.yaml");
+const FULL: &str = include_str!("../../configs/full.yaml");
 
 fn platform(distro: &str) -> Platform {
     let codename = if distro == "ubuntu" {
