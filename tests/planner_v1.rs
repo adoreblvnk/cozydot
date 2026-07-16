@@ -660,6 +660,7 @@ fn exact_tool_selectors_and_typed_architectures_are_retained() {
         );
         assert!(actions.contains(&PlannedAction::Tool(ToolInstall::Node {
             selector: expected,
+            architecture: Architecture::Amd64,
         })));
     }
 }
@@ -744,6 +745,7 @@ updates:
     })));
     assert!(updates.contains(&&UpdateAction::Tool(ToolUpdate::Node {
         selector: NodeSelector::Lts,
+        architecture: Architecture::Amd64,
     })));
     assert!(updates.contains(&&UpdateAction::Cargo {
         packages: vec!["bat".into()],

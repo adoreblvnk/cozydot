@@ -8,7 +8,10 @@ pub fn rustup(host: &Host<'_>) -> Result<()> {
         .value("CARGO_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| host.home().join(".cargo"));
-    if executable_file(&cargo_home.join("bin/rustup")) || host.command_exists("rustup") {
+    if !cargo_home.is_absolute() {
+        bail!("rustup managed CARGO_HOME must be absolute");
+    }
+    if executable_file(&cargo_home.join("bin/rustup")) {
         return Ok(());
     }
     let installer = TempPath::new(host, "rustup")?;
@@ -30,13 +33,14 @@ pub fn rustup(host: &Host<'_>) -> Result<()> {
         "sh",
         [installer.path().as_os_str(), "-y".as_ref()],
     )?;
-    if !executable_file(&cargo_home.join("bin/rustup")) && !host.command_exists("rustup") {
-        bail!("rustup bootstrap did not publish an executable rustup");
+    if !executable_file(&cargo_home.join("bin/rustup")) {
+        bail!("rustup bootstrap did not publish the managed rustup executable");
     }
     Ok(())
 }
 
 fn executable_file(path: &std::path::Path) -> bool {
-    std::fs::metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0
+    })
 }

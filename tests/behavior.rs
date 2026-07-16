@@ -449,31 +449,45 @@ fn npm_package_step(packages: &[&str], mode: operations::NpmPackageMode) -> Step
 }
 
 fn rust_toolchain_step(mode: operations::ToolMutationMode) -> Step {
+    rust_toolchain_selector_step(operations::RustToolchainSelector::Stable, mode)
+}
+
+fn rust_toolchain_selector_step(
+    selector: operations::RustToolchainSelector,
+    mode: operations::ToolMutationMode,
+) -> Step {
     Step::workflow(operations::Operation::RustToolchain(
-        operations::RustToolchainOperation::new(
-            operations::RustToolchainSelector::Stable,
-            Architecture::Amd64,
-            mode,
-        )
-        .unwrap(),
+        operations::RustToolchainOperation::new(selector, Architecture::Amd64, mode).unwrap(),
     ))
 }
 
 fn node_toolchain_step(mode: operations::ToolMutationMode) -> Step {
+    node_toolchain_selector_step(operations::NodeToolchainSelector::Lts, mode)
+}
+
+fn node_toolchain_selector_step(
+    selector: operations::NodeToolchainSelector,
+    mode: operations::ToolMutationMode,
+) -> Step {
     Step::workflow(operations::Operation::NodeToolchain(
-        operations::NodeToolchainOperation::new(operations::NodeToolchainSelector::Lts, mode)
-            .unwrap(),
+        operations::NodeToolchainOperation::new(selector, Architecture::Amd64, mode).unwrap(),
     ))
 }
 
 fn python_toolchain_step(version: &str) -> Step {
     Step::workflow(operations::Operation::PythonToolchain(
-        operations::PythonToolchainOperation::new(version).unwrap(),
+        operations::PythonToolchainOperation::new(version, Architecture::Amd64).unwrap(),
     ))
 }
 
 fn bootstrap_step(operation: operations::Operation) -> Step {
     Step::workflow(operation)
+}
+
+fn cargo_binstall_bootstrap_step(architecture: Architecture) -> Step {
+    bootstrap_step(operations::Operation::CargoBinstallBootstrap(
+        operations::CargoBinstallBootstrapOperation::new(architecture),
+    ))
 }
 
 fn nerd_fonts_step(families: &[&str]) -> Step {
@@ -549,13 +563,27 @@ fn ubuntu_snap_step(enabled: bool) -> Step {
 fn configure_rust_toolchain_fake(host: &Host) {
     let cargo_bin = host.home.join(".cargo/bin");
     fs::create_dir_all(&cargo_bin).unwrap();
+    fs::write(host._dir.path().join("tmp/rust-release"), b"1.90.0").unwrap();
+    fs::write(host._dir.path().join("tmp/rust-date"), b"2026-01-01").unwrap();
+    host.fake(
+        "curl",
+        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+release=$(cat "$TMPDIR/rust-release"); date=$(cat "$TMPDIR/rust-date")
+printf 'manifest-version = "2"\ndate = "%s"\n\n[pkg.rust]\nversion = "%s (abc %s)"\n\n[pkg.rust.target.x86_64-unknown-linux-gnu]\navailable = true\n' "$date" "$release" "$date""#,
+    );
     host.fake(
         "rustup",
         r#"{ printf 'rustup'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
-if [ "$1" = toolchain ] && [ "$2" = install ]; then touch "$TMPDIR/rust-installed"; exit; fi
+if [ "$1" = toolchain ] && [ "$2" = install ]; then
+  [ ! -f "$TMPDIR/rust-install-failure" ] || exit 71
+  release=${3%-x86_64-unknown-linux-gnu}
+  printf '%s' "$release" >"$TMPDIR/rust-installed"
+  exit
+fi
 if [ "$1" = run ]; then
   [ -f "$TMPDIR/rust-installed" ] || exit 1
-  printf 'rustc 1.90.0 (abc 2026-01-01)\nbinary: rustc\ncommit-hash: abc\ncommit-date: 2026-01-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.0\n'
+  release=$(cat "$TMPDIR/rust-installed")
+  printf 'rustc %s (abc 2026-01-01)\nbinary: rustc\ncommit-hash: abc\ncommit-date: 2026-01-01\nhost: x86_64-unknown-linux-gnu\nrelease: %s\nLLVM version: 20.1.0\n' "$release" "$release"
   exit
 fi
 if [ "$1" = default ]; then
@@ -582,6 +610,7 @@ case "$1" in
     cat "$TMPDIR/fnm-remote"
     ;;
   install)
+    [ ! -f "$TMPDIR/fnm-install-failure" ] || exit 71
     printf '%s\n' "$2" >"$TMPDIR/fnm-installed"
     ;;
   alias)
@@ -596,18 +625,25 @@ case "$1" in
   *) exit 40 ;;
 esac"#,
     );
+    let managed = host.home.join(".local/share/fnm");
+    fs::create_dir_all(&managed).unwrap();
+    fs::rename(host.bin.join("fnm"), managed.join("fnm")).unwrap();
     fs::write(host._dir.path().join("tmp/fnm-remote"), b"v22.14.0 (Jod)\n").unwrap();
 }
 
 fn configure_python_toolchain_fake(host: &Host) {
+    fs::write(host._dir.path().join("tmp/python-remote"), b"3.13.7").unwrap();
     host.fake(
         "uv",
         r#"{ printf 'uv'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
 [ "$1" = python ] || exit 40
 if [ "$2" = find ]; then [ -f "$TMPDIR/python-version" ] || exit 1; cat "$TMPDIR/python-version"; exit; fi
-if [ "$2" = install ]; then printf '3.13.7\n' >"$TMPDIR/python-version"; exit; fi
+if [ "$2" = list ]; then version=$(cat "$TMPDIR/python-remote"); printf '[{"version":"%s","url":"https://example.test/python.tar.gz","implementation":"cpython","os":"linux","variant":"default","arch":"x86_64","libc":"gnu"}]\n' "$version"; exit; fi
+if [ "$2" = install ]; then [ ! -f "$TMPDIR/python-install-failure" ] || exit 71; printf '%s\n' "${!#}" >"$TMPDIR/python-version"; exit; fi
 exit 41"#,
     );
+    fs::create_dir_all(host.home.join(".local/bin")).unwrap();
+    fs::rename(host.bin.join("uv"), host.home.join(".local/bin/uv")).unwrap();
 }
 
 fn configure_system_state_fakes(host: &Host) {
@@ -664,26 +700,27 @@ fn configure_cargo_package_fakes(host: &Host, state: &str) {
         "cargo",
         r#"{ printf 'cargo'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
 if [ "$1" = install ] && [ "$2" = --list ]; then cat "$TMPDIR/cargo-state"; exit; fi
-if [ "$1" = install ] && [ "$2" = cargo-binstall ]; then
-  [ ! -f "$TMPDIR/cargo-bootstrap-failure" ] || exit 41
-  mkdir -p "$CARGO_HOME/bin"
-  cat >"$CARGO_HOME/bin/cargo-binstall" <<'BINSTALL'
-#!/bin/bash
-set -euo pipefail
-{ printf 'cargo-binstall'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+exit 43"#,
+    );
+    host.fake(
+        "cargo-binstall",
+        r#"{ printf 'cargo-binstall'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
 [ ! -f "$TMPDIR/cargo-mutation-failure" ] || exit 42
 for package in "$@"; do
   case "$package" in --*) continue ;; esac
   if ! grep -q "^$package v" "$TMPDIR/cargo-state"; then
     printf '%s v1.0.0:\n    %s\n' "$package" "$package" >>"$TMPDIR/cargo-state"
   fi
-done
-BINSTALL
-  chmod +x "$CARGO_HOME/bin/cargo-binstall"
-  exit
-fi
-exit 43"#,
+done"#,
     );
+    let cargo_bin = host.home.join(".cargo/bin");
+    fs::create_dir_all(&cargo_bin).unwrap();
+    fs::rename(host.bin.join("cargo"), cargo_bin.join("cargo")).unwrap();
+    fs::rename(
+        host.bin.join("cargo-binstall"),
+        cargo_bin.join("cargo-binstall"),
+    )
+    .unwrap();
 }
 
 fn configure_npm_package_fakes(host: &Host, version: &[u8], state: &[u8], post_state: &[u8]) {
@@ -709,6 +746,9 @@ if [ "$1" = install ] || [ "$1" = update ]; then
 fi
 exit 54"#,
     );
+    let managed = host.home.join(".local/share/fnm");
+    fs::create_dir_all(&managed).unwrap();
+    fs::rename(host.bin.join("fnm"), managed.join("fnm")).unwrap();
     host.fake(
         "npm",
         "printf 'ambient-npm <%s>\\n' \"$*\" >>\"$LOG\"; exit 90",
@@ -1679,12 +1719,7 @@ fn schema_v1_cargo_ensure_installs_only_missing_packages_in_order_and_is_retry_s
 
     let log = host.log();
     assert_eq!(log.matches("cargo <install> <--list>").count(), 3, "{log}");
-    assert_eq!(
-        log.matches("cargo <install> <cargo-binstall> <--locked>")
-            .count(),
-        1,
-        "{log}"
-    );
+    assert!(!log.contains("cargo <install> <cargo-binstall>"), "{log}");
     assert_eq!(
         log.matches("cargo-binstall <--no-confirm> <missing_one> <missing-two>")
             .count(),
@@ -1786,6 +1821,8 @@ fn schema_v1_cargo_state_failures_are_fatal() {
                 "if [ \"$1\" = install ] && [ \"$2\" = --list ]; then {body}; else exit 62; fi"
             ),
         );
+        fs::create_dir_all(host.home.join(".cargo/bin")).unwrap();
+        fs::rename(host.bin.join("cargo"), host.home.join(".cargo/bin/cargo")).unwrap();
         assert!(
             !host
                 .run(&cargo_package_step(
@@ -1810,21 +1847,25 @@ fn schema_v1_cargo_requires_an_executable_cargo_without_using_real_state() {
 }
 
 #[test]
-fn schema_v1_cargo_propagates_bootstrap_mutation_and_postcondition_failures() {
-    for failure in ["bootstrap", "mutation", "postcondition"] {
+fn schema_v1_cargo_propagates_mutation_and_postcondition_failures() {
+    for failure in ["mutation", "postcondition"] {
         let host = Host::new();
         configure_cargo_package_fakes(&host, "");
         match failure {
-            "bootstrap" => {
-                fs::write(host._dir.path().join("tmp/cargo-bootstrap-failure"), b"1").unwrap()
-            }
             "mutation" => {
                 fs::write(host._dir.path().join("tmp/cargo-mutation-failure"), b"1").unwrap()
             }
-            "postcondition" => host.fake(
-                "cargo-binstall",
-                "printf 'cargo-binstall %s\\n' \"$*\" >>\"$LOG\"",
-            ),
+            "postcondition" => {
+                host.fake(
+                    "cargo-binstall",
+                    "printf 'cargo-binstall %s\\n' \"$*\" >>\"$LOG\"",
+                );
+                fs::rename(
+                    host.bin.join("cargo-binstall"),
+                    host.home.join(".cargo/bin/cargo-binstall"),
+                )
+                .unwrap();
+            }
             _ => unreachable!(),
         }
         let output = host.run(&cargo_package_step(
@@ -1844,6 +1885,8 @@ fn schema_v1_cargo_bootstrap_must_publish_an_executable_binstall() {
 if [ "$1" = install ] && [ "$2" = cargo-binstall ]; then exit; fi
 exit 63"#,
     );
+    fs::create_dir_all(host.home.join(".cargo/bin")).unwrap();
+    fs::rename(host.bin.join("cargo"), host.home.join(".cargo/bin/cargo")).unwrap();
     assert!(!host
         .run(&cargo_package_step(
             &["bat"],
@@ -5179,9 +5222,6 @@ fn schema_v1_npm_uses_the_accepted_xdg_fnm_path() {
     let host = Host::new();
     let state = br#"{"dependencies":{"tool":{"version":"1.0.0"}}}"#;
     configure_npm_package_fakes(&host, b"v22.1.0\n", state, state);
-    let managed_dir = host.home.join(".local/share/fnm");
-    fs::create_dir_all(&managed_dir).unwrap();
-    fs::rename(host.bin.join("fnm"), managed_dir.join("fnm")).unwrap();
     host.run_ok(&npm_package_step(
         &["tool"],
         operations::NpmPackageMode::EnsurePresent,
@@ -5307,7 +5347,7 @@ fn schema_v1_rust_toolchain_ensure_is_retry_safe_and_update_refreshes_moving_cha
     host.run_ok(&ensure);
     assert_eq!(
         host.log()
-            .matches("rustup <toolchain> <install> <stable-x86_64-unknown-linux-gnu>")
+            .matches("rustup <toolchain> <install> <1.90.0-x86_64-unknown-linux-gnu>")
             .count(),
         1,
         "{}",
@@ -5315,21 +5355,21 @@ fn schema_v1_rust_toolchain_ensure_is_retry_safe_and_update_refreshes_moving_cha
     );
     assert_eq!(
         host.log()
-            .matches("rustup <default> <stable-x86_64-unknown-linux-gnu>")
+            .matches("rustup <default> <1.90.0-x86_64-unknown-linux-gnu>")
             .count(),
         1,
         "{}",
         host.log()
     );
 
+    fs::write(host._dir.path().join("tmp/rust-release"), b"1.91.0").unwrap();
+    fs::write(host._dir.path().join("tmp/rust-date"), b"2026-02-01").unwrap();
     host.run_ok(&rust_toolchain_step(
         operations::ToolMutationMode::UpdateMoving,
     ));
-    assert_eq!(
+    assert!(
         host.log()
-            .matches("rustup <toolchain> <install> <stable-x86_64-unknown-linux-gnu>")
-            .count(),
-        2,
+            .contains("rustup <toolchain> <install> <1.91.0-x86_64-unknown-linux-gnu>"),
         "{}",
         host.log()
     );
@@ -5398,18 +5438,211 @@ fn schema_v1_uv_python_uses_managed_state_and_is_retry_safe() {
     let log = host.log();
     assert_eq!(
         log.matches(
-            "uv <python> <install> <--no-config> <--managed-python> <--no-progress> <--default> <3.13>"
+            "uv <python> <install> <--no-config> <--managed-python> <--no-progress> <--default> <3.13.7>"
         )
         .count(),
         1,
         "{log}"
     );
     assert_eq!(
-        log.matches("uv <python> <find> <--no-project> <--managed-python> <--show-version> <3.13>")
-            .count(),
+        log.matches(
+            "uv <python> <find> <--no-project> <--managed-python> <--show-version> <3.13.7>"
+        )
+        .count(),
         4,
         "{log}"
     );
+    assert_eq!(log.matches("uv <python> <list> <3.13>").count(), 1, "{log}");
+}
+
+#[test]
+fn schema_v1_partial_tool_selectors_pin_across_failed_mutation_retries() {
+    let rust = Host::new();
+    configure_rust_toolchain_fake(&rust);
+    let rust_step = rust_toolchain_selector_step(
+        operations::RustToolchainSelector::Version("1.90".into()),
+        operations::ToolMutationMode::EnsurePresent,
+    );
+    fs::write(rust._dir.path().join("tmp/rust-install-failure"), b"1").unwrap();
+    assert!(!rust.run(&rust_step).status.success());
+    let rust_record = rust.home.join(".local/state/cozydot/tools/rust.json");
+    assert!(fs::read_to_string(&rust_record)
+        .unwrap()
+        .contains("\"status\":\"pending\""));
+    fs::remove_file(rust._dir.path().join("tmp/rust-install-failure")).unwrap();
+    fs::write(rust._dir.path().join("tmp/rust-release"), b"1.90.1").unwrap();
+    fs::write(rust.log.as_path(), b"").unwrap();
+    rust.run_ok(&rust_step);
+    let log = rust.log();
+    assert!(!log.contains("curl"), "{log}");
+    assert!(
+        log.contains("rustup <toolchain> <install> <1.90.0-x86_64-unknown-linux-gnu>"),
+        "{log}"
+    );
+    assert!(fs::read_to_string(rust_record)
+        .unwrap()
+        .contains("\"resolved\":\"1.90.0\""));
+
+    let node = Host::new();
+    configure_node_toolchain_fake(&node);
+    let node_step = node_toolchain_selector_step(
+        operations::NodeToolchainSelector::Version("22".into()),
+        operations::ToolMutationMode::EnsurePresent,
+    );
+    fs::write(node._dir.path().join("tmp/fnm-install-failure"), b"1").unwrap();
+    assert!(!node.run(&node_step).status.success());
+    fs::remove_file(node._dir.path().join("tmp/fnm-install-failure")).unwrap();
+    fs::write(node._dir.path().join("tmp/fnm-remote"), b"v22.15.0\n").unwrap();
+    fs::write(node.log.as_path(), b"").unwrap();
+    node.run_ok(&node_step);
+    let log = node.log();
+    assert!(!log.contains("list-remote"), "{log}");
+    assert!(log.contains("fnm <install> <v22.14.0>"), "{log}");
+
+    let python = Host::new();
+    configure_python_toolchain_fake(&python);
+    let python_step = python_toolchain_step("3.13");
+    fs::write(python._dir.path().join("tmp/python-install-failure"), b"1").unwrap();
+    assert!(!python.run(&python_step).status.success());
+    fs::remove_file(python._dir.path().join("tmp/python-install-failure")).unwrap();
+    fs::write(python._dir.path().join("tmp/python-remote"), b"3.13.8").unwrap();
+    fs::write(python.log.as_path(), b"").unwrap();
+    python.run_ok(&python_step);
+    let log = python.log();
+    assert!(!log.contains("<list>"), "{log}");
+    assert!(
+        log.contains(
+            "<install> <--no-config> <--managed-python> <--no-progress> <--default> <3.13.7>"
+        ),
+        "{log}"
+    );
+}
+
+#[test]
+fn schema_v1_tool_state_is_strict_and_precedes_manager_invocation() {
+    for kind in [
+        "duplicate",
+        "unknown",
+        "unsupported",
+        "architecture",
+        "wrong-mode",
+    ] {
+        let host = Host::new();
+        configure_node_toolchain_fake(&host);
+        let step = node_toolchain_step(operations::ToolMutationMode::EnsurePresent);
+        host.run_ok(&step);
+        let record = host.home.join(".local/state/cozydot/tools/node.json");
+        match kind {
+            "duplicate" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(
+                    &record,
+                    text.replacen("\"version\":1", "\"version\":1,\"version\":1", 1),
+                )
+                .unwrap();
+            }
+            "unknown" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen('{', "{\"unknown\":true,", 1)).unwrap();
+            }
+            "unsupported" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen("\"version\":1", "\"version\":2", 1)).unwrap();
+            }
+            "architecture" => {
+                let text = fs::read_to_string(&record).unwrap();
+                fs::write(&record, text.replacen("\"amd64\"", "\"AMD64\"", 1)).unwrap();
+            }
+            "wrong-mode" => {
+                fs::set_permissions(&record, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        fs::write(host.log.as_path(), b"").unwrap();
+        assert!(!host.run(&step).status.success(), "{kind}");
+        assert!(host.log().is_empty(), "{kind}: {}", host.log());
+    }
+}
+
+#[test]
+fn schema_v1_ambient_managers_never_satisfy_or_redirect_managed_operations() {
+    let host = Host::new();
+    for manager in ["rustup", "fnm", "uv", "cargo", "cargo-binstall"] {
+        host.fake(
+            manager,
+            &format!("printf 'ambient-{manager}\\n' >>\"$LOG\""),
+        );
+    }
+    for step in [
+        rust_toolchain_step(operations::ToolMutationMode::EnsurePresent),
+        node_toolchain_step(operations::ToolMutationMode::EnsurePresent),
+        python_toolchain_step("3.13"),
+        cargo_package_step(&["bat"], operations::CargoPackageMode::EnsurePresent),
+        npm_package_step(&["tool"], operations::NpmPackageMode::EnsurePresent),
+    ] {
+        assert!(!host.run(&step).status.success(), "{}", step.display());
+    }
+    assert!(host.log().is_empty(), "{}", host.log());
+}
+
+#[test]
+fn schema_v1_cargo_binstall_bootstraps_without_rust_or_cargo_and_is_offline_when_complete() {
+    let host = Host::new();
+    host.fake(
+        "curl",
+        r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+out=''; while [ "$#" -gt 0 ]; do case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac; done
+if [ -n "$out" ]; then printf archive >"$out"; else printf '{"draft":false,"prerelease":false,"tag_name":"v1.21.0","assets":[{"name":"cargo-binstall-x86_64-unknown-linux-musl.tgz","browser_download_url":"https://github.com/cargo-bins/cargo-binstall/releases/download/v1.21.0/cargo-binstall-x86_64-unknown-linux-musl.tgz","digest":"sha256:0eb3e36bfb24dcd9bb1d1bece1531216b59539a8fde17ee80224af0653c92aa3"}]}'; fi"#,
+    );
+    host.fake(
+        "tar",
+        r#"{ printf 'tar'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+for argument in "$@"; do [ "$argument" != --list ] || { printf 'LICENSE\ncargo-binstall\n'; exit; }; done
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --directory ]; then
+    cat >"$2/cargo-binstall" <<'BINSTALL'
+#!/bin/sh
+[ "$1" = -V ] || exit 71
+printf '1.21.0\n'
+BINSTALL
+    chmod 0755 "$2/cargo-binstall"
+    exit
+  fi
+  shift
+done
+exit 72"#,
+    );
+    host.fake("cargo", "printf 'ambient-cargo\\n' >>\"$LOG\"; exit 90");
+    host.fake("rustup", "printf 'ambient-rustup\\n' >>\"$LOG\"; exit 90");
+    let step = cargo_binstall_bootstrap_step(Architecture::Amd64);
+
+    host.run_ok(&step);
+    let first = host.log();
+    assert_eq!(first.matches("curl <").count(), 2, "{first}");
+    assert_eq!(first.matches("tar <").count(), 2, "{first}");
+    assert!(!first.contains("ambient-"), "{first}");
+    assert_eq!(step.display(), "workflow cargo-binstall-bootstrap amd64");
+    host.fake("curl", "exit 99");
+    host.fake("tar", "exit 99");
+    host.run_ok(&step);
+    assert_eq!(host.log(), first);
+}
+
+#[test]
+fn schema_v1_cargo_binstall_rejects_foreign_destination_before_resolution() {
+    let host = Host::new();
+    let destination = host.home.join(".cargo/bin/cargo-binstall");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, b"foreign").unwrap();
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o755)).unwrap();
+    host.logging_fake("curl");
+
+    assert!(!host
+        .run(&cargo_binstall_bootstrap_step(Architecture::Amd64))
+        .status
+        .success());
+    assert!(host.log().is_empty());
+    assert_eq!(fs::read(destination).unwrap(), b"foreign");
 }
 
 #[test]
@@ -5420,17 +5653,23 @@ fn schema_v1_tool_operation_display_forms_are_typed() {
     );
     assert_eq!(
         node_toolchain_step(operations::ToolMutationMode::EnsurePresent).display(),
-        "workflow node-toolchain ensure-present lts"
+        "workflow node-toolchain ensure-present lts amd64"
     );
     assert_eq!(
         python_toolchain_step("3.13").display(),
-        "workflow python-toolchain 3.13"
+        "workflow python-toolchain 3.13 amd64"
     );
 }
 
 #[test]
 fn schema_v1_manager_bootstraps_publish_fixed_executables_once() {
     let host = Host::new();
+    for manager in ["rustup", "fnm", "uv"] {
+        host.fake(
+            manager,
+            &format!("printf 'ambient-{manager}\\n' >>\"$LOG\""),
+        );
+    }
     host.fake(
         "curl",
         r#"{ printf 'curl'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
@@ -5477,6 +5716,7 @@ esac"#,
     assert!(host.home.join(".local/bin/uv").is_file());
     let log = host.log();
     assert_eq!(log.matches("curl <").count(), 3, "{log}");
+    assert!(!log.contains("ambient-"), "{log}");
     assert_eq!(steps[0].display(), "workflow rustup-bootstrap");
     assert_eq!(steps[1].display(), "workflow fnm-bootstrap");
     assert_eq!(steps[2].display(), "workflow uv-bootstrap");

@@ -37,6 +37,7 @@ fn complete_plan_lowers_every_action_to_fixed_workflows() {
     for expected in [
         "workflow apt-bootstrap-packages",
         "workflow rustup-bootstrap",
+        "workflow cargo-binstall-bootstrap amd64",
         "workflow fnm-bootstrap",
         "workflow uv-bootstrap",
         "workflow flatpak-ensure-flathub",
@@ -49,8 +50,8 @@ fn complete_plan_lowers_every_action_to_fixed_workflows() {
         "workflow apt-metadata-refresh",
         "workflow rust-toolchain ensure-present stable x86_64-unknown-linux-gnu",
         "workflow go-toolchain ensure-present latest amd64",
-        "workflow node-toolchain ensure-present lts",
-        "workflow python-toolchain 3.13",
+        "workflow node-toolchain ensure-present lts amd64",
+        "workflow python-toolchain 3.13 amd64",
         "workflow cargo-package-set ensure-present bat starship",
         "workflow npm-package-set ensure-present opencode-ai",
         "workflow binary-package obsidian ensure-present",
@@ -105,6 +106,8 @@ fn bootstrap_precedes_sources_and_consumers() {
     assert!(position("managed-apt-sources") < position("apt-metadata-refresh"));
     assert!(position("apt-metadata-refresh") < position("apt-packages gh"));
     assert!(position("fnm-bootstrap") < position("node-toolchain"));
+    assert!(position("cargo-binstall-bootstrap") < position("rust-toolchain"));
+    assert!(position("cargo-binstall-bootstrap") < position("cargo-package-set"));
     assert!(position("node-toolchain") < position("npm-package-set ensure-present"));
 }
 
