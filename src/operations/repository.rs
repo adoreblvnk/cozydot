@@ -924,24 +924,6 @@ fn reject_extra(object: &BTreeMap<String, StrictJson>, field: &str) -> Result<()
     Ok(())
 }
 
-pub fn source(host: &Host<'_>, destination: &str, contents: &str) -> Result<()> {
-    let destination = validate_destination(destination, SOURCES_DIRECTORY, ".list")?;
-    validate_source_contents(contents)?;
-    publish_bytes(
-        host,
-        &destination,
-        contents.as_bytes(),
-        "APT source publication",
-    )
-}
-
-pub fn key(host: &Host<'_>, url: &str, destination: &str) -> Result<()> {
-    validate_https_url(url)?;
-    let destination = validate_destination(destination, KEYRINGS_DIRECTORY, ".gpg")?;
-    let bytes = normalized_key(host, url)?;
-    publish_bytes(host, &destination, &bytes, "repository key publication")
-}
-
 pub(crate) fn publish_bytes(
     host: &Host<'_>,
     destination: &Path,
@@ -1139,28 +1121,6 @@ fn validate_destination(destination: &str, directory: &str, suffix: &str) -> Res
         bail!("destination must be a direct {suffix} file under {directory}");
     }
     Ok(path.to_owned())
-}
-
-fn validate_source_contents(contents: &str) -> Result<()> {
-    if contents.as_bytes().contains(&0)
-        || !contents.ends_with('\n')
-        || contents.lines().count() != 1
-        || contents
-            .lines()
-            .next()
-            .is_none_or(|line| line.trim().is_empty())
-    {
-        bail!("APT source contents must be exactly one non-empty generated line");
-    }
-    Ok(())
-}
-
-fn validate_https_url(value: &str) -> Result<()> {
-    let validated = HttpsUrl::parse(value).context("repository key URL is invalid")?;
-    if validated.as_str() != value {
-        bail!("repository key URL must be canonical HTTPS");
-    }
-    Ok(())
 }
 
 #[cfg(test)]

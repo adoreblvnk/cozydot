@@ -3,7 +3,6 @@ mod binary;
 mod cargo;
 mod cargo_binstall;
 mod desktop;
-mod direct;
 mod dotfiles;
 mod flatpak;
 mod fonts;
@@ -27,9 +26,6 @@ pub use cargo_binstall::CargoBinstallBootstrapOperation;
 pub use desktop::{
     DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, GnomeDockOperation,
     GnomeExtensionsOperation, GnomeRoundedCornersOperation,
-};
-pub use direct::{
-    DirectPackageFormat, DirectPackageMode, DirectPackageOperation, DirectPackageSelector,
 };
 pub use dotfiles::DotfilesOperation;
 pub use fonts::{NerdFontsMode, NerdFontsOperation};
@@ -59,38 +55,21 @@ const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    AptBootstrapPackages {
-        packages: Vec<String>,
-    },
+    AptBootstrapPackages { packages: Vec<String> },
     AptMetadataRefresh,
     AptRepository(AptRepositoryOperation),
     ManagedAptSources(ManagedAptSourcesOperation),
-    AptPackages {
-        packages: Vec<String>,
-    },
-    AptPurge {
-        packages: Vec<String>,
-    },
-    AptUpgrade {
-        policy: AptUpgradePolicy,
-    },
-    AptSource {
-        destination: String,
-        contents: String,
-    },
+    AptPackages { packages: Vec<String> },
+    AptPurge { packages: Vec<String> },
+    AptUpgrade { policy: AptUpgradePolicy },
     DockerGroup,
     DockerLocalLog(DockerLocalLogOperation),
     DesktopSetting(DesktopSettingOperation),
     BinaryPackage(BinaryPackageOperation),
-    DirectPackage(DirectPackageOperation),
     Dotfiles(DotfilesOperation),
     FlatpakEnsureFlathub,
-    FlatpakEnsureApps {
-        refs: Vec<String>,
-    },
-    FlatpakUpdateApps {
-        refs: Vec<String>,
-    },
+    FlatpakEnsureApps { refs: Vec<String> },
+    FlatpakUpdateApps { refs: Vec<String> },
     FnmBootstrap,
     EnsureAdmin(EnsureAdminOperation),
     GnomeExtensions(GnomeExtensionsOperation),
@@ -98,10 +77,6 @@ pub enum Operation {
     GnomeRoundedCorners(GnomeRoundedCornersOperation),
     GoToolchain(GoToolchainOperation),
     NerdFonts(NerdFontsOperation),
-    RepositoryKey {
-        url: String,
-        destination: String,
-    },
     RustupBootstrap,
     CargoBinstallBootstrap(CargoBinstallBootstrapOperation),
     RustToolchain(RustToolchainOperation),
@@ -147,14 +122,10 @@ impl Operation {
                 }
                 .into(),
             ],
-            Self::AptSource { destination, .. } => {
-                vec!["apt-source".into(), destination.clone()]
-            }
             Self::DockerGroup => vec!["docker-group".into()],
             Self::DockerLocalLog(operation) => operation.display_args(),
             Self::DesktopSetting(operation) => operation.display_args(),
             Self::BinaryPackage(package) => package.display_args(),
-            Self::DirectPackage(package) => package.display_args(),
             Self::Dotfiles(operation) => operation.display_args(),
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
             Self::FlatpakEnsureApps { refs } => std::iter::once("flatpak-ensure-apps".into())
@@ -170,9 +141,6 @@ impl Operation {
             Self::GnomeRoundedCorners(operation) => operation.display_args(),
             Self::GoToolchain(operation) => operation.display_args(),
             Self::NerdFonts(operation) => operation.display_args(),
-            Self::RepositoryKey { destination, .. } => {
-                vec!["repository-key".into(), destination.clone()]
-            }
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
             Self::CargoBinstallBootstrap(operation) => operation.display_args(),
             Self::RustToolchain(operation) => operation.display_args(),
@@ -224,10 +192,6 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<OperationOut
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptPurge { packages } => completed(apt::purge(&host, packages)),
         Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
-        Operation::AptSource {
-            destination,
-            contents,
-        } => completed(repository::source(&host, destination, contents)),
         Operation::DockerGroup => completed(integrations::docker_group(&host)),
         Operation::DockerLocalLog(operation) => {
             completed(integrations::docker_local_log(&host, operation))
@@ -236,7 +200,6 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<OperationOut
             completed(desktop::desktop_setting(&host, operation))
         }
         Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
-        Operation::DirectPackage(package) => completed(direct::execute(&host, package)),
         Operation::Dotfiles(operation) => completed(dotfiles::execute(&host, operation)),
         Operation::FlatpakEnsureFlathub => completed(flatpak::ensure_flathub(&host)),
         Operation::FlatpakEnsureApps { refs } => completed(flatpak::ensure_apps(&host, refs)),
@@ -250,9 +213,6 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<OperationOut
         }
         Operation::GoToolchain(operation) => completed(tools::execute_go(&host, operation)),
         Operation::NerdFonts(operation) => completed(fonts::execute(&host, operation)),
-        Operation::RepositoryKey { url, destination } => {
-            completed(repository::key(&host, url, destination))
-        }
         Operation::RustupBootstrap => completed(provisioning::rustup(&host)),
         Operation::CargoBinstallBootstrap(operation) => {
             completed(cargo_binstall::execute(&host, operation))

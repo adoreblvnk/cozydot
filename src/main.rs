@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use cozydot::{
-    config::v1::ConfigV1,
+    config::Config,
     init, planner,
     platform::Platform,
     runner::{execute, ProcessRunner},
@@ -29,11 +29,11 @@ fn main() -> Result<()> {
 fn apply() -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
-    let cfg = ConfigV1::load(&path)
+    let cfg = Config::load(&path)
         .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
-    let platform = Platform::detect(cfg.distro_request(), cfg.desktop_request())?;
-    let plan = planner::v1::plan(&cfg, &platform, &root.join("dotfiles"))?;
-    let steps = planner::lower_v1::lower(&plan)?;
+    let platform = Platform::detect()?;
+    let plan = planner::plan(&cfg, &platform, &root.join("dotfiles"))?;
+    let steps = planner::lower_neutral::lower(&plan)?;
     let mut runner = ProcessRunner {
         dry_run: std::env::var_os("COZYDOT_DRY_RUN").is_some(),
     };

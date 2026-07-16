@@ -1,8 +1,8 @@
 use cozydot::{
-    config::v1::ConfigV1,
-    planner::{lower_v1::lower, v1::plan},
+    config::Config,
+    planner::{lower_neutral::lower, plan},
     platform::Platform,
-    runner::Step,
+    runner::{Step, StepKind},
 };
 use std::path::Path;
 
@@ -24,7 +24,7 @@ fn platform(distro: &str, upstream: &str, desktop: &str) -> Platform {
 
 fn preset(name: &str, platform: &Platform) -> Vec<Step> {
     let path = format!("configs/{name}.yaml");
-    let config = ConfigV1::load(Path::new(&path)).unwrap();
+    let config = Config::load(Path::new(&path)).unwrap();
     let plan = plan(&config, platform, Path::new("/dotfiles")).unwrap();
     lower(&plan).unwrap()
 }
@@ -32,13 +32,14 @@ fn preset(name: &str, platform: &Platform) -> Vec<Step> {
 fn text(steps: &[Step]) -> String {
     steps
         .iter()
+        .filter(|step| matches!(step.kind(), StepKind::Operation { .. }))
         .map(Step::display)
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 #[test]
-fn every_preset_is_schema_v1_and_lowers_on_ubuntu_and_debian() {
+fn every_preset_uses_version_1_0_0_and_lowers_on_ubuntu_and_debian() {
     for name in ["default", "cli", "full", "vm"] {
         for resolved in [
             platform("ubuntu", "ubuntu", "gnome"),

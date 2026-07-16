@@ -443,8 +443,8 @@ fn platform_validation_rechecks_mutated_and_directly_deserialized_models() {
     mutated.tools.as_mut().unwrap().rust = Some("not valid".into());
     reject_platform(&mutated, &target, "tools.rust");
 
-    let direct: Config = serde_yaml::from_str("version: 1.0.0\ntools: {}").unwrap();
-    reject_platform(&direct, &target, "tools");
+    let deserialized: Config = serde_yaml::from_str("version: 1.0.0\ntools: {}").unwrap();
+    reject_platform(&deserialized, &target, "tools");
 }
 
 #[test]
