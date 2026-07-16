@@ -155,7 +155,7 @@ impl ManagedAptSources {
 }
 
 impl Platform {
-    pub fn detect(_config_distro: &str, _config_desktop: &str) -> Result<Self> {
+    pub fn detect() -> Result<Self> {
         let os = parse_os_release(Path::new("/etc/os-release"))?;
         let uname = Command::new("uname")
             .arg("-m")

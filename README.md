@@ -20,7 +20,7 @@ $EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
 cozydot apply
 ```
 
-`init` materializes the schema-v1 defaults embedded at build time into the XDG config directory. It needs no repository checkout, network, release archive, or cache. Files unchanged since cozydot last installed them are refreshed; modified, unmanaged, and obsolete files are preserved. `apply` validates the complete file and resolved platform before side effects, then executes the typed plan in dependency order.
+`init` materializes the version `1.0.0` defaults embedded at build time into the XDG config directory. It needs no repository checkout, network, release archive, or cache. Files unchanged since cozydot last installed them are refreshed; modified, unmanaged, and obsolete files are preserved. `apply` validates the complete file and resolved platform before side effects, then executes the typed plan in dependency order.
 
 The schema and field reference is in [`docs/config-schema-v1.md`](docs/config-schema-v1.md). Managers, lock paths, shell commands, profiles, and plugins are implementation details and cannot be selected from YAML.
 

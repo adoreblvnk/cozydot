@@ -1,50 +1,48 @@
-schema: 1
+version: 1.0.0
 
 system:
-  distro: auto
-  desktop: auto
   ensure_admin: true
   apt:
-    sources: preserve
-    unattended_upgrades: false
+    sources:
+      mode: preserve
+    unattended_upgrades: disabled
   ubuntu:
-    snap: false
-    codecs: true
+    snap: disabled
+    codecs: installed
 
 packages:
   apt:
-    - bash-completion
-    - build-essential
-    - cmake
-    - curl
-    - ffmpeg
-    - git
-    - imagemagick
-    - openssh-server
-    - pandoc
-    - pass
-    - trash-cli
-    - unzip
-    - vim
-    - vlc
-    - xz-utils
-  repositories:
-    - name: github-cli
-      key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
-      source:
+    install:
+      - bash-completion
+      - build-essential
+      - cmake
+      - curl
+      - ffmpeg
+      - git
+      - imagemagick
+      - openssh-server
+      - pandoc
+      - pass
+      - trash-cli
+      - unzip
+      - vim
+      - vlc
+      - xz-utils
+    repositories:
+      - name: github-cli
+        key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
         urls:
           default: https://cli.github.com/packages
         suite: stable
         components: [main]
-      packages: [gh]
-    - name: vscode
-      key: https://packages.microsoft.com/keys/microsoft.asc
-      source:
+        packages: [gh]
+      - name: vscode
+        key: https://packages.microsoft.com/keys/microsoft.asc
         urls:
           default: https://packages.microsoft.com/repos/code
         suite: stable
         components: [main]
-      packages: [code]
+        packages: [code]
   flatpak:
     - com.bitwarden.desktop
     - com.discordapp.Discord
@@ -117,4 +115,3 @@ updates:
   packages:
     cargo: true
     npm: true
-    direct: false

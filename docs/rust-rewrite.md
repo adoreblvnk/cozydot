@@ -1,6 +1,6 @@
 # Rust rewrite
 
-cozydot is a Rust binary with one strict schema-v1 configuration. The implementation is split into CLI parsing, recursive typed validation, platform resolution, domain planning, fixed-operation lowering, and process execution.
+cozydot is a Rust binary with one strict version `1.0.0` configuration. The implementation is split into CLI parsing, recursive typed validation, platform resolution, domain planning, fixed-operation lowering, and process execution.
 
 ## Compatibility
 
@@ -23,7 +23,7 @@ The typed planner and operations cover:
 - per-user Flathub applications, Rustup/Rust, official Go archives, FNM/Node, UV/Python, Cargo, NPM, direct Debian/AppImage packages, and Nerd Fonts;
 - one backup-before-Stow policy, existing-product-only Docker/VirtualBox/VS Code integrations, GNOME/Cinnamon settings, GNOME extensions, dock, and rounded corners.
 
-Config-derived values are passed as arguments to typed fixed operations. GitHub, Go, GNOME, NPM, and Docker state is parsed by internal Rust helpers; `yq` and generated shell source are not used by schema-v1 lowering.
+Config-derived values are passed as arguments to typed fixed operations. GitHub, Go, GNOME, NPM, and Docker state is parsed by internal Rust helpers; `yq` and generated shell source are not used by version `1.0.0` lowering.
 
 ## Packaging
 

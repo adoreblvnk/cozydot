@@ -1,34 +1,33 @@
-schema: 1
+version: 1.0.0
 
 system:
-  distro: auto
-  desktop: auto
   ensure_admin: true
   apt:
-    sources: preserve
-    unattended_upgrades: false
+    sources:
+      mode: preserve
+    unattended_upgrades: disabled
   ubuntu:
-    snap: false
+    snap: disabled
 
 packages:
   apt:
-    - bash-completion
-    - build-essential
-    - curl
-    - git
-    - openssh-server
-    - unzip
-    - vim
-    - xz-utils
-  repositories:
-    - name: vscode
-      key: https://packages.microsoft.com/keys/microsoft.asc
-      source:
+    install:
+      - bash-completion
+      - build-essential
+      - curl
+      - git
+      - openssh-server
+      - unzip
+      - vim
+      - xz-utils
+    repositories:
+      - name: vscode
+        key: https://packages.microsoft.com/keys/microsoft.asc
         urls:
           default: https://packages.microsoft.com/repos/code
         suite: stable
         components: [main]
-      packages: [code]
+        packages: [code]
   cargo: [bat, bottom, starship]
   npm: [opencode-ai]
 
