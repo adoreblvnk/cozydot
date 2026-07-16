@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::{
-    repository::{publish_bytes, sync_parent},
+    privileged_file::{publish_bytes, sync_parent},
     Host,
 };
 
