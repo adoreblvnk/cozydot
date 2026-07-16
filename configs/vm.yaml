@@ -1,25 +1,48 @@
+# Full Cozydot VM configuration version 1.0.0.
+# Derived from docs/examples/full.yaml for a Debian 13 or Ubuntu GNOME amd64 VM.
+# VirtualBox installation and host-group integration are intentionally omitted.
 version: 1.0.0
 
 system:
+  require:
+    distros: [ubuntu, debian]
+    desktops: [gnome]
   ensure_admin: true
   apt:
     sources:
-      mode: preserve
-    unattended_upgrades: disabled
+      mode: managed # preserve
+      components:
+        ubuntu: [main, restricted, universe, multiverse]
+        debian: [main, contrib, non-free, non-free-firmware]
+    unattended_upgrades: disabled # enabled
   ubuntu:
-    snap: disabled
+    snap: disabled # enabled
+    codecs: installed
 
 packages:
   apt:
     install:
       - bash-completion
       - build-essential
+      - cmake
       - curl
+      - default-jdk
+      - ffmpeg
+      - figlet
       - git
+      - imagemagick
+      - lolcat
       - openssh-server
+      - pandoc
+      - pass
+      - pinentry-tty
+      - trash-cli
+      - ttf-mscorefonts-installer
       - unzip
       - vim
+      - vlc
       - xz-utils
+
     repositories:
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
@@ -28,35 +51,99 @@ packages:
         suite: stable
         components: [main]
         packages: [code]
-  cargo: [bat, bottom, starship]
-  npm: [opencode-ai]
+
+      - name: wezterm
+        key: https://apt.fury.io/wez/gpg.key
+        urls:
+          default: https://apt.fury.io/wez/
+        suite: "*"
+        components: ["*"]
+        packages: [wezterm-nightly]
+
+  flatpak:
+    - com.bitwarden.desktop
+
+  cargo:
+    - bat
+    - fd-find
+    - starship
+    - tealdeer
+
+  npm:
+    - opencode-ai
+
+  binaries:
+    - name: fastfetch
+      format: deb
+      commands: [fastfetch]
+      source:
+        provider: github
+        repository: fastfetch-cli/fastfetch
+        assets:
+          amd64: '^fastfetch-linux-amd64\.deb$'
+          arm64: '^fastfetch-linux-aarch64\.deb$'
+          arm32: '^fastfetch-linux-armv7l.*\.deb$'
+          riscv64: '^fastfetch-linux-riscv64.*\.deb$'
+
+    - name: git-credential-manager
+      format: deb
+      commands: [git-credential-manager]
+      source:
+        provider: github
+        repository: git-ecosystem/git-credential-manager
+        assets:
+          amd64: '^gcm-linux-x64-.*\.deb$'
+          arm64: '^gcm-linux-arm64-.*\.deb$'
 
 tools:
-  rust: stable
-  go: latest
-  node: lts
+  rust: stable # beta, nightly, nightly-YYYY-MM-DD, or numeric version
+  go: latest # or numeric version
+  node: latest # lts or numeric version
   python: "3.13"
 
 fonts:
-  nerd: [GeistMono]
+  nerd:
+    - GeistMono
 
 dotfiles:
-  packages: [bash, bin, bat, bottom, fastfetch, starship, vscode]
+  packages:
+    - bash
+    - bin
+    - bat
+    - bottom
+    - fastfetch
+    - starship
+    - vscode
+    - wezterm
+    - yazi
 
 integrations:
   vscode:
-    extensions: [catppuccin.catppuccin-vsc]
+    extensions:
+      - catppuccin.catppuccin-vsc
 
 desktop:
-  theme: dark
+  theme: dark # light
+  terminal: wezterm
   idle:
-    timeout: 15m
+    timeout: 15m # 0s disables the timeout; s, m, and h units are accepted
     dim: false
   gnome:
     extensions:
       - blur-my-shell@aunetx
       - netspeedsimplified@prateekmedia.extension
+    dock: true
     rounded_corners: true
 
 updates:
-  apt: standard
+  apt: full # standard
+  flatpak: true
+  tools:
+    rust: true
+    go: true
+    node: true
+  packages:
+    cargo: true
+    npm: true
+    binaries: true
+  fonts: true

@@ -23,7 +23,11 @@ fn platform(distro: &str, upstream: &str, desktop: &str) -> Platform {
 }
 
 fn preset(name: &str, platform: &Platform) -> Vec<Step> {
-    let path = format!("configs/{name}.yaml");
+    let path = if name == "full" {
+        "docs/examples/full.yaml".to_owned()
+    } else {
+        format!("configs/{name}.yaml")
+    };
     let config = Config::load(Path::new(&path)).unwrap();
     let plan = plan(&config, platform, Path::new("/dotfiles")).unwrap();
     lower(&plan).unwrap()
@@ -52,12 +56,18 @@ fn every_preset_uses_version_1_0_0_and_lowers_on_ubuntu_and_debian() {
 }
 
 #[test]
-fn presets_do_not_implicitly_install_or_configure_docker_or_virtualbox() {
-    for name in ["default", "cli", "full", "vm"] {
-        let plan = text(&preset(name, &platform("ubuntu", "ubuntu", "gnome")));
+fn only_full_explicitly_configures_existing_docker_and_virtualbox_products() {
+    let resolved = platform("ubuntu", "ubuntu", "gnome");
+    for name in ["default", "cli", "vm"] {
+        let plan = text(&preset(name, &resolved));
         for product in ["docker", "virtualbox"] {
             assert!(!plan.contains(product), "{name}: {plan}");
         }
+    }
+
+    let full = text(&preset("full", &resolved));
+    for expected in ["docker-group", "docker-local-log 10m", "virtualbox-group"] {
+        assert!(full.contains(expected), "full: missing {expected}: {full}");
     }
 }
 
@@ -72,10 +82,10 @@ fn cli_preset_has_no_desktop_flatpak_or_vscode_actions() {
 }
 
 #[test]
-fn vm_omits_terminal_and_dock_but_keeps_declared_desktop_controls() {
+fn vm_preserves_full_desktop_controls() {
     let plan = text(&preset("vm", &platform("ubuntu", "ubuntu", "gnome")));
-    assert!(!plan.contains(" terminal "), "{plan}");
-    assert!(!plan.contains("gnome-dock"), "{plan}");
+    assert!(plan.contains(" terminal wezterm"), "{plan}");
+    assert!(plan.contains("gnome-dock"), "{plan}");
     assert!(plan.contains("desktop-setting gnome theme dark"), "{plan}");
     assert!(plan.contains("gnome-rounded-corners"), "{plan}");
 }

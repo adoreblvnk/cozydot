@@ -3,6 +3,7 @@ use crate::{
     platform::{Architecture, Platform},
 };
 use anyhow::{bail, Context, Result};
+use regex::Regex;
 use serde::{de, Deserialize, Deserializer};
 use serde_yaml::Value;
 use std::{
@@ -827,9 +828,7 @@ fn selected_repository_codename(
     platform: &Platform,
     distro: Distro,
 ) -> Option<&str> {
-    if key == DistroMapKey::Default {
-        None
-    } else if key == DistroMapKey::from_distro(distro) {
+    if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
         Some(&platform.distro_codename)
     } else {
         Some(&platform.base_codename)
@@ -895,8 +894,8 @@ pub enum BinarySource {
         assets: AssetMap,
     },
     Url {
-        urls: ArchitectureUrls,
-        sha256: ArchitectureHashes,
+        urls: Box<ArchitectureUrls>,
+        sha256: Box<ArchitectureHashes>,
     },
 }
 
@@ -954,7 +953,7 @@ impl BinarySource {
 pub(crate) enum ResolvedNativeBinary<'a> {
     Github {
         repository: &'a str,
-        selector: &'a AssetSelector,
+        selector: &'a str,
     },
     Url {
         url: &'a HttpsUrl,
@@ -965,10 +964,10 @@ pub(crate) enum ResolvedNativeBinary<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetMap {
-    pub amd64: Option<AssetSelector>,
-    pub arm64: Option<AssetSelector>,
-    pub arm32: Option<AssetSelector>,
-    pub riscv64: Option<AssetSelector>,
+    pub amd64: Option<String>,
+    pub arm64: Option<String>,
+    pub arm32: Option<String>,
+    pub riscv64: Option<String>,
 }
 
 impl AssetMap {
@@ -978,13 +977,13 @@ impl AssetMap {
         }
         for (architecture, selector) in self.values() {
             if let Some(selector) = selector {
-                selector.validate(&format!("{path}.{architecture}"))?;
+                validate_asset_regex(selector, &format!("{path}.{architecture}"))?;
             }
         }
         Ok(())
     }
 
-    fn values(&self) -> [(&'static str, Option<&AssetSelector>); 4] {
+    fn values(&self) -> [(&'static str, Option<&String>); 4] {
         [
             ("amd64", self.amd64.as_ref()),
             ("arm64", self.arm64.as_ref()),
@@ -993,37 +992,22 @@ impl AssetMap {
         ]
     }
 
-    fn get(&self, architecture: Architecture) -> Option<&AssetSelector> {
+    fn get(&self, architecture: Architecture) -> Option<&str> {
         match architecture {
-            Architecture::Amd64 => self.amd64.as_ref(),
-            Architecture::Arm64 => self.arm64.as_ref(),
-            Architecture::Arm32 => self.arm32.as_ref(),
-            Architecture::Riscv64 => self.riscv64.as_ref(),
+            Architecture::Amd64 => self.amd64.as_deref(),
+            Architecture::Arm64 => self.arm64.as_deref(),
+            Architecture::Arm32 => self.arm32.as_deref(),
+            Architecture::Riscv64 => self.riscv64.as_deref(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AssetSelector {
-    #[serde(deserialize_with = "deserialize_string")]
-    pub include: String,
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
-    pub exclude: Option<Vec<String>>,
-    pub sha256: Option<Sha256>,
-}
-
-impl AssetSelector {
-    fn validate(&self, path: &str) -> Result<()> {
-        validate_wildcard(&self.include, &format!("{path}.include"))?;
-        if let Some(exclude) = &self.exclude {
-            validate_string_values(exclude, &format!("{path}.exclude"), validate_wildcard)?;
-        }
-        if let Some(sha256) = &self.sha256 {
-            sha256.validate(&format!("{path}.sha256"))?;
-        }
-        Ok(())
+fn validate_asset_regex(value: &str, path: &str) -> Result<()> {
+    if value.is_empty() || !value.starts_with('^') || !value.ends_with('$') {
+        bail!("{path}: asset regex must be non-empty and anchored with '^' and '$'");
     }
+    Regex::new(value).with_context(|| format!("{path}: invalid asset regex {value:?}"))?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2014,17 +1998,6 @@ fn validate_github_repository(value: &str, path: &str) -> Result<()> {
         bail!(
             "{path}: invalid GitHub repository {value:?}; must be an owner/repository coordinate"
         );
-    }
-    Ok(())
-}
-
-fn validate_wildcard(value: &str, path: &str) -> Result<()> {
-    if value.is_empty()
-        || !value.contains(['*', '?'])
-        || value.contains(['/', '\\', '[', ']', '{', '}', '$', '`'])
-        || value.chars().any(char::is_control)
-    {
-        bail!("{path}: invalid asset selector {value:?}; must be a whole-filename wildcard using only '*' and '?' operators");
     }
     Ok(())
 }

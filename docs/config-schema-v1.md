@@ -58,7 +58,7 @@ All sections except `version` are optional. A present section must contain at le
 - Scalar, sequence, and mapping shapes are exact; no shorthand alternatives exist.
 - YAML booleans must be actual `true` or `false` values.
 - All user strings are literal. Substitution-looking text remains literal and is rejected where it violates the field grammar.
-- Every identifier, URL, duration, version, package name, repository coordinate, wildcard selector, and cross-field relationship is validated before platform mutation.
+- Every identifier, URL, duration, version, package name, repository coordinate, asset regex, and cross-field relationship is validated before platform mutation.
 - Platform-independent validation runs while loading. Platform-aware validation runs once after detection and before planning.
 - Errors contain the complete YAML field path and the invalid value or missing requirement.
 
@@ -76,7 +76,7 @@ All sections except `version` are optional. A present section must contain at le
 - **Durations:** a non-negative decimal integer followed by exactly one lowercase unit `s`, `m`, or `h`. **Docker sizes:** a positive decimal integer followed by exactly one lowercase unit `k`, `m`, or `g`.
 - **Rust selectors:** `stable`, `beta`, `nightly`, valid `nightly-YYYY-MM-DD`, or two/three numeric components. **Go:** `latest` or two/three numeric components. **Node:** `lts`, `latest`, or one to three numeric components. **Python:** two/three numeric components.
 - **GitHub coordinates:** exactly `owner/repository`; owners start/end alphanumeric and otherwise contain alphanumerics or `-`, while repository names contain alphanumerics, `-`, `_`, or `.` and are not solely dots.
-- **Asset selectors:** non-empty whole-filename patterns that contain at least one `*` or `?`; those are the only operators. Paths, character classes, braces, control characters, backticks, `$`, and substitutions are invalid.
+- **Asset regexes:** non-empty Rust `regex` patterns anchored with leading `^` and trailing `$`. Patterns are compiled during configuration validation and matched case-sensitively against the complete GitHub asset filename.
 - **SHA-256:** exactly 64 lowercase hexadecimal characters. HTTPS URLs use canonical parsed URL values with a valid host and no credentials or fragment.
 
 ## 6. `system`
@@ -110,7 +110,7 @@ system:
 - Any present backend-neutral `desktop.theme`, `desktop.terminal`, or `desktop.idle` intent requires the resolved desktop to be `gnome` or `cinnamon`. A resolved `none` or unsupported desktop is rejected during platform-aware validation; desktop intent is never silently skipped or deferred to lowering.
 - Cozydot retains detected distro, distro family, upstream distro, detected codename, and upstream codename as separate internal facts.
 - Repository URL selection checks exact distro, then upstream distro, then `default`.
-- Repository `suite: system` resolves to the codename belonging to the selected exact-distro or upstream-distro URL key. It is invalid when URL selection reaches `default`, because `default` carries no repository-family identity. This avoids using a Linux Mint or Pop!_OS codename against an Ubuntu repository.
+- Repository `suite: system` resolves to the exact distro codename for exact-distro and `default` URL keys, or the base codename for an upstream-family URL key.
 
 ### 6.2 Administrative membership
 
@@ -205,7 +205,7 @@ Repository fields:
 - The suite/components form requires both fields and rejects `path`.
 - The path form requires a safe relative path ending in `/` and rejects `suite` and `components`.
 - Suite/component token grammar accepts normal APT tokens plus the complete literal `*`. The asterisk is data, not wildcard expansion, and is invalid when embedded in another token.
-- `suite: system` is a reserved semantic value resolved from an exact-distro or upstream-distro URL key; it is invalid with a selected `default` URL.
+- `suite: system` is a reserved semantic value resolved from the detected host: exact distro codename for exact-distro and `default` URL keys, or base codename for an upstream-family key.
 - `packages`: non-empty package list installed after all configured repositories are published and one shared APT metadata refresh succeeds.
 - Raw `deb` lines, architecture interpolation, key paths, source filenames, pinning snippets, and arbitrary options remain invalid.
 - Cozydot always emits the detected native architecture and its derived `signed-by` path.
@@ -239,9 +239,8 @@ Canonical GitHub form:
     provider: github
     repository: obsidianmd/obsidian-releases
     assets:
-      amd64:
-        include: "Obsidian-*.AppImage"
-        exclude: ["Obsidian-*-arm64.AppImage"]
+      amd64: '^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$'
+      arm64: '^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$'
 ```
 
 Fields:
@@ -255,13 +254,11 @@ GitHub provider:
 
 - `repository`: validated `owner/repository` coordinate.
 - Every GitHub source resolves the repository’s latest non-prerelease release. The YAML has no release field, tag pin, or alternate release-selection mode.
-- `assets`: non-empty architecture map using canonical `amd64`, `arm64`, `arm32`, and `riscv64` keys.
-- Every selected architecture contains required `include` and optional `exclude` and `sha256` fields.
-- Omitted `exclude` means no exclusions; an empty exclusion sequence is invalid.
-- Include/exclude patterns are anchored whole-filename patterns with only `*` and `?` operators.
-- Selection requires exactly one remaining asset.
-- `sha256`, when supplied, must be exactly 64 lowercase hexadecimal characters and must match before installation.
-- If GitHub publishes a SHA-256 digest for the selected asset, Cozydot verifies it even when the YAML omits `sha256`.
+- `assets`: non-empty architecture-to-regex map using canonical `amd64`, `arm64`, `arm32`, and `riscv64` keys. Each architecture maps directly to one string; selector objects and separate include/exclude fields do not exist.
+- Patterns use the Rust `regex` syntax, must start with `^` and end with `$`, and are compiled during configuration validation.
+- Regexes match the asset filename, not its URL. Matching follows Rust `regex` semantics and is case-sensitive unless the pattern explicitly enables a different mode.
+- Selection requires exactly one matching asset; zero or multiple matches fail before download.
+- If GitHub publishes a SHA-256 digest for the selected asset, Cozydot verifies it. The GitHub YAML source does not expose a configured checksum field.
 
 Fixed-URL provider:
 
@@ -468,5 +465,4 @@ No planner or lowerer may reorder operations across these dependency boundaries 
 ## 17. Examples
 
 - [`config-v1-beginner.yaml`](examples/config-v1-beginner.yaml) is a concise starting point.
-- [`config-v1-full.yaml`](examples/config-v1-full.yaml) is a realistic Ubuntu/Debian 13 GNOME workstation.
-- [`config-v1-exhaustive.yaml`](examples/config-v1-exhaustive.yaml) demonstrates unusual and mutually exclusive forms. It is a parser example, not a recommended workstation configuration.
+- [`full.yaml`](examples/full.yaml) is the single practical comprehensive reference; comments list scalar alternatives that cannot coexist in one valid document.

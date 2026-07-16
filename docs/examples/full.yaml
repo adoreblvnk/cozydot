@@ -1,7 +1,7 @@
-# Comprehensive Cozydot configuration version 1.0.0 workstation example.
-# Mandatory validated reference hosts: Ubuntu amd64 with GNOME and Debian 13 amd64 with GNOME.
-# These are acceptance targets, not exclusive architecture/release constraints.
-# This is a realistic full configuration, not an exhaustive parser fixture.
+# Full Cozydot configuration version 1.0.0 reference.
+# This single valid document demonstrates a complete practical configuration.
+# Comments name scalar alternatives that cannot coexist in one valid document.
+# Validated reference hosts: Ubuntu amd64 GNOME and Debian 13 amd64 GNOME.
 version: 1.0.0
 
 system:
@@ -11,13 +11,13 @@ system:
   ensure_admin: true
   apt:
     sources:
-      mode: managed
+      mode: managed # preserve
       components:
         ubuntu: [main, restricted, universe, multiverse]
         debian: [main, contrib, non-free, non-free-firmware]
-    unattended_upgrades: disabled
+    unattended_upgrades: disabled # enabled
   ubuntu:
-    snap: disabled
+    snap: disabled # enabled
     codecs: installed
 
 packages:
@@ -71,8 +71,7 @@ packages:
       - name: debian-griffo
         key: https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc
         urls:
-          ubuntu: https://debian.griffo.io/apt
-          debian: https://debian.griffo.io/apt
+          default: https://debian.griffo.io/apt
         suite: system
         components: [main]
         packages: [eza, fzf, yazi, zoxide]
@@ -104,8 +103,7 @@ packages:
       - name: virtualbox
         key: https://www.virtualbox.org/download/oracle_vbox_2016.asc
         urls:
-          ubuntu: https://download.virtualbox.org/virtualbox/debian
-          debian: https://download.virtualbox.org/virtualbox/debian
+          default: https://download.virtualbox.org/virtualbox/debian
         suite: system
         components: [contrib]
         packages: [virtualbox-7.1]
@@ -157,10 +155,8 @@ packages:
         provider: github
         repository: jgraph/drawio-desktop
         assets:
-          amd64:
-            include: "drawio-amd64-*.deb"
-          arm64:
-            include: "drawio-arm64-*.deb"
+          amd64: '^drawio-amd64-.*\.deb$'
+          arm64: '^drawio-arm64-.*\.deb$'
 
     - name: fastfetch
       format: deb
@@ -169,16 +165,10 @@ packages:
         provider: github
         repository: fastfetch-cli/fastfetch
         assets:
-          amd64:
-            include: "fastfetch-linux-amd64*.deb"
-            exclude: ["*-polyfilled.deb"]
-          arm64:
-            include: "fastfetch-linux-aarch64*.deb"
-            exclude: ["*-polyfilled.deb"]
-          arm32:
-            include: "fastfetch-linux-armv7l*.deb"
-          riscv64:
-            include: "fastfetch-linux-riscv64*.deb"
+          amd64: '^fastfetch-linux-amd64\.deb$'
+          arm64: '^fastfetch-linux-aarch64\.deb$'
+          arm32: '^fastfetch-linux-armv7l.*\.deb$'
+          riscv64: '^fastfetch-linux-riscv64.*\.deb$'
 
     - name: git-credential-manager
       format: deb
@@ -187,10 +177,8 @@ packages:
         provider: github
         repository: git-ecosystem/git-credential-manager
         assets:
-          amd64:
-            include: "gcm-linux-x64-*.deb"
-          arm64:
-            include: "gcm-linux-arm64-*.deb"
+          amd64: '^gcm-linux-x64-.*\.deb$'
+          arm64: '^gcm-linux-arm64-.*\.deb$'
 
     - name: obsidian
       format: appimage
@@ -199,11 +187,8 @@ packages:
         provider: github
         repository: obsidianmd/obsidian-releases
         assets:
-          amd64:
-            include: "Obsidian-*.AppImage"
-            exclude: ["Obsidian-*-arm64.AppImage"]
-          arm64:
-            include: "Obsidian-*-arm64.AppImage"
+          amd64: '^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$'
+          arm64: '^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$'
 
     - name: zen-browser
       format: appimage
@@ -212,15 +197,13 @@ packages:
         provider: github
         repository: zen-browser/desktop
         assets:
-          amd64:
-            include: "zen-x86_6?.AppImage"
-          arm64:
-            include: "zen-aarch6?.AppImage"
+          amd64: '^zen-x86_6[0-9]\.AppImage$'
+          arm64: '^zen-aarch6[0-9]\.AppImage$'
 
 tools:
-  rust: stable
-  go: latest
-  node: latest
+  rust: stable # beta, nightly, nightly-YYYY-MM-DD, or numeric version
+  go: latest # or numeric version
+  node: latest # lts or numeric version
   python: "3.13"
 
 fonts:
@@ -269,10 +252,10 @@ integrations:
       - yzhang.markdown-all-in-one
 
 desktop:
-  theme: dark
+  theme: dark # light
   terminal: wezterm
   idle:
-    timeout: 15m
+    timeout: 15m # 0s disables the timeout; s, m, and h units are accepted
     dim: false
   gnome:
     extensions:
@@ -282,7 +265,7 @@ desktop:
     rounded_corners: true
 
 updates:
-  apt: full
+  apt: full # standard
   flatpak: true
   tools:
     rust: true

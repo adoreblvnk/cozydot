@@ -1,6 +1,7 @@
 use super::{managed_state::ManagedState, Host, TempPath};
 use crate::{domain::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -45,28 +46,18 @@ impl GithubRepository {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BinaryPackageSelector {
-    include: String,
-    excludes: Vec<String>,
+    pattern: String,
 }
 impl BinaryPackageSelector {
-    pub fn new(include: impl Into<String>, excludes: Vec<String>) -> Result<Self> {
+    pub fn new(pattern: impl Into<String>) -> Result<Self> {
         let value = Self {
-            include: include.into(),
-            excludes,
+            pattern: pattern.into(),
         };
         value.validate()?;
         Ok(value)
     }
     fn validate(&self) -> Result<()> {
-        validate_wildcard(&self.include, "include selector")?;
-        let mut seen = HashSet::new();
-        for value in &self.excludes {
-            validate_wildcard(value, "exclude selector")?;
-            if !seen.insert(value) {
-                bail!("binary package exclude selectors must be unique");
-            }
-        }
-        Ok(())
+        validate_asset_regex(&self.pattern)
     }
 }
 
@@ -224,8 +215,7 @@ struct Declaration {
 enum SourceDeclaration {
     Github {
         repository: String,
-        include: String,
-        excludes: Vec<String>,
+        pattern: String,
         sha256: Option<String>,
     },
     Url {
@@ -441,8 +431,7 @@ fn declaration(operation: &BinaryPackageOperation) -> Declaration {
             sha256,
         } => SourceDeclaration::Github {
             repository: repository.0.clone(),
-            include: selector.include.clone(),
-            excludes: selector.excludes.clone(),
+            pattern: selector.pattern.clone(),
             sha256: sha256.map(BinarySha256::as_hex),
         },
         BinarySourceOperation::ChecksummedUrl { url, sha256 } => SourceDeclaration::Url {
@@ -505,12 +494,11 @@ fn validate_declaration(stored: &Declaration) -> Result<()> {
     let source = match &stored.source {
         SourceDeclaration::Github {
             repository,
-            include,
-            excludes,
+            pattern,
             sha256,
         } => BinarySourceOperation::GithubLatest {
             repository: GithubRepository::parse(repository)?,
-            selector: BinaryPackageSelector::new(include, excludes.clone())?,
+            selector: BinaryPackageSelector::new(pattern)?,
             sha256: sha256.as_deref().map(BinarySha256::parse).transpose()?,
         },
         SourceDeclaration::Url { url, sha256 } => BinarySourceOperation::ChecksummedUrl {
@@ -554,16 +542,10 @@ fn validate_resolved_for_declaration(value: &Resolved, declaration: &Declaration
     validate_resolved(value)?;
     match &declaration.source {
         SourceDeclaration::Github {
-            include,
-            excludes,
-            sha256,
-            ..
+            pattern, sha256, ..
         } => {
             if value.tag.is_none()
-                || !wildcard_match(include, &value.asset_name)
-                || excludes
-                    .iter()
-                    .any(|pattern| wildcard_match(pattern, &value.asset_name))
+                || !regex_match(pattern, &value.asset_name)?
                 || sha256
                     .as_ref()
                     .is_some_and(|declared| value.effective_sha256.as_ref() != Some(declared))
@@ -667,15 +649,10 @@ fn select_asset(
     for (index, value) in assets.iter().enumerate() {
         named.push((index, value, parse_asset_name(value, index)?));
     }
+    let pattern = Regex::new(&selector.pattern).context("compile binary asset regex")?;
     let matches = named
         .into_iter()
-        .filter(|(_, _, name)| {
-            wildcard_match(&selector.include, name)
-                && !selector
-                    .excludes
-                    .iter()
-                    .any(|pattern| wildcard_match(pattern, name))
-        })
+        .filter(|(_, _, name)| pattern.is_match(name))
         .collect::<Vec<_>>();
     if matches.len() != 1 {
         bail!(
@@ -869,10 +846,17 @@ fn preflight_deb(
         .unwrap_or(text)
         .split('\n')
         .collect::<Vec<_>>();
+    let package = lines
+        .first()
+        .and_then(|line| line.strip_prefix("Package: "));
+    let architecture = lines
+        .get(1)
+        .and_then(|line| line.strip_prefix("Architecture: "));
     if lines.len() != 2
-        || !valid_debian_package(lines[0])
-        || lines[1].is_empty()
-        || lines[1] != "all" && lines[1] != operation.architecture.debian()
+        || !package.is_some_and(valid_debian_package)
+        || !architecture.is_some_and(|architecture| {
+            architecture == "all" || architecture == operation.architecture.debian()
+        })
     {
         bail!("dpkg-deb Package/Architecture output is malformed or does not match native architecture");
     }
@@ -1344,14 +1328,11 @@ fn valid_debian_package(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"+.-".contains(&b))
 }
-fn validate_wildcard(value: &str, field: &str) -> Result<()> {
-    if value.is_empty()
-        || !value.contains(['*', '?'])
-        || value.contains(['/', '\\', '[', ']', '{', '}', '$', '(', ')', '`'])
-        || value.chars().any(char::is_control)
-    {
-        bail!("binary package {field} must be an anchored filename wildcard using only '*' and '?' operators");
+fn validate_asset_regex(value: &str) -> Result<()> {
+    if value.is_empty() || !value.starts_with('^') || !value.ends_with('$') {
+        bail!("binary package asset regex must be non-empty and anchored with '^' and '$'");
     }
+    Regex::new(value).with_context(|| format!("invalid binary package asset regex {value:?}"))?;
     Ok(())
 }
 fn validate_asset_name(value: &str) -> Result<()> {
@@ -1366,29 +1347,8 @@ fn valid_asset_name(value: &str) -> bool {
         && !value.contains(['/', '\\', '\0'])
         && !value.chars().any(char::is_control)
 }
-fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let text = text.chars().collect::<Vec<_>>();
-    let mut previous = vec![false; text.len() + 1];
-    previous[0] = true;
-    for token in pattern.chars() {
-        let mut current = vec![false; text.len() + 1];
-        match token {
-            '*' => {
-                current[0] = previous[0];
-                for i in 1..=text.len() {
-                    current[i] = previous[i] || current[i - 1];
-                }
-            }
-            '?' => current[1..].copy_from_slice(&previous[..text.len()]),
-            literal => {
-                for i in 1..=text.len() {
-                    current[i] = previous[i - 1] && text[i - 1] == literal;
-                }
-            }
-        }
-        previous = current;
-    }
-    previous[text.len()]
+fn regex_match(pattern: &str, text: &str) -> Result<bool> {
+    Ok(Regex::new(pattern)?.is_match(text))
 }
 
 #[cfg(test)]
@@ -1405,7 +1365,7 @@ mod tests {
             architecture,
             BinarySourceOperation::GithubLatest {
                 repository: GithubRepository::parse("owner/repo").unwrap(),
-                selector: BinaryPackageSelector::new("sample-?.AppImage", vec![]).unwrap(),
+                selector: BinaryPackageSelector::new(r"^sample-.\.AppImage$").unwrap(),
                 sha256: None,
             },
             BinaryPackageMode::EnsurePresent,
@@ -1620,8 +1580,22 @@ mod tests {
         assert!(parse_record(unknown.as_bytes()).is_err());
     }
     #[test]
-    fn wildcard_matches_unicode_scalar() {
-        assert!(wildcard_match("x-?.deb", "x-é.deb"));
-        assert!(!wildcard_match("x-?.deb", "x-ab.deb"));
+    fn obsidian_regexes_distinguish_unmarked_amd64_from_arm64() {
+        let amd64 = r"^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$";
+        let arm64 = r"^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$";
+
+        assert!(regex_match(amd64, "Obsidian-1.12.7.AppImage").unwrap());
+        assert!(!regex_match(amd64, "Obsidian-1.12.7-arm64.AppImage").unwrap());
+        assert!(regex_match(arm64, "Obsidian-1.12.7-arm64.AppImage").unwrap());
+        assert!(!regex_match(arm64, "Obsidian-1.12.7.AppImage").unwrap());
+        assert!(BinaryPackageSelector::new(amd64).is_ok());
+        assert!(BinaryPackageSelector::new("Obsidian-.*").is_err());
+        assert!(BinaryPackageSelector::new("^Obsidian-($").is_err());
+    }
+
+    #[test]
+    fn regex_dot_matches_one_unicode_scalar() {
+        assert!(regex_match(r"^x-.\.deb$", "x-é.deb").unwrap());
+        assert!(!regex_match(r"^x-.\.deb$", "x-ab.deb").unwrap());
     }
 }

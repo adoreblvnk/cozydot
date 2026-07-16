@@ -305,15 +305,8 @@ fn lower_binary(
             let GithubReleasePolicy::LatestNonDraftNonPrerelease = release;
             BinarySourceOperation::GithubLatest {
                 repository: GithubRepository::parse(repository.clone())?,
-                selector: BinaryPackageSelector::new(
-                    selector.include.clone(),
-                    selector.exclude.clone(),
-                )?,
-                sha256: selector
-                    .declared_sha256
-                    .as_ref()
-                    .map(BinarySha256::parse)
-                    .transpose()?,
+                selector: BinaryPackageSelector::new(selector.pattern.clone())?,
+                sha256: None,
             }
         }
         BinarySourceIntent::FixedUrl { url, sha256 } => BinarySourceOperation::ChecksummedUrl {
