@@ -1,10 +1,5 @@
-use anyhow::{bail, Context, Result};
-use cozydot::{
-    config::Config,
-    init, planner,
-    platform::Platform,
-    runner::{execute, ProcessRunner},
-};
+use anyhow::{bail, Result};
+use cozydot::{apply, init};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -23,21 +18,6 @@ fn main() -> Result<()> {
             bail!("unknown command: {other}");
         }
     }
-    Ok(())
-}
-
-fn apply() -> Result<()> {
-    let root = init::config_root()?;
-    let path = root.join("cozydot.yaml");
-    let cfg = Config::load(&path)
-        .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
-    let platform = Platform::detect()?;
-    let plan = planner::plan(&cfg, &platform, &root.join("dotfiles"))?;
-    let steps = planner::lower_neutral::lower(&plan)?;
-    let mut runner = ProcessRunner {
-        dry_run: std::env::var_os("COZYDOT_DRY_RUN").is_some(),
-    };
-    execute(&mut runner, &steps)?;
     Ok(())
 }
 

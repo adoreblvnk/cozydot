@@ -24,10 +24,6 @@ const MANAGED_STATE_VERSION: u64 = 1;
 pub struct AptRepositoryToken(String);
 
 impl AptRepositoryToken {
-    pub fn new(value: impl Into<String>) -> Result<Self> {
-        Self::parse(value)
-    }
-
     pub fn parse(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         if value != "*"
@@ -52,10 +48,6 @@ impl AptRepositoryToken {
 pub struct AptRepositoryPath(String);
 
 impl AptRepositoryPath {
-    pub fn new(value: impl Into<String>) -> Result<Self> {
-        Self::parse(value)
-    }
-
     pub fn parse(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         let valid = value == "./"

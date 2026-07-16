@@ -16,6 +16,9 @@ mod repository;
 mod system;
 mod tools;
 
+#[cfg(test)]
+mod behavior_tests;
+
 pub use apt::AptUpgradePolicy;
 pub use binary::{
     BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector,
@@ -157,12 +160,15 @@ impl Operation {
     }
 }
 
-pub fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<OperationOutcome> {
+pub(crate) fn execute(
+    operation: &Operation,
+    env: &[(OsString, OsString)],
+) -> Result<OperationOutcome> {
     execute_on_host(operation, Host::new(env, Path::new(DOCKER_LOCK))?)
 }
 
-#[doc(hidden)]
-pub fn execute_with_docker_lock_for_test(
+#[cfg(test)]
+pub(crate) fn execute_with_docker_lock_for_test(
     operation: &Operation,
     env: &[(OsString, OsString)],
     docker_lock_open_path: &Path,
@@ -170,8 +176,8 @@ pub fn execute_with_docker_lock_for_test(
     execute_on_host(operation, Host::new(env, docker_lock_open_path)?).map(|_| ())
 }
 
-#[doc(hidden)]
-pub fn execute_with_outcome_for_test(
+#[cfg(test)]
+pub(crate) fn execute_with_outcome_for_test(
     operation: &Operation,
     env: &[(OsString, OsString)],
     docker_lock_open_path: &Path,
