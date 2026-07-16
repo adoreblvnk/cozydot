@@ -23,7 +23,7 @@ cozydot apply
 
 `init` materializes the embedded version `1.0.0` `cozydot` preset by default; `--preset` selects `cozydot`, `full`, `cli`, or `vm`. It needs no repository checkout, network, release archive, or cache. Files unchanged since cozydot last installed them are refreshed; modified, unmanaged, and obsolete files are preserved. `apply` validates the complete active file and resolved platform before side effects, then executes the typed plan in dependency order.
 
-The schema and field reference is in [`docs/config-schema-v1.md`](docs/config-schema-v1.md). Managers, lock paths, shell commands, profiles, and plugins are implementation details and cannot be selected from YAML.
+The configuration reference is in [`docs/configuration.md`](docs/configuration.md). Managers, lock paths, shell commands, profiles, and plugins are implementation details and cannot be selected from YAML.
 
 ## Development
 

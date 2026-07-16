@@ -2,8 +2,10 @@ use serde_yaml::{Mapping, Value};
 use std::collections::BTreeSet;
 
 const BEGINNER: &str = include_str!("../docs/examples/config-v1-beginner.yaml");
+const CLI: &str = include_str!("../configs/cli.yaml");
 const COZYDOT: &str = include_str!("../configs/cozydot.yaml");
 const FULL: &str = include_str!("../configs/full.yaml");
+const VM: &str = include_str!("../configs/vm.yaml");
 
 fn parse(document: &str) -> Value {
     serde_yaml::from_str(document).expect("canonical contract fixture must be valid YAML")
@@ -164,4 +166,23 @@ fn full_fixture_uses_practical_repository_and_binary_shapes() {
         let source = mapping(field(binary, "source", "binary"), "binary.source");
         !source.contains_key(Value::String("sha256".to_owned()))
     }));
+}
+
+#[test]
+fn shipped_configs_are_compact() {
+    for (name, document) in [
+        ("cozydot", COZYDOT),
+        ("full", FULL),
+        ("cli", CLI),
+        ("vm", VM),
+    ] {
+        assert!(
+            !document.contains("\n\n"),
+            "configs/{name}.yaml contains a blank separator line"
+        );
+        assert!(
+            document.lines().all(|line| line.trim_end() == line),
+            "configs/{name}.yaml contains trailing whitespace"
+        );
+    }
 }

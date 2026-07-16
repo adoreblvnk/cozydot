@@ -263,5 +263,7 @@ done
 if [[ "$mode" == "--check" && "$status" == 0 ]]; then
   cargo test --locked --lib \
     bundle::tests::embedded_presets_are_sorted_unique_valid_and_nonempty -- --exact
+  cargo test --locked --test config_contract_v1 \
+    shipped_configs_are_compact -- --exact
 fi
 exit "$status"
