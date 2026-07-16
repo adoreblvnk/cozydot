@@ -2,6 +2,7 @@ use serde_yaml::{Mapping, Value};
 use std::collections::BTreeSet;
 
 const BEGINNER: &str = include_str!("../docs/examples/config-v1-beginner.yaml");
+const COZYDOT: &str = include_str!("../configs/cozydot.yaml");
 const FULL: &str = include_str!("../configs/full.yaml");
 
 fn parse(document: &str) -> Value {
@@ -34,7 +35,7 @@ fn string_set<'a>(value: &'a Value, path: &str) -> BTreeSet<&'a str> {
 
 #[test]
 fn canonical_fixtures_use_only_exact_version_1_0_0() {
-    for (name, document) in [("beginner", BEGINNER), ("full", FULL)] {
+    for (name, document) in [("beginner", BEGINNER), ("cozydot", COZYDOT), ("full", FULL)] {
         let root = parse(document);
         let root = mapping(&root, name);
         assert_eq!(
@@ -51,7 +52,7 @@ fn canonical_fixtures_use_only_exact_version_1_0_0() {
 
 #[test]
 fn canonical_yaml_does_not_expose_removed_or_internal_vocabulary() {
-    for (name, document) in [("beginner", BEGINNER), ("full", FULL)] {
+    for (name, document) in [("beginner", BEGINNER), ("cozydot", COZYDOT), ("full", FULL)] {
         for forbidden in [
             "schema:",
             "direct:",
@@ -103,26 +104,30 @@ fn full_fixture_uses_flat_typed_apt_repositories() {
 }
 
 #[test]
-fn full_fixture_requires_the_four_release_distros_and_supported_desktops() {
-    let root = parse(FULL);
-    let root = mapping(&root, "full");
-    let system = mapping(field(root, "system", "full"), "system");
-    let require = mapping(field(system, "require", "system"), "system.require");
+fn desktop_presets_require_the_four_release_distros_and_supported_desktops() {
+    for (name, document) in [("cozydot", COZYDOT), ("full", FULL)] {
+        let root = parse(document);
+        let root = mapping(&root, name);
+        let system = mapping(field(root, "system", name), "system");
+        let require = mapping(field(system, "require", "system"), "system.require");
 
-    assert_eq!(
-        string_set(
-            field(require, "distros", "system.require"),
-            "system.require.distros"
-        ),
-        BTreeSet::from(["debian", "linuxmint", "pop", "ubuntu"])
-    );
-    assert_eq!(
-        string_set(
-            field(require, "desktops", "system.require"),
-            "system.require.desktops"
-        ),
-        BTreeSet::from(["cinnamon", "gnome"])
-    );
+        assert_eq!(
+            string_set(
+                field(require, "distros", "system.require"),
+                "system.require.distros"
+            ),
+            BTreeSet::from(["debian", "linuxmint", "pop", "ubuntu"]),
+            "{name}"
+        );
+        assert_eq!(
+            string_set(
+                field(require, "desktops", "system.require"),
+                "system.require.desktops"
+            ),
+            BTreeSet::from(["cinnamon", "gnome"]),
+            "{name}"
+        );
+    }
 }
 
 #[test]

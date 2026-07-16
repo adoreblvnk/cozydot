@@ -7,6 +7,15 @@ system:
     unattended_upgrades: disabled
   ubuntu:
     snap: disabled
+  require:
+    distros:
+      - ubuntu
+      - debian
+      - pop
+      - linuxmint
+    desktops:
+      - gnome
+      - cinnamon
 packages:
   apt:
     install:
@@ -14,10 +23,15 @@ packages:
       - build-essential
       - cmake
       - curl
+      - default-jdk
+      - figlet
+      - fzf
       - git
+      - lolcat
       - openssh-server
       - pandoc
       - pass
+      - pinentry-tty
       - trash-cli
       - unzip
       - vim
@@ -34,11 +48,38 @@ packages:
     - bat
     - bottom
     - du-dust
+    - eza
     - fd-find
     - presenterm
     - starship
     - tealdeer
-  npm: [opencode-ai]
+    - yazi-fm
+    - zoxide
+  npm:
+    - opencode-ai
+  binaries:
+    - name: fastfetch
+      format: deb
+      commands:
+        - fastfetch
+      source:
+        provider: github
+        repository: fastfetch-cli/fastfetch
+        assets:
+          amd64: ^fastfetch-linux-amd64\.deb$
+          arm64: ^fastfetch-linux-aarch64\.deb$
+          arm32: ^fastfetch-linux-armv7l.*\.deb$
+          riscv64: ^fastfetch-linux-riscv64.*\.deb$
+    - name: git-credential-manager
+      format: deb
+      commands:
+        - git-credential-manager
+      source:
+        provider: github
+        repository: git-ecosystem/git-credential-manager
+        assets:
+          amd64: ^gcm-linux-x64-.*\.deb$
+          arm64: ^gcm-linux-arm64-.*\.deb$
 tools:
   rust: stable
   go: latest
@@ -47,7 +88,14 @@ tools:
 fonts:
   nerd: [GeistMono]
 dotfiles:
-  packages: [bash, bin, bat, bottom, fastfetch, starship, yazi]
+  packages:
+    - bash
+    - bin
+    - bat
+    - bottom
+    - fastfetch
+    - starship
+    - yazi
 updates:
   apt: standard
   tools:
@@ -57,3 +105,5 @@ updates:
   packages:
     cargo: true
     npm: true
+    binaries: true
+  fonts: true

@@ -5,10 +5,20 @@ pub struct Record {
     pub mode: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PresetRecord {
+    pub name: &'static str,
+    pub bytes: &'static [u8],
+}
+
 include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
 
 pub fn records() -> &'static [Record] {
     RECORDS
+}
+
+pub fn preset(name: &str) -> Option<&'static PresetRecord> {
+    PRESETS.iter().find(|preset| preset.name == name)
 }
 
 #[cfg(test)]
@@ -40,19 +50,27 @@ mod tests {
                 record.path
             );
         }
-        assert!(RECORDS.iter().any(|record| record.path == "cozydot.yaml"));
         assert!(RECORDS
             .iter()
             .any(|record| record.path == "dotfiles/bash/.bashrc"));
-        let config = RECORDS
-            .iter()
-            .find(|record| record.path == "cozydot.yaml")
-            .unwrap();
-        assert_eq!(config.mode & 0o111, 0);
         let script = RECORDS
             .iter()
             .find(|record| record.path == "dotfiles/bin/.local/bin/round")
             .unwrap();
         assert_ne!(script.mode & 0o111, 0);
+    }
+
+    #[test]
+    fn embedded_presets_are_sorted_unique_valid_and_nonempty() {
+        assert_eq!(
+            PRESETS.iter().map(|preset| preset.name).collect::<Vec<_>>(),
+            ["cli", "cozydot", "full", "vm"]
+        );
+        for preset in PRESETS {
+            assert!(!preset.bytes.is_empty(), "{} is empty", preset.name);
+            assert!(!preset.bytes.windows(2).any(|bytes| bytes == b"\n\n"));
+            let text = std::str::from_utf8(preset.bytes).unwrap();
+            crate::config::Config::parse(text).unwrap();
+        }
     }
 }
