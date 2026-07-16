@@ -684,6 +684,7 @@ printf '%s' "$generation" >"$directory/${family}NerdFont-Regular.ttf""###,
     host.fake(
         "fc-cache",
         r#"{ printf 'fc-cache'; printf ' <%s>' "$@"; printf '\n'; } >>"$LOG"
+[ "$#" -eq 2 ] && [ "$1" = --force ] && [ "$2" = "$HOME/.local/share/fonts/cozydot" ] || exit 72
 if [ -f "$TMPDIR/font-cache-failure" ]; then rm "$TMPDIR/font-cache-failure"; exit 71; fi
 for path in "$HOME/.local/share/fonts/cozydot/"*; do [ -d "$path" ] || continue; touch "$TMPDIR/font-cached-${path##*/}"; done"#,
     );
@@ -5525,7 +5526,11 @@ fn schema_v1_nerd_fonts_publish_user_local_files_and_verify_fontconfig_state() {
         .join(".local/share/fonts/cozydot/GeistMono/GeistMonoNerdFont-Regular.ttf");
     assert_eq!(fs::read(installed).unwrap(), b"v1");
     let log = host.log();
-    assert_eq!(log.matches("fc-cache <--force>").count(), 1, "{log}");
+    let refresh = format!(
+        "fc-cache <--force> <{}>",
+        host.home.join(".local/share/fonts/cozydot").display()
+    );
+    assert_eq!(log.matches(&refresh).count(), 1, "{log}");
     assert_eq!(log.matches("curl <").count(), 1, "{log}");
     assert!(
         log.contains(
@@ -5589,8 +5594,12 @@ fn schema_v1_nerd_font_failed_update_restores_old_files_and_retries() {
     assert_eq!(fs::read(installed).unwrap(), b"v2");
     let log = host.log();
     assert_eq!(log.matches("curl <").count(), 3, "{log}");
+    let refresh = format!(
+        "fc-cache <--force> <{}>",
+        host.home.join(".local/share/fonts/cozydot").display()
+    );
     assert_eq!(
-        log.matches("fc-cache <--force>").count(),
+        log.matches(&refresh).count(),
         4,
         "initial, failed, rollback, and retry refreshes: {log}"
     );
