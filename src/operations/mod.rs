@@ -11,6 +11,7 @@ mod languages;
 mod managed_apt;
 mod managed_state;
 mod npm;
+mod privileged_file;
 mod provisioning;
 mod repository;
 mod system;

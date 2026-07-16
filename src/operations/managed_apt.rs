@@ -1,4 +1,4 @@
-use super::{repository, Host};
+use super::{privileged_file, Host};
 use crate::platform::{Architecture, ManagedAptSources, Platform};
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
@@ -87,7 +87,7 @@ pub(crate) fn execute(host: &Host<'_>, operation: &ManagedAptSourcesOperation) -
         .filter(|change| change.path != Path::new(OWNED_SOURCE))
     {
         require_unchanged(host, change)?;
-        repository::publish_bytes(
+        privileged_file::publish_bytes(
             host,
             &change.path,
             &change.replacement,
@@ -99,14 +99,14 @@ pub(crate) fn execute(host: &Host<'_>, operation: &ManagedAptSourcesOperation) -
         .find(|change| change.path == Path::new(OWNED_SOURCE))
     {
         require_unchanged(host, change)?;
-        repository::publish_bytes(
+        privileged_file::publish_bytes(
             host,
             &change.path,
             &change.replacement,
             "managed APT publication",
         )?;
     } else {
-        repository::sync_parent(host, Path::new(OWNED_SOURCE), "managed APT publication")?;
+        privileged_file::sync_parent(host, Path::new(OWNED_SOURCE), "managed APT publication")?;
     }
 
     let remaining = reconcile(&operation.policy, &inspect_sources(host)?)?;
@@ -619,7 +619,7 @@ fn backup(host: &Host<'_>, change: &SourceChange) -> Result<()> {
         .strip_prefix("/")
         .context("managed APT source path is not absolute")?;
     let destination = Path::new(BACKUP_ROOT).join(digest_hex).join(relative);
-    repository::publish_bytes_with_mode(
+    privileged_file::publish_bytes_with_mode(
         host,
         &destination,
         &change.original,

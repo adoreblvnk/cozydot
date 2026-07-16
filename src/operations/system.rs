@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::{collections::BTreeSet, path::Path};
 
-use super::{apt, repository::publish_bytes, Host};
+use super::{apt, privileged_file::publish_bytes, Host};
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
