@@ -60,6 +60,8 @@ packages:
     - tealdeer
   npm:
     - opencode-ai
+    - skills
+    - "@playwright/cli"
 
 tools:
   rust: stable
@@ -77,6 +79,7 @@ dotfiles:
     - bat
     - bottom
     - fastfetch
+    - opencode
     - starship
     - vscode
     - wezterm
