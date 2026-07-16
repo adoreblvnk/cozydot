@@ -158,7 +158,7 @@ fn preflight_keyring(host: &Host<'_>, policy: &ManagedAptSources) -> Result<()> 
     let output = host.require(
         "managed APT keyring preflight",
         "sudo",
-        ["stat", "--format=%f:%s", "--", keyring],
+        ["stat", "--dereference", "--format=%f:%s", "--", keyring],
     )?;
     let state = std::str::from_utf8(&output.stdout)
         .context("managed APT keyring stat returned non-UTF-8 output")?
