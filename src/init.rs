@@ -87,7 +87,7 @@ fn sync(root: &Path, records: &[Record]) -> Result<()> {
 }
 
 pub fn config_root() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
+    if let Some(path) = env::var_os("XDG_CONFIG_HOME").filter(|path| !path.is_empty()) {
         return Ok(PathBuf::from(path).join("cozydot"));
     }
     Ok(PathBuf::from(env::var_os("HOME").context("HOME is not set")?).join(".config/cozydot"))

@@ -1,38 +1,99 @@
 # cozydot
 
-cozydot provisions Debian- and Ubuntu-family Linux systems from one active YAML configuration.
+Cozydot is a Linux bootstrapper that provisions packages, development tools,
+dotfiles, integrations, desktop settings, and updates from one active YAML
+configuration.
+
+Released builds support Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64`
+and `aarch64`. The configuration parser recognizes some additional platform
+values for modeling purposes; those values are not released support targets.
 
 ## Install
 
-The installer detects Linux amd64/arm64, verifies the published release checksum, requires a one-file release archive, and atomically installs only `~/.local/bin/cozydot`. The binary contains its bundled configurations and dotfiles:
+On a supported host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh | bash
 ```
 
-For a local mirror or a pinned release, set `COZYDOT_VERSION` and `COZYDOT_RELEASE_BASE_URL`.
+The installer selects the `amd64` or `arm64` release, verifies its published
+SHA-256 file, requires the archive to contain exactly one regular `cozydot`
+entry, and atomically installs the binary in the configured install directory.
 
-## Use
+These environment variables override the defaults:
+
+| Variable | Purpose |
+| --- | --- |
+| `COZYDOT_VERSION` | Release version; defaults to `0.0.1` |
+| `COZYDOT_RELEASE_BASE_URL` | Release or mirror base URL; defaults to the GitHub releases page |
+| `XDG_BIN_HOME` | Install directory; defaults to `~/.local/bin` |
+
+Pass overrides to the shell running the installer, for example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh \
+  | COZYDOT_VERSION=0.0.1 COZYDOT_RELEASE_BASE_URL=https://mirror.example/cozydot bash
+```
+
+## First run
 
 ```bash
 cozydot init
-# Or: cozydot init --preset full|cli|vm
 $EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
 cozydot apply
 ```
 
-`init` materializes the embedded version `1.0.0` `cozydot` preset by default; `--preset` selects `cozydot`, `full`, `cli`, or `vm`. It needs no repository checkout, network, release archive, or cache. Files unchanged since cozydot last installed them are refreshed; modified, unmanaged, and obsolete files are preserved. `apply` validates the complete active file and resolved platform before side effects, then executes the typed plan in dependency order.
+`init` defaults to the embedded `cozydot` preset. Use
+`cozydot init --preset cozydot|full|cli|vm` to select any bundled preset. It
+writes the active config and bundled dotfiles under
+`${XDG_CONFIG_HOME:-$HOME/.config}/cozydot` without a checkout or network
+request.
 
-The configuration reference is in [`docs/configuration.md`](docs/configuration.md). Managers, lock paths, shell commands, profiles, and plugins are implementation details and cannot be selected from YAML.
+Preset intent and the complete `1.0.0` configuration contract are documented
+in [`docs/configuration.md`](docs/configuration.md). A smaller starting config
+is available at
+[`docs/examples/config-v1-beginner.yaml`](docs/examples/config-v1-beginner.yaml).
+
+## Configuration sources
+
+`configs/cozydot.yaml` is the canonical, manually maintained base preset.
+`scripts/generate-configs.sh` derives `configs/full.yaml`, `configs/cli.yaml`,
+and `configs/vm.yaml`; do not edit those generated files directly. Builds embed
+snapshots of all four presets.
+
+The active `cozydot.yaml` created by `init` is user configuration, not a
+generated repository file. Edit that active file before running `apply`.
+
+## Safety model
+
+- `apply` validates the complete active config and resolved platform, then
+  builds and lowers the full typed plan before it starts apply side effects.
+- YAML selects only the documented schema. It cannot provide arbitrary
+  commands, shell fragments, managers, lock paths, plugins, or interpolation;
+  execution uses a fixed set of typed operations.
+- `init` tracks the files it writes. Later runs refresh missing or unchanged
+  init-managed files while preserving user-edited, unmanaged, and obsolete
+  files.
+- Release packaging emits a deterministic one-binary archive and a separate
+  checksum. The installer verifies that transport before replacing the binary.
+  This does not imply that every upstream package or manager download has a
+  checksum.
+
+See [`docs/rust-rewrite.md`](docs/rust-rewrite.md) for the architecture,
+operation boundaries, packaging details, and download trust boundaries.
 
 ## Development
 
+The repository pins Rust 1.85.0. The config generator also requires `yq` v4.
+
 ```bash
 scripts/generate-configs.sh --check
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
 scripts/package-release.sh
+bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
 ```
 
-`configs/cozydot.yaml` is the canonical base. `scripts/generate-configs.sh` deterministically derives `full.yaml`, `cli.yaml`, and `vm.yaml`; edit the base or generator rather than those outputs. The build embeds all four configurations and every regular file under `dotfiles/`. Shebang scripts materialize as `0755` and every other asset as `0644`. Release archives are deterministic transport containing only `cozydot`; their checksum is published separately. The installer verifies transport in a private temporary directory and does not create an XDG cache. The XDG config tree created by `init` is user state.
+`scripts/package-release.sh` performs its release build with `--locked` and
+writes the archive and checksum under `target/` by default.
