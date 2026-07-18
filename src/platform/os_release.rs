@@ -143,7 +143,11 @@ mod tests {
         assert_eq!(release.get("DOUBLE"), Some("a \"quote\" \\ $ `"));
         assert_eq!(release.get("UNQUOTED"), Some("a b;c"));
 
-        let release = OsRelease::parse("VALUE=\"keep\\\\q\"\n").unwrap();
+        let release = OsRelease::parse(
+            r#"VALUE="keep\q"
+"#,
+        )
+        .unwrap();
         assert_eq!(release.get("VALUE"), Some(r"keep\q"));
     }
 
