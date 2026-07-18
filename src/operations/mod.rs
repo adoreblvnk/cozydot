@@ -49,13 +49,16 @@ use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
     fs::File,
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    thread,
+    time::Duration,
 };
 
 const COZYDOT_RUNTIME_DIRECTORY: &str = "/run/cozydot";
 const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
+const EXECUTABLE_FILE_BUSY: i32 = 26;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
@@ -275,8 +278,7 @@ impl<'a> Host<'a> {
         for (key, value) in self.env {
             command.env(key, value);
         }
-        command
-            .output()
+        retry_executable_busy(|| command.output())
             .with_context(|| format!("{program} operation: start {}", display(program, &args)))
     }
 
@@ -316,8 +318,7 @@ impl<'a> Host<'a> {
         for (key, value) in self.env {
             command.env(key, value);
         }
-        let mut child = command
-            .spawn()
+        let mut child = retry_executable_busy(|| command.spawn())
             .with_context(|| format!("{operation}: start {}", display(program, &args)))?;
         child
             .stdin
@@ -498,6 +499,18 @@ fn display(program: &str, args: &[OsString]) -> String {
         .join(" ")
 }
 
+fn retry_executable_busy<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    for delay_ms in [1, 2, 4, 8, 16] {
+        match operation() {
+            Err(error) if error.raw_os_error() == Some(EXECUTABLE_FILE_BUSY) => {
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+            result => return result,
+        }
+    }
+    operation()
+}
+
 fn resolve_home(env: &[(OsString, OsString)], process_home: Option<OsString>) -> Result<PathBuf> {
     env.iter()
         .rev()
@@ -509,8 +522,8 @@ fn resolve_home(env: &[(OsString, OsString)], process_home: Option<OsString>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_home;
-    use std::{ffi::OsString, path::PathBuf};
+    use super::{resolve_home, retry_executable_busy, EXECUTABLE_FILE_BUSY};
+    use std::{cell::Cell, ffi::OsString, io, path::PathBuf};
 
     #[test]
     fn operations_require_home_without_a_literal_fallback() {
@@ -519,5 +532,30 @@ mod tests {
             PathBuf::from("/home/process")
         );
         assert!(resolve_home(&[], None).is_err());
+    }
+
+    #[test]
+    fn command_start_retries_only_executable_busy_errors() {
+        let attempts = Cell::new(0);
+        let value = retry_executable_busy(|| {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                Err(io::Error::from_raw_os_error(EXECUTABLE_FILE_BUSY))
+            } else {
+                Ok(7)
+            }
+        })
+        .unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(attempts.get(), 2);
+
+        let attempts = Cell::new(0);
+        let error = retry_executable_busy(|| -> io::Result<()> {
+            attempts.set(attempts.get() + 1);
+            Err(io::Error::from_raw_os_error(13))
+        })
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(13));
+        assert_eq!(attempts.get(), 1);
     }
 }
