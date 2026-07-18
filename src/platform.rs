@@ -1,4 +1,4 @@
-use std::{fs, path::Path, process::Command};
+use std::{fs, io::ErrorKind, path::Path, process::Command};
 
 use anyhow::{bail, Context, Result};
 
@@ -119,7 +119,7 @@ impl ManagedAptSources {
 
 impl Platform {
     pub fn detect() -> Result<Self> {
-        let os = read_os_release(Path::new("/etc/os-release"))?;
+        let os = read_system_os_release()?;
         let uname = Command::new("uname")
             .arg("-m")
             .output()
@@ -400,7 +400,28 @@ fn normalize_desktop(value: &str) -> String {
 fn read_os_release(path: &Path) -> Result<OsRelease> {
     let text = fs::read_to_string(path)
         .with_context(|| format!("read os-release at {}", path.display()))?;
-    OsRelease::parse(&text).with_context(|| format!("parse os-release at {}", path.display()))
+    parse_os_release(path, &text)
+}
+
+fn parse_os_release(path: &Path, text: &str) -> Result<OsRelease> {
+    OsRelease::parse(text).with_context(|| format!("parse os-release at {}", path.display()))
+}
+
+fn read_system_os_release() -> Result<OsRelease> {
+    read_system_os_release_from(
+        Path::new("/etc/os-release"),
+        Path::new("/usr/lib/os-release"),
+    )
+}
+
+fn read_system_os_release_from(etc_path: &Path, usr_path: &Path) -> Result<OsRelease> {
+    match fs::read_to_string(etc_path) {
+        Ok(text) => parse_os_release(etc_path, &text),
+        Err(error) if error.kind() == ErrorKind::NotFound => read_os_release(usr_path),
+        Err(error) => {
+            Err(error).with_context(|| format!("read os-release at {}", etc_path.display()))
+        }
+    }
 }
 
 fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
@@ -619,6 +640,27 @@ mod tests {
                 .map(std::io::Error::kind),
             Some(std::io::ErrorKind::NotFound)
         );
+    }
+
+    #[test]
+    fn os_release_falls_back_to_usr_only_when_etc_is_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let etc = directory.path().join("etc-os-release");
+        let usr = directory.path().join("usr-os-release");
+        std::fs::write(&usr, "ID=debian\nVERSION_CODENAME=bookworm\n").unwrap();
+
+        let release = read_system_os_release_from(&etc, &usr).unwrap();
+        assert_eq!(release.get("ID"), Some("debian"));
+
+        std::fs::write(&etc, "ID=ubuntu\nVERSION_CODENAME=noble\n").unwrap();
+        let release = read_system_os_release_from(&etc, &usr).unwrap();
+        assert_eq!(release.get("ID"), Some("ubuntu"));
+
+        std::fs::write(&etc, "malformed\n").unwrap();
+        let error = read_system_os_release_from(&etc, &usr).unwrap_err();
+        assert!(error
+            .to_string()
+            .starts_with(&format!("parse os-release at {}", etc.display())));
     }
 
     #[test]
