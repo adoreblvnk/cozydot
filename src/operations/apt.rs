@@ -223,9 +223,9 @@ mod tests {
 
     #[test]
     fn status_accepts_documented_bytes_and_classifies_only_installed_status() {
-        let desired = [b'u', b'i', b'h', b'r', b'p'];
-        let states = [b'n', b'c', b'H', b'U', b'F', b'W', b't', b'i'];
-        let errors = [b' ', b'R'];
+        let desired = *b"uihrp";
+        let states = *b"ncHUFWti";
+        let errors = *b" R";
         let mut output = Vec::new();
         let mut packages = Vec::new();
         let mut expected = BTreeSet::new();
