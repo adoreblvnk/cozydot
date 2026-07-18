@@ -91,6 +91,8 @@ scripts/generate-configs.sh --check
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
+cargo test --locked --doc
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 scripts/package-release.sh
 bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
 ```

@@ -439,7 +439,7 @@ impl OfficialSources {
         let components = self
             .components
             .as_ref()
-            .expect("validated managed components");
+            .context("managed APT sources require components")?;
         let (_, selected) = select_distro_map(components, identity.distro, identity.upstream)
             .ok_or_else(|| {
                 anyhow::anyhow!(

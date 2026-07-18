@@ -275,7 +275,11 @@ impl Repository {
         let resolved = self.resolve_for_platform(index, platform, identity)?;
         if self.suite.as_deref() == Some("system") {
             validate_apt_token(
-                resolved.suite.expect("resolved system suite").as_str(),
+                resolved
+                    .suite
+                    .as_ref()
+                    .context("system repository suite did not resolve")?
+                    .as_str(),
                 &format!("packages.apt.repositories[{index}].suite resolved codename"),
             )?;
         }

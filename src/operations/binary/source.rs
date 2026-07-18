@@ -97,7 +97,9 @@ pub(super) fn select_asset(
         );
     }
     let (index, asset, name) = matches[0];
-    let object = asset.as_object().unwrap();
+    let object = asset
+        .as_object()
+        .context("selected GitHub release asset must be an object")?;
     let url = HttpsUrl::parse(
         object
             .get("browser_download_url")

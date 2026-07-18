@@ -6,24 +6,29 @@ rust-version = "1.85"
 description = "Declarative Linux post-install, update, and dotfile manager"
 license = "MIT"
 repository = "https://github.com/adoreblvnk/cozydot"
+publish = false
+
+[lints.rust]
+unsafe_code = "forbid"
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4.6", features = ["derive", "wrap_help"] }
-os-release = "=0.1.0"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_path_to_error = "0.1"
 serde_yaml = { version = "0.10", package = "yaml_serde" }
 serde_json = "1"
+# sha2 0.11 drops digest formatting and io::Write integration; keep 0.10 until
+# Cozydot's streamed checksum paths are deliberately migrated.
 sha2 = "0.10"
 tempfile = "3"
 regex = "1"
 rustix = { version = "1.1", features = ["fs", "process"] }
-url = "=2.5.7"
-yaml-rust2 = "0.11"
+url = "=2.5.8"
+yaml-rust2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2"
-predicates = "3"
+predicates = { version = "3", default-features = false }
 syn = { version = "2", default-features = false, features = ["full", "parsing"] }

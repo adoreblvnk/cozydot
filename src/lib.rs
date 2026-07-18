@@ -1,3 +1,8 @@
+//! Cozydot's application core.
+//!
+//! This internal library keeps the CLI thin and makes configuration, planning,
+//! and host operations independently testable. It is not a supported SDK.
+
 use anyhow::{Context, Result};
 
 pub mod bundle;
@@ -10,6 +15,12 @@ pub mod planner;
 pub mod platform;
 mod runner;
 
+/// Applies the active Cozydot configuration to the current host.
+///
+/// # Errors
+///
+/// Returns an error when the configuration cannot be loaded or validated, the
+/// host is unsupported, planning fails, or an operation cannot be completed.
 pub fn apply() -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
