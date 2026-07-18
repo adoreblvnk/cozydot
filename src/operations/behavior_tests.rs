@@ -52,7 +52,9 @@ impl Host {
         temporary.flush().unwrap();
         fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
         temporary.as_file().sync_all().unwrap();
-        temporary.into_temp_path().persist(path).unwrap();
+        let (file, temporary_path) = temporary.keep().unwrap();
+        drop(file);
+        fs::rename(temporary_path, path).unwrap();
         fs::File::open(&self.bin).unwrap().sync_all().unwrap();
     }
 
