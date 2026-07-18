@@ -496,8 +496,11 @@ fn parse_deb822_fields(paragraph: &str) -> Result<BTreeMap<String, String>> {
             let key = current
                 .as_ref()
                 .context("deb822 continuation has no field")?;
-            fields.get_mut(key).unwrap().push(' ');
-            fields.get_mut(key).unwrap().push_str(line.trim());
+            let value = fields
+                .get_mut(key)
+                .context("deb822 continuation field disappeared")?;
+            value.push(' ');
+            value.push_str(line.trim());
             continue;
         }
         let (name, value) = line

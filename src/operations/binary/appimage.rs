@@ -64,9 +64,7 @@ pub(super) fn preflight_appimage(
             .iter()
             .filter(|name| !operation.commands.contains(name))
         {
-            let link = command_links_for(host, std::slice::from_ref(command))
-                .pop()
-                .unwrap();
+            let link = command_link_for(host, command);
             preflight_stale_link(
                 &link,
                 &artifact,
@@ -122,9 +120,7 @@ pub(super) fn install_appimage(
             .iter()
             .filter(|name| !operation.commands.contains(name))
         {
-            let link = command_links_for(host, std::slice::from_ref(command))
-                .pop()
-                .unwrap();
+            let link = command_link_for(host, command);
             match fs::symlink_metadata(&link) {
                 Ok(_) if managed_link(&link, &artifact) => {
                     fs::remove_file(&link).with_context(|| {
@@ -144,12 +140,12 @@ pub(super) fn install_appimage(
     }
     Ok(())
 }
-fn command_links_for(host: &Host<'_>, commands: &[String]) -> Vec<PathBuf> {
+fn command_link_for(host: &Host<'_>, command: &str) -> PathBuf {
     let root = host
         .value("XDG_BIN_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| host.home().join(".local/bin"));
-    commands.iter().map(|name| root.join(name)).collect()
+    root.join(command)
 }
 fn ensure_secure_data_parent(host: &Host<'_>, artifact: &Path) -> Result<()> {
     let data = host
@@ -209,7 +205,9 @@ fn validate_owned_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 fn publish_artifact(source: &Path, destination: &Path, no_replace: bool) -> Result<()> {
-    let parent = destination.parent().unwrap();
+    let parent = destination
+        .parent()
+        .context("binary artifact destination has no parent")?;
     let mut source_file = fs::File::open(source)?;
     let mut staged = tempfile::NamedTempFile::new_in(parent)?;
     std::io::copy(&mut source_file, staged.as_file_mut())?;
@@ -256,7 +254,7 @@ fn publish_link(link: &Path, artifact: &Path) -> Result<()> {
     if managed_link(link, artifact) {
         return Ok(());
     }
-    fs::create_dir_all(link.parent().unwrap())?;
+    fs::create_dir_all(link.parent().context("binary command link has no parent")?)?;
     match symlink(artifact, link) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && managed_link(link, artifact) => {

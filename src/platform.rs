@@ -1,11 +1,10 @@
+use std::{fs, path::Path, process::Command};
+
 use anyhow::{bail, Context, Result};
-use os_release::OsRelease;
-use std::{
-    fs::File,
-    io::{self, Read},
-    path::Path,
-    process::Command,
-};
+
+use self::os_release::OsRelease;
+
+mod os_release;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
@@ -164,9 +163,9 @@ impl Platform {
     }
 
     fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
-        let distro = os.id.clone();
-        let upstream: String = upstream(&distro, Some(&os.id_like))?.into();
-        let distro_codename = os.version_codename.clone();
+        let distro = os.get("ID").unwrap_or_default().to_owned();
+        let upstream: String = upstream(&distro, os.get("ID_LIKE"))?.into();
+        let distro_codename = os.get("VERSION_CODENAME").unwrap_or_default().to_owned();
         let base_codename = match upstream.as_str() {
             "ubuntu" => {
                 extra_codename(os, "UBUNTU_CODENAME").unwrap_or_else(|| distro_codename.clone())
@@ -399,23 +398,13 @@ fn normalize_desktop(value: &str) -> String {
 }
 
 fn read_os_release(path: &Path) -> Result<OsRelease> {
-    let mut file = File::open(path)
-        .map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("unable to open file at {path:?}: {error}"),
-            )
-        })
-        .context("read os-release")?;
-    let mut text = String::new();
-    file.read_to_string(&mut text).context("read os-release")?;
-    Ok(text.lines().map(str::to_owned).collect())
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("read os-release at {}", path.display()))?;
+    OsRelease::parse(&text).with_context(|| format!("parse os-release at {}", path.display()))
 }
 
 fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
-    os.extra
-        .get(key)
-        .map(|value| value.trim_matches('"').to_owned())
+    os.get(key).map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -623,8 +612,13 @@ mod tests {
     fn os_release_read_errors_keep_context() {
         let directory = tempfile::tempdir().unwrap();
         let error = read_os_release(&directory.path().join("missing-os-release")).unwrap_err();
-        assert_eq!(error.to_string(), "read os-release");
-        assert!(format!("{error:#}").contains("unable to open file"));
+        assert!(error.to_string().starts_with("read os-release at "));
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::NotFound)
+        );
     }
 
     #[test]
@@ -633,7 +627,7 @@ mod tests {
         std::fs::write(file.path(), b"ID=ubuntu\n\xff\nVERSION_CODENAME=noble\n").unwrap();
 
         let error = read_os_release(file.path()).unwrap_err();
-        assert_eq!(error.to_string(), "read os-release");
+        assert!(error.to_string().starts_with("read os-release at "));
         assert!(format!("{error:#}").contains("stream did not contain valid UTF-8"));
     }
 

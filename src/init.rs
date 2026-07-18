@@ -97,9 +97,10 @@ fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     let parent = relative.parent().unwrap_or(Path::new(""));
     ensure_directory_path(root, parent)?;
     let destination = root.join(relative);
+    let destination_parent = required_parent(&destination)?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".cozydot.")
-        .tempfile_in(destination.parent().unwrap())?;
+        .tempfile_in(destination_parent)?;
     if env::var("COZYDOT_TEST_FAIL_MANAGED_FILE_AT")
         .ok()
         .as_deref()
@@ -127,7 +128,7 @@ fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
         bail!("injected rename failure");
     }
     temporary.persist(&destination).map_err(|e| e.error)?;
-    sync_directory(destination.parent().unwrap())?;
+    sync_directory(destination_parent)?;
     Ok(())
 }
 
@@ -234,9 +235,10 @@ fn append_pending_with_failure(
         new,
         relative.display()
     ));
+    let parent = required_parent(path)?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".managed-files.pending.")
-        .tempfile_in(path.parent().unwrap())?;
+        .tempfile_in(parent)?;
     temporary.write_all(records.as_bytes())?;
     temporary.flush()?;
     temporary.as_file_mut().sync_all()?;
@@ -244,7 +246,7 @@ fn append_pending_with_failure(
         bail!("injected pending journal failure before publication");
     }
     temporary.persist(path).map_err(|e| e.error)?;
-    sync_directory(path.parent().unwrap())?;
+    sync_directory(parent)?;
     if failure == Some("post-publish") {
         bail!("injected pending journal failure after publication");
     }
@@ -267,16 +269,22 @@ fn validate_pending(text: &str) -> Result<()> {
 }
 
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
+    let parent = required_parent(path)?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".managed-files.")
-        .tempfile_in(path.parent().unwrap())?;
+        .tempfile_in(parent)?;
     for (relative, hash) in managed {
         writeln!(temporary, "{}\t{}", hash, relative.display())?;
     }
     temporary.as_file_mut().sync_all()?;
     temporary.persist(path).map_err(|e| e.error)?;
-    sync_directory(path.parent().unwrap())?;
+    sync_directory(parent)?;
     Ok(())
+}
+
+fn required_parent(path: &Path) -> Result<&Path> {
+    path.parent()
+        .with_context(|| format!("path has no parent: {}", path.display()))
 }
 
 fn sync_directory(path: &Path) -> Result<()> {

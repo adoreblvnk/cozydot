@@ -269,7 +269,9 @@ fn valid_token(value: &str) -> bool {
 fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
     let (username, _) = effective_user(host)?;
     preflight(host, product)?;
-    let group = product.group().expect("group product");
+    let group = product
+        .group()
+        .context("group integration requires a system group")?;
     let gid = if let Some(gid) = group_gid(host, group)? {
         gid
     } else {
