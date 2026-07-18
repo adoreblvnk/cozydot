@@ -400,12 +400,20 @@ fn publish_executable(source: &Path, destination: &Path) -> Result<()> {
         .as_file_mut()
         .set_permissions(fs::Permissions::from_mode(0o755))?;
     staged.as_file_mut().sync_all()?;
-    let staged = staged.into_temp_path();
-    fs::hard_link(&staged, destination)
-        .context("publish cargo-binstall executable without replacement")?;
-    fs::remove_file(&staged)?;
-    fs::File::open(parent)?.sync_all()?;
-    Ok(())
+    let (file, staged_path) = staged.keep().map_err(|error| error.error)?;
+    // Linux rejects execution while any process still holds the inode open for writing.
+    drop(file);
+    let publication = (|| -> Result<()> {
+        fs::hard_link(&staged_path, destination)
+            .context("publish cargo-binstall executable without replacement")?;
+        fs::remove_file(&staged_path)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if publication.is_err() {
+        let _ = fs::remove_file(&staged_path);
+    }
+    publication
 }
 
 fn valid_installed(host: &Host<'_>, path: &Path, record: &Record) -> Result<bool> {
