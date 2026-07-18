@@ -42,19 +42,12 @@ fn generate() -> io::Result<()> {
     writeln!(file, "];")?;
     writeln!(file, "pub static PRESETS: &[PresetRecord] = &[")?;
     for (name, bytes) in presets {
-        writeln!(
-            file,
-            "    PresetRecord {{ name: {name:?}, bytes: &{bytes:?} }},"
-        )?;
+        writeln!(file, "    PresetRecord {{ name: {name:?}, bytes: &{bytes:?} }},")?;
     }
     writeln!(file, "];")
 }
 
-fn walk(
-    source: &Path,
-    destination: &Path,
-    records: &mut BTreeMap<String, (PathBuf, u32)>,
-) -> io::Result<()> {
+fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathBuf, u32)>) -> io::Result<()> {
     println!("cargo:rerun-if-changed={}", source.display());
     let metadata = fs::symlink_metadata(source)?;
     if !metadata.is_dir() {
@@ -78,11 +71,7 @@ fn walk(
     Ok(())
 }
 
-fn add_file(
-    source: &Path,
-    destination: &Path,
-    records: &mut BTreeMap<String, (PathBuf, u32)>,
-) -> io::Result<()> {
+fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathBuf, u32)>) -> io::Result<()> {
     println!("cargo:rerun-if-changed={}", source.display());
     let metadata = fs::symlink_metadata(source)?;
     if !metadata.file_type().is_file() {
@@ -98,10 +87,7 @@ fn add_file(
         .insert(destination.clone(), (source.to_path_buf(), mode))
         .is_some()
     {
-        return Err(invalid(
-            source,
-            &format!("duplicate destination {destination}"),
-        ));
+        return Err(invalid(source, &format!("duplicate destination {destination}")));
     }
     Ok(())
 }
@@ -128,17 +114,9 @@ fn valid_destination(destination: &Path, source: &Path) -> io::Result<String> {
         .to_str()
         .filter(|path| !path.contains(['\t', '\n', '\r']))
         .map(str::to_owned)
-        .ok_or_else(|| {
-            invalid(
-                source,
-                "asset destination is invalid UTF-8 or contains controls",
-            )
-        })
+        .ok_or_else(|| invalid(source, "asset destination is invalid UTF-8 or contains controls"))
 }
 
 fn invalid(path: &Path, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("{message}: {}", path.display()),
-    )
+    io::Error::new(io::ErrorKind::InvalidData, format!("{message}: {}", path.display()))
 }

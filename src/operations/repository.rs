@@ -27,11 +27,10 @@ impl AptRepositoryToken {
         let value = value.into();
         if value != "*"
             && (value.is_empty()
-                || !value.as_bytes()[0].is_ascii_lowercase()
-                    && !value.as_bytes()[0].is_ascii_digit()
-                || !value.bytes().all(|byte| {
-                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._+-".contains(&byte)
-                }))
+                || !value.as_bytes()[0].is_ascii_lowercase() && !value.as_bytes()[0].is_ascii_digit()
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._+-".contains(&byte)))
         {
             bail!("invalid APT repository token {value:?}");
         }
@@ -54,9 +53,7 @@ impl AptRepositoryPath {
                 && !value.starts_with('/')
                 && !value.contains('\\')
                 && !value.contains("//")
-                && value[..value.len() - 1]
-                    .split('/')
-                    .all(valid_definition_name);
+                && value[..value.len() - 1].split('/').all(valid_definition_name);
         if !valid {
             bail!("invalid exact APT repository path {value:?}");
         }
@@ -108,22 +105,16 @@ impl AptRepositoryOperation {
         }
         let expected_stem = repository_stem(&name);
         if filename_stem != expected_stem {
-            bail!(
-                "APT repository filename stem {filename_stem:?} does not match name-derived stem {expected_stem:?}"
-            );
+            bail!("APT repository filename stem {filename_stem:?} does not match name-derived stem {expected_stem:?}");
         }
         validate_canonical_url(&key_url, "key")?;
         validate_canonical_url(&source_url, "source")?;
         validate_layout(&layout)?;
 
-        let keyring_path =
-            PathBuf::from(format!("{KEYRINGS_DIRECTORY}/cozydot-{filename_stem}.gpg"));
-        let source_list_path =
-            PathBuf::from(format!("{SOURCES_DIRECTORY}/cozydot-{filename_stem}.list"));
+        let keyring_path = PathBuf::from(format!("{KEYRINGS_DIRECTORY}/cozydot-{filename_stem}.gpg"));
+        let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/cozydot-{filename_stem}.list"));
         validate_destination(
-            keyring_path
-                .to_str()
-                .context("repository keyring path is not UTF-8")?,
+            keyring_path.to_str().context("repository keyring path is not UTF-8")?,
             KEYRINGS_DIRECTORY,
             ".gpg",
         )?;
@@ -145,14 +136,6 @@ impl AptRepositoryOperation {
             keyring_path,
             source_list_path,
         })
-    }
-
-    pub fn keyring_path(&self) -> &Path {
-        &self.keyring_path
-    }
-
-    pub fn source_list_path(&self) -> &Path {
-        &self.source_list_path
     }
 
     pub fn render_source(&self) -> String {
@@ -196,33 +179,20 @@ pub(crate) fn execute(host: &Host<'_>, operation: &AptRepositoryOperation) -> Re
     let record = state.read_record()?;
     state.validate_lock_entry(&lock)?;
 
-    match record
-        .as_ref()
-        .map(|record| (&record.status, &record.declaration))
-    {
+    match record.as_ref().map(|record| (&record.status, &record.declaration)) {
         None => {
-            require_absent(
-                host,
-                &operation.keyring_path,
-                "repository keyring preflight",
-            )?;
-            require_absent(
-                host,
-                &operation.source_list_path,
-                "repository source preflight",
-            )?;
+            require_absent(host, &operation.keyring_path, "repository keyring preflight")?;
+            require_absent(host, &operation.source_list_path, "repository source preflight")?;
         }
-        Some((ManagedStatus::PendingInitial | ManagedStatus::PendingUpdate, recorded))
-            if recorded != &declaration =>
-        {
+        Some((ManagedStatus::PendingInitial | ManagedStatus::PendingUpdate, recorded)) if recorded != &declaration => {
             bail!("APT repository has a pending managed record for a different declaration")
         }
         Some((_, recorded)) => validate_record_destinations(recorded, &operation.filename_stem)?,
     }
 
-    let completed_matching = record.as_ref().is_some_and(|record| {
-        record.status == ManagedStatus::Completed && record.declaration == declaration
-    });
+    let completed_matching = record
+        .as_ref()
+        .is_some_and(|record| record.status == ManagedStatus::Completed && record.declaration == declaration);
     let initial_publication = match record.as_ref().map(|record| &record.status) {
         None => {
             state.publish_record(&ManagedRecord {
@@ -239,10 +209,8 @@ pub(crate) fn execute(host: &Host<'_>, operation: &AptRepositoryOperation) -> Re
     let key = normalized_key(host, operation.key_url.as_str())?;
     let source = operation.render_source().into_bytes();
     if completed_matching
-        && inspect_owned_file(host, &operation.keyring_path, "APT repository key")?.as_deref()
-            == Some(key.as_slice())
-        && inspect_owned_file(host, &operation.source_list_path, "APT repository source")?
-            .as_deref()
+        && inspect_owned_file(host, &operation.keyring_path, "APT repository key")?.as_deref() == Some(key.as_slice())
+        && inspect_owned_file(host, &operation.source_list_path, "APT repository source")?.as_deref()
             == Some(source.as_slice())
     {
         return Ok(());
@@ -300,9 +268,7 @@ fn validate_layout(layout: &AptRepositorySourceLayout) -> Result<()> {
         AptRepositorySourceLayout::SuiteComponents { suite, components } => {
             AptRepositoryToken::parse(suite.as_str())?;
             if suite.as_str() == "system" {
-                bail!(
-                    "APT repository suite 'system' must be resolved before operation construction"
-                );
+                bail!("APT repository suite 'system' must be resolved before operation construction");
             }
             if components.is_empty() {
                 bail!("APT repository components must be nonempty");
@@ -314,10 +280,7 @@ fn validate_layout(layout: &AptRepositorySourceLayout) -> Result<()> {
                     bail!("APT repository component 'system' is reserved for suite resolution");
                 }
                 if !seen.insert(component.as_str()) {
-                    bail!(
-                        "duplicate APT repository component {:?}",
-                        component.as_str()
-                    );
+                    bail!("duplicate APT repository component {:?}", component.as_str());
                 }
             }
         }
@@ -329,14 +292,8 @@ fn validate_layout(layout: &AptRepositorySourceLayout) -> Result<()> {
 }
 
 fn valid_definition_name(value: &str) -> bool {
-    value
-        .as_bytes()
-        .first()
-        .is_some_and(u8::is_ascii_alphanumeric)
-        && value
-            .as_bytes()
-            .last()
-            .is_some_and(u8::is_ascii_alphanumeric)
+    value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
@@ -375,8 +332,7 @@ fn valid_filename_stem(value: &str) -> bool {
 }
 
 fn validate_canonical_url(url: &HttpsUrl, kind: &str) -> Result<()> {
-    let parsed = HttpsUrl::parse(url.as_str())
-        .with_context(|| format!("APT repository {kind} URL is invalid"))?;
+    let parsed = HttpsUrl::parse(url.as_str()).with_context(|| format!("APT repository {kind} URL is invalid"))?;
     if parsed != *url {
         bail!("APT repository {kind} URL is not canonical");
     }
@@ -435,22 +391,17 @@ fn normalized_key(host: &Host<'_>, url: &str) -> Result<Vec<u8>> {
             "--with-colons",
         ],
     )?;
-    if !inspection.stdout.split(|byte| *byte == b'\n').any(|line| {
-        line.strip_prefix(b"pub:")
-            .is_some_and(|fields| !fields.is_empty())
-    }) {
+    if !inspection
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()))
+    {
         bail!("repository key validation found no public key");
     }
     Ok(bytes)
 }
 
-fn converge_owned_bytes(
-    host: &Host<'_>,
-    path: &Path,
-    expected: &[u8],
-    label: &str,
-    no_replace: bool,
-) -> Result<()> {
+fn converge_owned_bytes(host: &Host<'_>, path: &Path, expected: &[u8], label: &str, no_replace: bool) -> Result<()> {
     let current = inspect_owned_file(host, path, label)?;
     if no_replace && current.as_deref().is_some_and(|bytes| bytes != expected) {
         bail!("{label} initial-publication destination collision");
@@ -464,8 +415,8 @@ fn converge_owned_bytes(
             no_replace,
         )?;
     }
-    let final_bytes = inspect_owned_file(host, path, label)?
-        .with_context(|| format!("{label} postcondition is missing"))?;
+    let final_bytes =
+        inspect_owned_file(host, path, label)?.with_context(|| format!("{label} postcondition is missing"))?;
     if final_bytes != expected {
         bail!("{label} publication did not establish exact bytes");
     }
@@ -477,24 +428,14 @@ fn inspect_owned_file(host: &Host<'_>, path: &Path, label: &str) -> Result<Optio
     let absent = host
         .run(
             "sudo",
-            [
-                OsStr::new("test"),
-                OsStr::new("!"),
-                OsStr::new("-e"),
-                path_arg,
-            ],
+            [OsStr::new("test"), OsStr::new("!"), OsStr::new("-e"), path_arg],
         )?
         .status
         .success();
     let not_symlink = host
         .run(
             "sudo",
-            [
-                OsStr::new("test"),
-                OsStr::new("!"),
-                OsStr::new("-L"),
-                path_arg,
-            ],
+            [OsStr::new("test"), OsStr::new("!"), OsStr::new("-L"), path_arg],
         )?
         .status
         .success();
@@ -518,9 +459,7 @@ fn inspect_owned_file(host: &Host<'_>, path: &Path, label: &str) -> Result<Optio
         .with_context(|| format!("{label} stat returned non-UTF-8 output"))?
         .trim_end();
     let mut fields = state.split(':');
-    let mode = fields
-        .next()
-        .and_then(|value| u32::from_str_radix(value, 16).ok());
+    let mode = fields.next().and_then(|value| u32::from_str_radix(value, 16).ok());
     let uid = fields.next().and_then(|value| value.parse::<u32>().ok());
     let gid = fields.next().and_then(|value| value.parse::<u32>().ok());
     if fields.next().is_some()
@@ -545,18 +484,10 @@ fn require_absent(host: &Host<'_>, path: &Path, label: &str) -> Result<()> {
     for kind in ["-e", "-L"] {
         let output = host.run(
             "sudo",
-            [
-                OsStr::new("test"),
-                OsStr::new("!"),
-                OsStr::new(kind),
-                path_arg,
-            ],
+            [OsStr::new("test"), OsStr::new("!"), OsStr::new(kind), path_arg],
         )?;
         if !output.status.success() {
-            bail!(
-                "{label}: unmanaged destination conflict at {}",
-                path.display()
-            );
+            bail!("{label}: unmanaged destination conflict at {}", path.display());
         }
     }
     Ok(())
@@ -592,27 +523,17 @@ struct ManagedDeclaration {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ManagedLayout {
-    SuiteComponents {
-        suite: String,
-        components: Vec<String>,
-    },
-    ExactPath {
-        path: String,
-    },
+    SuiteComponents { suite: String, components: Vec<String> },
+    ExactPath { path: String },
 }
 
 impl ManagedDeclaration {
     fn from_operation(operation: &AptRepositoryOperation) -> Self {
         let layout = match &operation.layout {
-            AptRepositorySourceLayout::SuiteComponents { suite, components } => {
-                ManagedLayout::SuiteComponents {
-                    suite: suite.as_str().into(),
-                    components: components
-                        .iter()
-                        .map(|component| component.as_str().into())
-                        .collect(),
-                }
-            }
+            AptRepositorySourceLayout::SuiteComponents { suite, components } => ManagedLayout::SuiteComponents {
+                suite: suite.as_str().into(),
+                components: components.iter().map(|component| component.as_str().into()).collect(),
+            },
             AptRepositorySourceLayout::ExactPath(path) => ManagedLayout::ExactPath {
                 path: path.as_str().into(),
             },
@@ -654,10 +575,9 @@ impl ManagedState {
         self.0
             .read()?
             .map(|bytes| {
-                let value: StrictJson = serde_json::from_slice(&bytes)
-                    .context("parse strict APT repository managed record")?;
-                let record = parse_managed_record(value)
-                    .context("validate APT repository managed record")?;
+                let value: StrictJson =
+                    serde_json::from_slice(&bytes).context("parse strict APT repository managed record")?;
+                let record = parse_managed_record(value).context("validate APT repository managed record")?;
                 validate_managed_declaration(&record.declaration)
                     .context("validate APT repository managed declaration")?;
                 Ok(record)
@@ -666,9 +586,8 @@ impl ManagedState {
     }
 
     fn publish_record(&self, record: &ManagedRecord) -> Result<()> {
-        self.0.publish(
-            &serde_json::to_vec(record).context("serialize APT repository managed record")?,
-        )
+        self.0
+            .publish(&serde_json::to_vec(record).context("serialize APT repository managed record")?)
     }
 }
 
@@ -683,18 +602,14 @@ fn validate_managed_declaration(declaration: &ManagedDeclaration) -> Result<()> 
         bail!("managed declaration architecture is not canonical");
     }
     let layout = match &declaration.layout {
-        ManagedLayout::SuiteComponents { suite, components } => {
-            AptRepositorySourceLayout::SuiteComponents {
-                suite: AptRepositoryToken::parse(suite)?,
-                components: components
-                    .iter()
-                    .map(AptRepositoryToken::parse)
-                    .collect::<Result<Vec<_>>>()?,
-            }
-        }
-        ManagedLayout::ExactPath { path } => {
-            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?)
-        }
+        ManagedLayout::SuiteComponents { suite, components } => AptRepositorySourceLayout::SuiteComponents {
+            suite: AptRepositoryToken::parse(suite)?,
+            components: components
+                .iter()
+                .map(AptRepositoryToken::parse)
+                .collect::<Result<Vec<_>>>()?,
+        },
+        ManagedLayout::ExactPath { path } => AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?),
     };
     let operation = AptRepositoryOperation::new(
         declaration.name.clone(),
@@ -713,10 +628,7 @@ fn validate_managed_declaration(declaration: &ManagedDeclaration) -> Result<()> 
 fn validate_record_destinations(record: &ManagedDeclaration, stem: &str) -> Result<()> {
     let key = format!("{KEYRINGS_DIRECTORY}/cozydot-{stem}.gpg");
     let source = format!("{SOURCES_DIRECTORY}/cozydot-{stem}.list");
-    if record.filename_stem != stem
-        || record.keyring_path != key
-        || record.source_list_path != source
-    {
+    if record.filename_stem != stem || record.keyring_path != key || record.source_list_path != source {
         bail!("APT repository managed record has mismatched deterministic destinations");
     }
     Ok(())
@@ -806,9 +718,7 @@ impl<'de> Visitor<'de> for StrictJsonVisitor {
         let mut result = BTreeMap::new();
         while let Some((key, value)) = values.next_entry::<String, StrictJson>()? {
             if result.insert(key.clone(), value).is_some() {
-                return Err(serde::de::Error::custom(format!(
-                    "duplicate JSON key {key:?}"
-                )));
+                return Err(serde::de::Error::custom(format!("duplicate JSON key {key:?}")));
             }
         }
         Ok(StrictJson::Object(result))
@@ -931,123 +841,582 @@ fn validate_destination(destination: &str, directory: &str, suffix: &str) -> Res
     Ok(path.to_owned())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod managed_apt {
 
-    fn url(value: &str) -> HttpsUrl {
-        HttpsUrl::parse(value).unwrap()
-    }
-    fn operation(
-        architecture: Architecture,
-        layout: AptRepositorySourceLayout,
-    ) -> AptRepositoryOperation {
-        AptRepositoryOperation::new(
-            "Vendor_Name",
-            "vendor-name",
-            url("https://example.test/key"),
-            url("https://example.test/apt/"),
-            architecture,
-            layout,
-        )
-        .unwrap()
-    }
-    fn token(value: &str) -> AptRepositoryToken {
-        AptRepositoryToken::parse(value).unwrap()
+    use super::super::{privileged_file, Host};
+    use crate::platform::{Architecture, ManagedAptSources, Platform};
+    use anyhow::{bail, Context, Result};
+    use sha2::{Digest, Sha256};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        ffi::OsStr,
+        fmt::Write as _,
+        path::{Path, PathBuf},
+    };
+    use url::Url;
+
+    const APT_ROOT: &str = "/etc/apt";
+    const OWNED_SOURCE: &str = "/etc/apt/sources.list.d/cozydot-base.sources";
+    const BACKUP_ROOT: &str = "/var/lib/cozydot/apt-source-backups";
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ManagedAptSourcesOperation {
+        policy: ManagedAptSources,
     }
 
-    #[test]
-    fn renders_all_architectures_and_both_layouts_exactly() {
-        for (architecture, debian) in [
-            (Architecture::Amd64, "amd64"),
-            (Architecture::Arm64, "arm64"),
-            (Architecture::Arm32, "armhf"),
-            (Architecture::Riscv64, "riscv64"),
-        ] {
-            let operation = operation(
-                architecture,
-                AptRepositorySourceLayout::SuiteComponents {
-                    suite: token("stable"),
-                    components: vec![token("main"), token("contrib")],
-                },
-            );
-            assert_eq!(operation.render_source(), format!("deb [arch={debian} signed-by=/etc/apt/keyrings/cozydot-vendor-name.gpg] https://example.test/apt/ stable main contrib\n"));
+    impl ManagedAptSourcesOperation {
+        pub fn from_policy(policy: ManagedAptSources) -> Result<Self> {
+            validate_policy(&policy)?;
+            Ok(Self { policy })
         }
-        let stars = operation(
-            Architecture::Amd64,
-            AptRepositorySourceLayout::SuiteComponents {
-                suite: token("*"),
-                components: vec![token("*")],
-            },
-        );
-        assert!(stars.render_source().ends_with(" * *\n"));
-        let exact = operation(
-            Architecture::Amd64,
-            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("pool/vendor/").unwrap()),
-        );
-        assert_eq!(exact.render_source(), "deb [arch=amd64 signed-by=/etc/apt/keyrings/cozydot-vendor-name.gpg] https://example.test/apt/ pool/vendor/\n");
+
+        pub(crate) fn display_args(&self) -> Vec<String> {
+            vec![
+                "managed-apt-sources".into(),
+                self.policy.distro.clone(),
+                self.policy.release.clone(),
+                self.policy.architecture.canonical().into(),
+            ]
+        }
     }
 
-    #[test]
-    fn rejects_partial_wildcards_unsafe_paths_and_invalid_layouts() {
-        for value in ["sta*ble", "*main", "Main", "", "two words"] {
-            assert!(AptRepositoryToken::parse(value).is_err(), "{value}");
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SourceFile {
+        path: PathBuf,
+        bytes: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SourceChange {
+        path: PathBuf,
+        existed: bool,
+        original: Vec<u8>,
+        replacement: Vec<u8>,
+    }
+
+    pub(crate) fn execute(host: &Host<'_>, operation: &ManagedAptSourcesOperation) -> Result<()> {
+        validate_policy(&operation.policy)?;
+        preflight_keyring(host, &operation.policy)?;
+        let files = inspect_sources(host)?;
+        let changes = reconcile(&operation.policy, &files)?;
+
+        for change in &changes {
+            backup(host, change)?;
         }
-        for value in [
-            "/absolute/",
-            "../escape/",
-            "a//b/",
-            "a\\b/",
-            "a",
-            ".",
-            "a/./",
-        ] {
-            assert!(AptRepositoryPath::parse(value).is_err(), "{value}");
+        for change in changes.iter().filter(|change| change.path != Path::new(OWNED_SOURCE)) {
+            require_unchanged(host, change)?;
+            privileged_file::publish_bytes(host, &change.path, &change.replacement, "managed APT migration")?;
         }
-        assert!(AptRepositoryOperation::new(
-            "../bad",
-            "bad",
-            url("https://example.test/key"),
-            url("https://example.test/apt"),
-            Architecture::Amd64,
-            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("./").unwrap())
-        )
-        .is_err());
-        assert!(AptRepositoryOperation::new(
-            "Good_Name",
-            "wrong",
-            url("https://example.test/key"),
-            url("https://example.test/apt"),
-            Architecture::Amd64,
-            AptRepositorySourceLayout::SuiteComponents {
-                suite: token("stable"),
-                components: vec![]
+        if let Some(change) = changes.iter().find(|change| change.path == Path::new(OWNED_SOURCE)) {
+            require_unchanged(host, change)?;
+            privileged_file::publish_bytes(host, &change.path, &change.replacement, "managed APT publication")?;
+        } else {
+            privileged_file::sync_parent(host, Path::new(OWNED_SOURCE), "managed APT publication")?;
+        }
+
+        let remaining = reconcile(&operation.policy, &inspect_sources(host)?)?;
+        if !remaining.is_empty() {
+            bail!("managed APT publication did not establish the exact source postcondition");
+        }
+        Ok(())
+    }
+
+    fn validate_policy(policy: &ManagedAptSources) -> Result<()> {
+        let upstream = if policy.distro == "ubuntu" { "ubuntu" } else { "debian" };
+        let platform = Platform::from_parts(
+            policy.distro.clone(),
+            upstream.into(),
+            policy.release.clone(),
+            "none".into(),
+            policy.architecture.canonical(),
+        )?;
+        let component_refs = policy.components.iter().map(String::as_str).collect::<Vec<_>>();
+        if platform.managed_apt_sources(&component_refs)? != *policy {
+            bail!("managed APT operation policy is not canonical");
+        }
+        Ok(())
+    }
+
+    fn preflight_keyring(host: &Host<'_>, policy: &ManagedAptSources) -> Result<()> {
+        let Some(keyring) = policy.stanzas.first().map(|stanza| stanza.signed_by.as_str()) else {
+            bail!("managed APT policy has no source stanzas");
+        };
+        if policy.stanzas.iter().any(|stanza| stanza.signed_by != keyring) {
+            bail!("managed APT policy has inconsistent keyrings");
+        }
+        let output = host.require(
+            "managed APT keyring preflight",
+            "sudo",
+            ["stat", "--dereference", "--format=%f:%s", "--", keyring],
+        )?;
+        let state = std::str::from_utf8(&output.stdout)
+            .context("managed APT keyring stat returned non-UTF-8 output")?
+            .trim_end();
+        let Some((mode, size)) = state.split_once(':') else {
+            bail!("managed APT keyring stat returned malformed output");
+        };
+        let mode = u32::from_str_radix(mode, 16).context("managed APT keyring stat returned malformed mode")?;
+        let size = size
+            .parse::<u64>()
+            .context("managed APT keyring stat returned malformed size")?;
+        if mode & 0o170000 != 0o100000 || size == 0 {
+            bail!("managed APT keyring must be a nonempty regular file");
+        }
+        Ok(())
+    }
+
+    fn inspect_sources(host: &Host<'_>) -> Result<Vec<SourceFile>> {
+        for directory in [APT_ROOT, "/etc/apt/sources.list.d"] {
+            host.require(
+                "managed APT source directory symlink check",
+                "sudo",
+                ["test", "!", "-L", directory],
+            )?;
+        }
+        let output = host.require(
+            "managed APT source discovery",
+            "sudo",
+            [
+                "find",
+                APT_ROOT,
+                "-xdev",
+                "-maxdepth",
+                "2",
+                "(",
+                "-path",
+                "/etc/apt/sources.list",
+                "-o",
+                "-path",
+                "/etc/apt/sources.list.d/*.list",
+                "-o",
+                "-path",
+                "/etc/apt/sources.list.d/*.sources",
+                ")",
+                "-print0",
+            ],
+        )?;
+        let mut paths = Vec::new();
+        for raw in output.stdout.split(|byte| *byte == 0) {
+            if raw.is_empty() {
+                continue;
             }
-        )
-        .is_err());
-        assert!(AptRepositoryOperation::new(
-            "Good_Name",
-            "good-name",
-            url("https://example.test/key"),
-            url("https://example.test/apt"),
-            Architecture::Amd64,
-            AptRepositorySourceLayout::SuiteComponents {
-                suite: token("system"),
-                components: vec![token("main")]
+            let path = std::str::from_utf8(raw).context("managed APT source discovery returned a non-UTF-8 path")?;
+            let path = validate_source_path(path)?;
+            if paths.iter().any(|existing| existing == &path) {
+                bail!("managed APT source discovery returned a duplicate path");
             }
-        )
-        .is_err());
+            paths.push(path);
+        }
+        paths.sort();
+
+        let mut files = Vec::new();
+        for path in paths {
+            let state = host.require(
+                "managed APT source inspection",
+                "sudo",
+                [
+                    OsStr::new("stat"),
+                    OsStr::new("--format=%f"),
+                    OsStr::new("--"),
+                    path.as_os_str(),
+                ],
+            )?;
+            let mode = std::str::from_utf8(&state.stdout)
+                .context("managed APT source stat returned non-UTF-8 output")?
+                .trim_end();
+            let mode = u32::from_str_radix(mode, 16).context("managed APT source stat returned malformed mode")?;
+            if mode & 0o170000 != 0o100000 {
+                bail!("managed APT source path is not a regular file: {}", path.display());
+            }
+            let bytes = host
+                .require(
+                    "managed APT source inspection",
+                    "sudo",
+                    [OsStr::new("cat"), OsStr::new("--"), path.as_os_str()],
+                )?
+                .stdout;
+            std::str::from_utf8(&bytes)
+                .with_context(|| format!("managed APT source is not UTF-8: {}", path.display()))?;
+            files.push(SourceFile { path, bytes });
+        }
+        Ok(files)
     }
 
-    #[test]
-    fn strict_json_rejects_duplicate_keys_at_every_level() {
-        for value in [
-            r#"{"version":1,"version":1,"status":"pending_initial","declaration":{}}"#,
-            r#"{"version":1,"status":"pending_initial","declaration":{"name":"a","name":"b"}}"#,
-            r#"{"layout":{"type":"suite_components","suite":"stable","suite":"testing"}}"#,
-            r#"{"layout":{"components":[{"name":"a","name":"b"}]}}"#,
-        ] {
-            assert!(serde_json::from_str::<StrictJson>(value).is_err());
+    fn validate_source_path(value: &str) -> Result<PathBuf> {
+        let path = Path::new(value);
+        if path == Path::new("/etc/apt/sources.list") {
+            return Ok(path.to_owned());
         }
+        if path.parent() != Some(Path::new("/etc/apt/sources.list.d")) {
+            bail!("managed APT discovery returned a path outside the source directories");
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            bail!("managed APT discovery returned an invalid source filename");
+        };
+        if !name.ends_with(".list") && !name.ends_with(".sources")
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        {
+            bail!("managed APT discovery returned an invalid source filename");
+        }
+        Ok(path.to_owned())
+    }
+
+    fn reconcile(policy: &ManagedAptSources, files: &[SourceFile]) -> Result<Vec<SourceChange>> {
+        let expected = policy.render_deb822().into_bytes();
+        let mut changes = Vec::new();
+        let mut saw_owned = false;
+        for file in files {
+            if file.path == Path::new(OWNED_SOURCE) {
+                saw_owned = true;
+                if file.bytes != expected {
+                    changes.push(SourceChange {
+                        path: file.path.clone(),
+                        existed: true,
+                        original: file.bytes.clone(),
+                        replacement: expected.clone(),
+                    });
+                }
+                continue;
+            }
+            let text = std::str::from_utf8(&file.bytes).context("managed APT source is not UTF-8")?;
+            let replacement = match file.path.extension().and_then(|extension| extension.to_str()) {
+                Some("list") | None => reconcile_list(policy, text)?,
+                Some("sources") => reconcile_deb822(policy, text)?,
+                _ => bail!("managed APT source has an unsupported extension"),
+            };
+            if replacement.as_bytes() != file.bytes {
+                changes.push(SourceChange {
+                    path: file.path.clone(),
+                    existed: true,
+                    original: file.bytes.clone(),
+                    replacement: replacement.into_bytes(),
+                });
+            }
+        }
+        if !saw_owned {
+            changes.push(SourceChange {
+                path: PathBuf::from(OWNED_SOURCE),
+                existed: false,
+                original: Vec::new(),
+                replacement: expected,
+            });
+        }
+        Ok(changes)
+    }
+
+    fn reconcile_list(policy: &ManagedAptSources, text: &str) -> Result<String> {
+        let mut output = String::new();
+        for line in text.split_inclusive('\n') {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let active = body.split_once('#').map_or(body, |(before, _)| before).trim();
+            if active.split_ascii_whitespace().next() != Some("deb") {
+                output.push_str(line);
+                continue;
+            }
+            let entry = parse_list_entry(active).context("parse active one-line APT source")?;
+            if official_uri(policy, &entry.uri) && entry.architecture_modifiers {
+                bail!("managed APT cannot safely migrate an official one-line source with architecture add/remove modifiers");
+            }
+            if entry.applies_to(policy.architecture) && official_uri(policy, &entry.uri) {
+                validate_official_suites(policy, &entry.suites)?;
+                continue;
+            }
+            output.push_str(line);
+        }
+        Ok(output)
+    }
+
+    #[derive(Debug)]
+    struct ListEntry {
+        uri: String,
+        suites: Vec<String>,
+        architectures: Option<Vec<String>>,
+        architecture_modifiers: bool,
+    }
+
+    impl ListEntry {
+        fn applies_to(&self, architecture: Architecture) -> bool {
+            self.architectures
+                .as_ref()
+                .is_none_or(|values| values.iter().any(|value| value == architecture.debian()))
+        }
+    }
+
+    fn parse_list_entry(line: &str) -> Result<ListEntry> {
+        let mut rest = line
+            .strip_prefix("deb")
+            .context("APT source does not start with deb")?
+            .trim_start();
+        let mut architectures = None;
+        let mut architecture_modifiers = false;
+        if rest.starts_with('[') {
+            let end = rest.find(']').context("APT source has unterminated options")?;
+            let options = &rest[1..end];
+            for option in options.split_ascii_whitespace() {
+                if let Some(value) = option.strip_prefix("arch=") {
+                    architectures = Some(parse_architectures(value)?);
+                } else if option.starts_with("arch+=") || option.starts_with("arch-=") {
+                    architecture_modifiers = true;
+                }
+            }
+            rest = rest[end + 1..].trim_start();
+        }
+        let fields = rest.split_ascii_whitespace().collect::<Vec<_>>();
+        if fields.len() < 3 {
+            bail!("APT source is missing URI, suite, or components");
+        }
+        let uri = normalized_uri(fields[0])?;
+        Ok(ListEntry {
+            uri,
+            suites: vec![fields[1].to_owned()],
+            architectures,
+            architecture_modifiers,
+        })
+    }
+
+    fn parse_architectures(value: &str) -> Result<Vec<String>> {
+        let values = value.split(',').map(str::to_owned).collect::<Vec<_>>();
+        if values.is_empty()
+            || values
+                .iter()
+                .any(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        {
+            bail!("APT source has malformed architectures");
+        }
+        Ok(values)
+    }
+
+    fn reconcile_deb822(policy: &ManagedAptSources, text: &str) -> Result<String> {
+        let trailing_newline = text.ends_with('\n');
+        let mut output = Vec::new();
+        for paragraph in text.split("\n\n") {
+            if paragraph.trim().is_empty() {
+                output.push(paragraph.to_owned());
+                continue;
+            }
+            let fields = parse_deb822_fields(paragraph)?;
+            let enabled = match fields.get("enabled").map(String::as_str) {
+                None => true,
+                Some(value) if value.eq_ignore_ascii_case("yes") => true,
+                Some(value) if value.eq_ignore_ascii_case("no") => false,
+                Some(_) => bail!("deb822 source has an invalid Enabled value"),
+            };
+            let types = fields
+                .get("types")
+                .map(|value| value.split_ascii_whitespace().collect::<Vec<_>>())
+                .unwrap_or_default();
+            if !enabled || !types.contains(&"deb") {
+                output.push(paragraph.to_owned());
+                continue;
+            }
+            let uris = fields
+                .get("uris")
+                .context("active deb822 APT source is missing URIs")?
+                .split_ascii_whitespace()
+                .map(normalized_uri)
+                .collect::<Result<Vec<_>>>()?;
+            let suites = fields
+                .get("suites")
+                .context("active deb822 APT source is missing Suites")?
+                .split_ascii_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let architectures = fields
+                .get("architectures")
+                .map(|value| value.split_ascii_whitespace().map(str::to_owned).collect::<Vec<_>>());
+            let applies = architectures
+                .as_ref()
+                .is_none_or(|values| values.iter().any(|value| value == policy.architecture.debian()));
+            let official = uris.iter().filter(|uri| official_uri(policy, uri)).count();
+            if applies && official != 0 {
+                if fields.contains_key("architectures-add") || fields.contains_key("architectures-remove") {
+                    bail!("managed APT cannot safely migrate an official deb822 source with architecture add/remove fields");
+                }
+                if official != uris.len() {
+                    bail!("managed APT cannot safely split a deb822 stanza mixing official and unrelated URIs");
+                }
+                validate_official_suites(policy, &suites)?;
+                if types.contains(&"deb-src") {
+                    output.push(replace_deb822_types(paragraph, "deb-src")?);
+                }
+                continue;
+            }
+            output.push(paragraph.to_owned());
+        }
+        let mut result = output.join("\n\n");
+        if trailing_newline && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        Ok(result)
+    }
+
+    fn parse_deb822_fields(paragraph: &str) -> Result<BTreeMap<String, String>> {
+        let mut fields = BTreeMap::<String, String>::new();
+        let mut current: Option<String> = None;
+        for line in paragraph.lines() {
+            if line.trim().is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with([' ', '\t']) {
+                let key = current.as_ref().context("deb822 continuation has no field")?;
+                let value = fields.get_mut(key).context("deb822 continuation field disappeared")?;
+                value.push(' ');
+                value.push_str(line.trim());
+                continue;
+            }
+            let (name, value) = line.split_once(':').context("deb822 source has malformed field")?;
+            if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-') {
+                bail!("deb822 source has malformed field name");
+            }
+            let key = name.to_ascii_lowercase();
+            if fields.insert(key.clone(), value.trim().to_owned()).is_some() {
+                bail!("deb822 source has a duplicate field");
+            }
+            current = Some(key);
+        }
+        Ok(fields)
+    }
+
+    fn replace_deb822_types(paragraph: &str, replacement: &str) -> Result<String> {
+        let mut result = Vec::new();
+        let mut replacing = false;
+        let mut found = false;
+        for line in paragraph.lines() {
+            if line.starts_with([' ', '\t']) && replacing {
+                continue;
+            }
+            replacing = false;
+            if let Some((name, _)) = line.split_once(':') {
+                if name.eq_ignore_ascii_case("Types") {
+                    if found {
+                        bail!("deb822 source has duplicate Types fields");
+                    }
+                    result.push(format!("{name}: {replacement}"));
+                    found = true;
+                    replacing = true;
+                    continue;
+                }
+            }
+            result.push(line.to_owned());
+        }
+        if !found {
+            bail!("deb822 source is missing Types");
+        }
+        Ok(result.join("\n"))
+    }
+
+    fn normalized_uri(value: &str) -> Result<String> {
+        if !value.starts_with("http://") && !value.starts_with("https://") {
+            return Ok(value.to_owned());
+        }
+        let mut url = Url::parse(value).context("APT source URI is malformed")?;
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            bail!("APT source URI is unsupported");
+        }
+        let path = url.path().trim_end_matches('/').to_owned();
+        url.set_path(if path.is_empty() { "/" } else { &path });
+        Ok(url.to_string().trim_end_matches('/').to_owned())
+    }
+
+    fn official_uri(policy: &ManagedAptSources, uri: &str) -> bool {
+        let aliases: &[&str] = match policy.distro.as_str() {
+            "ubuntu" => &[
+                "http://archive.ubuntu.com/ubuntu",
+                "https://archive.ubuntu.com/ubuntu",
+                "http://security.ubuntu.com/ubuntu",
+                "https://security.ubuntu.com/ubuntu",
+                "http://ports.ubuntu.com/ubuntu-ports",
+                "https://ports.ubuntu.com/ubuntu-ports",
+            ],
+            "debian" => &[
+                "http://deb.debian.org/debian",
+                "https://deb.debian.org/debian",
+                "http://deb.debian.org/debian-security",
+                "https://deb.debian.org/debian-security",
+                "http://security.debian.org/debian-security",
+                "https://security.debian.org/debian-security",
+            ],
+            "kali" => &["http://http.kali.org/kali", "https://http.kali.org/kali"],
+            _ => &[],
+        };
+        aliases.contains(&uri)
+    }
+
+    fn validate_official_suites(policy: &ManagedAptSources, suites: &[String]) -> Result<()> {
+        let expected = policy
+            .stanzas
+            .iter()
+            .flat_map(|stanza| stanza.suites.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        if suites.is_empty() || suites.iter().any(|suite| !expected.contains(suite)) {
+            bail!("managed APT found an official base source for an unexpected release or pocket");
+        }
+        Ok(())
+    }
+
+    fn backup(host: &Host<'_>, change: &SourceChange) -> Result<()> {
+        if !change.existed {
+            return Ok(());
+        }
+        let digest = Sha256::digest(&change.original);
+        let mut digest_hex = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            write!(digest_hex, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        let relative = change
+            .path
+            .strip_prefix("/")
+            .context("managed APT source path is not absolute")?;
+        let destination = Path::new(BACKUP_ROOT).join(digest_hex).join(relative);
+        privileged_file::publish_bytes_with_mode(
+            host,
+            &destination,
+            &change.original,
+            "managed APT source backup",
+            "0600",
+        )
+    }
+
+    fn require_unchanged(host: &Host<'_>, change: &SourceChange) -> Result<()> {
+        if !change.existed {
+            host.require(
+                "managed APT owned source absence check",
+                "sudo",
+                [
+                    OsStr::new("test"),
+                    OsStr::new("!"),
+                    OsStr::new("-e"),
+                    change.path.as_os_str(),
+                ],
+            )?;
+            host.require(
+                "managed APT owned source symlink check",
+                "sudo",
+                [
+                    OsStr::new("test"),
+                    OsStr::new("!"),
+                    OsStr::new("-L"),
+                    change.path.as_os_str(),
+                ],
+            )?;
+            return Ok(());
+        }
+        let current = host.require(
+            "managed APT source prepublication check",
+            "sudo",
+            [OsStr::new("cat"), OsStr::new("--"), change.path.as_os_str()],
+        )?;
+        if current.stdout != change.original {
+            bail!("managed APT source changed concurrently before publication");
+        }
+        Ok(())
     }
 }
