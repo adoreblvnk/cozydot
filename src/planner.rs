@@ -17,7 +17,7 @@ use crate::{
     platform::{Architecture, Platform},
     runner::{self, ExecutionPhase, Step},
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::{collections::BTreeSet, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -580,7 +580,7 @@ fn plan_desktop(
                 ExecutionPhase::Desktop,
                 Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
                     target,
-                    DesktopSetting::IdleTimeoutSeconds(duration_seconds(timeout)?),
+                    DesktopSetting::IdleTimeoutSeconds(timeout.seconds()),
                 )?)),
             );
         }
@@ -803,22 +803,6 @@ fn enabled(state: EnabledDisabled) -> bool {
         EnabledDisabled::Enabled => true,
         EnabledDisabled::Disabled => false,
     }
-}
-
-fn duration_seconds(value: &str) -> Result<u32> {
-    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
-        (number, 1_u64)
-    } else if let Some(number) = value.strip_suffix('m') {
-        (number, 60)
-    } else {
-        (value.strip_suffix('h').context("invalid desktop idle duration")?, 3600)
-    };
-    number
-        .parse::<u64>()
-        .context("invalid desktop idle duration")?
-        .checked_mul(multiplier)
-        .and_then(|seconds| u32::try_from(seconds).ok())
-        .context("desktop idle duration exceeds the supported uint32 range")
 }
 
 #[cfg(test)]
