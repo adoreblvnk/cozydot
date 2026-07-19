@@ -236,9 +236,7 @@ pub enum Operation {
         mode: NerdFontsMode,
     },
     RustupBootstrap,
-    CargoBinstallBootstrap {
-        architecture: Architecture,
-    },
+    CargoBinstallBootstrap,
     RustToolchain {
         selector: RustToolchainSelector,
         architecture: Architecture,
@@ -369,9 +367,7 @@ impl Operation {
             .chain(families.iter().cloned())
             .collect(),
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
-            Self::CargoBinstallBootstrap { architecture } => {
-                vec!["cargo-binstall-bootstrap".into(), architecture.canonical().into()]
-            }
+            Self::CargoBinstallBootstrap => vec!["cargo-binstall-bootstrap".into()],
             Self::RustToolchain {
                 selector,
                 architecture,
@@ -478,9 +474,7 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         } => completed(tools::execute_go(&host, selector, *architecture, *mode)),
         Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
-        Operation::CargoBinstallBootstrap { architecture } => {
-            completed(binary::cargo_binstall::execute(&host, *architecture))
-        }
+        Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
         Operation::RustToolchain {
             selector,
             architecture,

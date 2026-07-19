@@ -41,6 +41,7 @@ enum PlannerPhase {
     AptPackages,
     FlatpakApplications,
     LanguageToolchains,
+    CargoBinstallBootstrap,
     LanguagePackages,
     BinaryPackages,
     Fonts,
@@ -66,6 +67,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         (PlannerPhase::AptPackages, Vec::new()),
         (PlannerPhase::FlatpakApplications, Vec::new()),
         (PlannerPhase::LanguageToolchains, Vec::new()),
+        (PlannerPhase::CargoBinstallBootstrap, Vec::new()),
         (PlannerPhase::LanguagePackages, Vec::new()),
         (PlannerPhase::BinaryPackages, Vec::new()),
         (PlannerPhase::Fonts, Vec::new()),
@@ -270,9 +272,6 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     if managers.contains(&ManagerBootstrap::Fnm) {
         prerequisites.insert("unzip");
     }
-    if managers.contains(&ManagerBootstrap::CargoBinstall) {
-        prerequisites.insert("tar");
-    }
 
     if !prerequisites.is_empty() {
         push_operation(
@@ -285,16 +284,16 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     }
 
     for manager in &managers {
-        let op = match manager {
-            ManagerBootstrap::Flatpak => Operation::FlatpakEnsureFlathub,
-            ManagerBootstrap::Rustup => Operation::RustupBootstrap,
-            ManagerBootstrap::CargoBinstall => Operation::CargoBinstallBootstrap {
-                architecture: platform.architecture,
-            },
-            ManagerBootstrap::Fnm => Operation::FnmBootstrap,
-            ManagerBootstrap::Uv => Operation::UvBootstrap,
+        let (phase, operation) = match manager {
+            ManagerBootstrap::Flatpak => (PlannerPhase::ManagerBootstraps, Operation::FlatpakEnsureFlathub),
+            ManagerBootstrap::Rustup => (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap),
+            ManagerBootstrap::CargoBinstall => {
+                (PlannerPhase::CargoBinstallBootstrap, Operation::CargoBinstallBootstrap)
+            }
+            ManagerBootstrap::Fnm => (PlannerPhase::ManagerBootstraps, Operation::FnmBootstrap),
+            ManagerBootstrap::Uv => (PlannerPhase::ManagerBootstraps, Operation::UvBootstrap),
         };
-        push_operation(&mut phases, PlannerPhase::ManagerBootstraps, op);
+        push_operation(&mut phases, phase, operation);
     }
 
     let mut final_operations = Vec::new();
