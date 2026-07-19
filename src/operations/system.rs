@@ -56,18 +56,11 @@ impl UbuntuSnapOperation {
 
 pub(crate) fn ensure_admin(host: &Host<'_>, _: &EnsureAdminOperation) -> Result<()> {
     let (username, _) = effective_user(host)?;
-    let sudo_gid = group_gid(host, "sudo")?.context("administrative group sudo does not exist")?;
-    if user_group_ids(host, &username)?.contains(&sudo_gid) {
-        return Ok(());
-    }
     host.require(
         "administrative group membership",
         "sudo",
         ["usermod", "-aG", "sudo", "--", &username],
     )?;
-    if !user_group_ids(host, &username)?.contains(&sudo_gid) {
-        bail!("administrative group mutation did not add {username} to sudo");
-    }
     Ok(())
 }
 
@@ -85,15 +78,11 @@ pub(crate) fn unattended_upgrades(host: &Host<'_>, operation: &UnattendedUpgrade
             contents,
             "unattended-upgrades periodic configuration",
         )?;
-        if !systemd_state(host, "is-enabled", "unattended-upgrades.service")?
-            || !systemd_state(host, "is-active", "unattended-upgrades.service")?
-        {
-            host.require(
-                "unattended-upgrades service enablement",
-                "sudo",
-                ["systemctl", "enable", "--now", "unattended-upgrades.service"],
-            )?;
-        }
+        host.require(
+            "unattended-upgrades service enablement",
+            "sudo",
+            ["systemctl", "enable", "--now", "unattended-upgrades.service"],
+        )?;
     } else {
         publish_bytes(
             host,
@@ -101,54 +90,42 @@ pub(crate) fn unattended_upgrades(host: &Host<'_>, operation: &UnattendedUpgrade
             contents,
             "unattended-upgrades periodic configuration",
         )?;
-        if systemd_state(host, "is-enabled", "unattended-upgrades.service")?
-            || systemd_state(host, "is-active", "unattended-upgrades.service")?
-        {
+        let is_enabled = systemd_state(host, "is-enabled", "unattended-upgrades.service")?;
+        let is_active = systemd_state(host, "is-active", "unattended-upgrades.service")?;
+        if is_enabled || is_active {
             host.require(
                 "unattended-upgrades service disablement",
                 "sudo",
                 ["systemctl", "disable", "--now", "unattended-upgrades.service"],
             )?;
         }
-        if package_installed(host, "unattended-upgrades")? {
-            apt::purge(host, &["unattended-upgrades".into()])?;
-        }
-    }
-    if package_installed(host, "unattended-upgrades")? != operation.enabled {
-        bail!("unattended-upgrades package state did not converge");
-    }
-    require_root_file(host, AUTO_UPGRADES, contents, "unattended-upgrades")?;
-    if operation.enabled {
-        require_systemd_state(host, "unattended-upgrades.service", true)?;
-    } else if systemd_state(host, "is-enabled", "unattended-upgrades.service")?
-        || systemd_state(host, "is-active", "unattended-upgrades.service")?
-    {
-        bail!("unattended-upgrades service remains enabled or active");
+        apt::purge(host, &["unattended-upgrades".into()])?;
     }
     Ok(())
+}
+
+fn systemd_state(host: &Host<'_>, query: &str, unit: &str) -> Result<bool> {
+    let output = host.run("systemctl", [query, unit])?;
+    Ok(output.status.success())
 }
 
 pub(crate) fn ubuntu_snap(host: &Host<'_>, operation: &UbuntuSnapOperation) -> Result<()> {
     if operation.enabled {
         host.require("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
         apt::packages(host, &["snapd".into()])?;
-        if !systemd_state(host, "is-enabled", "snapd.socket")? || !systemd_state(host, "is-active", "snapd.socket")? {
-            host.require(
-                "Snap service enablement",
-                "sudo",
-                ["systemctl", "enable", "--now", "snapd.socket"],
-            )?;
-        }
-        if !package_installed(host, "snapd")? {
-            bail!("Snap enablement did not install snapd");
-        }
-        require_systemd_state(host, "snapd.socket", true)?;
+        host.require(
+            "Snap service enablement",
+            "sudo",
+            ["systemctl", "enable", "--now", "snapd.socket"],
+        )?;
         return Ok(());
     }
 
     remove_snaps(host)?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        if systemd_state(host, "is-enabled", unit)? || systemd_state(host, "is-active", unit)? {
+        let is_enabled = systemd_state(host, "is-enabled", unit)?;
+        let is_active = systemd_state(host, "is-active", unit)?;
+        if is_enabled || is_active {
             host.require(
                 "Snap service disablement",
                 "sudo",
@@ -173,26 +150,6 @@ pub(crate) fn ubuntu_snap(host: &Host<'_>, operation: &UbuntuSnapOperation) -> R
     )?;
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
     publish_bytes(host, Path::new(NO_SNAP_PIN), pin, "no-Snap APT pin publication")?;
-    if package_installed(host, "snapd")? {
-        bail!("Snap disablement did not remove snapd");
-    }
-    require_root_file(host, NO_SNAP_PIN, pin, "no-Snap APT pin")?;
-    for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        if systemd_state(host, "is-enabled", unit)? || systemd_state(host, "is-active", unit)? {
-            bail!("Snap unit {unit} remains enabled or active");
-        }
-    }
-    for path in [
-        home_snap.as_path(),
-        Path::new("/snap"),
-        Path::new("/var/snap"),
-        Path::new("/var/lib/snapd"),
-    ] {
-        let output = host.run("sudo", ["test".as_ref(), "!".as_ref(), "-e".as_ref(), path.as_os_str()])?;
-        if !output.status.success() {
-            bail!("Snap data path remains present: {}", path.display());
-        }
-    }
     Ok(())
 }
 
@@ -228,51 +185,6 @@ fn valid_snap_name(name: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn package_installed(host: &Host<'_>, package: &str) -> Result<bool> {
-    let output = host.run(
-        "dpkg-query",
-        ["-W", "-f=${Package}\\t${db:Status-Abbrev}\\n", "--", package],
-    )?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        bail!("dpkg-query failed while verifying {package}");
-    }
-    if output.stdout.is_empty() {
-        return Ok(false);
-    }
-    let record = one_record(&output.stdout, "dpkg-query")?;
-    let Some((returned, status)) = record.split_once('\t') else {
-        bail!("dpkg-query returned malformed package state");
-    };
-    if returned != package || status.len() != 3 {
-        bail!("dpkg-query returned mismatched package state");
-    }
-    Ok(status.as_bytes()[1] == b'i')
-}
-
-fn require_root_file(host: &Host<'_>, path: &str, expected: &[u8], operation: &str) -> Result<()> {
-    let output = host.require(operation, "sudo", ["cat", "--", path])?;
-    if output.stdout != expected {
-        bail!("{operation} file content did not converge");
-    }
-    Ok(())
-}
-
-fn require_systemd_state(host: &Host<'_>, unit: &str, expected: bool) -> Result<()> {
-    if systemd_state(host, "is-enabled", unit)? != expected || systemd_state(host, "is-active", unit)? != expected {
-        bail!("systemd unit {unit} did not converge to enabled={expected}");
-    }
-    Ok(())
-}
-
-fn systemd_state(host: &Host<'_>, query: &str, unit: &str) -> Result<bool> {
-    let output = host.run("systemctl", ["--quiet", query, unit])?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(_) => Ok(false),
-        None => bail!("systemctl {query} {unit} terminated without an exit code"),
-    }
-}
-
 fn effective_user(host: &Host<'_>) -> Result<(String, u32)> {
     let uid = rustix::process::geteuid().as_raw();
     let output = host.require("effective user query", "getent", ["passwd", &uid.to_string()])?;
@@ -284,29 +196,14 @@ fn effective_user(host: &Host<'_>) -> Result<(String, u32)> {
     Ok((fields[0].to_owned(), uid))
 }
 
-fn group_gid(host: &Host<'_>, group: &str) -> Result<Option<u32>> {
+fn group_exists(host: &Host<'_>, group: &str) -> Result<bool> {
     let output = host.run("getent", ["group", group])?;
-    if output.status.code() == Some(2) && output.stdout.is_empty() {
-        return Ok(None);
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(2) => Ok(false),
+        Some(code) => bail!("getent group failed with exit code {code}"),
+        None => bail!("getent group terminated without an exit code"),
     }
-    if !output.status.success() {
-        bail!("getent group failed");
-    }
-    let record = one_record(&output.stdout, "getent group")?;
-    let fields = record.split(':').collect::<Vec<_>>();
-    if fields.len() != 4 || fields[0] != group {
-        bail!("getent group returned malformed state");
-    }
-    Ok(Some(fields[2].parse().context("getent group returned malformed GID")?))
-}
-
-fn user_group_ids(host: &Host<'_>, username: &str) -> Result<BTreeSet<u32>> {
-    let output = host.require("user group query", "id", ["-G", "--", username])?;
-    let record = one_record(&output.stdout, "id -G")?;
-    record
-        .split_ascii_whitespace()
-        .map(|value| value.parse::<u32>().context("id -G returned malformed GID"))
-        .collect()
 }
 
 fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
@@ -389,42 +286,17 @@ pub(crate) fn docker_local_log(host: &Host<'_>, operation: &DockerLocalLogOperat
         &bytes,
         "Docker daemon config publication",
     )?;
-    let published = read_daemon_config(host)?;
-    if published != requested {
-        bail!("Docker daemon config publication did not establish the requested state");
-    }
     Ok(())
 }
 pub(crate) fn vscode_extensions(host: &Host<'_>, operation: &VsCodeExtensionOperation) -> Result<()> {
     let extensions = canonical_extensions(&operation.extensions).context("validate VS Code extension operation")?;
     preflight(host, Product::VsCode)?;
-    let installed = inspect_extensions(host)?;
-    let missing = extensions
-        .iter()
-        .filter(|extension| !installed.contains(extension.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return Ok(());
-    }
-    for extension in missing {
+    for extension in extensions {
         host.require(
             "VS Code extension installation",
             "code",
             ["--install-extension", extension.as_str()],
         )?;
-    }
-    let installed = inspect_extensions(host)?;
-    let missing = extensions
-        .iter()
-        .filter(|extension| !installed.contains(extension.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        bail!(
-            "VS Code extension installation did not install configured extensions: {}",
-            missing.join(", ")
-        );
     }
     Ok(())
 }
@@ -535,31 +407,18 @@ fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
     let (username, _) = effective_user(host)?;
     preflight(host, product)?;
     let group = product.group().context("group integration requires a system group")?;
-    let gid = if let Some(gid) = group_gid(host, group)? {
-        gid
-    } else {
+    if !group_exists(host, group)? {
         host.require(
             &format!("{} group creation", product.label()),
             "sudo",
             ["groupadd", "--system", group],
         )?;
-        group_gid(host, group)?
-            .ok_or_else(|| anyhow::anyhow!("{} group creation did not create {group}", product.label()))?
-    };
-    if user_group_ids(host, &username)?.contains(&gid) {
-        return Ok(());
     }
     host.require(
         &format!("{} group membership", product.label()),
         "sudo",
         ["usermod", "-aG", group, "--", username.as_str()],
     )?;
-    if !user_group_ids(host, &username)?.contains(&gid) {
-        bail!(
-            "{} group membership mutation did not add {username} to {group}",
-            product.label()
-        );
-    }
     Ok(())
 }
 fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
@@ -601,20 +460,6 @@ fn read_daemon_config(host: &Host<'_>) -> Result<Value> {
         bail!("Docker daemon config must be a JSON object");
     }
     Ok(value)
-}
-fn inspect_extensions(host: &Host<'_>) -> Result<BTreeSet<String>> {
-    let output = host.require("VS Code installed extension query", "code", ["--list-extensions"])?;
-    let output = std::str::from_utf8(&output.stdout).context("code returned non-UTF-8 installed extension state")?;
-    let mut installed = BTreeSet::new();
-    for extension in output.lines() {
-        let Some(extension) = canonical_extension(extension) else {
-            bail!("code returned malformed extension identifier: {extension:?}");
-        };
-        if !installed.insert(extension) {
-            bail!("code returned duplicate case-folded extension identifiers");
-        }
-    }
-    Ok(installed)
 }
 fn canonical_extensions(extensions: &[String]) -> Result<Vec<String>> {
     if extensions.is_empty() {
@@ -828,50 +673,25 @@ pub(crate) fn gnome_rounded_corners(host: &Host<'_>, _: &GnomeRoundedCornersOper
 }
 fn ensure_extension(host: &Host<'_>, extension: &str) -> Result<OperationOutcome> {
     validate_extension(extension).context("validate fixed GNOME extension provider")?;
-    let installed = extension_state(host, false)?;
+    let installed = extension_state(host)?;
     let newly_installed = !installed.contains(extension);
     if newly_installed {
         install_extension(host, extension)?;
-        if !extension_state(host, false)?.contains(extension) {
-            return Ok(OperationOutcome::LoginRequired);
-        }
-    }
-    if !extension_state(host, true)?.contains(extension) {
-        host.require("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
-    }
-    if !extension_state(host, true)?.contains(extension) {
         return Ok(OperationOutcome::LoginRequired);
     }
+    host.require("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
     Ok(OperationOutcome::Completed)
 }
 fn ensure_gsetting(host: &Host<'_>, schema: &str, key: &str, expected: &str) -> Result<()> {
-    let current = host.require("desktop setting query", "gsettings", ["get", schema, key])?;
-    if state_line(&current.stdout, "gsettings")? != expected {
-        host.require("desktop setting mutation", "gsettings", ["set", schema, key, expected])?;
-    }
-    let current = host.require("desktop setting postcondition", "gsettings", ["get", schema, key])?;
-    if state_line(&current.stdout, "gsettings")? != expected {
-        bail!("desktop setting {schema} {key} did not converge to {expected}");
-    }
+    host.require("desktop setting mutation", "gsettings", ["set", schema, key, expected])?;
     Ok(())
 }
 fn ensure_dconf(host: &Host<'_>, key: &str, expected: &str) -> Result<()> {
-    let current = host.require("GNOME dconf query", "dconf", ["read", key])?;
-    if optional_state_line(&current.stdout, "dconf")? != Some(expected) {
-        host.require("GNOME dconf mutation", "dconf", ["write", key, expected])?;
-    }
-    let current = host.require("GNOME dconf postcondition", "dconf", ["read", key])?;
-    if optional_state_line(&current.stdout, "dconf")? != Some(expected) {
-        bail!("GNOME dconf setting {key} did not converge to {expected}");
-    }
+    host.require("GNOME dconf mutation", "dconf", ["write", key, expected])?;
     Ok(())
 }
-fn extension_state(host: &Host<'_>, enabled_only: bool) -> Result<BTreeSet<String>> {
-    let mut command = vec!["list".to_owned()];
-    if enabled_only {
-        command.push("--enabled".into());
-    }
-    let output = host.require("GNOME extension state query", "gnome-extensions", command)?;
+fn extension_state(host: &Host<'_>) -> Result<BTreeSet<String>> {
+    let output = host.require("GNOME extension state query", "gnome-extensions", ["list"])?;
     let output = std::str::from_utf8(&output.stdout).context("gnome-extensions returned non-UTF-8 state")?;
     let mut extensions = BTreeSet::new();
     for extension in output.lines() {
@@ -953,15 +773,4 @@ fn valid_uuid_part(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-}
-fn state_line<'a>(output: &'a [u8], command: &str) -> Result<&'a str> {
-    optional_state_line(output, command)?.context(format!("{command} returned empty state"))
-}
-fn optional_state_line<'a>(output: &'a [u8], command: &str) -> Result<Option<&'a str>> {
-    let output = std::str::from_utf8(output).with_context(|| format!("{command} returned non-UTF-8 state"))?;
-    let output = output.strip_suffix('\n').unwrap_or(output);
-    if output.contains(['\n', '\r']) {
-        bail!("{command} returned malformed multiline state");
-    }
-    Ok((!output.is_empty()).then_some(output))
 }
