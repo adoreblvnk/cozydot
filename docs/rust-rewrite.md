@@ -13,7 +13,7 @@ The public CLI is intentionally small:
 
 `apply` parses and validates the complete file, resolves the host platform, plans typed operations directly, and executes them in fixed phases. Unknown fields, wrong types, YAML extensions, interpolation, unsafe paths, malformed identifiers, and unsupported platform combinations fail with contextual field paths.
 
-Managers and repository paths are fixed implementation choices. YAML cannot select commands, shell source, managers, lock paths, plugins, profiles, or interpolation variables.
+Managers and executable behavior are fixed implementation choices. YAML cannot select commands, shell source, managers, lock paths, plugins, profiles, or interpolation variables. Third-party APT declarations may select a validated signing-key destination under `/etc/apt/keyrings/` or `/usr/share/keyrings/`; Cozydot derives the corresponding source-list path from the repository name.
 
 ## Behavior Covered
 

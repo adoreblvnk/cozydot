@@ -51,6 +51,7 @@ packages:
     repositories:
       - name: docker
         key: https://download.docker.com/linux/ubuntu/gpg
+        key_path: /etc/apt/keyrings/docker.asc
         urls:
           ubuntu: https://download.docker.com/linux/ubuntu
           debian: https://download.docker.com/linux/debian
@@ -65,6 +66,7 @@ packages:
           - docker-compose-plugin
       - name: github-cli
         key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
         urls:
           default: https://cli.github.com/packages
         suite: stable
@@ -72,6 +74,7 @@ packages:
         packages: [gh]
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
+        key_path: /etc/apt/keyrings/packages.microsoft.gpg
         urls:
           default: https://packages.microsoft.com/repos/code
         suite: stable
@@ -79,6 +82,7 @@ packages:
         packages: [code]
       - name: wezterm
         key: https://apt.fury.io/wez/gpg.key
+        key_path: /usr/share/keyrings/wezterm-fury.asc
         urls:
           default: https://apt.fury.io/wez/
         suite: '*'

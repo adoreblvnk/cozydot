@@ -52,6 +52,7 @@ packages:
     repositories:
       - name: docker
         key: https://download.docker.com/linux/ubuntu/gpg
+        key_path: /etc/apt/keyrings/docker.asc
         urls:
           ubuntu: https://download.docker.com/linux/ubuntu
           debian: https://download.docker.com/linux/debian
@@ -66,6 +67,7 @@ packages:
           - docker-compose-plugin
       - name: github-cli
         key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
         urls:
           default: https://cli.github.com/packages
         suite: stable
@@ -73,6 +75,7 @@ packages:
         packages: [gh]
       - name: helium
         key: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
+        key_path: /usr/share/keyrings/helium.gpg
         urls:
           default: https://pkg.helium.computer/deb
         suite: stable
@@ -82,6 +85,7 @@ packages:
           - helium-bin
       - name: onlyoffice
         key: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+        key_path: /usr/share/keyrings/onlyoffice.gpg
         urls:
           default: https://download.onlyoffice.com/repo/debian
         suite: squeeze
@@ -91,6 +95,7 @@ packages:
           - onlyoffice-desktopeditors
       - name: virtualbox
         key: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
         urls:
           default: https://download.virtualbox.org/virtualbox/debian
         suite: system
@@ -100,6 +105,7 @@ packages:
           - virtualbox-7.1
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
+        key_path: /etc/apt/keyrings/packages.microsoft.gpg
         urls:
           default: https://packages.microsoft.com/repos/code
         suite: stable
@@ -107,6 +113,7 @@ packages:
         packages: [code]
       - name: wezterm
         key: https://apt.fury.io/wez/gpg.key
+        key_path: /usr/share/keyrings/wezterm-fury.asc
         urls:
           default: https://apt.fury.io/wez/
         suite: '*'

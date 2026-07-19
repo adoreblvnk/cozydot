@@ -1,23 +1,14 @@
 use super::{Host, TempPath};
 use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
-use serde::{
-    de::Visitor,
-    de::{MapAccess, SeqAccess},
-    Deserialize, Deserializer, Serialize,
-};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     ffi::OsStr,
-    fmt, fs,
-    fs::File,
-    os::unix::ffi::OsStrExt,
+    fs,
     path::{Path, PathBuf},
 };
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
-const KEYRINGS_DIRECTORY: &str = "/etc/apt/keyrings";
-const MANAGED_STATE_VERSION: u64 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepositoryToken(String);
@@ -77,7 +68,6 @@ pub enum AptRepositorySourceLayout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepositoryOperation {
     name: String,
-    filename_stem: String,
     key_url: HttpsUrl,
     source_url: HttpsUrl,
     architecture: Architecture,
@@ -89,46 +79,27 @@ pub struct AptRepositoryOperation {
 impl AptRepositoryOperation {
     pub fn new(
         name: impl Into<String>,
-        filename_stem: impl Into<String>,
         key_url: HttpsUrl,
         source_url: HttpsUrl,
         architecture: Architecture,
         layout: AptRepositorySourceLayout,
+        keyring_path: PathBuf,
     ) -> Result<Self> {
         let name = name.into();
-        let filename_stem = filename_stem.into();
         if !valid_definition_name(&name) {
             bail!("invalid APT repository name {name:?}");
-        }
-        if !valid_filename_stem(&filename_stem) {
-            bail!("invalid APT repository filename stem {filename_stem:?}");
-        }
-        let expected_stem = repository_stem(&name);
-        if filename_stem != expected_stem {
-            bail!("APT repository filename stem {filename_stem:?} does not match name-derived stem {expected_stem:?}");
         }
         validate_canonical_url(&key_url, "key")?;
         validate_canonical_url(&source_url, "source")?;
         validate_layout(&layout)?;
 
-        let keyring_path = PathBuf::from(format!("{KEYRINGS_DIRECTORY}/cozydot-{filename_stem}.gpg"));
-        let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/cozydot-{filename_stem}.list"));
-        validate_destination(
-            keyring_path.to_str().context("repository keyring path is not UTF-8")?,
-            KEYRINGS_DIRECTORY,
-            ".gpg",
-        )?;
-        validate_destination(
-            source_list_path
-                .to_str()
-                .context("repository source-list path is not UTF-8")?,
-            SOURCES_DIRECTORY,
-            ".list",
-        )?;
+        let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
+
+        validate_keyring_destination(&keyring_path)?;
+        validate_source_list_destination(&source_list_path, &name)?;
 
         Ok(Self {
             name,
-            filename_stem,
             key_url,
             source_url,
             architecture,
@@ -173,89 +144,27 @@ impl AptRepositoryOperation {
 
 pub(crate) fn execute(host: &Host<'_>, operation: &AptRepositoryOperation) -> Result<()> {
     validate_operation(operation)?;
-    let declaration = ManagedDeclaration::from_operation(operation);
-    let state = ManagedState::open(host, &operation.filename_stem)?;
-    let lock = state.acquire_lock()?;
-    let record = state.read_record()?;
-    state.validate_lock_entry(&lock)?;
 
-    match record.as_ref().map(|record| (&record.status, &record.declaration)) {
-        None => {
-            require_absent(host, &operation.keyring_path, "repository keyring preflight")?;
-            require_absent(host, &operation.source_list_path, "repository source preflight")?;
-        }
-        Some((ManagedStatus::PendingInitial | ManagedStatus::PendingUpdate, recorded)) if recorded != &declaration => {
-            bail!("APT repository has a pending managed record for a different declaration")
-        }
-        Some((_, recorded)) => validate_record_destinations(recorded, &operation.filename_stem)?,
-    }
+    let keyring_path_str = operation.keyring_path.to_str().context("keyring path is not UTF-8")?;
+    let use_armor = keyring_path_str.ends_with(".asc");
 
-    let completed_matching = record
-        .as_ref()
-        .is_some_and(|record| record.status == ManagedStatus::Completed && record.declaration == declaration);
-    let initial_publication = match record.as_ref().map(|record| &record.status) {
-        None => {
-            state.publish_record(&ManagedRecord {
-                version: MANAGED_STATE_VERSION,
-                status: ManagedStatus::PendingInitial,
-                declaration: declaration.clone(),
-            })?;
-            true
-        }
-        Some(ManagedStatus::PendingInitial) => true,
-        Some(ManagedStatus::PendingUpdate | ManagedStatus::Completed) => false,
-    };
-
-    let key = normalized_key(host, operation.key_url.as_str())?;
+    let key = processed_key(host, operation.key_url.as_str(), use_armor)?;
     let source = operation.render_source().into_bytes();
-    if completed_matching
-        && inspect_owned_file(host, &operation.keyring_path, "APT repository key")?.as_deref() == Some(key.as_slice())
-        && inspect_owned_file(host, &operation.source_list_path, "APT repository source")?.as_deref()
-            == Some(source.as_slice())
-    {
-        return Ok(());
-    }
-    if record
-        .as_ref()
-        .is_some_and(|record| record.status == ManagedStatus::Completed)
-    {
-        state.publish_record(&ManagedRecord {
-            version: MANAGED_STATE_VERSION,
-            status: ManagedStatus::PendingUpdate,
-            declaration: declaration.clone(),
-        })?;
-    }
-    converge_owned_bytes(
-        host,
-        &operation.keyring_path,
-        &key,
-        "APT repository key",
-        initial_publication,
-    )?;
-    converge_owned_bytes(
-        host,
-        &operation.source_list_path,
-        &source,
-        "APT repository source",
-        initial_publication,
-    )?;
 
-    state.validate_lock_entry(&lock)?;
-    state.publish_record(&ManagedRecord {
-        version: MANAGED_STATE_VERSION,
-        status: ManagedStatus::Completed,
-        declaration,
-    })
+    converge_owned_bytes(host, &operation.keyring_path, &key, "APT repository key")?;
+    converge_owned_bytes(host, &operation.source_list_path, &source, "APT repository source")?;
+
+    Ok(())
 }
 
 fn validate_operation(operation: &AptRepositoryOperation) -> Result<()> {
     let rebuilt = AptRepositoryOperation::new(
         operation.name.clone(),
-        operation.filename_stem.clone(),
         operation.key_url.clone(),
         operation.source_url.clone(),
         operation.architecture,
         operation.layout.clone(),
+        operation.keyring_path.clone(),
     )?;
     if rebuilt != *operation {
         bail!("APT repository operation is not canonical");
@@ -299,38 +208,6 @@ fn valid_definition_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
-fn repository_stem(name: &str) -> String {
-    let mut stem = String::new();
-    let mut separator = false;
-    for byte in name.bytes() {
-        if byte.is_ascii_alphanumeric() {
-            if separator && !stem.is_empty() {
-                stem.push('-');
-            }
-            stem.push((byte as char).to_ascii_lowercase());
-            separator = false;
-        } else {
-            separator = true;
-        }
-    }
-    stem
-}
-
-fn valid_filename_stem(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .as_bytes()
-            .first()
-            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        && value
-            .as_bytes()
-            .last()
-            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-}
-
 fn validate_canonical_url(url: &HttpsUrl, kind: &str) -> Result<()> {
     let parsed = HttpsUrl::parse(url.as_str()).with_context(|| format!("APT repository {kind} URL is invalid"))?;
     if parsed != *url {
@@ -339,9 +216,8 @@ fn validate_canonical_url(url: &HttpsUrl, kind: &str) -> Result<()> {
     Ok(())
 }
 
-fn normalized_key(host: &Host<'_>, url: &str) -> Result<Vec<u8>> {
+fn processed_key(host: &Host<'_>, url: &str, use_armor: bool) -> Result<Vec<u8>> {
     let downloaded = TempPath::new(host, "repository-key-download")?;
-    let normalized = TempPath::new(host, "repository-key-normalized")?;
     host.require(
         "repository key download",
         "curl",
@@ -361,6 +237,14 @@ fn normalized_key(host: &Host<'_>, url: &str) -> Result<Vec<u8>> {
             url,
         ],
     )?;
+
+    let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repository key")?;
+    if downloaded_bytes.is_empty() {
+        bail!("repository key download produced empty output");
+    }
+
+    let binary_keyring = TempPath::new_with_suffix(host, "repository-key-binary", ".gpg")?;
+
     host.require(
         "repository key conversion",
         "gpg",
@@ -368,16 +252,14 @@ fn normalized_key(host: &Host<'_>, url: &str) -> Result<Vec<u8>> {
             "--no-options",
             "--batch",
             "--yes",
-            "--dearmor",
             "--output",
-            &normalized.path().to_string_lossy(),
+            &binary_keyring.path().to_string_lossy(),
+            "--dearmor",
             &downloaded.path().to_string_lossy(),
         ],
     )?;
-    let bytes = fs::read(normalized.path()).context("read normalized repository key")?;
-    if bytes.is_empty() {
-        bail!("repository key conversion produced empty output");
-    }
+
+    // Validate the keyring contains a public key
     let inspection = host.require(
         "repository key validation",
         "gpg",
@@ -386,9 +268,9 @@ fn normalized_key(host: &Host<'_>, url: &str) -> Result<Vec<u8>> {
             "--batch",
             "--no-default-keyring",
             "--keyring",
-            &normalized.path().to_string_lossy(),
-            "--list-keys",
+            &binary_keyring.path().to_string_lossy(),
             "--with-colons",
+            "--list-keys",
         ],
     )?;
     if !inspection
@@ -398,23 +280,53 @@ fn normalized_key(host: &Host<'_>, url: &str) -> Result<Vec<u8>> {
     {
         bail!("repository key validation found no public key");
     }
+
+    // Now export in the desired format
+    let exported = TempPath::new(host, "repository-key-exported")?;
+    if use_armor {
+        host.require(
+            "repository key export",
+            "gpg",
+            [
+                "--no-options",
+                "--batch",
+                "--yes",
+                "--no-default-keyring",
+                "--keyring",
+                &binary_keyring.path().to_string_lossy(),
+                "--armor",
+                "--output",
+                &exported.path().to_string_lossy(),
+                "--export",
+            ],
+        )?;
+    } else {
+        host.require(
+            "repository key export",
+            "gpg",
+            [
+                "--no-options",
+                "--batch",
+                "--yes",
+                "--no-default-keyring",
+                "--keyring",
+                &binary_keyring.path().to_string_lossy(),
+                "--output",
+                &exported.path().to_string_lossy(),
+                "--export",
+            ],
+        )?;
+    }
+
+    let bytes = fs::read(exported.path()).context("read exported repository key")?;
+    if bytes.is_empty() {
+        bail!("repository key export produced empty output");
+    }
     Ok(bytes)
 }
 
-fn converge_owned_bytes(host: &Host<'_>, path: &Path, expected: &[u8], label: &str, no_replace: bool) -> Result<()> {
-    let current = inspect_owned_file(host, path, label)?;
-    if no_replace && current.as_deref().is_some_and(|bytes| bytes != expected) {
-        bail!("{label} initial-publication destination collision");
-    }
-    if current.is_none() || !no_replace && current.as_deref() != Some(expected) {
-        super::privileged_file::publish_bytes_with_policy(
-            host,
-            path,
-            expected,
-            &format!("{label} publication"),
-            no_replace,
-        )?;
-    }
+fn converge_owned_bytes(host: &Host<'_>, path: &Path, expected: &[u8], label: &str) -> Result<()> {
+    super::privileged_file::publish_bytes_with_policy(host, path, expected, &format!("{label} publication"), false)?;
     let final_bytes =
         inspect_owned_file(host, path, label)?.with_context(|| format!("{label} postcondition is missing"))?;
     if final_bytes != expected {
@@ -479,366 +391,57 @@ fn inspect_owned_file(host: &Host<'_>, path: &Path, label: &str) -> Result<Optio
     ))
 }
 
-fn require_absent(host: &Host<'_>, path: &Path, label: &str) -> Result<()> {
-    let path_arg = path.as_os_str();
-    for kind in ["-e", "-L"] {
-        let output = host.run(
-            "sudo",
-            [OsStr::new("test"), OsStr::new("!"), OsStr::new(kind), path_arg],
-        )?;
-        if !output.status.success() {
-            bail!("{label}: unmanaged destination conflict at {}", path.display());
-        }
+fn validate_keyring_destination(destination: &Path) -> Result<()> {
+    let dest_str = destination.to_str().context("keyring path is not UTF-8")?;
+    if dest_str.as_bytes().contains(&0) || !destination.is_absolute() {
+        bail!("keyring path must be absolute and contain no null bytes");
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("keyring path has no parent"))?;
+    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
+        bail!("keyring path must be a direct child of /etc/apt/keyrings/ or /usr/share/keyrings/");
+    }
+    let file_name = destination
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| anyhow::anyhow!("keyring path has no file name"))?;
+    if parent.join(file_name).to_str() != Some(dest_str) {
+        bail!("keyring path must use its canonical direct-child spelling");
+    }
+    if !file_name.ends_with(".asc") && !file_name.ends_with(".gpg") {
+        bail!("keyring path extension must be .asc or .gpg");
+    }
+    let stem = destination
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow::anyhow!("keyring path has no file stem"))?;
+    if !valid_definition_name(stem) {
+        bail!("keyring path file stem must be a valid definition name");
     }
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct ManagedRecord {
-    version: u64,
-    status: ManagedStatus,
-    declaration: ManagedDeclaration,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum ManagedStatus {
-    PendingInitial,
-    PendingUpdate,
-    Completed,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct ManagedDeclaration {
-    name: String,
-    filename_stem: String,
-    key_url: String,
-    source_url: String,
-    architecture: String,
-    layout: ManagedLayout,
-    keyring_path: String,
-    source_list_path: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ManagedLayout {
-    SuiteComponents { suite: String, components: Vec<String> },
-    ExactPath { path: String },
-}
-
-impl ManagedDeclaration {
-    fn from_operation(operation: &AptRepositoryOperation) -> Self {
-        let layout = match &operation.layout {
-            AptRepositorySourceLayout::SuiteComponents { suite, components } => ManagedLayout::SuiteComponents {
-                suite: suite.as_str().into(),
-                components: components.iter().map(|component| component.as_str().into()).collect(),
-            },
-            AptRepositorySourceLayout::ExactPath(path) => ManagedLayout::ExactPath {
-                path: path.as_str().into(),
-            },
-        };
-        Self {
-            name: operation.name.clone(),
-            filename_stem: operation.filename_stem.clone(),
-            key_url: operation.key_url.as_str().into(),
-            source_url: operation.source_url.as_str().into(),
-            architecture: operation.architecture.canonical().into(),
-            layout,
-            keyring_path: operation.keyring_path.display().to_string(),
-            source_list_path: operation.source_list_path.display().to_string(),
-        }
+fn validate_source_list_destination(destination: &Path, filename_stem: &str) -> Result<()> {
+    let dest_str = destination.to_str().context("source list path is not UTF-8")?;
+    if dest_str.as_bytes().contains(&0) || !destination.is_absolute() {
+        bail!("source list path must be absolute and contain no null bytes");
     }
-}
-
-struct ManagedState(super::managed_state::ManagedState);
-
-impl ManagedState {
-    fn open(host: &Host<'_>, stem: &str) -> Result<Self> {
-        Ok(Self(super::managed_state::ManagedState::open(
-            host,
-            "apt-repositories",
-            stem,
-            "APT repository",
-        )?))
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("source list path has no parent"))?;
+    if parent != Path::new(SOURCES_DIRECTORY) {
+        bail!("source list path must be a direct child of {SOURCES_DIRECTORY}");
     }
-
-    fn acquire_lock(&self) -> Result<File> {
-        self.0.acquire_lock()
-    }
-
-    fn validate_lock_entry(&self, lock: &File) -> Result<()> {
-        self.0.validate_lock_entry(lock)
-    }
-
-    fn read_record(&self) -> Result<Option<ManagedRecord>> {
-        self.0
-            .read()?
-            .map(|bytes| {
-                let value: StrictJson =
-                    serde_json::from_slice(&bytes).context("parse strict APT repository managed record")?;
-                let record = parse_managed_record(value).context("validate APT repository managed record")?;
-                validate_managed_declaration(&record.declaration)
-                    .context("validate APT repository managed declaration")?;
-                Ok(record)
-            })
-            .transpose()
-    }
-
-    fn publish_record(&self, record: &ManagedRecord) -> Result<()> {
-        self.0
-            .publish(&serde_json::to_vec(record).context("serialize APT repository managed record")?)
-    }
-}
-
-fn validate_managed_declaration(declaration: &ManagedDeclaration) -> Result<()> {
-    let key_url = HttpsUrl::parse(&declaration.key_url)?;
-    let source_url = HttpsUrl::parse(&declaration.source_url)?;
-    if key_url.as_str() != declaration.key_url || source_url.as_str() != declaration.source_url {
-        bail!("managed declaration URLs are not canonical");
-    }
-    let architecture = Architecture::normalize(&declaration.architecture)?;
-    if architecture.canonical() != declaration.architecture {
-        bail!("managed declaration architecture is not canonical");
-    }
-    let layout = match &declaration.layout {
-        ManagedLayout::SuiteComponents { suite, components } => AptRepositorySourceLayout::SuiteComponents {
-            suite: AptRepositoryToken::parse(suite)?,
-            components: components
-                .iter()
-                .map(AptRepositoryToken::parse)
-                .collect::<Result<Vec<_>>>()?,
-        },
-        ManagedLayout::ExactPath { path } => AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?),
-    };
-    let operation = AptRepositoryOperation::new(
-        declaration.name.clone(),
-        declaration.filename_stem.clone(),
-        key_url,
-        source_url,
-        architecture,
-        layout,
-    )?;
-    if ManagedDeclaration::from_operation(&operation) != *declaration {
-        bail!("managed declaration does not match its canonical operation identity");
+    let expected_name = format!("{filename_stem}.list");
+    let file_name = destination
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| anyhow::anyhow!("source list path has no file name"))?;
+    if file_name != expected_name {
+        bail!("source list path filename {file_name:?} must match expected name {expected_name:?}");
     }
     Ok(())
-}
-
-fn validate_record_destinations(record: &ManagedDeclaration, stem: &str) -> Result<()> {
-    let key = format!("{KEYRINGS_DIRECTORY}/cozydot-{stem}.gpg");
-    let source = format!("{SOURCES_DIRECTORY}/cozydot-{stem}.list");
-    if record.filename_stem != stem || record.keyring_path != key || record.source_list_path != source {
-        bail!("APT repository managed record has mismatched deterministic destinations");
-    }
-    Ok(())
-}
-
-#[derive(Debug)]
-enum StrictJson {
-    Null,
-    Bool,
-    Number(serde_json::Number),
-    String(String),
-    Array(Vec<Self>),
-    Object(BTreeMap<String, Self>),
-}
-
-impl<'de> Deserialize<'de> for StrictJson {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(StrictJsonVisitor)
-    }
-}
-
-struct StrictJsonVisitor;
-
-impl<'de> Visitor<'de> for StrictJsonVisitor {
-    type Value = StrictJson;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("strict JSON")
-    }
-
-    fn visit_bool<E>(self, value: bool) -> std::result::Result<Self::Value, E> {
-        let _ = value;
-        Ok(StrictJson::Bool)
-    }
-
-    fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E> {
-        Ok(StrictJson::Number(value.into()))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E> {
-        Ok(StrictJson::Number(value.into()))
-    }
-
-    fn visit_f64<E>(self, value: f64) -> std::result::Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        serde_json::Number::from_f64(value)
-            .map(StrictJson::Number)
-            .ok_or_else(|| E::custom("invalid JSON number"))
-    }
-
-    fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
-        Ok(StrictJson::String(value.into()))
-    }
-
-    fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E> {
-        Ok(StrictJson::String(value))
-    }
-
-    fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
-        Ok(StrictJson::Null)
-    }
-
-    fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
-        Ok(StrictJson::Null)
-    }
-
-    fn visit_seq<A>(self, mut values: A) -> std::result::Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let mut result = Vec::new();
-        while let Some(value) = values.next_element()? {
-            result.push(value);
-        }
-        Ok(StrictJson::Array(result))
-    }
-
-    fn visit_map<A>(self, mut values: A) -> std::result::Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut result = BTreeMap::new();
-        while let Some((key, value)) = values.next_entry::<String, StrictJson>()? {
-            if result.insert(key.clone(), value).is_some() {
-                return Err(serde::de::Error::custom(format!("duplicate JSON key {key:?}")));
-            }
-        }
-        Ok(StrictJson::Object(result))
-    }
-}
-
-fn parse_managed_record(value: StrictJson) -> Result<ManagedRecord> {
-    let mut object = object(value, "record")?;
-    let version = number(take(&mut object, "version")?, "version")?;
-    if version != MANAGED_STATE_VERSION {
-        bail!("unsupported managed record version {version}");
-    }
-    let status = match string(take(&mut object, "status")?, "status")?.as_str() {
-        "pending_initial" => ManagedStatus::PendingInitial,
-        "pending_update" => ManagedStatus::PendingUpdate,
-        "completed" => ManagedStatus::Completed,
-        other => bail!("invalid managed record status {other:?}"),
-    };
-    let declaration = parse_declaration(take(&mut object, "declaration")?)?;
-    reject_extra(&object, "record")?;
-    Ok(ManagedRecord {
-        version,
-        status,
-        declaration,
-    })
-}
-
-fn parse_declaration(value: StrictJson) -> Result<ManagedDeclaration> {
-    let mut object = object(value, "declaration")?;
-    let name = string(take(&mut object, "name")?, "name")?;
-    let filename_stem = string(take(&mut object, "filename_stem")?, "filename_stem")?;
-    let key_url = string(take(&mut object, "key_url")?, "key_url")?;
-    let source_url = string(take(&mut object, "source_url")?, "source_url")?;
-    let architecture = string(take(&mut object, "architecture")?, "architecture")?;
-    let layout = parse_layout(take(&mut object, "layout")?)?;
-    let keyring_path = string(take(&mut object, "keyring_path")?, "keyring_path")?;
-    let source_list_path = string(take(&mut object, "source_list_path")?, "source_list_path")?;
-    reject_extra(&object, "declaration")?;
-    Ok(ManagedDeclaration {
-        name,
-        filename_stem,
-        key_url,
-        source_url,
-        architecture,
-        layout,
-        keyring_path,
-        source_list_path,
-    })
-}
-
-fn parse_layout(value: StrictJson) -> Result<ManagedLayout> {
-    let mut object = object(value, "layout")?;
-    let kind = string(take(&mut object, "type")?, "layout.type")?;
-    let layout = match kind.as_str() {
-        "suite_components" => {
-            let suite = string(take(&mut object, "suite")?, "layout.suite")?;
-            let components = match take(&mut object, "components")? {
-                StrictJson::Array(values) => values
-                    .into_iter()
-                    .map(|value| string(value, "layout.components"))
-                    .collect::<Result<Vec<_>>>()?,
-                _ => bail!("layout.components must be an array"),
-            };
-            ManagedLayout::SuiteComponents { suite, components }
-        }
-        "exact_path" => ManagedLayout::ExactPath {
-            path: string(take(&mut object, "path")?, "layout.path")?,
-        },
-        other => bail!("invalid managed layout type {other:?}"),
-    };
-    reject_extra(&object, "layout")?;
-    Ok(layout)
-}
-
-fn object(value: StrictJson, field: &str) -> Result<BTreeMap<String, StrictJson>> {
-    match value {
-        StrictJson::Object(value) => Ok(value),
-        _ => bail!("{field} must be an object"),
-    }
-}
-fn take(object: &mut BTreeMap<String, StrictJson>, field: &str) -> Result<StrictJson> {
-    object
-        .remove(field)
-        .with_context(|| format!("managed record is missing {field:?}"))
-}
-fn string(value: StrictJson, field: &str) -> Result<String> {
-    match value {
-        StrictJson::String(value) => Ok(value),
-        _ => bail!("{field} must be a string"),
-    }
-}
-fn number(value: StrictJson, field: &str) -> Result<u64> {
-    match value {
-        StrictJson::Number(value) => value
-            .as_u64()
-            .with_context(|| format!("{field} must be an unsigned integer")),
-        _ => bail!("{field} must be a number"),
-    }
-}
-fn reject_extra(object: &BTreeMap<String, StrictJson>, field: &str) -> Result<()> {
-    if let Some(key) = object.keys().next() {
-        bail!("unknown {field} key {key:?}");
-    }
-    Ok(())
-}
-
-fn validate_destination(destination: &str, directory: &str, suffix: &str) -> Result<PathBuf> {
-    let path = Path::new(destination);
-    if destination.as_bytes().contains(&0)
-        || !path.is_absolute()
-        || path.parent() != Some(Path::new(directory))
-        || path.file_name().is_none_or(|name| {
-            name.as_bytes().contains(&0)
-                || !name.as_bytes().ends_with(suffix.as_bytes())
-                || name.as_bytes().len() == suffix.len()
-        })
-    {
-        bail!("destination must be a direct {suffix} file under {directory}");
-    }
-    Ok(path.to_owned())
 }
 
 pub(crate) mod managed_apt {
@@ -1418,5 +1021,362 @@ pub(crate) mod managed_apt {
             bail!("managed APT source changed concurrently before publication");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::HttpsUrl;
+    use crate::platform::Architecture;
+    use std::path::PathBuf;
+
+    struct TestEnv {
+        _temp_dir: tempfile::TempDir,
+        fake_root: PathBuf,
+        host: Host<'static>,
+    }
+
+    fn setup_test_env() -> TestEnv {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path();
+
+        let fake_root = path.join("fake_root");
+        let bin_dir = path.join("bin");
+        let home_dir = path.join("home");
+        let state_dir = path.join("state");
+
+        fs::create_dir_all(&fake_root).unwrap();
+        fs::create_dir_all(&bin_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&state_dir).unwrap();
+
+        // Write mock curl
+        let curl_path = bin_dir.join("curl");
+        let curl_script = r#"#!/bin/bash
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      shift
+      out_file="$1"
+      ;;
+    *)
+      url="$1"
+      ;;
+  esac
+  shift
+done
+
+if [[ "$url" == *invalid* ]]; then
+  echo "invalid-key" > "$out_file"
+elif [[ "$url" == *armored* ]]; then
+  echo "-----BEGIN PGP PUBLIC KEY BLOCK-----" > "$out_file"
+  echo "mock-armored-key" >> "$out_file"
+elif [[ "$url" == *binary* ]]; then
+  echo "mock-binary-key" > "$out_file"
+else
+  echo "-----BEGIN PGP PUBLIC KEY BLOCK-----" > "$out_file"
+  echo "mock-default-key" >> "$out_file"
+fi
+"#;
+        fs::write(&curl_path, curl_script).unwrap();
+        fs::set_permissions(&curl_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Write mock gpg
+        let gpg_path = bin_dir.join("gpg");
+        let gpg_script = r#"#!/bin/bash
+out_file=""
+dearmor=0
+list_keys=0
+export_keys=0
+armor=0
+keyring=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      shift
+      out_file="$1"
+      ;;
+    --keyring)
+      shift
+      keyring="$1"
+      ;;
+    --dearmor)
+      dearmor=1
+      if [[ $# -gt 1 ]]; then
+        shift
+        in_file="$1"
+      fi
+      ;;
+    --list-keys)
+      list_keys=1
+      ;;
+    --export)
+      export_keys=1
+      ;;
+    --armor)
+      armor=1
+      ;;
+  esac
+  shift
+done
+
+if [[ $dearmor -eq 1 ]]; then
+  content=$(cat "$in_file")
+  echo "dearmored-$content" > "$out_file"
+  exit 0
+fi
+
+if [[ $list_keys -eq 1 ]]; then
+  if grep -q "invalid-key" "$keyring"; then
+    exit 0
+  fi
+  echo "pub:dummypubkey"
+  exit 0
+fi
+
+if [[ $export_keys -eq 1 ]]; then
+  content=$(cat "$keyring")
+  if [[ $armor -eq 1 ]]; then
+    echo -n "armored-export-$content" > "$out_file"
+  else
+    echo -n "binary-export-$content" > "$out_file"
+  fi
+  exit 0
+fi
+"#;
+        fs::write(&gpg_path, gpg_script).unwrap();
+        fs::set_permissions(&gpg_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Write mock sudo that performs path translation
+        let sudo_path = bin_dir.join("sudo");
+        let sudo_script = format!(
+            r#"#!/bin/bash
+if [[ "$1" == "stat" ]]; then
+  path="${{@: -1}}"
+  if [[ "$path" == /etc/* ]]; then
+    path="{}/etc${{path#/etc}}"
+  elif [[ "$path" == /usr/* ]]; then
+    path="{}/usr${{path#/usr}}"
+  fi
+  mode=$(/usr/bin/stat --format=%f "$path")
+  echo "${{mode}}:0:0"
+  exit 0
+fi
+
+args=()
+skip_next=0
+for arg in "$@"; do
+  if [[ "$arg" == "chown" || "$arg" == "chgrp" ]]; then
+    exit 0
+  fi
+  if [ $skip_next -eq 1 ]; then
+    skip_next=0
+    continue
+  fi
+  if [[ "$arg" == "-o" || "$arg" == "-g" || "$arg" == "--owner" || "$arg" == "--group" ]]; then
+    skip_next=1
+    continue
+  fi
+  if [[ "$arg" == /etc/* ]]; then
+    arg="{}/etc${{arg#/etc}}"
+  elif [[ "$arg" == /usr/* ]]; then
+    arg="{}/usr${{arg#/usr}}"
+  fi
+  args+=("$arg")
+done
+exec "${{args[@]}}"
+"#,
+            fake_root.to_str().unwrap(),
+            fake_root.to_str().unwrap(),
+            fake_root.to_str().unwrap(),
+            fake_root.to_str().unwrap()
+        );
+        fs::write(&sudo_path, sudo_script).unwrap();
+        fs::set_permissions(&sudo_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut env_vec = Vec::new();
+        let path_env = match std::env::var_os("PATH") {
+            Some(p) => format!("{}:{}", bin_dir.to_str().unwrap(), p.to_str().unwrap()),
+            None => bin_dir.to_str().unwrap().to_string(),
+        };
+        env_vec.push((std::ffi::OsString::from("PATH"), std::ffi::OsString::from(path_env)));
+        env_vec.push((
+            std::ffi::OsString::from("TMPDIR"),
+            std::ffi::OsString::from(path.to_str().unwrap()),
+        ));
+        env_vec.push((
+            std::ffi::OsString::from("HOME"),
+            std::ffi::OsString::from(home_dir.to_str().unwrap()),
+        ));
+        env_vec.push((
+            std::ffi::OsString::from("XDG_STATE_HOME"),
+            std::ffi::OsString::from(state_dir.to_str().unwrap()),
+        ));
+        env_vec.push((
+            std::ffi::OsString::from("FAKE_ROOT"),
+            std::ffi::OsString::from(fake_root.to_str().unwrap()),
+        ));
+
+        let env_slice: &'static [(std::ffi::OsString, std::ffi::OsString)] = Box::leak(env_vec.into_boxed_slice());
+        let docker_lock = path.join("docker_lock");
+        fs::write(&docker_lock, "").unwrap();
+        let docker_lock_path: &'static Path = Box::leak(docker_lock.into_boxed_path());
+
+        let host = Host::new(env_slice, docker_lock_path).unwrap();
+
+        TestEnv {
+            _temp_dir: temp_dir,
+            fake_root,
+            host,
+        }
+    }
+
+    #[test]
+    fn test_repository_operation_execution() {
+        let env = setup_test_env();
+
+        // 1. .asc vs .gpg processing behavior
+        // Case A: .asc key_path
+        let op_asc = AptRepositoryOperation::new(
+            "testasc",
+            HttpsUrl::parse("https://example.com/mock-key-armored").unwrap(),
+            HttpsUrl::parse("https://example.com/repo").unwrap(),
+            Architecture::Amd64,
+            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("./").unwrap()),
+            PathBuf::from("/etc/apt/keyrings/testasc.asc"),
+        )
+        .unwrap();
+
+        execute(&env.host, &op_asc).unwrap();
+
+        // Verify the key and sources file were written in the fake root
+        let key_path_asc = env.fake_root.join("etc/apt/keyrings/testasc.asc");
+        let source_path_asc = env.fake_root.join("etc/apt/sources.list.d/testasc.list");
+
+        assert!(key_path_asc.exists());
+        assert!(source_path_asc.exists());
+
+        let key_bytes_asc = fs::read(&key_path_asc).unwrap();
+        let key_str_asc = String::from_utf8(key_bytes_asc).unwrap();
+        assert_eq!(
+            key_str_asc,
+            "armored-export-dearmored------BEGIN PGP PUBLIC KEY BLOCK-----\nmock-armored-key"
+        );
+
+        let source_bytes_asc = fs::read(&source_path_asc).unwrap();
+        let source_str_asc = String::from_utf8(source_bytes_asc).unwrap();
+        assert!(source_str_asc.contains("signed-by=/etc/apt/keyrings/testasc.asc"));
+
+        // Case B: .gpg key_path
+        let op_gpg = AptRepositoryOperation::new(
+            "testgpg",
+            HttpsUrl::parse("https://example.com/mock-key-binary").unwrap(),
+            HttpsUrl::parse("https://example.com/repo").unwrap(),
+            Architecture::Amd64,
+            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("./").unwrap()),
+            PathBuf::from("/usr/share/keyrings/testgpg.gpg"),
+        )
+        .unwrap();
+
+        execute(&env.host, &op_gpg).unwrap();
+
+        let key_path_gpg = env.fake_root.join("usr/share/keyrings/testgpg.gpg");
+        let source_path_gpg = env.fake_root.join("etc/apt/sources.list.d/testgpg.list");
+
+        assert!(key_path_gpg.exists());
+        assert!(source_path_gpg.exists());
+
+        let key_bytes_gpg = fs::read(&key_path_gpg).unwrap();
+        let key_str_gpg = String::from_utf8(key_bytes_gpg).unwrap();
+        assert_eq!(key_str_gpg, "binary-export-dearmored-mock-binary-key");
+
+        let source_bytes_gpg = fs::read(&source_path_gpg).unwrap();
+        let source_str_gpg = String::from_utf8(source_bytes_gpg).unwrap();
+        assert!(source_str_gpg.contains("signed-by=/usr/share/keyrings/testgpg.gpg"));
+
+        // 2. Unconditional atomic replacement across two applies
+        // Corrupt the files first
+        fs::write(&key_path_asc, "corrupted-key").unwrap();
+        fs::write(&source_path_asc, "corrupted-source").unwrap();
+
+        // Apply again
+        execute(&env.host, &op_asc).unwrap();
+
+        // Verify they are restored
+        let key_bytes_asc_restored = fs::read(&key_path_asc).unwrap();
+        let key_str_asc_restored = String::from_utf8(key_bytes_asc_restored).unwrap();
+        assert_eq!(
+            key_str_asc_restored,
+            "armored-export-dearmored------BEGIN PGP PUBLIC KEY BLOCK-----\nmock-armored-key"
+        );
+
+        let source_bytes_asc_restored = fs::read(&source_path_asc).unwrap();
+        let source_str_asc_restored = String::from_utf8(source_bytes_asc_restored).unwrap();
+        assert!(source_str_asc_restored.contains("signed-by=/etc/apt/keyrings/testasc.asc"));
+
+        let invalid = AptRepositoryOperation::new(
+            "invalid",
+            HttpsUrl::parse("https://example.com/mock-key-invalid").unwrap(),
+            HttpsUrl::parse("https://example.com/repo").unwrap(),
+            Architecture::Amd64,
+            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("./").unwrap()),
+            PathBuf::from("/etc/apt/keyrings/invalid.gpg"),
+        )
+        .unwrap();
+        assert!(execute(&env.host, &invalid).is_err());
+        assert!(!env.fake_root.join("etc/apt/keyrings/invalid.gpg").exists());
+        assert!(!env.fake_root.join("etc/apt/sources.list.d/invalid.list").exists());
+
+        let xdg_state_home = env.host.value("XDG_STATE_HOME").map(PathBuf::from).unwrap();
+        assert!(xdg_state_home.exists());
+        let xdg_state_entries: Vec<_> = fs::read_dir(&xdg_state_home)
+            .unwrap()
+            .map(|r| r.unwrap().path())
+            .collect();
+        for entry in xdg_state_entries {
+            let name = entry.file_name().unwrap().to_str().unwrap();
+            assert!(!name.contains("apt-repositories"));
+        }
+    }
+
+    #[test]
+    fn test_name_derived_source_path() {
+        let op = AptRepositoryOperation::new(
+            "Helium_Repo",
+            HttpsUrl::parse("https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc").unwrap(),
+            HttpsUrl::parse("https://pkg.helium.computer/deb").unwrap(),
+            Architecture::Amd64,
+            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("./").unwrap()),
+            PathBuf::from("/usr/share/keyrings/helium.gpg"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            op.source_list_path,
+            PathBuf::from("/etc/apt/sources.list.d/Helium_Repo.list")
+        );
+    }
+
+    #[test]
+    fn test_exact_rendered_signed_by() {
+        let op = AptRepositoryOperation::new(
+            "helium",
+            HttpsUrl::parse("https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc").unwrap(),
+            HttpsUrl::parse("https://pkg.helium.computer/deb").unwrap(),
+            Architecture::Amd64,
+            AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse("./").unwrap()),
+            PathBuf::from("/usr/share/keyrings/helium.gpg"),
+        )
+        .unwrap();
+
+        let rendered = op.render_source();
+        assert!(
+            rendered.contains("signed-by=/usr/share/keyrings/helium.gpg"),
+            "Rendered: {}",
+            rendered
+        );
     }
 }

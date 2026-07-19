@@ -540,7 +540,7 @@ impl AptPackages {
                 bail!("packages.apt.repositories: must be a non-empty sequence");
             }
             let mut names = HashSet::new();
-            let mut stems = HashSet::new();
+            let mut key_paths = HashSet::new();
             for (index, repository) in repositories.iter().enumerate() {
                 repository.validate(index)?;
                 if !names.insert(repository.name.as_str()) {
@@ -549,10 +549,10 @@ impl AptPackages {
                         repository.name
                     );
                 }
-                let stem = repository.filename_stem();
-                if !stems.insert(stem.clone()) {
+                if !key_paths.insert(repository.key_path.as_str()) {
                     bail!(
-                        "packages.apt.repositories[{index}].name: filename stem {stem:?} collides with an earlier repository"
+                        "packages.apt.repositories[{index}].key_path: destination {:?} collides with an earlier repository",
+                        repository.key_path
                     );
                 }
                 for (package_index, package) in repository.packages.iter().enumerate() {
@@ -643,6 +643,8 @@ pub struct Repository {
     #[serde(deserialize_with = "deserialize_string")]
     pub name: String,
     pub key: HttpsUrl,
+    #[serde(deserialize_with = "deserialize_string")]
+    pub key_path: String,
     pub urls: BTreeMap<DistroMapKey, HttpsUrl>,
     #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub suite: Option<String>,
@@ -654,28 +656,12 @@ pub struct Repository {
 }
 
 impl Repository {
-    pub fn filename_stem(&self) -> String {
-        let mut result = String::new();
-        let mut separator = false;
-        for byte in self.name.bytes() {
-            if byte.is_ascii_alphanumeric() {
-                if separator && !result.is_empty() {
-                    result.push('-');
-                }
-                result.push((byte as char).to_ascii_lowercase());
-                separator = false;
-            } else {
-                separator = true;
-            }
-        }
-        result
-    }
-
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
         validate_string_values(&self.packages, &format!("{path}.packages"), validate_debian_package)?;
+        validate_key_path(&self.key_path, &format!("{path}.key_path"))?;
         match (&self.suite, &self.components, &self.path) {
             (Some(suite), Some(components), None) => {
                 validate_suite(suite, &format!("{path}.suite"))?;
@@ -1648,6 +1634,38 @@ fn validate_definition_name(value: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_key_path(value: &str, path: &str) -> Result<()> {
+    if value.as_bytes().contains(&0) {
+        bail!("{path}: key path must not contain a null byte");
+    }
+    let p = Path::new(value);
+    if !p.is_absolute() {
+        bail!("{path}: key path must be absolute");
+    }
+    let parent = p
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{path}: key path has no parent"))?;
+    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
+        bail!("{path}: key path must be a direct child of /etc/apt/keyrings/ or /usr/share/keyrings/");
+    }
+    let file_name = p
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| anyhow::anyhow!("{path}: key path has no file name"))?;
+    if parent.join(file_name).to_str() != Some(value) {
+        bail!("{path}: key path must use its canonical direct-child spelling");
+    }
+    if !file_name.ends_with(".asc") && !file_name.ends_with(".gpg") {
+        bail!("{path}: key path extension must be .asc or .gpg");
+    }
+    let stem = p
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow::anyhow!("{path}: key path has no file stem"))?;
+    validate_definition_name(stem, &format!("{path} file stem"))?;
+    Ok(())
+}
+
 fn validate_dotfile_package(value: &str, path: &str) -> Result<()> {
     if matches!(value, "." | "..") {
         bail!("{path}: must denote exactly one child directory, not {value:?}");
@@ -1947,5 +1965,107 @@ mod tests {
             let yaml = format!("version: 1.0.0\ndesktop:\n  idle:\n    timeout: {timeout}\n");
             assert!(Config::parse(&yaml).is_err(), "accepted {timeout:?}");
         }
+    }
+
+    #[test]
+    fn test_config_repository_key_path() {
+        let missing_key_path = r#"version: "1.0.0"
+packages:
+  apt:
+    repositories:
+      - name: example
+        key: https://example.com/key.asc
+        urls:
+          default: https://example.com/repository
+        suite: stable
+        components: [main]
+        packages: [example]
+"#;
+        assert!(
+            Config::parse(missing_key_path).is_err(),
+            "should reject repository with missing key_path"
+        );
+
+        let invalid_paths = [
+            "relative/path.gpg",
+            "/etc/apt/sources.list.d/helium.list",
+            "/etc/apt/keyrings/../keyrings/docker.asc",
+            "/etc/apt/keyrings/docker.invalid",
+            "/usr/share/keyrings/bad_name$.gpg",
+            "/other/directory/helium.gpg",
+            "/etc/apt/keyrings/bad\0name.gpg",
+            "/etc/apt/keyrings//duplicate.gpg",
+            "/etc/apt/keyrings/trailing.gpg/",
+        ];
+        for path in invalid_paths {
+            let yaml = format!(
+                r#"version: "1.0.0"
+packages:
+  apt:
+    repositories:
+      - name: example
+        key: https://example.com/key.asc
+        key_path: {:?}
+        urls:
+          default: https://example.com/repository
+        suite: stable
+        components: [main]
+        packages: [example]
+"#,
+                path
+            );
+            assert!(
+                Config::parse(&yaml).is_err(),
+                "should reject invalid key_path: {}",
+                path
+            );
+        }
+
+        let valid_paths = [
+            "/etc/apt/keyrings/docker.asc",
+            "/etc/apt/keyrings/githubcli-archive-keyring.gpg",
+            "/usr/share/keyrings/helium.gpg",
+            "/usr/share/keyrings/wezterm-fury.asc",
+        ];
+        for path in valid_paths {
+            let yaml = format!(
+                r#"version: "1.0.0"
+packages:
+  apt:
+    repositories:
+      - name: example
+        key: https://example.com/key.asc
+        key_path: {:?}
+        urls:
+          default: https://example.com/repository
+        suite: stable
+        components: [main]
+        packages: [example]
+"#,
+                path
+            );
+            assert!(Config::parse(&yaml).is_ok(), "should accept valid key_path: {}", path);
+        }
+
+        let duplicate_key_path = r#"version: "1.0.0"
+packages:
+  apt:
+    repositories:
+      - name: first
+        key: https://example.com/first.asc
+        key_path: /etc/apt/keyrings/shared.gpg
+        urls: {default: https://example.com/first}
+        suite: stable
+        components: [main]
+        packages: [first]
+      - name: second
+        key: https://example.com/second.asc
+        key_path: /etc/apt/keyrings/shared.gpg
+        urls: {default: https://example.com/second}
+        suite: stable
+        components: [main]
+        packages: [second]
+"#;
+        assert!(Config::parse(duplicate_key_path).is_err());
     }
 }

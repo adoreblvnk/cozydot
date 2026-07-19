@@ -194,7 +194,7 @@ lists above illustrate placement only and are not valid configuration values.
 | `packages.apt` | Optional mapping containing `remove`, `install`, and/or `repositories` | Omission requests no APT package/repository action |
 | `packages.apt.remove` | Optional unique list of Debian packages | Purged before installs; an entry cannot also be owned by either install source |
 | `packages.apt.install` | Optional unique list of Debian packages | Cannot duplicate a repository-owned package |
-| `packages.apt.repositories` | Optional non-empty list of repository definitions | Repository names, normalized filename stems, and owned packages must be unique |
+| `packages.apt.repositories` | Optional non-empty list of repository definitions | Repository names, key paths, and owned packages must be unique |
 | `packages.flatpak` | Optional unique list of Flatpak IDs | Uses Cozydot's fixed per-user Flathub policy |
 | `packages.cargo` | Optional unique list of Cargo packages | Requires `tools.rust` |
 | `packages.npm` | Optional unique list of NPM packages | Requires `tools.node` |
@@ -207,6 +207,7 @@ Suite/components form:
 ```yaml
 - name: example
   key: https://example.com/key.asc
+  key_path: /etc/apt/keyrings/example.asc
   urls:
     ubuntu: https://example.com/ubuntu
     debian: https://example.com/debian
@@ -221,6 +222,7 @@ Exact-path form:
 ```yaml
 - name: example
   key: https://example.com/key.asc
+  key_path: /usr/share/keyrings/example.gpg
   urls:
     default: https://example.com/repository
   path: pool/stable/
@@ -229,8 +231,9 @@ Exact-path form:
 
 | Field | Required and accepted value | Interactions |
 | --- | --- | --- |
-| `packages.apt.repositories[].name` | Required definition name | Stable identity; normalized filename stem must be unique |
-| `packages.apt.repositories[].key` | Required HTTPS URL | Signing-key destination is fixed internally |
+| `packages.apt.repositories[].name` | Required definition name | Stable identity and exact basename of `/etc/apt/sources.list.d/<name>.list`; must be unique |
+| `packages.apt.repositories[].key` | Required HTTPS URL | The source URL for the signing key |
+| `packages.apt.repositories[].key_path` | Required absolute path under `/etc/apt/keyrings/` or `/usr/share/keyrings/` ending with `.asc` or `.gpg` | Destination where the keyring is saved; file stem must be a valid definition name |
 | `packages.apt.repositories[].urls` | Required non-empty HTTPS URL map keyed by `default`, `ubuntu`, `linuxmint`, `pop`, `zorin`, `deepin`, `debian`, `kali`, or `tails` | Selection is exact distro, upstream family, then `default` |
 | `packages.apt.repositories[].suite` | Conditionally required with `components`; APT token, `*`, or reserved `system` | Forbidden with `path` |
 | `packages.apt.repositories[].components` | Conditionally required with `suite`; non-empty unique list of APT tokens or complete `*`; `system` is forbidden | Forbidden with `path` |
@@ -244,6 +247,16 @@ upstream-family URL wins. The resolved codename must be an APT token.
 
 Exactly one repository layout is required: `suite` together with `components`,
 or `path` by itself.
+
+### Key and Source Semantics
+
+Each APT repository must specify a `key_path` defining the target path for the signing key. The following rules govern its execution and placement:
+- **Path domain**: The `key_path` must use the canonical spelling of an absolute direct child of `/etc/apt/keyrings/` or `/usr/share/keyrings/`. The file stem must be a valid definition name, and key paths must be unique across repositories.
+- **Output semantics**: If the `key_path` ends with `.asc`, the processed key is exported as ASCII-armored bytes. If it ends with `.gpg`, it is exported as binary bytes.
+- **Source-list destination**: The repository configuration is written to `/etc/apt/sources.list.d/<name>.list`, where `<name>` is the repository's definition `name` exactly.
+- **Authoritative replacement**: Both the keyring file at `key_path` and the `.list` file are authoritatively and unconditionally replaced on every `apply` invocation.
+- **Rerun recovery**: Because of unconditional replacement, running the command again recovers the correct state if any files are manually altered, corrupted, or deleted.
+- **No automatic deletion**: Unmanaged files are not automatically deleted merely because a repository declaration is absent from the active configuration.
 
 ### Binary definitions
 
