@@ -5,12 +5,12 @@ pub(crate) mod privileged_file {
     use anyhow::{bail, Context, Result};
     use std::{ffi::OsStr, fs, io::Write, path::Path};
 
-    pub(crate) fn publish_bytes(host: &Host<'_>, destination: &Path, contents: &[u8], operation: &str) -> Result<()> {
+    pub(crate) fn publish_bytes(host: &Host, destination: &Path, contents: &[u8], operation: &str) -> Result<()> {
         publish_bytes_with_mode(host, destination, contents, operation, "0644")
     }
 
     pub(crate) fn publish_bytes_with_mode(
-        host: &Host<'_>,
+        host: &Host,
         destination: &Path,
         contents: &[u8],
         operation: &str,
@@ -20,7 +20,7 @@ pub(crate) mod privileged_file {
     }
 
     pub(super) fn publish_bytes_with_policy(
-        host: &Host<'_>,
+        host: &Host,
         destination: &Path,
         contents: &[u8],
         operation: &str,
@@ -30,7 +30,7 @@ pub(crate) mod privileged_file {
     }
 
     fn publish_bytes_with_mode_and_policy(
-        host: &Host<'_>,
+        host: &Host,
         destination: &Path,
         contents: &[u8],
         operation: &str,
@@ -144,7 +144,7 @@ pub(crate) mod privileged_file {
         result
     }
 
-    pub(crate) fn sync_parent(host: &Host<'_>, destination: &Path, operation: &str) -> Result<()> {
+    pub(crate) fn sync_parent(host: &Host, destination: &Path, operation: &str) -> Result<()> {
         let parent = destination.parent().context("publication destination has no parent")?;
         host.require(
             operation,
@@ -175,17 +175,11 @@ use crate::platform::{Architecture, ManagedAptSources};
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
-    fs::File,
-    io::{self, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    thread,
-    time::Duration,
 };
 
-const COZYDOT_RUNTIME_DIRECTORY: &str = "/run/cozydot";
-const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
-const EXECUTABLE_FILE_BUSY: i32 = 26;
 const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -451,11 +445,11 @@ impl Operation {
     }
 }
 
-pub(crate) fn execute(operation: &Operation, env: &[(OsString, OsString)]) -> Result<OperationOutcome> {
-    execute_on_host(operation, Host::new(env, Path::new(DOCKER_LOCK))?)
+pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
+    execute_on_host(operation, Host::new()?)
 }
 
-fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<OperationOutcome> {
+fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
     match operation {
         Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
         Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
@@ -514,20 +508,14 @@ fn completed(result: Result<()>) -> Result<OperationOutcome> {
     result.map(|()| OperationOutcome::Completed)
 }
 
-pub(crate) struct Host<'a> {
-    env: &'a [(OsString, OsString)],
-    docker_lock_open_path: &'a Path,
+pub(crate) struct Host {
     home: PathBuf,
 }
 
-impl<'a> Host<'a> {
-    fn new(env: &'a [(OsString, OsString)], docker_lock_open_path: &'a Path) -> Result<Self> {
-        let home = resolve_home(env, std::env::var_os("HOME"))?;
-        Ok(Self {
-            env,
-            docker_lock_open_path,
-            home,
-        })
+impl Host {
+    fn new() -> Result<Self> {
+        let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
+        Ok(Self { home })
     }
 
     pub fn run<I, S>(&self, program: &str, args: I) -> Result<Output>
@@ -541,10 +529,8 @@ impl<'a> Host<'a> {
             .collect::<Vec<_>>();
         let mut command = Command::new(program);
         command.args(&args);
-        for (key, value) in self.env {
-            command.env(key, value);
-        }
-        retry_executable_busy(|| command.output())
+        command
+            .output()
             .with_context(|| format!("{program} operation: start {}", display(program, &args)))
     }
 
@@ -575,10 +561,8 @@ impl<'a> Host<'a> {
             .collect::<Vec<_>>();
         let mut command = Command::new(program);
         command.args(&args).stdin(Stdio::piped());
-        for (key, value) in self.env {
-            command.env(key, value);
-        }
-        let mut child = retry_executable_busy(|| command.spawn())
+        let mut child = command
+            .spawn()
             .with_context(|| format!("{operation}: start {}", display(program, &args)))?;
         child
             .stdin
@@ -603,115 +587,14 @@ impl<'a> Host<'a> {
     }
 
     pub fn value(&self, name: &str) -> Option<OsString> {
-        self.env
-            .iter()
-            .rev()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.clone())
-            .or_else(|| std::env::var_os(name))
-    }
-
-    pub fn acquire_docker_lock(&self) -> Result<File> {
-        self.require(
-            "Docker transaction lock directory symlink check",
-            "sudo",
-            ["test", "!", "-L", COZYDOT_RUNTIME_DIRECTORY],
-        )?;
-        self.require(
-            "Docker transaction lock directory",
-            "sudo",
-            [
-                "install",
-                "-d",
-                "-o",
-                "root",
-                "-g",
-                "root",
-                "-m",
-                "0755",
-                "--",
-                COZYDOT_RUNTIME_DIRECTORY,
-            ],
-        )?;
-        self.require(
-            "Docker transaction lock creation",
-            "sudo",
-            [
-                "cp",
-                "--no-clobber",
-                "--no-target-directory",
-                "--",
-                "/dev/null",
-                DOCKER_LOCK,
-            ],
-        )?;
-        let kind = self.require(
-            "Docker transaction lock type check",
-            "sudo",
-            ["stat", "--format=%f", "--", DOCKER_LOCK],
-        )?;
-        let mode = std::str::from_utf8(&kind.stdout)
-            .context("Docker transaction lock stat returned non-UTF-8 output")?
-            .trim_end();
-        let mode =
-            u32::from_str_radix(mode, 16).context("Docker transaction lock stat returned malformed mode output")?;
-        if mode & 0o170000 != 0o100000 {
-            bail!("Docker transaction lock is not a regular file");
-        }
-        self.require(
-            "Docker transaction lock ownership",
-            "sudo",
-            ["chown", "--no-dereference", "root:root", "--", DOCKER_LOCK],
-        )?;
-        self.require(
-            "Docker transaction lock permissions",
-            "sudo",
-            ["chmod", "0644", "--", DOCKER_LOCK],
-        )?;
-        let state = self.require(
-            "Docker transaction lock state check",
-            "sudo",
-            ["stat", "--format=%f:%u:%g", "--", DOCKER_LOCK],
-        )?;
-        let state = std::str::from_utf8(&state.stdout)
-            .context("Docker transaction lock state returned non-UTF-8 output")?
-            .trim_end();
-        let mut fields = state.split(':');
-        let mode = fields.next().and_then(|value| u32::from_str_radix(value, 16).ok());
-        let uid = fields.next().and_then(|value| value.parse::<u32>().ok());
-        let gid = fields.next().and_then(|value| value.parse::<u32>().ok());
-        if fields.next().is_some()
-            || mode.is_none_or(|mode| mode & 0o170000 != 0o100000 || mode & 0o7777 != 0o0644)
-            || uid != Some(0)
-            || gid != Some(0)
-        {
-            bail!("Docker transaction lock has mismatched type, ownership, or permissions");
-        }
-        let lock: File = rustix::fs::open(
-            self.docker_lock_open_path,
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-        )
-        .context("Docker transaction lock: open fixed regular lock file without following links")?
-        .into();
-        if !lock
-            .metadata()
-            .context("Docker transaction lock: inspect opened lock file")?
-            .file_type()
-            .is_file()
-        {
-            bail!("Docker transaction lock opened inode is not a regular file");
-        }
-        rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
-            .context("Docker transaction lock: acquire exclusive flock")?;
-        Ok(lock)
+        std::env::var_os(name)
     }
 }
 
 pub(crate) struct TempDir(tempfile::TempDir);
 
 impl TempDir {
-    pub fn new(host: &Host<'_>, stem: &str) -> Result<Self> {
+    pub fn new(host: &Host, stem: &str) -> Result<Self> {
         Self::new_in(&host.temp_dir(), stem)
     }
 
@@ -731,11 +614,11 @@ impl TempDir {
 pub(crate) struct TempPath(tempfile::TempPath);
 
 impl TempPath {
-    pub fn new(host: &Host<'_>, stem: &str) -> Result<Self> {
+    pub fn new(host: &Host, stem: &str) -> Result<Self> {
         Self::new_with_suffix(host, stem, "")
     }
 
-    pub fn new_with_suffix(host: &Host<'_>, stem: &str, suffix: &str) -> Result<Self> {
+    pub fn new_with_suffix(host: &Host, stem: &str, suffix: &str) -> Result<Self> {
         tempfile::Builder::new()
             .prefix(stem)
             .suffix(suffix)
@@ -757,27 +640,6 @@ fn display(program: &str, args: &[OsString]) -> String {
         .join(" ")
 }
 
-fn retry_executable_busy<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    for delay_ms in [1, 2, 4, 8, 16] {
-        match operation() {
-            Err(error) if error.raw_os_error() == Some(EXECUTABLE_FILE_BUSY) => {
-                thread::sleep(Duration::from_millis(delay_ms));
-            }
-            result => return result,
-        }
-    }
-    operation()
-}
-
-fn resolve_home(env: &[(OsString, OsString)], process_home: Option<OsString>) -> Result<PathBuf> {
-    env.iter()
-        .rev()
-        .find(|(key, _)| key == "HOME")
-        .map(|(_, value)| PathBuf::from(value))
-        .or_else(|| process_home.map(PathBuf::from))
-        .context("HOME is not set")
-}
-
 pub(crate) mod apt {
     use crate::operations::Host;
     use anyhow::Result;
@@ -788,12 +650,12 @@ pub(crate) mod apt {
         Full,
     }
 
-    pub fn metadata_refresh(host: &Host<'_>) -> Result<()> {
+    pub fn metadata_refresh(host: &Host) -> Result<()> {
         host.require("APT metadata refresh", "sudo", ["apt-get", "update", "-qq"])?;
         Ok(())
     }
 
-    pub fn bootstrap_packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
+    pub fn bootstrap_packages(host: &Host, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             anyhow::bail!("APT bootstrap package sequence must not be empty");
         }
@@ -801,14 +663,14 @@ pub(crate) mod apt {
         install(host, "APT bootstrap package installation", packages.to_vec())
     }
 
-    pub fn packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
+    pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
         install(host, "APT package installation", packages.to_vec())
     }
 
-    fn install(host: &Host<'_>, operation: &str, packages: Vec<String>) -> Result<()> {
+    fn install(host: &Host, operation: &str, packages: Vec<String>) -> Result<()> {
         let mut args = vec![
             "DEBIAN_FRONTEND=noninteractive".to_owned(),
             "apt-get".to_owned(),
@@ -822,7 +684,7 @@ pub(crate) mod apt {
         Ok(())
     }
 
-    pub fn purge(host: &Host<'_>, packages: &[String]) -> Result<()> {
+    pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
@@ -839,7 +701,7 @@ pub(crate) mod apt {
         Ok(())
     }
 
-    pub fn upgrade(host: &Host<'_>, policy: AptUpgradePolicy) -> Result<()> {
+    pub fn upgrade(host: &Host, policy: AptUpgradePolicy) -> Result<()> {
         match policy {
             AptUpgradePolicy::Standard => {
                 host.require(
@@ -893,7 +755,7 @@ pub(crate) mod languages {
 
     use crate::operations::{Host, TempPath, RUSTUP_BOOTSTRAP_FLAGS};
 
-    pub fn fnm_bootstrap(host: &Host<'_>) -> Result<()> {
+    pub fn fnm_bootstrap(host: &Host) -> Result<()> {
         let data_home = host
             .value("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -927,7 +789,7 @@ pub(crate) mod languages {
         Ok(())
     }
 
-    pub fn uv_bootstrap(host: &Host<'_>) -> Result<()> {
+    pub fn uv_bootstrap(host: &Host) -> Result<()> {
         let install_dir = host
             .value("UV_INSTALL_DIR")
             .map(PathBuf::from)
@@ -971,7 +833,7 @@ pub(crate) mod languages {
             .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
     }
 
-    pub fn rustup(host: &Host<'_>) -> Result<()> {
+    pub fn rustup(host: &Host) -> Result<()> {
         let cargo_home = host
             .value("CARGO_HOME")
             .map(PathBuf::from)
@@ -1025,7 +887,7 @@ pub(crate) mod packages {
             UpdateCurrent,
         }
 
-        pub(crate) fn execute(host: &Host<'_>, packages: &[String], mode: CargoPackageMode) -> Result<()> {
+        pub(crate) fn execute(host: &Host, packages: &[String], mode: CargoPackageMode) -> Result<()> {
             let cargo_home = host
                 .value("CARGO_HOME")
                 .map(PathBuf::from)
@@ -1079,7 +941,7 @@ pub(crate) mod packages {
             UpdateCurrent,
         }
 
-        pub(crate) fn execute(host: &Host<'_>, packages: &[String], mode: NpmPackageMode) -> Result<()> {
+        pub(crate) fn execute(host: &Host, packages: &[String], mode: NpmPackageMode) -> Result<()> {
             let fnm = resolve_fnm(host)?;
             let version = selected_version(host, &fnm)?;
 
@@ -1093,7 +955,7 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        fn resolve_fnm(host: &Host<'_>) -> Result<String> {
+        fn resolve_fnm(host: &Host) -> Result<String> {
             let data_home = host
                 .value("XDG_DATA_HOME")
                 .map(PathBuf::from)
@@ -1111,7 +973,7 @@ pub(crate) mod packages {
             bail!("npm package operation: managed fnm is unavailable after bootstrap")
         }
 
-        fn selected_version(host: &Host<'_>, fnm: &str) -> Result<String> {
+        fn selected_version(host: &Host, fnm: &str) -> Result<String> {
             let output = host.require("fnm default Node query", fnm, ["default"])?;
             let output = std::str::from_utf8(&output.stdout).context("fnm returned non-UTF-8 default Node version")?;
             let version = output.strip_suffix('\n').unwrap_or(output);
@@ -1122,7 +984,7 @@ pub(crate) mod packages {
         }
 
         fn run_npm_required<I, S>(
-            host: &Host<'_>,
+            host: &Host,
             fnm: &str,
             version: &str,
             operation: &str,
@@ -1170,7 +1032,7 @@ pub(crate) mod packages {
         const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
         const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
 
-        pub fn ensure_flathub(host: &Host<'_>) -> Result<()> {
+        pub fn ensure_flathub(host: &Host) -> Result<()> {
             host.require(
                 "Flathub remote ensure",
                 "flatpak",
@@ -1201,7 +1063,7 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        pub fn ensure_apps(host: &Host<'_>, refs: &[String]) -> Result<()> {
+        pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
             let mut args = vec![
                 "--user".to_owned(),
                 "install".into(),
@@ -1216,7 +1078,7 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        pub fn update_apps(host: &Host<'_>, refs: &[String]) -> Result<()> {
+        pub fn update_apps(host: &Host, refs: &[String]) -> Result<()> {
             let mut args = vec![
                 "--user".to_owned(),
                 "update".into(),
@@ -1244,7 +1106,7 @@ pub(crate) mod packages {
             Update,
         }
 
-        pub(crate) fn execute(host: &Host<'_>, families: &[String], mode: NerdFontsMode) -> Result<()> {
+        pub(crate) fn execute(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
             let data_home = host
                 .value("XDG_DATA_HOME")
                 .map(std::path::PathBuf::from)
@@ -1279,7 +1141,7 @@ pub(crate) mod packages {
         }
 
         fn install_family_with_destination(
-            host: &Host<'_>,
+            host: &Host,
             family: &str,
             destination: &Path,
             parent: &Path,
@@ -1353,7 +1215,7 @@ pub(crate) mod packages {
                 .context("atomically publish Nerd Font family")
         }
 
-        fn refresh_cache(host: &Host<'_>, operation: &str, directory: &Path) -> Result<()> {
+        fn refresh_cache(host: &Host, operation: &str, directory: &Path) -> Result<()> {
             host.require(operation, "fc-cache", [OsStr::new("--force"), directory.as_os_str()])?;
             Ok(())
         }
@@ -1434,7 +1296,7 @@ pub(crate) mod packages {
 
         use super::super::Host;
 
-        pub(crate) fn execute(host: &Host<'_>, root: &Path, packages: &[String]) -> Result<()> {
+        pub(crate) fn execute(host: &Host, root: &Path, packages: &[String]) -> Result<()> {
             let root = fs::canonicalize(root)
                 .with_context(|| format!("dotfiles operation: canonicalize root {}", root.display()))?;
             if !fs::symlink_metadata(&root)?.file_type().is_dir() {
@@ -1446,7 +1308,7 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        fn apply_package(host: &Host<'_>, root: &Path, package: &str) -> Result<()> {
+        fn apply_package(host: &Host, root: &Path, package: &str) -> Result<()> {
             let source = root.join(package);
             let metadata = fs::symlink_metadata(&source)
                 .with_context(|| format!("dotfiles package {package:?} does not exist"))?;
@@ -1504,7 +1366,7 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        fn backup_conflicts(host: &Host<'_>, package: &str, conflicts: &[PathBuf]) -> Result<()> {
+        fn backup_conflicts(host: &Host, package: &str, conflicts: &[PathBuf]) -> Result<()> {
             let state_home = host
                 .value("XDG_STATE_HOME")
                 .map(PathBuf::from)

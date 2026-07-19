@@ -56,7 +56,7 @@ fn apply() -> Result<()> {
     for operation in operations {
         let display = operation.display_args().join(" ");
         println!("Applying {display}");
-        match operations::execute(&operation, &[]).with_context(|| format!("apply {display}"))? {
+        match operations::execute(&operation).with_context(|| format!("apply {display}"))? {
             operations::OperationOutcome::Completed => {}
             operations::OperationOutcome::LoginRequired => {
                 println!("Login required to finish {display}");
