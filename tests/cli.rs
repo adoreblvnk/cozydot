@@ -134,28 +134,6 @@ fn init_ignores_removed_failure_injection_environment_variables() {
 }
 
 #[test]
-fn canonical_init_and_dry_run_apply_succeeds() {
-    let temp = tempfile::tempdir().unwrap();
-
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", temp.path())
-        .arg("init")
-        .assert()
-        .success();
-
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", temp.path())
-        .env("XDG_CURRENT_DESKTOP", "gnome")
-        .env("COZYDOT_DRY_RUN", "1")
-        .arg("apply")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("summary:"));
-}
-
-#[test]
 fn unsupported_architecture_selector_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");

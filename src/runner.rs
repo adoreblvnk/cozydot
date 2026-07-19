@@ -172,7 +172,6 @@ pub enum StepOutcome {
     Completed,
     LoginRequired,
     Skipped,
-    Planned,
     Failed(String),
 }
 
@@ -187,7 +186,6 @@ pub struct ExecutionSummary {
     pub completed: usize,
     pub skipped: usize,
     pub login_required: usize,
-    pub planned: usize,
     pub failed: usize,
 }
 
@@ -212,9 +210,6 @@ impl ExecutionReport {
                 (StepKind::Operation { .. }, StepOutcome::LoginRequired) => {
                     format!("login-required: {}", report.step.report_name())
                 }
-                (StepKind::Operation { .. }, StepOutcome::Planned) => {
-                    format!("planned: {}", report.step.report_name())
-                }
                 (StepKind::Skip(skip), StepOutcome::Skipped) => {
                     format!("skipped: {} ({})", skip.action.name(), skip.reason.description())
                 }
@@ -225,12 +220,8 @@ impl ExecutionReport {
             })
             .collect::<Vec<_>>();
         lines.push(format!(
-            "summary: {} completed, {} skipped, {} login-required, {} planned, {} failed",
-            self.summary.completed,
-            self.summary.skipped,
-            self.summary.login_required,
-            self.summary.planned,
-            self.summary.failed,
+            "summary: {} completed, {} skipped, {} login-required, {} failed",
+            self.summary.completed, self.summary.skipped, self.summary.login_required, self.summary.failed,
         ));
         lines.join("\n")
     }
@@ -240,7 +231,6 @@ impl ExecutionReport {
             StepOutcome::Completed => self.summary.completed += 1,
             StepOutcome::Skipped => self.summary.skipped += 1,
             StepOutcome::LoginRequired => self.summary.login_required += 1,
-            StepOutcome::Planned => self.summary.planned += 1,
             StepOutcome::Failed(_) => self.summary.failed += 1,
             StepOutcome::PhaseStarted => {}
         }
@@ -266,9 +256,7 @@ impl std::error::Error for ExecutionFailure {
     }
 }
 
-pub struct ProcessRunner {
-    pub dry_run: bool,
-}
+pub struct ProcessRunner;
 
 impl ProcessRunner {
     fn run(&mut self, operation: &Operation) -> Result<OperationOutcome> {
@@ -277,7 +265,7 @@ impl ProcessRunner {
 }
 
 pub fn execute(runner: &mut ProcessRunner, steps: &[Step]) -> std::result::Result<ExecutionReport, ExecutionFailure> {
-    let result = execute_with(steps, runner.dry_run, |operation| runner.run(operation));
+    let result = execute_with(steps, |operation| runner.run(operation));
     match &result {
         Ok(report) => println!("{}", report.render()),
         Err(failure) => println!("{}", failure.report.render()),
@@ -285,7 +273,7 @@ pub fn execute(runner: &mut ProcessRunner, steps: &[Step]) -> std::result::Resul
     result
 }
 
-fn execute_with<F>(steps: &[Step], dry_run: bool, mut run: F) -> std::result::Result<ExecutionReport, ExecutionFailure>
+fn execute_with<F>(steps: &[Step], mut run: F) -> std::result::Result<ExecutionReport, ExecutionFailure>
 where
     F: FnMut(&Operation) -> Result<OperationOutcome>,
 {
@@ -295,7 +283,6 @@ where
             StepKind::Phase(_) => report.push(step.clone(), StepOutcome::PhaseStarted),
             StepKind::Skip(_) => report.push(step.clone(), StepOutcome::Skipped),
             StepKind::Summary => {}
-            StepKind::Operation { .. } if dry_run => report.push(step.clone(), StepOutcome::Planned),
             StepKind::Operation { .. } => match run(step
                 .operation()
                 .expect("matched operation step must contain an operation"))
