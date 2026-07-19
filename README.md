@@ -67,7 +67,7 @@ generated repository file. Edit that active file before running `apply`.
 ## Safety model
 
 - `apply` validates the complete active config and resolved platform, then
-  builds and lowers the full typed plan before it starts apply side effects.
+  plans the complete ordered typed-operation workflow before starting side effects.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
   execution uses a fixed set of typed operations.
