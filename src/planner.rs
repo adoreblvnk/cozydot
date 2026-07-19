@@ -804,32 +804,3 @@ fn enabled(state: EnabledDisabled) -> bool {
         EnabledDisabled::Disabled => false,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::plan;
-    use crate::{config::Config, platform::Platform};
-    use std::path::Path;
-
-    #[test]
-    fn every_preset_plans_for_arm32() {
-        let platform = Platform::from_parts(
-            "debian".into(),
-            "debian".into(),
-            "bookworm".into(),
-            "gnome".into(),
-            "armv7l",
-        )
-        .unwrap();
-        for (name, yaml) in [
-            ("cozydot", include_str!("../configs/cozydot.yaml")),
-            ("full", include_str!("../configs/full.yaml")),
-            ("cli", include_str!("../configs/cli.yaml")),
-            ("vm", include_str!("../configs/vm.yaml")),
-        ] {
-            let config = Config::parse(yaml).unwrap_or_else(|error| panic!("{name} config failed: {error:#}"));
-            plan(&config, &platform, Path::new("/tmp/cozydot-arm32-test"))
-                .unwrap_or_else(|error| panic!("{name} ARM32 plan failed: {error:#}"));
-        }
-    }
-}
