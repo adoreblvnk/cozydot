@@ -67,6 +67,73 @@ fn init_materializes_four_presets() {
 }
 
 #[test]
+fn init_updates_unmodified_files_and_preserves_modified_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("cozydot/cozydot.yaml");
+    let dotfile_path = temp.path().join("cozydot/dotfiles/bash/.bashrc");
+
+    for preset in ["cli", "vm"] {
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .args(["init", "--preset", preset])
+            .assert()
+            .success();
+    }
+    assert_eq!(
+        fs::read_to_string(&config_path).unwrap(),
+        fs::read_to_string("configs/vm.yaml").unwrap()
+    );
+
+    fs::write(&config_path, "user-owned config\n").unwrap();
+    fs::write(&dotfile_path, "user-owned dotfile\n").unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .args(["init", "--preset", "full"])
+        .assert()
+        .success();
+    assert_eq!(fs::read_to_string(config_path).unwrap(), "user-owned config\n");
+    assert_eq!(fs::read_to_string(dotfile_path).unwrap(), "user-owned dotfile\n");
+}
+
+#[test]
+fn init_preserves_unmanaged_existing_config_and_dotfile() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("cozydot");
+    let config_path = root.join("cozydot.yaml");
+    let dotfile_path = root.join("dotfiles/bash/.bashrc");
+    fs::create_dir_all(dotfile_path.parent().unwrap()).unwrap();
+    fs::write(&config_path, "existing config\n").unwrap();
+    fs::write(&dotfile_path, "existing dotfile\n").unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .arg("init")
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(config_path).unwrap(), "existing config\n");
+    assert_eq!(fs::read_to_string(dotfile_path).unwrap(), "existing dotfile\n");
+}
+
+#[test]
+fn init_ignores_removed_failure_injection_environment_variables() {
+    let temp = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env("COZYDOT_TEST_FAIL_AFTER_INSTALLS", "1")
+        .env("COZYDOT_TEST_FAIL_AFTER_RELATIVE", "cozydot.yaml")
+        .env("COZYDOT_TEST_FAIL_MANAGED_FILE_AT", "cp")
+        .arg("init")
+        .assert()
+        .success();
+}
+
+#[test]
 fn canonical_init_and_dry_run_apply_succeeds() {
     let temp = tempfile::tempdir().unwrap();
 
