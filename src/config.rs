@@ -1218,18 +1218,38 @@ impl Desktop {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Idle {
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    pub timeout: Option<String>,
+    pub timeout: Option<DesktopIdleDuration>,
     pub dim: Option<bool>,
 }
 
 impl Idle {
     fn validate(&self) -> Result<()> {
-        require_effective(self.timeout.is_some() || self.dim.is_some(), "desktop.idle")?;
-        if let Some(timeout) = &self.timeout {
-            validate_duration(timeout, "desktop.idle.timeout")?;
+        require_effective(self.timeout.is_some() || self.dim.is_some(), "desktop.idle")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopIdleDuration(u32);
+
+impl DesktopIdleDuration {
+    pub fn seconds(self) -> u32 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for DesktopIdleDuration {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = deserialize_string(deserializer)?;
+        let duration = humantime::parse_duration(&value).map_err(de::Error::custom)?;
+        if duration.subsec_nanos() != 0 {
+            return Err(de::Error::custom("duration must resolve to a whole number of seconds"));
         }
-        Ok(())
+        u32::try_from(duration.as_secs())
+            .map(Self)
+            .map_err(|_| de::Error::custom("duration exceeds the supported uint32 seconds range"))
     }
 }
 
@@ -1780,14 +1800,6 @@ fn validate_numeric_version(value: &str, path: &str, min: usize, max: usize) -> 
     Ok(())
 }
 
-fn validate_duration(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[0-9]+[smh]$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid duration {value:?}; must be a non-negative decimal integer followed by s, m, or h");
-    }
-    Ok(())
-}
-
 fn validate_docker_size(value: &str, path: &str) -> Result<()> {
     let re = Regex::new(r"^[1-9][0-9]*[kmg]$").unwrap();
     if !re.is_match(value) {
@@ -1898,4 +1910,37 @@ fn valid_domain_host(domain: &str) -> bool {
 
 fn has_substitution(value: &str) -> bool {
     value.contains('$') || value.contains("{{") || value.contains("{%")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn desktop_idle_duration_uses_humantime_grammar() {
+        for (timeout, seconds) in [
+            ("0s", 0),
+            ("15m", 900),
+            ("1h 30m", 5_400),
+            ("2 days", 172_800),
+            ("5000ms", 5),
+            ("4.0s", 4),
+        ] {
+            let yaml = format!("version: 1.0.0\ndesktop:\n  idle:\n    timeout: {timeout}\n");
+            let config = Config::parse(&yaml).unwrap();
+            assert_eq!(
+                config.desktop.unwrap().idle.unwrap().timeout.unwrap().seconds(),
+                seconds,
+                "parsed {timeout:?} incorrectly"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_idle_duration_must_fit_exact_whole_seconds() {
+        for timeout in ["invalid", "500ms", "4.2s", "4294967296s"] {
+            let yaml = format!("version: 1.0.0\ndesktop:\n  idle:\n    timeout: {timeout}\n");
+            assert!(Config::parse(&yaml).is_err(), "accepted {timeout:?}");
+        }
+    }
 }

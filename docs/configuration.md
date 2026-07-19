@@ -115,7 +115,7 @@ The field tables refer to these reusable domains:
 | VS Code extension | Exactly `publisher.extension`; both lowercase components start alphanumeric and continue with alphanumerics or `-` |
 | GNOME extension UUID | Exactly one `@`, non-empty sides, and only ASCII alphanumerics, `.`, `_`, or `-` |
 | APT token | Starts lowercase ASCII or digit; continues with lowercase ASCII, digits, `.`, `_`, `+`, or `-`; the complete `*` is also accepted where stated |
-| Duration | Non-negative decimal integer followed by lowercase `s`, `m`, or `h`; `0s`, `0m`, and `0h` are valid |
+| Duration | Human-readable `humantime` duration such as `15m`, `1h 30m`, or `2 days`; it must resolve exactly to whole seconds within the `u32` range, and zero is valid |
 | Docker size | Positive decimal integer followed by lowercase `k`, `m`, or `g` |
 | HTTPS URL | Absolute `https://` URL with a host and no credentials, fragment, whitespace, control characters, backslash, `$`, `{{`, or `{%` |
 | SHA-256 | Exactly 64 lowercase hexadecimal characters |
@@ -397,7 +397,7 @@ desktop:
 | `desktop.theme` | Optional: `light` or `dark` | GNOME/Cinnamon only; omission preserves theme |
 | `desktop.terminal` | Optional executable basename | GNOME/Cinnamon only; command existence is checked after installation phases |
 | `desktop.idle` | Optional mapping containing `timeout` and/or `dim` | GNOME/Cinnamon only |
-| `desktop.idle.timeout` | Optional duration | Omission preserves timeout; conversion to seconds must fit runtime limits |
+| `desktop.idle.timeout` | Optional duration | Omission preserves timeout; sub-second results and values above `u32::MAX` seconds are rejected because the desktop backend stores whole seconds |
 | `desktop.idle.dim` | Optional boolean, both `true` and `false` | Omission preserves dimming state |
 | `desktop.gnome` | Optional mapping containing at least one GNOME child | Allowed on GNOME and Cinnamon; applied on GNOME and skipped on Cinnamon |
 | `desktop.gnome.extensions` | Optional unique list of GNOME extension UUIDs | GNOME only; newly installed extensions may require logout/login before enabling |
