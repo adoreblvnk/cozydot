@@ -1722,9 +1722,9 @@ fn validate_vscode_id(value: &str, path: &str) -> Result<()> {
 }
 
 fn validate_gnome_uuid(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[^@]+@[^@]+$").unwrap();
+    let re = Regex::new(r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$").unwrap();
     if !re.is_match(value) {
-        bail!("{path}: invalid GNOME extension UUID {value:?}; must contain exactly one '@'");
+        bail!("{path}: invalid GNOME extension UUID {value:?}; must contain exactly one '@' and use only ASCII alphanumerics, '.', '_', or '-' in each part");
     }
     Ok(())
 }
@@ -1775,11 +1775,7 @@ fn validate_rust_selector(value: &str, path: &str) -> Result<()> {
     if value == "stable" {
         return Ok(());
     }
-    validate_numeric_version(value, path, 2, 3)?;
-    if value.split('.').any(|part| part != "0" && part.starts_with('0')) {
-        bail!("{path}: invalid Rustup selector {value:?}; numeric components cannot have leading zeroes");
-    }
-    Ok(())
+    validate_numeric_version(value, path, 2, 3)
 }
 
 fn rust_selector_is_moving(value: &str) -> bool {
@@ -1794,6 +1790,9 @@ fn validate_numeric_version(value: &str, path: &str, min: usize, max: usize) -> 
             .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
     {
         bail!("{path}: invalid selector {value:?}; expected {min} to {max} numeric components");
+    }
+    if parts.iter().any(|part| *part != "0" && part.starts_with('0')) {
+        bail!("{path}: invalid selector {value:?}; numeric components cannot have leading zeroes");
     }
     Ok(())
 }

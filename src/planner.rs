@@ -6,13 +6,9 @@ use crate::{
     operations::{
         AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
         BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
-        BinarySourceOperation, CargoBinstallBootstrapOperation, CargoPackageMode, CargoPackageOperation,
-        DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, DockerLocalLogOperation,
-        DotfilesOperation, EnsureAdminOperation, GithubRepository, GnomeDockOperation, GnomeExtensionsOperation,
-        GnomeRoundedCornersOperation, GoToolchainOperation, GoToolchainSelector, ManagedAptSourcesOperation,
-        NerdFontsMode, NerdFontsOperation, NodeToolchainOperation, NodeToolchainSelector, NpmPackageMode,
-        NpmPackageOperation, Operation, PythonToolchainOperation, RustToolchainOperation, RustToolchainSelector,
-        ToolMutationMode, UbuntuSnapOperation, UnattendedUpgradesOperation, VsCodeExtensionOperation,
+        BinarySourceOperation, CargoPackageMode, DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository,
+        GoToolchainSelector, NerdFontsMode, NodeToolchainSelector, NpmPackageMode, Operation, RustToolchainSelector,
+        ToolMutationMode,
     },
     platform::{Architecture, Platform},
 };
@@ -93,7 +89,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::AdministrativeVerification,
-            Operation::EnsureAdmin(EnsureAdminOperation::new()),
+            Operation::EnsureAdmin,
         );
     }
 
@@ -110,7 +106,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             push_operation(
                 &mut phases,
                 PlannerPhase::OfficialAptSources,
-                Operation::ManagedAptSources(ManagedAptSourcesOperation::from_policy(managed)?),
+                Operation::ManagedAptSources(managed),
             );
         }
     }
@@ -183,10 +179,10 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::CargoPackageSet(CargoPackageOperation::new(
-                cargo.clone(),
-                CargoPackageMode::EnsurePresent,
-            )?),
+            Operation::CargoPackageSet {
+                packages: cargo.clone(),
+                mode: CargoPackageMode::EnsurePresent,
+            },
         );
     }
     if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()) {
@@ -196,7 +192,10 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::NpmPackageSet(NpmPackageOperation::new(npm.clone(), NpmPackageMode::EnsurePresent)?),
+            Operation::NpmPackageSet {
+                packages: npm.clone(),
+                mode: NpmPackageMode::EnsurePresent,
+            },
         );
     }
 
@@ -231,19 +230,25 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::Fonts,
-            Operation::NerdFonts(NerdFontsOperation::new(fonts.clone(), NerdFontsMode::EnsurePresent)?),
+            Operation::NerdFonts {
+                families: fonts.clone(),
+                mode: NerdFontsMode::EnsurePresent,
+            },
         );
     }
 
     if let Some(dotfiles) = &config.dotfiles {
+        if dotfiles_root.as_os_str().is_empty() {
+            anyhow::bail!("dotfiles root must not be empty");
+        }
         prerequisites.insert("stow");
         push_operation(
             &mut phases,
             PlannerPhase::Dotfiles,
-            Operation::Dotfiles(DotfilesOperation::new(
-                dotfiles_root.to_path_buf(),
-                dotfiles.packages.clone(),
-            )?),
+            Operation::Dotfiles {
+                root: dotfiles_root.to_path_buf(),
+                packages: dotfiles.packages.clone(),
+            },
         );
     }
 
@@ -283,9 +288,9 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         let op = match manager {
             ManagerBootstrap::Flatpak => Operation::FlatpakEnsureFlathub,
             ManagerBootstrap::Rustup => Operation::RustupBootstrap,
-            ManagerBootstrap::CargoBinstall => {
-                Operation::CargoBinstallBootstrap(CargoBinstallBootstrapOperation::new(platform.architecture))
-            }
+            ManagerBootstrap::CargoBinstall => Operation::CargoBinstallBootstrap {
+                architecture: platform.architecture,
+            },
             ManagerBootstrap::Fnm => Operation::FnmBootstrap,
             ManagerBootstrap::Uv => Operation::UvBootstrap,
         };
@@ -384,7 +389,9 @@ fn plan_system_states(
         push_operation(
             phases,
             PlannerPhase::SystemPackageStates,
-            Operation::UnattendedUpgrades(UnattendedUpgradesOperation::new(enabled(state))),
+            Operation::UnattendedUpgrades {
+                enabled: enabled(state),
+            },
         );
         *needs_apt_refresh = true;
     }
@@ -396,7 +403,9 @@ fn plan_system_states(
             push_operation(
                 phases,
                 PlannerPhase::SystemPackageStates,
-                Operation::UbuntuSnap(UbuntuSnapOperation::new(enabled(state))),
+                Operation::UbuntuSnap {
+                    enabled: enabled(state),
+                },
             );
         }
     }
@@ -431,11 +440,11 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::RustToolchain(RustToolchainOperation::new(
-                rust_selector_main(selector),
-                platform.architecture,
-                ToolMutationMode::EnsurePresent,
-            )?),
+            Operation::RustToolchain {
+                selector: rust_selector_main(selector),
+                architecture: platform.architecture,
+                mode: ToolMutationMode::EnsurePresent,
+            },
         );
     }
     if let Some(selector) = tools.go.as_deref() {
@@ -443,11 +452,11 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::GoToolchain(GoToolchainOperation::new(
-                go_selector_main(selector),
-                platform.architecture,
-                ToolMutationMode::EnsurePresent,
-            )?),
+            Operation::GoToolchain {
+                selector: go_selector_main(selector),
+                architecture: platform.architecture,
+                mode: ToolMutationMode::EnsurePresent,
+            },
         );
     }
     if let Some(selector) = tools.node.as_deref() {
@@ -456,11 +465,11 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::NodeToolchain(NodeToolchainOperation::new(
-                node_selector_main(selector),
-                platform.architecture,
-                ToolMutationMode::EnsurePresent,
-            )?),
+            Operation::NodeToolchain {
+                selector: node_selector_main(selector),
+                architecture: platform.architecture,
+                mode: ToolMutationMode::EnsurePresent,
+            },
         );
     }
     if let Some(selector) = &tools.python {
@@ -469,7 +478,10 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::PythonToolchain(PythonToolchainOperation::new(selector.clone(), platform.architecture)?),
+            Operation::PythonToolchain {
+                version: selector.clone(),
+                architecture: platform.architecture,
+            },
         );
     }
     Ok(())
@@ -487,7 +499,9 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
             push_operation(
                 phases,
                 PlannerPhase::Integrations,
-                Operation::DockerLocalLog(DockerLocalLogOperation::new(logging.max_size.clone())?),
+                Operation::DockerLocalLog {
+                    max_size: logging.max_size.clone(),
+                },
             );
         }
     }
@@ -502,7 +516,7 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
         push_operation(
             phases,
             PlannerPhase::Integrations,
-            Operation::VsCodeExtensionSet(VsCodeExtensionOperation::new(extensions)?),
+            Operation::VsCodeExtensionSet { extensions },
         );
     }
     Ok(())
@@ -527,23 +541,23 @@ fn plan_desktop(
         push_operation(
             phases,
             PlannerPhase::Desktop,
-            Operation::DesktopSetting(DesktopSettingOperation::new(
+            Operation::DesktopSetting {
                 target,
-                DesktopSetting::Theme(match theme {
+                setting: DesktopSetting::Theme(match theme {
                     Theme::Light => DesktopTheme::Light,
                     Theme::Dark => DesktopTheme::Dark,
                 }),
-            )?),
+            },
         );
     }
     if let Some(executable) = &desktop.terminal {
         push_operation(
             phases,
             PlannerPhase::Desktop,
-            Operation::DesktopSetting(DesktopSettingOperation::new(
+            Operation::DesktopSetting {
                 target,
-                DesktopSetting::Terminal(executable.clone()),
-            )?),
+                setting: DesktopSetting::Terminal(executable.clone()),
+            },
         );
     }
     if let Some(idle) = &desktop.idle {
@@ -551,17 +565,20 @@ fn plan_desktop(
             push_operation(
                 phases,
                 PlannerPhase::Desktop,
-                Operation::DesktopSetting(DesktopSettingOperation::new(
+                Operation::DesktopSetting {
                     target,
-                    DesktopSetting::IdleTimeoutSeconds(timeout.seconds()),
-                )?),
+                    setting: DesktopSetting::IdleTimeoutSeconds(timeout.seconds()),
+                },
             );
         }
         if let Some(enabled) = idle.dim {
             push_operation(
                 phases,
                 PlannerPhase::Desktop,
-                Operation::DesktopSetting(DesktopSettingOperation::new(target, DesktopSetting::IdleDim(enabled))?),
+                Operation::DesktopSetting {
+                    target,
+                    setting: DesktopSetting::IdleDim(enabled),
+                },
             );
         }
     }
@@ -572,24 +589,18 @@ fn plan_desktop(
                 push_operation(
                     phases,
                     PlannerPhase::Desktop,
-                    Operation::GnomeExtensions(GnomeExtensionsOperation::new(extensions.clone())?),
+                    Operation::GnomeExtensions {
+                        extensions: extensions.clone(),
+                    },
                 );
             }
             if gnome.dock == Some(true) {
                 prerequisites.insert("gnome-shell");
-                push_operation(
-                    phases,
-                    PlannerPhase::Desktop,
-                    Operation::GnomeDock(GnomeDockOperation::new()),
-                );
+                push_operation(phases, PlannerPhase::Desktop, Operation::GnomeDock);
             }
             if gnome.rounded_corners == Some(true) {
                 prerequisites.insert("gnome-shell");
-                push_operation(
-                    phases,
-                    PlannerPhase::Desktop,
-                    Operation::GnomeRoundedCorners(GnomeRoundedCornersOperation::new()),
-                );
+                push_operation(phases, PlannerPhase::Desktop, Operation::GnomeRoundedCorners);
             }
         }
     }
@@ -636,45 +647,45 @@ fn plan_updates(
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::RustToolchain(RustToolchainOperation::new(
-                    rust_selector_main(
+                Operation::RustToolchain {
+                    selector: rust_selector_main(
                         tools
                             .and_then(|tools| tools.rust.as_deref())
                             .expect("validated update target"),
                     ),
-                    platform.architecture,
-                    ToolMutationMode::UpdateMoving,
-                )?),
+                    architecture: platform.architecture,
+                    mode: ToolMutationMode::UpdateMoving,
+                },
             );
         }
         if tool_updates.go == Some(true) {
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::GoToolchain(GoToolchainOperation::new(
-                    go_selector_main(
+                Operation::GoToolchain {
+                    selector: go_selector_main(
                         tools
                             .and_then(|tools| tools.go.as_deref())
                             .expect("validated update target"),
                     ),
-                    platform.architecture,
-                    ToolMutationMode::UpdateMoving,
-                )?),
+                    architecture: platform.architecture,
+                    mode: ToolMutationMode::UpdateMoving,
+                },
             );
         }
         if tool_updates.node == Some(true) {
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::NodeToolchain(NodeToolchainOperation::new(
-                    node_selector_main(
+                Operation::NodeToolchain {
+                    selector: node_selector_main(
                         tools
                             .and_then(|tools| tools.node.as_deref())
                             .expect("validated update target"),
                     ),
-                    platform.architecture,
-                    ToolMutationMode::UpdateMoving,
-                )?),
+                    architecture: platform.architecture,
+                    mode: ToolMutationMode::UpdateMoving,
+                },
             );
         }
     }
@@ -683,24 +694,24 @@ fn plan_updates(
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::CargoPackageSet(CargoPackageOperation::new(
-                    packages
+                Operation::CargoPackageSet {
+                    packages: packages
                         .and_then(|packages| packages.cargo.clone())
                         .expect("validated update target"),
-                    CargoPackageMode::UpdateCurrent,
-                )?),
+                    mode: CargoPackageMode::UpdateCurrent,
+                },
             );
         }
         if package_updates.npm == Some(true) {
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::NpmPackageSet(NpmPackageOperation::new(
-                    packages
+                Operation::NpmPackageSet {
+                    packages: packages
                         .and_then(|packages| packages.npm.clone())
                         .expect("validated update target"),
-                    NpmPackageMode::UpdateCurrent,
-                )?),
+                    mode: NpmPackageMode::UpdateCurrent,
+                },
             );
         }
         if package_updates.binaries == Some(true) {
@@ -723,14 +734,14 @@ fn plan_updates(
         push_operation(
             phases,
             PlannerPhase::Updates,
-            Operation::NerdFonts(NerdFontsOperation::new(
-                config
+            Operation::NerdFonts {
+                families: config
                     .fonts
                     .as_ref()
                     .and_then(|fonts| fonts.nerd.clone())
                     .expect("validated update target"),
-                NerdFontsMode::Update,
-            )?),
+                mode: NerdFontsMode::Update,
+            },
         );
     }
     Ok(())
