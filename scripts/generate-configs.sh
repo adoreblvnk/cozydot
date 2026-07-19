@@ -22,6 +22,7 @@ generate_full() {
       {
         "name": "helium",
         "key": "https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc",
+        "key_path": "/usr/share/keyrings/helium.gpg",
         "urls": {"default": "https://pkg.helium.computer/deb"},
         "suite": "stable",
         "components": ["main"],
@@ -30,6 +31,7 @@ generate_full() {
       {
         "name": "onlyoffice",
         "key": "https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE",
+        "key_path": "/usr/share/keyrings/onlyoffice.gpg",
         "urls": {"default": "https://download.onlyoffice.com/repo/debian"},
         "suite": "squeeze",
         "components": ["main"],
@@ -38,6 +40,7 @@ generate_full() {
       {
         "name": "virtualbox",
         "key": "https://www.virtualbox.org/download/oracle_vbox_2016.asc",
+        "key_path": "/usr/share/keyrings/oracle-virtualbox-2016.asc",
         "urls": {"default": "https://download.virtualbox.org/virtualbox/debian"},
         "suite": "system",
         "components": ["contrib"],
@@ -193,6 +196,7 @@ generate_vm() {
       {
         "name": "wezterm",
         "key": "https://apt.fury.io/wez/gpg.key",
+        "key_path": "/usr/share/keyrings/wezterm-fury.asc",
         "urls": {"default": "https://apt.fury.io/wez/"},
         "suite": "*",
         "components": ["*"],

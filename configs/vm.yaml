@@ -52,6 +52,7 @@ packages:
     repositories:
       - name: vscode
         key: https://packages.microsoft.com/keys/microsoft.asc
+        key_path: /etc/apt/keyrings/packages.microsoft.gpg
         urls:
           default: https://packages.microsoft.com/repos/code
         suite: stable
@@ -59,6 +60,7 @@ packages:
         packages: [code]
       - name: wezterm
         key: https://apt.fury.io/wez/gpg.key
+        key_path: /usr/share/keyrings/wezterm-fury.asc
         urls:
           default: https://apt.fury.io/wez/
         suite: '*'

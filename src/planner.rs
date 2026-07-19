@@ -18,7 +18,10 @@ use crate::{
     runner::{self, ExecutionPhase, Step},
 };
 use anyhow::Result;
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ManagerBootstrap {
@@ -321,14 +324,13 @@ fn plan_repository(
                 .collect::<Result<Vec<_>>>()?,
         }
     };
-    let stem = repository.filename_stem();
     AptRepositoryOperation::new(
         repository.name.clone(),
-        stem,
         repository.key.clone(),
         resolved.source_url.clone(),
         platform.architecture,
         layout,
+        PathBuf::from(&repository.key_path),
     )
 }
 
