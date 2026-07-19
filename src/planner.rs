@@ -15,7 +15,6 @@ use crate::{
         ToolMutationMode, UbuntuSnapOperation, UnattendedUpgradesOperation, VsCodeExtensionOperation,
     },
     platform::{Architecture, Platform},
-    runner::{self, ExecutionPhase, Step},
 };
 use anyhow::Result;
 use std::{
@@ -32,30 +31,52 @@ pub enum ManagerBootstrap {
     Uv,
 }
 
-pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Step>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PlannerPhase {
+    SystemPrerequisites,
+    ManagerBootstraps,
+    AdministrativeVerification,
+    OfficialAptSources,
+    ThirdPartyRepositories,
+    AptMetadataRefresh,
+    SystemPackageStates,
+    AptPurge,
+    RepositoryPackages,
+    AptPackages,
+    FlatpakApplications,
+    LanguageToolchains,
+    LanguagePackages,
+    BinaryPackages,
+    Fonts,
+    Dotfiles,
+    Integrations,
+    Desktop,
+    Updates,
+}
+
+pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Operation>> {
     config.validate_for_platform(platform)?;
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
-        (ExecutionPhase::SystemPrerequisites, Vec::new()),
-        (ExecutionPhase::ManagerBootstraps, Vec::new()),
-        (ExecutionPhase::AdministrativeVerification, Vec::new()),
-        (ExecutionPhase::OfficialAptSources, Vec::new()),
-        (ExecutionPhase::ThirdPartyRepositories, Vec::new()),
-        (ExecutionPhase::AptMetadataRefresh, Vec::new()),
-        (ExecutionPhase::SystemPackageStates, Vec::new()),
-        (ExecutionPhase::AptPurge, Vec::new()),
-        (ExecutionPhase::RepositoryPackages, Vec::new()),
-        (ExecutionPhase::AptPackages, Vec::new()),
-        (ExecutionPhase::FlatpakApplications, Vec::new()),
-        (ExecutionPhase::LanguageToolchains, Vec::new()),
-        (ExecutionPhase::LanguagePackages, Vec::new()),
-        (ExecutionPhase::BinaryPackages, Vec::new()),
-        (ExecutionPhase::Fonts, Vec::new()),
-        (ExecutionPhase::Dotfiles, Vec::new()),
-        (ExecutionPhase::Integrations, Vec::new()),
-        (ExecutionPhase::Desktop, Vec::new()),
-        (ExecutionPhase::Updates, Vec::new()),
-        (ExecutionPhase::FinalVerification, Vec::new()),
+        (PlannerPhase::SystemPrerequisites, Vec::new()),
+        (PlannerPhase::ManagerBootstraps, Vec::new()),
+        (PlannerPhase::AdministrativeVerification, Vec::new()),
+        (PlannerPhase::OfficialAptSources, Vec::new()),
+        (PlannerPhase::ThirdPartyRepositories, Vec::new()),
+        (PlannerPhase::AptMetadataRefresh, Vec::new()),
+        (PlannerPhase::SystemPackageStates, Vec::new()),
+        (PlannerPhase::AptPurge, Vec::new()),
+        (PlannerPhase::RepositoryPackages, Vec::new()),
+        (PlannerPhase::AptPackages, Vec::new()),
+        (PlannerPhase::FlatpakApplications, Vec::new()),
+        (PlannerPhase::LanguageToolchains, Vec::new()),
+        (PlannerPhase::LanguagePackages, Vec::new()),
+        (PlannerPhase::BinaryPackages, Vec::new()),
+        (PlannerPhase::Fonts, Vec::new()),
+        (PlannerPhase::Dotfiles, Vec::new()),
+        (PlannerPhase::Integrations, Vec::new()),
+        (PlannerPhase::Desktop, Vec::new()),
+        (PlannerPhase::Updates, Vec::new()),
     ];
     let mut prerequisites = BTreeSet::new();
     let mut managers = BTreeSet::new();
@@ -69,10 +90,10 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         .as_ref()
         .is_some_and(|system| system.ensure_admin == Some(true))
     {
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::AdministrativeVerification,
-            Step::workflow(Operation::EnsureAdmin(EnsureAdminOperation::new())),
+            PlannerPhase::AdministrativeVerification,
+            Operation::EnsureAdmin(EnsureAdminOperation::new()),
         );
     }
 
@@ -86,12 +107,10 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             let managed = sources
                 .resolve_managed(platform, identity)?
                 .expect("managed source resolution returns an intent");
-            push_step(
+            push_operation(
                 &mut phases,
-                ExecutionPhase::OfficialAptSources,
-                Step::workflow(Operation::ManagedAptSources(ManagedAptSourcesOperation::from_policy(
-                    managed,
-                )?)),
+                PlannerPhase::OfficialAptSources,
+                Operation::ManagedAptSources(ManagedAptSourcesOperation::from_policy(managed)?),
             );
         }
     }
@@ -102,20 +121,17 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         prerequisites.insert("gnupg");
         for repository in repositories {
             let operation = plan_repository(repository, platform, identity)?;
-            push_step(
+            push_operation(
                 &mut phases,
-                ExecutionPhase::ThirdPartyRepositories,
-                Step::workflow(Operation::AptRepository(operation.clone())),
+                PlannerPhase::ThirdPartyRepositories,
+                Operation::AptRepository(operation),
             );
-            push_step(
+            push_operation(
                 &mut phases,
-                ExecutionPhase::RepositoryPackages,
-                Step::labeled_workflow(
-                    Operation::AptPackages {
-                        packages: repository.packages.clone(),
-                    },
-                    format!("repository {}", repository.name),
-                )?,
+                PlannerPhase::RepositoryPackages,
+                Operation::AptPackages {
+                    packages: repository.packages.clone(),
+                },
             );
             needs_apt_refresh = true;
         }
@@ -124,22 +140,22 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     plan_system_states(config, platform, &mut phases, &mut needs_apt_refresh);
 
     if let Some(remove) = apt.and_then(|apt| apt.remove.as_ref()) {
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::AptPurge,
-            Step::workflow(Operation::AptPurge {
+            PlannerPhase::AptPurge,
+            Operation::AptPurge {
                 packages: remove.clone(),
-            }),
+            },
         );
         needs_apt_refresh = true;
     }
     if let Some(install) = apt.and_then(|apt| apt.install.as_ref()) {
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::AptPackages,
-            Step::workflow(Operation::AptPackages {
+            PlannerPhase::AptPackages,
+            Operation::AptPackages {
                 packages: install.clone(),
-            }),
+            },
         );
         needs_apt_refresh = true;
     }
@@ -148,12 +164,12 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Flatpak);
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::FlatpakApplications,
-            Step::workflow(Operation::FlatpakEnsureApps {
+            PlannerPhase::FlatpakApplications,
+            Operation::FlatpakEnsureApps {
                 refs: applications.clone(),
-            }),
+            },
         );
     }
 
@@ -164,26 +180,23 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Rustup);
         managers.insert(ManagerBootstrap::CargoBinstall);
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::LanguagePackages,
-            Step::workflow(Operation::CargoPackageSet(CargoPackageOperation::new(
+            PlannerPhase::LanguagePackages,
+            Operation::CargoPackageSet(CargoPackageOperation::new(
                 cargo.clone(),
                 CargoPackageMode::EnsurePresent,
-            )?)),
+            )?),
         );
     }
     if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Fnm);
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::LanguagePackages,
-            Step::workflow(Operation::NpmPackageSet(NpmPackageOperation::new(
-                npm.clone(),
-                NpmPackageMode::EnsurePresent,
-            )?)),
+            PlannerPhase::LanguagePackages,
+            Operation::NpmPackageSet(NpmPackageOperation::new(npm.clone(), NpmPackageMode::EnsurePresent)?),
         );
     }
 
@@ -201,10 +214,10 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
                 }
                 BinaryFormat::Appimage => {}
             }
-            push_step(
+            push_operation(
                 &mut phases,
-                ExecutionPhase::BinaryPackages,
-                Step::workflow(Operation::BinaryPackage(planned)),
+                PlannerPhase::BinaryPackages,
+                Operation::BinaryPackage(planned),
             );
         }
     }
@@ -215,25 +228,22 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         prerequisites.insert("tar");
         prerequisites.insert("xz-utils");
         prerequisites.insert("fontconfig");
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::Fonts,
-            Step::workflow(Operation::NerdFonts(NerdFontsOperation::new(
-                fonts.clone(),
-                NerdFontsMode::EnsurePresent,
-            )?)),
+            PlannerPhase::Fonts,
+            Operation::NerdFonts(NerdFontsOperation::new(fonts.clone(), NerdFontsMode::EnsurePresent)?),
         );
     }
 
     if let Some(dotfiles) = &config.dotfiles {
         prerequisites.insert("stow");
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::Dotfiles,
-            Step::workflow(Operation::Dotfiles(DotfilesOperation::new(
+            PlannerPhase::Dotfiles,
+            Operation::Dotfiles(DotfilesOperation::new(
                 dotfiles_root.to_path_buf(),
                 dotfiles.packages.clone(),
-            )?)),
+            )?),
         );
     }
 
@@ -242,10 +252,10 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     plan_updates(config, platform, &mut phases, &mut needs_apt_refresh)?;
 
     if needs_apt_refresh {
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::AptMetadataRefresh,
-            Step::workflow(Operation::AptMetadataRefresh),
+            PlannerPhase::AptMetadataRefresh,
+            Operation::AptMetadataRefresh,
         );
     }
 
@@ -260,12 +270,12 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     }
 
     if !prerequisites.is_empty() {
-        push_step(
+        push_operation(
             &mut phases,
-            ExecutionPhase::SystemPrerequisites,
-            Step::workflow(Operation::AptBootstrapPackages {
+            PlannerPhase::SystemPrerequisites,
+            Operation::AptBootstrapPackages {
                 packages: prerequisites.iter().map(|s| (*s).to_owned()).collect(),
-            }),
+            },
         );
     }
 
@@ -279,28 +289,24 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             ManagerBootstrap::Fnm => Operation::FnmBootstrap,
             ManagerBootstrap::Uv => Operation::UvBootstrap,
         };
-        push_step(&mut phases, ExecutionPhase::ManagerBootstraps, Step::workflow(op));
+        push_operation(&mut phases, PlannerPhase::ManagerBootstraps, op);
     }
 
-    let mut final_steps = Vec::new();
-    for (phase, steps) in phases {
-        if !steps.is_empty() {
-            final_steps.push(Step::phase(phase));
-            final_steps.extend(steps);
-        }
+    let mut final_operations = Vec::new();
+    for (_phase, ops) in phases {
+        final_operations.extend(ops);
     }
-    final_steps.push(Step::summary());
 
-    Ok(final_steps)
+    Ok(final_operations)
 }
 
-fn push_step(phases: &mut [(ExecutionPhase, Vec<Step>)], phase: ExecutionPhase, step: Step) {
+fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerPhase, op: Operation) {
     phases
         .iter_mut()
         .find(|(p, _)| *p == phase)
         .expect("phase exists")
         .1
-        .push(step);
+        .push(op);
 }
 
 fn plan_repository(
@@ -370,17 +376,15 @@ fn plan_binary(
 fn plan_system_states(
     config: &Config,
     platform: &Platform,
-    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
     needs_apt_refresh: &mut bool,
 ) {
     let Some(system) = &config.system else { return };
     if let Some(state) = system.apt.as_ref().and_then(|apt| apt.unattended_upgrades) {
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::SystemPackageStates,
-            Step::workflow(Operation::UnattendedUpgrades(UnattendedUpgradesOperation::new(
-                enabled(state),
-            ))),
+            PlannerPhase::SystemPackageStates,
+            Operation::UnattendedUpgrades(UnattendedUpgradesOperation::new(enabled(state))),
         );
         *needs_apt_refresh = true;
     }
@@ -389,19 +393,10 @@ fn plan_system_states(
     if let Some(state) = ubuntu.snap {
         if ubuntu_family {
             *needs_apt_refresh = true;
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::SystemPackageStates,
-                Step::workflow(Operation::UbuntuSnap(UbuntuSnapOperation::new(enabled(state)))),
-            );
-        } else {
-            push_step(
-                phases,
-                ExecutionPhase::SystemPackageStates,
-                Step::skip(
-                    runner::SkippedAction::UbuntuSnap,
-                    runner::SkipReason::RequiresUbuntuFamily,
-                ),
+                PlannerPhase::SystemPackageStates,
+                Operation::UbuntuSnap(UbuntuSnapOperation::new(enabled(state))),
             );
         }
     }
@@ -409,23 +404,14 @@ fn plan_system_states(
         if ubuntu_family {
             *needs_apt_refresh = true;
             if state == InstalledState::Installed {
-                push_step(
+                push_operation(
                     phases,
-                    ExecutionPhase::SystemPackageStates,
-                    Step::workflow(Operation::AptPackages {
+                    PlannerPhase::SystemPackageStates,
+                    Operation::AptPackages {
                         packages: vec!["ubuntu-restricted-extras".into()],
-                    }),
+                    },
                 );
             }
-        } else {
-            push_step(
-                phases,
-                ExecutionPhase::SystemPackageStates,
-                Step::skip(
-                    runner::SkippedAction::UbuntuCodecs,
-                    runner::SkipReason::RequiresUbuntuFamily,
-                ),
-            );
         }
     }
 }
@@ -433,7 +419,7 @@ fn plan_system_states(
 fn plan_tools(
     config: &Config,
     platform: &Platform,
-    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) -> Result<()> {
@@ -442,75 +428,66 @@ fn plan_tools(
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Rustup);
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::LanguageToolchains,
-            Step::workflow(Operation::RustToolchain(RustToolchainOperation::new(
+            PlannerPhase::LanguageToolchains,
+            Operation::RustToolchain(RustToolchainOperation::new(
                 rust_selector_main(selector),
                 platform.architecture,
                 ToolMutationMode::EnsurePresent,
-            )?)),
+            )?),
         );
     }
     if let Some(selector) = tools.go.as_deref() {
         prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils"]);
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::LanguageToolchains,
-            Step::workflow(Operation::GoToolchain(GoToolchainOperation::new(
+            PlannerPhase::LanguageToolchains,
+            Operation::GoToolchain(GoToolchainOperation::new(
                 go_selector_main(selector),
                 platform.architecture,
                 ToolMutationMode::EnsurePresent,
-            )?)),
+            )?),
         );
     }
     if let Some(selector) = tools.node.as_deref() {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Fnm);
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::LanguageToolchains,
-            Step::workflow(Operation::NodeToolchain(NodeToolchainOperation::new(
+            PlannerPhase::LanguageToolchains,
+            Operation::NodeToolchain(NodeToolchainOperation::new(
                 node_selector_main(selector),
                 platform.architecture,
                 ToolMutationMode::EnsurePresent,
-            )?)),
+            )?),
         );
     }
     if let Some(selector) = &tools.python {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Uv);
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::LanguageToolchains,
-            Step::workflow(Operation::PythonToolchain(PythonToolchainOperation::new(
-                selector.clone(),
-                platform.architecture,
-            )?)),
+            PlannerPhase::LanguageToolchains,
+            Operation::PythonToolchain(PythonToolchainOperation::new(selector.clone(), platform.architecture)?),
         );
     }
     Ok(())
 }
 
-fn plan_integrations(config: &Config, phases: &mut [(ExecutionPhase, Vec<Step>)]) -> Result<()> {
+fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation>)]) -> Result<()> {
     let Some(integrations) = &config.integrations else {
         return Ok(());
     };
     if let Some(docker) = &integrations.docker {
         if docker.add_user_to_group == Some(true) {
-            push_step(
-                phases,
-                ExecutionPhase::Integrations,
-                Step::workflow(Operation::DockerGroup),
-            );
+            push_operation(phases, PlannerPhase::Integrations, Operation::DockerGroup);
         }
         if let Some(logging) = &docker.logging {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Integrations,
-                Step::workflow(Operation::DockerLocalLog(DockerLocalLogOperation::new(
-                    logging.max_size.clone(),
-                )?)),
+                PlannerPhase::Integrations,
+                Operation::DockerLocalLog(DockerLocalLogOperation::new(logging.max_size.clone())?),
             );
         }
     }
@@ -519,19 +496,13 @@ fn plan_integrations(config: &Config, phases: &mut [(ExecutionPhase, Vec<Step>)]
         .as_ref()
         .is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true))
     {
-        push_step(
-            phases,
-            ExecutionPhase::Integrations,
-            Step::workflow(Operation::VirtualBoxGroup),
-        );
+        push_operation(phases, PlannerPhase::Integrations, Operation::VirtualBoxGroup);
     }
     if let Some(extensions) = integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()) {
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::Integrations,
-            Step::workflow(Operation::VsCodeExtensionSet(VsCodeExtensionOperation::new(
-                extensions,
-            )?)),
+            PlannerPhase::Integrations,
+            Operation::VsCodeExtensionSet(VsCodeExtensionOperation::new(extensions)?),
         );
     }
     Ok(())
@@ -540,7 +511,7 @@ fn plan_integrations(config: &Config, phases: &mut [(ExecutionPhase, Vec<Step>)]
 fn plan_desktop(
     config: &Config,
     platform: &Platform,
-    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
 ) -> Result<()> {
     let Some(desktop) = &config.desktop else {
@@ -553,47 +524,44 @@ fn plan_desktop(
     };
     prerequisites.extend(["dconf-cli", "libglib2.0-bin"]);
     if let Some(theme) = desktop.theme {
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::Desktop,
-            Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+            PlannerPhase::Desktop,
+            Operation::DesktopSetting(DesktopSettingOperation::new(
                 target,
                 DesktopSetting::Theme(match theme {
                     Theme::Light => DesktopTheme::Light,
                     Theme::Dark => DesktopTheme::Dark,
                 }),
-            )?)),
+            )?),
         );
     }
     if let Some(executable) = &desktop.terminal {
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::Desktop,
-            Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+            PlannerPhase::Desktop,
+            Operation::DesktopSetting(DesktopSettingOperation::new(
                 target,
                 DesktopSetting::Terminal(executable.clone()),
-            )?)),
+            )?),
         );
     }
     if let Some(idle) = &desktop.idle {
         if let Some(timeout) = &idle.timeout {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Desktop,
-                Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+                PlannerPhase::Desktop,
+                Operation::DesktopSetting(DesktopSettingOperation::new(
                     target,
                     DesktopSetting::IdleTimeoutSeconds(timeout.seconds()),
-                )?)),
+                )?),
             );
         }
         if let Some(enabled) = idle.dim {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Desktop,
-                Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
-                    target,
-                    DesktopSetting::IdleDim(enabled),
-                )?)),
+                PlannerPhase::Desktop,
+                Operation::DesktopSetting(DesktopSettingOperation::new(target, DesktopSetting::IdleDim(enabled))?),
             );
         }
     }
@@ -601,28 +569,26 @@ fn plan_desktop(
         if let Some(gnome) = &desktop.gnome {
             if let Some(extensions) = &gnome.extensions {
                 prerequisites.insert("gnome-shell");
-                push_step(
+                push_operation(
                     phases,
-                    ExecutionPhase::Desktop,
-                    Step::workflow(Operation::GnomeExtensions(GnomeExtensionsOperation::new(
-                        extensions.clone(),
-                    )?)),
+                    PlannerPhase::Desktop,
+                    Operation::GnomeExtensions(GnomeExtensionsOperation::new(extensions.clone())?),
                 );
             }
             if gnome.dock == Some(true) {
                 prerequisites.insert("gnome-shell");
-                push_step(
+                push_operation(
                     phases,
-                    ExecutionPhase::Desktop,
-                    Step::workflow(Operation::GnomeDock(GnomeDockOperation::new())),
+                    PlannerPhase::Desktop,
+                    Operation::GnomeDock(GnomeDockOperation::new()),
                 );
             }
             if gnome.rounded_corners == Some(true) {
                 prerequisites.insert("gnome-shell");
-                push_step(
+                push_operation(
                     phases,
-                    ExecutionPhase::Desktop,
-                    Step::workflow(Operation::GnomeRoundedCorners(GnomeRoundedCornersOperation::new())),
+                    PlannerPhase::Desktop,
+                    Operation::GnomeRoundedCorners(GnomeRoundedCornersOperation::new()),
                 );
             }
         }
@@ -633,7 +599,7 @@ fn plan_desktop(
 fn plan_updates(
     config: &Config,
     platform: &Platform,
-    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
     needs_apt_refresh: &mut bool,
 ) -> Result<()> {
     let Some(updates) = &config.updates else {
@@ -643,34 +609,34 @@ fn plan_updates(
     let tools = config.tools.as_ref();
     if let Some(policy) = updates.apt {
         *needs_apt_refresh = true;
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::Updates,
-            Step::workflow(Operation::AptUpgrade {
+            PlannerPhase::Updates,
+            Operation::AptUpgrade {
                 policy: match policy {
                     AptUpdate::Standard => AptUpgradePolicy::Standard,
                     AptUpdate::Full => AptUpgradePolicy::Full,
                 },
-            }),
+            },
         );
     }
     if updates.flatpak == Some(true) {
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::Updates,
-            Step::workflow(Operation::FlatpakUpdateApps {
+            PlannerPhase::Updates,
+            Operation::FlatpakUpdateApps {
                 refs: packages
                     .and_then(|packages| packages.flatpak.clone())
                     .expect("validated update target"),
-            }),
+            },
         );
     }
     if let Some(tool_updates) = &updates.tools {
         if tool_updates.rust == Some(true) {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Updates,
-                Step::workflow(Operation::RustToolchain(RustToolchainOperation::new(
+                PlannerPhase::Updates,
+                Operation::RustToolchain(RustToolchainOperation::new(
                     rust_selector_main(
                         tools
                             .and_then(|tools| tools.rust.as_deref())
@@ -678,14 +644,14 @@ fn plan_updates(
                     ),
                     platform.architecture,
                     ToolMutationMode::UpdateMoving,
-                )?)),
+                )?),
             );
         }
         if tool_updates.go == Some(true) {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Updates,
-                Step::workflow(Operation::GoToolchain(GoToolchainOperation::new(
+                PlannerPhase::Updates,
+                Operation::GoToolchain(GoToolchainOperation::new(
                     go_selector_main(
                         tools
                             .and_then(|tools| tools.go.as_deref())
@@ -693,14 +659,14 @@ fn plan_updates(
                     ),
                     platform.architecture,
                     ToolMutationMode::UpdateMoving,
-                )?)),
+                )?),
             );
         }
         if tool_updates.node == Some(true) {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Updates,
-                Step::workflow(Operation::NodeToolchain(NodeToolchainOperation::new(
+                PlannerPhase::Updates,
+                Operation::NodeToolchain(NodeToolchainOperation::new(
                     node_selector_main(
                         tools
                             .and_then(|tools| tools.node.as_deref())
@@ -708,33 +674,33 @@ fn plan_updates(
                     ),
                     platform.architecture,
                     ToolMutationMode::UpdateMoving,
-                )?)),
+                )?),
             );
         }
     }
     if let Some(package_updates) = &updates.packages {
         if package_updates.cargo == Some(true) {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Updates,
-                Step::workflow(Operation::CargoPackageSet(CargoPackageOperation::new(
+                PlannerPhase::Updates,
+                Operation::CargoPackageSet(CargoPackageOperation::new(
                     packages
                         .and_then(|packages| packages.cargo.clone())
                         .expect("validated update target"),
                     CargoPackageMode::UpdateCurrent,
-                )?)),
+                )?),
             );
         }
         if package_updates.npm == Some(true) {
-            push_step(
+            push_operation(
                 phases,
-                ExecutionPhase::Updates,
-                Step::workflow(Operation::NpmPackageSet(NpmPackageOperation::new(
+                PlannerPhase::Updates,
+                Operation::NpmPackageSet(NpmPackageOperation::new(
                     packages
                         .and_then(|packages| packages.npm.clone())
                         .expect("validated update target"),
                     NpmPackageMode::UpdateCurrent,
-                )?)),
+                )?),
             );
         }
         if package_updates.binaries == Some(true) {
@@ -747,28 +713,24 @@ fn plan_updates(
                     if is_github {
                         let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
                             .expect("native GitHub source was resolved");
-                        push_step(
-                            phases,
-                            ExecutionPhase::Updates,
-                            Step::workflow(Operation::BinaryPackage(planned)),
-                        );
+                        push_operation(phases, PlannerPhase::Updates, Operation::BinaryPackage(planned));
                     }
                 }
             }
         }
     }
     if updates.fonts == Some(true) {
-        push_step(
+        push_operation(
             phases,
-            ExecutionPhase::Updates,
-            Step::workflow(Operation::NerdFonts(NerdFontsOperation::new(
+            PlannerPhase::Updates,
+            Operation::NerdFonts(NerdFontsOperation::new(
                 config
                     .fonts
                     .as_ref()
                     .and_then(|fonts| fonts.nerd.clone())
                     .expect("validated update target"),
                 NerdFontsMode::Update,
-            )?)),
+            )?),
         );
     }
     Ok(())

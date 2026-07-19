@@ -134,6 +134,23 @@ fn init_ignores_removed_failure_injection_environment_variables() {
 }
 
 #[test]
+fn empty_config_apply_has_no_synthetic_report_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\n").unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
 fn unsupported_architecture_selector_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");

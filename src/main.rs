@@ -6,7 +6,6 @@ mod init;
 mod operations;
 mod planner;
 mod platform;
-mod runner;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -53,8 +52,16 @@ fn apply() -> Result<()> {
     let config =
         config::Config::load(&path).with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
-    let steps = planner::plan(&config, &platform, &root.join("dotfiles"))?;
-    let mut runner_inst = runner::ProcessRunner;
-    runner::execute(&mut runner_inst, &steps)?;
+    let operations = planner::plan(&config, &platform, &root.join("dotfiles"))?;
+    for operation in operations {
+        let display = operation.display_args().join(" ");
+        println!("Applying {display}");
+        match operations::execute(&operation, &[]).with_context(|| format!("apply {display}"))? {
+            operations::OperationOutcome::Completed => {}
+            operations::OperationOutcome::LoginRequired => {
+                println!("Login required to finish {display}");
+            }
+        }
+    }
     Ok(())
 }
