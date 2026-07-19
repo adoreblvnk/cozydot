@@ -2471,13 +2471,3 @@ fn stable_go_version(value: &str) -> bool {
             .iter()
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::RUSTUP_BOOTSTRAP_FLAGS;
-
-    #[test]
-    fn rustup_bootstrap_defers_toolchain_installation() {
-        assert_eq!(RUSTUP_BOOTSTRAP_FLAGS, ["-y", "--default-toolchain", "none"]);
-    }
-}

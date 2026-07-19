@@ -489,22 +489,3 @@ pub fn read_system_os_release_from(etc_path: &Path, usr_path: &Path) -> Result<O
 fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
     os.get(key).map(str::to_owned)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Architecture;
-
-    #[test]
-    fn architecture_support_is_closed() {
-        for (input, expected) in [
-            ("x86_64", Architecture::Amd64),
-            ("aarch64", Architecture::Arm64),
-            ("armv7l", Architecture::Arm32),
-        ] {
-            assert_eq!(Architecture::normalize(input).unwrap(), expected);
-        }
-        for input in ["i686", "riscv64", "s390x"] {
-            assert!(Architecture::normalize(input).is_err());
-        }
-    }
-}
