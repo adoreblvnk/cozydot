@@ -1,5 +1,5 @@
 use super::{Host, TempPath};
-use crate::{domain::HttpsUrl, platform::Architecture};
+use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
 use serde::{
     de::Visitor,

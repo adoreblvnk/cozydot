@@ -1,0 +1,815 @@
+use crate::{
+    config::{
+        resolve_platform_identity, AptUpdate, BinaryFormat, Config, EnabledDisabled, InstalledState,
+        ResolvedNativeBinary, SourceMode, Theme,
+    },
+    operations::{
+        AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
+        BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
+        BinarySourceOperation, CargoBinstallBootstrapOperation, CargoPackageMode, CargoPackageOperation,
+        DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, DockerLocalLogOperation,
+        DotfilesOperation, EnsureAdminOperation, GithubRepository, GnomeDockOperation, GnomeExtensionsOperation,
+        GnomeRoundedCornersOperation, GoToolchainOperation, GoToolchainSelector, ManagedAptSourcesOperation,
+        NerdFontsMode, NerdFontsOperation, NodeToolchainOperation, NodeToolchainSelector, NpmPackageMode,
+        NpmPackageOperation, Operation, PythonToolchainOperation, RustToolchainOperation, RustToolchainSelector,
+        ToolMutationMode, UbuntuSnapOperation, UnattendedUpgradesOperation, VsCodeExtensionOperation,
+    },
+    platform::{Architecture, Platform},
+    runner::{self, ExecutionPhase, Step},
+};
+use anyhow::{Context, Result};
+use std::{collections::BTreeSet, path::Path};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ManagerBootstrap {
+    Flatpak,
+    Rustup,
+    CargoBinstall,
+    Fnm,
+    Uv,
+}
+
+pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Step>> {
+    config.validate_for_platform(platform)?;
+    let identity = resolve_platform_identity(platform)?;
+    let mut phases = [
+        (ExecutionPhase::SystemPrerequisites, Vec::new()),
+        (ExecutionPhase::ManagerBootstraps, Vec::new()),
+        (ExecutionPhase::AdministrativeVerification, Vec::new()),
+        (ExecutionPhase::OfficialAptSources, Vec::new()),
+        (ExecutionPhase::ThirdPartyRepositories, Vec::new()),
+        (ExecutionPhase::AptMetadataRefresh, Vec::new()),
+        (ExecutionPhase::SystemPackageStates, Vec::new()),
+        (ExecutionPhase::AptPurge, Vec::new()),
+        (ExecutionPhase::RepositoryPackages, Vec::new()),
+        (ExecutionPhase::AptPackages, Vec::new()),
+        (ExecutionPhase::FlatpakApplications, Vec::new()),
+        (ExecutionPhase::LanguageToolchains, Vec::new()),
+        (ExecutionPhase::LanguagePackages, Vec::new()),
+        (ExecutionPhase::BinaryPackages, Vec::new()),
+        (ExecutionPhase::Fonts, Vec::new()),
+        (ExecutionPhase::Dotfiles, Vec::new()),
+        (ExecutionPhase::Integrations, Vec::new()),
+        (ExecutionPhase::Desktop, Vec::new()),
+        (ExecutionPhase::Updates, Vec::new()),
+        (ExecutionPhase::FinalVerification, Vec::new()),
+    ];
+    let mut prerequisites = BTreeSet::new();
+    let mut managers = BTreeSet::new();
+    let mut needs_apt_refresh = false;
+
+    let packages = config.packages.as_ref();
+    let apt = packages.and_then(|packages| packages.apt.as_ref());
+
+    if config
+        .system
+        .as_ref()
+        .is_some_and(|system| system.ensure_admin == Some(true))
+    {
+        push_step(
+            &mut phases,
+            ExecutionPhase::AdministrativeVerification,
+            Step::workflow(Operation::EnsureAdmin(EnsureAdminOperation::new())),
+        );
+    }
+
+    if let Some(sources) = config
+        .system
+        .as_ref()
+        .and_then(|system| system.apt.as_ref())
+        .and_then(|apt| apt.sources.as_ref())
+    {
+        if sources.mode == SourceMode::Managed {
+            let managed = sources
+                .resolve_managed(platform, identity)?
+                .expect("managed source resolution returns an intent");
+            push_step(
+                &mut phases,
+                ExecutionPhase::OfficialAptSources,
+                Step::workflow(Operation::ManagedAptSources(ManagedAptSourcesOperation::from_policy(
+                    managed,
+                )?)),
+            );
+        }
+    }
+
+    if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        prerequisites.insert("gnupg");
+        for repository in repositories {
+            let operation = plan_repository(repository, platform, identity)?;
+            push_step(
+                &mut phases,
+                ExecutionPhase::ThirdPartyRepositories,
+                Step::workflow(Operation::AptRepository(operation.clone())),
+            );
+            push_step(
+                &mut phases,
+                ExecutionPhase::RepositoryPackages,
+                Step::labeled_workflow(
+                    Operation::AptPackages {
+                        packages: repository.packages.clone(),
+                    },
+                    format!("repository {}", repository.name),
+                )?,
+            );
+            needs_apt_refresh = true;
+        }
+    }
+
+    plan_system_states(config, platform, &mut phases, &mut needs_apt_refresh);
+
+    if let Some(remove) = apt.and_then(|apt| apt.remove.as_ref()) {
+        push_step(
+            &mut phases,
+            ExecutionPhase::AptPurge,
+            Step::workflow(Operation::AptPurge {
+                packages: remove.clone(),
+            }),
+        );
+        needs_apt_refresh = true;
+    }
+    if let Some(install) = apt.and_then(|apt| apt.install.as_ref()) {
+        push_step(
+            &mut phases,
+            ExecutionPhase::AptPackages,
+            Step::workflow(Operation::AptPackages {
+                packages: install.clone(),
+            }),
+        );
+        needs_apt_refresh = true;
+    }
+
+    if let Some(applications) = packages.and_then(|packages| packages.flatpak.as_ref()) {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        managers.insert(ManagerBootstrap::Flatpak);
+        push_step(
+            &mut phases,
+            ExecutionPhase::FlatpakApplications,
+            Step::workflow(Operation::FlatpakEnsureApps {
+                refs: applications.clone(),
+            }),
+        );
+    }
+
+    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers)?;
+
+    if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()) {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        managers.insert(ManagerBootstrap::Rustup);
+        managers.insert(ManagerBootstrap::CargoBinstall);
+        push_step(
+            &mut phases,
+            ExecutionPhase::LanguagePackages,
+            Step::workflow(Operation::CargoPackageSet(CargoPackageOperation::new(
+                cargo.clone(),
+                CargoPackageMode::EnsurePresent,
+            )?)),
+        );
+    }
+    if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()) {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        managers.insert(ManagerBootstrap::Fnm);
+        push_step(
+            &mut phases,
+            ExecutionPhase::LanguagePackages,
+            Step::workflow(Operation::NpmPackageSet(NpmPackageOperation::new(
+                npm.clone(),
+                NpmPackageMode::EnsurePresent,
+            )?)),
+        );
+    }
+
+    if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        for binary in binaries {
+            let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)?;
+            match binary.format {
+                BinaryFormat::Deb => {
+                    prerequisites.insert("dpkg");
+                    needs_apt_refresh = true;
+                }
+                BinaryFormat::Appimage => {}
+            }
+            push_step(
+                &mut phases,
+                ExecutionPhase::BinaryPackages,
+                Step::workflow(Operation::BinaryPackage(planned)),
+            );
+        }
+    }
+
+    if let Some(fonts) = config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()) {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        prerequisites.insert("tar");
+        prerequisites.insert("xz-utils");
+        prerequisites.insert("fontconfig");
+        push_step(
+            &mut phases,
+            ExecutionPhase::Fonts,
+            Step::workflow(Operation::NerdFonts(NerdFontsOperation::new(
+                fonts.clone(),
+                NerdFontsMode::EnsurePresent,
+            )?)),
+        );
+    }
+
+    if let Some(dotfiles) = &config.dotfiles {
+        prerequisites.insert("stow");
+        push_step(
+            &mut phases,
+            ExecutionPhase::Dotfiles,
+            Step::workflow(Operation::Dotfiles(DotfilesOperation::new(
+                dotfiles_root.to_path_buf(),
+                dotfiles.packages.clone(),
+            )?)),
+        );
+    }
+
+    plan_integrations(config, &mut phases)?;
+    plan_desktop(config, platform, &mut phases, &mut prerequisites)?;
+    plan_updates(config, platform, &mut phases, &mut needs_apt_refresh)?;
+
+    if needs_apt_refresh {
+        push_step(
+            &mut phases,
+            ExecutionPhase::AptMetadataRefresh,
+            Step::workflow(Operation::AptMetadataRefresh),
+        );
+    }
+
+    if managers.contains(&ManagerBootstrap::Flatpak) {
+        prerequisites.insert("flatpak");
+    }
+    if managers.contains(&ManagerBootstrap::Fnm) {
+        prerequisites.insert("unzip");
+    }
+    if managers.contains(&ManagerBootstrap::CargoBinstall) {
+        prerequisites.insert("tar");
+    }
+
+    if !prerequisites.is_empty() {
+        push_step(
+            &mut phases,
+            ExecutionPhase::SystemPrerequisites,
+            Step::workflow(Operation::AptBootstrapPackages {
+                packages: prerequisites.iter().map(|s| (*s).to_owned()).collect(),
+            }),
+        );
+    }
+
+    for manager in &managers {
+        let op = match manager {
+            ManagerBootstrap::Flatpak => Operation::FlatpakEnsureFlathub,
+            ManagerBootstrap::Rustup => Operation::RustupBootstrap,
+            ManagerBootstrap::CargoBinstall => {
+                Operation::CargoBinstallBootstrap(CargoBinstallBootstrapOperation::new(platform.architecture))
+            }
+            ManagerBootstrap::Fnm => Operation::FnmBootstrap,
+            ManagerBootstrap::Uv => Operation::UvBootstrap,
+        };
+        push_step(&mut phases, ExecutionPhase::ManagerBootstraps, Step::workflow(op));
+    }
+
+    let mut final_steps = Vec::new();
+    for (phase, steps) in phases {
+        if !steps.is_empty() {
+            final_steps.push(Step::phase(phase));
+            final_steps.extend(steps);
+        }
+    }
+    final_steps.push(Step::summary());
+
+    Ok(final_steps)
+}
+
+fn push_step(phases: &mut [(ExecutionPhase, Vec<Step>)], phase: ExecutionPhase, step: Step) {
+    phases
+        .iter_mut()
+        .find(|(p, _)| *p == phase)
+        .expect("phase exists")
+        .1
+        .push(step);
+}
+
+fn plan_repository(
+    repository: &crate::config::Repository,
+    platform: &Platform,
+    identity: crate::config::PlatformIdentity,
+) -> Result<AptRepositoryOperation> {
+    let resolved = repository.resolve_for_platform(0, platform, identity)?;
+    let layout = if let Some(path) = &repository.path {
+        AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?)
+    } else {
+        let suite_token = resolved.suite.as_ref().expect("validated suite/components repository");
+        AptRepositorySourceLayout::SuiteComponents {
+            suite: AptRepositoryToken::parse(suite_token.as_str())?,
+            components: repository
+                .components
+                .as_ref()
+                .expect("validated suite/components repository")
+                .iter()
+                .map(|component| AptRepositoryToken::parse(component.as_str()))
+                .collect::<Result<Vec<_>>>()?,
+        }
+    };
+    let stem = repository.filename_stem();
+    AptRepositoryOperation::new(
+        repository.name.clone(),
+        stem,
+        repository.key.clone(),
+        resolved.source_url.clone(),
+        platform.architecture,
+        layout,
+    )
+}
+
+fn plan_binary(
+    binary: &crate::config::BinaryPackage,
+    architecture: Architecture,
+    mode: BinaryPackageMode,
+) -> Result<BinaryPackageOperation> {
+    let source = match binary.source.resolve_native(architecture)? {
+        ResolvedNativeBinary::Github { repository, selector } => BinarySourceOperation::GithubLatest {
+            repository: GithubRepository::parse(repository.to_owned())?,
+            selector: BinaryPackageSelector::new(selector.to_owned())?,
+            sha256: None,
+        },
+        ResolvedNativeBinary::Url { url, sha256 } => BinarySourceOperation::ChecksummedUrl {
+            url: url.clone(),
+            sha256: BinarySha256::parse(sha256.as_str())?,
+        },
+    };
+    BinaryPackageOperation::new(
+        binary.name.clone(),
+        match binary.format {
+            BinaryFormat::Deb => BinaryPackageFormat::Deb,
+            BinaryFormat::Appimage => BinaryPackageFormat::AppImage,
+        },
+        binary.commands.clone(),
+        architecture,
+        source,
+        mode,
+    )
+}
+
+fn plan_system_states(
+    config: &Config,
+    platform: &Platform,
+    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    needs_apt_refresh: &mut bool,
+) {
+    let Some(system) = &config.system else { return };
+    if let Some(state) = system.apt.as_ref().and_then(|apt| apt.unattended_upgrades) {
+        push_step(
+            phases,
+            ExecutionPhase::SystemPackageStates,
+            Step::workflow(Operation::UnattendedUpgrades(UnattendedUpgradesOperation::new(
+                enabled(state),
+            ))),
+        );
+        *needs_apt_refresh = true;
+    }
+    let Some(ubuntu) = &system.ubuntu else { return };
+    let ubuntu_family = platform.upstream == "ubuntu";
+    if let Some(state) = ubuntu.snap {
+        if ubuntu_family {
+            *needs_apt_refresh = true;
+            push_step(
+                phases,
+                ExecutionPhase::SystemPackageStates,
+                Step::workflow(Operation::UbuntuSnap(UbuntuSnapOperation::new(enabled(state)))),
+            );
+        } else {
+            push_step(
+                phases,
+                ExecutionPhase::SystemPackageStates,
+                Step::skip(
+                    runner::SkippedAction::UbuntuSnap,
+                    runner::SkipReason::RequiresUbuntuFamily,
+                ),
+            );
+        }
+    }
+    if let Some(state) = ubuntu.codecs {
+        if ubuntu_family {
+            *needs_apt_refresh = true;
+            if state == InstalledState::Installed {
+                push_step(
+                    phases,
+                    ExecutionPhase::SystemPackageStates,
+                    Step::workflow(Operation::AptPackages {
+                        packages: vec!["ubuntu-restricted-extras".into()],
+                    }),
+                );
+            }
+        } else {
+            push_step(
+                phases,
+                ExecutionPhase::SystemPackageStates,
+                Step::skip(
+                    runner::SkippedAction::UbuntuCodecs,
+                    runner::SkipReason::RequiresUbuntuFamily,
+                ),
+            );
+        }
+    }
+}
+
+fn plan_tools(
+    config: &Config,
+    platform: &Platform,
+    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    prerequisites: &mut BTreeSet<&'static str>,
+    managers: &mut BTreeSet<ManagerBootstrap>,
+) -> Result<()> {
+    let Some(tools) = &config.tools else { return Ok(()) };
+    if let Some(selector) = tools.rust.as_deref() {
+        prerequisites.insert("ca-certificates");
+        prerequisites.insert("curl");
+        managers.insert(ManagerBootstrap::Rustup);
+        push_step(
+            phases,
+            ExecutionPhase::LanguageToolchains,
+            Step::workflow(Operation::RustToolchain(RustToolchainOperation::new(
+                rust_selector_main(selector),
+                platform.architecture,
+                ToolMutationMode::EnsurePresent,
+            )?)),
+        );
+    }
+    if let Some(selector) = tools.go.as_deref() {
+        prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils"]);
+        push_step(
+            phases,
+            ExecutionPhase::LanguageToolchains,
+            Step::workflow(Operation::GoToolchain(GoToolchainOperation::new(
+                go_selector_main(selector),
+                platform.architecture,
+                ToolMutationMode::EnsurePresent,
+            )?)),
+        );
+    }
+    if let Some(selector) = tools.node.as_deref() {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        managers.insert(ManagerBootstrap::Fnm);
+        push_step(
+            phases,
+            ExecutionPhase::LanguageToolchains,
+            Step::workflow(Operation::NodeToolchain(NodeToolchainOperation::new(
+                node_selector_main(selector),
+                platform.architecture,
+                ToolMutationMode::EnsurePresent,
+            )?)),
+        );
+    }
+    if let Some(selector) = &tools.python {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        managers.insert(ManagerBootstrap::Uv);
+        push_step(
+            phases,
+            ExecutionPhase::LanguageToolchains,
+            Step::workflow(Operation::PythonToolchain(PythonToolchainOperation::new(
+                selector.clone(),
+                platform.architecture,
+            )?)),
+        );
+    }
+    Ok(())
+}
+
+fn plan_integrations(config: &Config, phases: &mut [(ExecutionPhase, Vec<Step>)]) -> Result<()> {
+    let Some(integrations) = &config.integrations else {
+        return Ok(());
+    };
+    if let Some(docker) = &integrations.docker {
+        if docker.add_user_to_group == Some(true) {
+            push_step(
+                phases,
+                ExecutionPhase::Integrations,
+                Step::workflow(Operation::DockerGroup),
+            );
+        }
+        if let Some(logging) = &docker.logging {
+            push_step(
+                phases,
+                ExecutionPhase::Integrations,
+                Step::workflow(Operation::DockerLocalLog(DockerLocalLogOperation::new(
+                    logging.max_size.clone(),
+                )?)),
+            );
+        }
+    }
+    if integrations
+        .virtualbox
+        .as_ref()
+        .is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true))
+    {
+        push_step(
+            phases,
+            ExecutionPhase::Integrations,
+            Step::workflow(Operation::VirtualBoxGroup),
+        );
+    }
+    if let Some(extensions) = integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()) {
+        push_step(
+            phases,
+            ExecutionPhase::Integrations,
+            Step::workflow(Operation::VsCodeExtensionSet(VsCodeExtensionOperation::new(
+                extensions,
+            )?)),
+        );
+    }
+    Ok(())
+}
+
+fn plan_desktop(
+    config: &Config,
+    platform: &Platform,
+    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    prerequisites: &mut BTreeSet<&'static str>,
+) -> Result<()> {
+    let Some(desktop) = &config.desktop else {
+        return Ok(());
+    };
+    let target = match platform.desktop.as_str() {
+        "gnome" => DesktopEnvironment::Gnome,
+        "cinnamon" => DesktopEnvironment::Cinnamon,
+        _ => unreachable!("platform validation rejects unsupported desktop intent"),
+    };
+    prerequisites.extend(["dconf-cli", "libglib2.0-bin"]);
+    if let Some(theme) = desktop.theme {
+        push_step(
+            phases,
+            ExecutionPhase::Desktop,
+            Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+                target,
+                DesktopSetting::Theme(match theme {
+                    Theme::Light => DesktopTheme::Light,
+                    Theme::Dark => DesktopTheme::Dark,
+                }),
+            )?)),
+        );
+    }
+    if let Some(executable) = &desktop.terminal {
+        push_step(
+            phases,
+            ExecutionPhase::Desktop,
+            Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+                target,
+                DesktopSetting::Terminal(executable.clone()),
+            )?)),
+        );
+    }
+    if let Some(idle) = &desktop.idle {
+        if let Some(timeout) = &idle.timeout {
+            push_step(
+                phases,
+                ExecutionPhase::Desktop,
+                Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+                    target,
+                    DesktopSetting::IdleTimeoutSeconds(duration_seconds(timeout)?),
+                )?)),
+            );
+        }
+        if let Some(enabled) = idle.dim {
+            push_step(
+                phases,
+                ExecutionPhase::Desktop,
+                Step::workflow(Operation::DesktopSetting(DesktopSettingOperation::new(
+                    target,
+                    DesktopSetting::IdleDim(enabled),
+                )?)),
+            );
+        }
+    }
+    if target == DesktopEnvironment::Gnome {
+        if let Some(gnome) = &desktop.gnome {
+            if let Some(extensions) = &gnome.extensions {
+                prerequisites.insert("gnome-shell");
+                push_step(
+                    phases,
+                    ExecutionPhase::Desktop,
+                    Step::workflow(Operation::GnomeExtensions(GnomeExtensionsOperation::new(
+                        extensions.clone(),
+                    )?)),
+                );
+            }
+            if gnome.dock == Some(true) {
+                prerequisites.insert("gnome-shell");
+                push_step(
+                    phases,
+                    ExecutionPhase::Desktop,
+                    Step::workflow(Operation::GnomeDock(GnomeDockOperation::new())),
+                );
+            }
+            if gnome.rounded_corners == Some(true) {
+                prerequisites.insert("gnome-shell");
+                push_step(
+                    phases,
+                    ExecutionPhase::Desktop,
+                    Step::workflow(Operation::GnomeRoundedCorners(GnomeRoundedCornersOperation::new())),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn plan_updates(
+    config: &Config,
+    platform: &Platform,
+    phases: &mut [(ExecutionPhase, Vec<Step>)],
+    needs_apt_refresh: &mut bool,
+) -> Result<()> {
+    let Some(updates) = &config.updates else {
+        return Ok(());
+    };
+    let packages = config.packages.as_ref();
+    let tools = config.tools.as_ref();
+    if let Some(policy) = updates.apt {
+        *needs_apt_refresh = true;
+        push_step(
+            phases,
+            ExecutionPhase::Updates,
+            Step::workflow(Operation::AptUpgrade {
+                policy: match policy {
+                    AptUpdate::Standard => AptUpgradePolicy::Standard,
+                    AptUpdate::Full => AptUpgradePolicy::Full,
+                },
+            }),
+        );
+    }
+    if updates.flatpak == Some(true) {
+        push_step(
+            phases,
+            ExecutionPhase::Updates,
+            Step::workflow(Operation::FlatpakUpdateApps {
+                refs: packages
+                    .and_then(|packages| packages.flatpak.clone())
+                    .expect("validated update target"),
+            }),
+        );
+    }
+    if let Some(tool_updates) = &updates.tools {
+        if tool_updates.rust == Some(true) {
+            push_step(
+                phases,
+                ExecutionPhase::Updates,
+                Step::workflow(Operation::RustToolchain(RustToolchainOperation::new(
+                    rust_selector_main(
+                        tools
+                            .and_then(|tools| tools.rust.as_deref())
+                            .expect("validated update target"),
+                    ),
+                    platform.architecture,
+                    ToolMutationMode::UpdateMoving,
+                )?)),
+            );
+        }
+        if tool_updates.go == Some(true) {
+            push_step(
+                phases,
+                ExecutionPhase::Updates,
+                Step::workflow(Operation::GoToolchain(GoToolchainOperation::new(
+                    go_selector_main(
+                        tools
+                            .and_then(|tools| tools.go.as_deref())
+                            .expect("validated update target"),
+                    ),
+                    platform.architecture,
+                    ToolMutationMode::UpdateMoving,
+                )?)),
+            );
+        }
+        if tool_updates.node == Some(true) {
+            push_step(
+                phases,
+                ExecutionPhase::Updates,
+                Step::workflow(Operation::NodeToolchain(NodeToolchainOperation::new(
+                    node_selector_main(
+                        tools
+                            .and_then(|tools| tools.node.as_deref())
+                            .expect("validated update target"),
+                    ),
+                    platform.architecture,
+                    ToolMutationMode::UpdateMoving,
+                )?)),
+            );
+        }
+    }
+    if let Some(package_updates) = &updates.packages {
+        if package_updates.cargo == Some(true) {
+            push_step(
+                phases,
+                ExecutionPhase::Updates,
+                Step::workflow(Operation::CargoPackageSet(CargoPackageOperation::new(
+                    packages
+                        .and_then(|packages| packages.cargo.clone())
+                        .expect("validated update target"),
+                    CargoPackageMode::UpdateCurrent,
+                )?)),
+            );
+        }
+        if package_updates.npm == Some(true) {
+            push_step(
+                phases,
+                ExecutionPhase::Updates,
+                Step::workflow(Operation::NpmPackageSet(NpmPackageOperation::new(
+                    packages
+                        .and_then(|packages| packages.npm.clone())
+                        .expect("validated update target"),
+                    NpmPackageMode::UpdateCurrent,
+                )?)),
+            );
+        }
+        if package_updates.binaries == Some(true) {
+            if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
+                for binary in binaries {
+                    let is_github = matches!(
+                        binary.source.resolve_native(platform.architecture)?,
+                        ResolvedNativeBinary::Github { .. }
+                    );
+                    if is_github {
+                        let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?;
+                        push_step(
+                            phases,
+                            ExecutionPhase::Updates,
+                            Step::workflow(Operation::BinaryPackage(planned)),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if updates.fonts == Some(true) {
+        push_step(
+            phases,
+            ExecutionPhase::Updates,
+            Step::workflow(Operation::NerdFonts(NerdFontsOperation::new(
+                config
+                    .fonts
+                    .as_ref()
+                    .and_then(|fonts| fonts.nerd.clone())
+                    .expect("validated update target"),
+                NerdFontsMode::Update,
+            )?)),
+        );
+    }
+    Ok(())
+}
+
+fn rust_selector_main(value: &str) -> RustToolchainSelector {
+    match value {
+        "stable" => RustToolchainSelector::Stable,
+        "beta" => RustToolchainSelector::Beta,
+        "nightly" => RustToolchainSelector::Nightly,
+        value if value.starts_with("nightly-") => RustToolchainSelector::DatedNightly(value.to_owned()),
+        value => RustToolchainSelector::Version(value.to_owned()),
+    }
+}
+
+fn go_selector_main(value: &str) -> GoToolchainSelector {
+    if value == "latest" {
+        GoToolchainSelector::Latest
+    } else {
+        GoToolchainSelector::Version(value.to_owned())
+    }
+}
+
+fn node_selector_main(value: &str) -> NodeToolchainSelector {
+    match value {
+        "lts" => NodeToolchainSelector::Lts,
+        "latest" => NodeToolchainSelector::Latest,
+        value => NodeToolchainSelector::Version(value.to_owned()),
+    }
+}
+
+fn enabled(state: EnabledDisabled) -> bool {
+    match state {
+        EnabledDisabled::Enabled => true,
+        EnabledDisabled::Disabled => false,
+    }
+}
+
+fn duration_seconds(value: &str) -> Result<u32> {
+    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
+        (number, 1_u64)
+    } else if let Some(number) = value.strip_suffix('m') {
+        (number, 60)
+    } else {
+        (value.strip_suffix('h').context("invalid desktop idle duration")?, 3600)
+    };
+    number
+        .parse::<u64>()
+        .context("invalid desktop idle duration")?
+        .checked_mul(multiplier)
+        .and_then(|seconds| u32::try_from(seconds).ok())
+        .context("desktop idle duration exceeds the supported uint32 range")
+}

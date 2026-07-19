@@ -1,5 +1,5 @@
 use super::{managed_state::ManagedState, Host, TempPath};
-use crate::{domain::HttpsUrl, platform::Architecture};
+use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -1237,7 +1237,7 @@ fn regex_match(pattern: &str, text: &str) -> Result<bool> {
 pub(crate) mod cargo_binstall {
 
     use super::super::{managed_state::ManagedState, Host, TempDir, TempPath};
-    use crate::{domain::HttpsUrl, platform::Architecture};
+    use crate::{config::HttpsUrl, platform::Architecture};
     use anyhow::{bail, Context, Result};
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
