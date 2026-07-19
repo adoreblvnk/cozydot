@@ -1,4 +1,4 @@
-use crate::{domain::HttpsUrl, json_helpers, platform::Architecture};
+use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -918,7 +918,7 @@ mod resolution {
                 "https://go.dev/dl/?mode=json&include=all",
             ],
         )?;
-        let (version, filename, checksum) = json_helpers::latest_go(
+        let (version, filename, checksum) = super::super::latest_go(
             std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,
             requested,
             architecture.go_archive(),

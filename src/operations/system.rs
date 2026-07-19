@@ -6,7 +6,6 @@ use super::{
     privileged_file::{publish_bytes, sync_parent},
     Host, OperationOutcome, TempPath,
 };
-use crate::json_helpers;
 use serde_json::{Map, Value};
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
@@ -887,10 +886,9 @@ fn install_extension(host: &Host<'_>, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.require("GNOME extension metadata", "curl", ["-fsSL", &endpoint])?;
     let shell = host.require("GNOME extension shell version", "gnome-shell", ["--version"])?;
-    let shell_version = json_helpers::gnome_shell_version(
-        std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?,
-    )?;
-    let version = json_helpers::gnome_version(
+    let shell_version =
+        super::gnome_shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
+    let version = super::gnome_version(
         std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
         &shell_version,
     )?;
