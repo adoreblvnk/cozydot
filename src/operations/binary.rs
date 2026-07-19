@@ -1,4 +1,4 @@
-use super::{managed_state::ManagedState, Host, TempPath};
+use super::{Host, TempPath};
 use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
 use regex::Regex;
@@ -13,7 +13,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const VERSION: u64 = 1;
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
 const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
@@ -165,498 +164,299 @@ impl BinaryPackageOperation {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Record {
-    version: u64,
-    status: Status,
-    declaration: Declaration,
-    resolved: Resolved,
-    previous: Option<Previous>,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Status {
-    PendingInitial,
-    PendingUpdate,
-    Completed,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Previous {
-    declaration: Declaration,
-    resolved: Resolved,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Declaration {
-    name: String,
-    format: BinaryPackageFormat,
-    architecture: String,
-    commands: Vec<String>,
-    source: SourceDeclaration,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
-enum SourceDeclaration {
-    Github {
-        repository: String,
-        pattern: String,
-        sha256: Option<String>,
-    },
-    Url {
-        url: String,
-        sha256: String,
-    },
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Resolved {
-    tag: Option<String>,
-    asset_name: String,
-    url: String,
-    actual_sha256: String,
-    effective_sha256: Option<String>,
-}
-
-#[derive(Debug)]
 struct Candidate {
-    tag: Option<String>,
-    asset_name: String,
     url: HttpsUrl,
     effective: Option<BinarySha256>,
-    retry_actual: Option<BinarySha256>,
 }
 struct Downloaded {
     temporary: TempPath,
-    resolved: Resolved,
+    actual_sha256: String,
 }
 
 pub(crate) fn execute(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<()> {
     operation.validate().context("validate binary package operation")?;
-    let declaration = declaration(operation);
-    let state = ManagedState::open(host, "binaries", &operation.name, "binary package")?;
-    let lock = state.acquire_lock()?;
-    let record = state.read()?.map(|bytes| parse_record(&bytes)).transpose()?;
-    state.validate_lock_entry(&lock)?;
-    if let Some(record) = &record {
-        if record.version != VERSION {
-            bail!("unsupported binary managed record version {}", record.version);
-        }
-        validate_record(record)?;
-        if record.status != Status::Completed && record.declaration != declaration {
-            bail!("binary package has a pending managed record for a different declaration");
-        }
-        if record.status == Status::Completed
-            && (record.declaration.format != declaration.format
-                || record.declaration.architecture != declaration.architecture)
-        {
-            bail!("binary package format and architecture cannot change across managed state");
-        }
-    }
 
-    if let Some(record) = &record {
-        if record.status == Status::Completed
-            && record.declaration == declaration
-            && operation.mode == BinaryPackageMode::EnsurePresent
-            && postconditions(host, operation, &record.resolved)?
-        {
-            return Ok(());
-        }
-    }
-
-    if operation.format == BinaryPackageFormat::AppImage {
-        preflight_appimage(host, operation, record.as_ref())?;
-    }
-
-    let retrying_update = record
-        .as_ref()
-        .is_some_and(|record| record.status == Status::PendingUpdate);
-    let pending = record.as_ref().filter(|r| r.status != Status::Completed);
-    let mut downloaded = None;
-    let completed_appimage_repair = record.as_ref().filter(|record| {
-        let artifact_ok = artifact_matches(host, operation, &record.resolved).unwrap_or(false);
-        record.status == Status::Completed
-            && record.declaration == declaration
-            && operation.mode == BinaryPackageMode::EnsurePresent
-            && operation.format == BinaryPackageFormat::AppImage
-            && artifact_ok
-    });
-    let resolved = if let Some(record) = completed_appimage_repair {
-        record.resolved.clone()
-    } else if let Some(record) = record.as_ref().filter(|record| {
-        record.status == Status::Completed
-            && record.declaration == declaration
-            && operation.mode == BinaryPackageMode::EnsurePresent
-    }) {
-        let value = download_candidate(host, operation, candidate_for_retry(operation, &record.resolved)?)?;
-        let result = value.resolved.clone();
-        downloaded = Some(value);
-        result
-    } else if let Some(record) = pending {
-        if operation.format == BinaryPackageFormat::AppImage && artifact_matches(host, operation, &record.resolved)? {
-            record.resolved.clone()
-        } else {
-            let value = download_candidate(host, operation, candidate_for_retry(operation, &record.resolved)?)?;
-            let result = value.resolved.clone();
-            downloaded = Some(value);
-            result
-        }
-    } else {
-        let candidate = resolve(host, operation)?;
-        if let Some(record) = &record {
-            if record.status == Status::Completed
-                && record.declaration == declaration
-                && same_remote_identity(&candidate, &record.resolved)
-                && postconditions(host, operation, &record.resolved)?
-            {
+    let appimage_expectation = if operation.format == BinaryPackageFormat::AppImage {
+        let artifact = appimage::data_artifact(host, operation);
+        let expectation = capture_publication_expectation(&artifact)?;
+        preflight_appimage(host, operation)?;
+        if is_acceptable_live_state(host, operation)? {
+            if expectation.verify_identity(&artifact)? {
                 return Ok(());
+            } else {
+                bail!(
+                    "TOCTOU conflict detected: live-state inspection passed but destination identity changed for {}",
+                    artifact.display()
+                );
             }
         }
-        let value = download_candidate(host, operation, candidate)?;
-        let result = value.resolved.clone();
-        downloaded = Some(value);
-        result
-    };
-
-    let previous = match &record {
-        Some(record) if record.status == Status::Completed => Some(Previous {
-            declaration: record.declaration.clone(),
-            resolved: record.resolved.clone(),
-        }),
-        Some(record) => record.previous.clone(),
-        None => None,
-    };
-    let status = if record.is_none() || record.as_ref().is_some_and(|r| r.status == Status::PendingInitial) {
-        Status::PendingInitial
+        Some(expectation)
     } else {
-        Status::PendingUpdate
+        None
     };
-    if operation.format == BinaryPackageFormat::Deb {
-        preflight_deb(
-            host,
-            operation,
-            downloaded
-                .as_ref()
-                .context("Debian convergence requires a staged download")?,
-        )?;
-    } else if let Some(downloaded) = downloaded.as_ref() {
-        require_elf(downloaded.temporary.path(), &operation.name)?;
-    }
-    publish_record(
-        &state,
-        &Record {
-            version: VERSION,
-            status,
-            declaration: declaration.clone(),
-            resolved: resolved.clone(),
-            previous: previous.clone(),
-        },
-    )?;
 
-    match operation.format {
-        BinaryPackageFormat::Deb => install_deb(
-            host,
-            operation,
-            downloaded.as_ref().context("Debian retry requires a staged download")?,
-        )?,
-        BinaryPackageFormat::AppImage => install_appimage(
-            host,
-            operation,
-            &resolved,
-            downloaded.as_ref(),
-            previous.as_ref(),
-            retrying_update,
-        )?,
+    if operation.format == BinaryPackageFormat::Deb && is_acceptable_live_state(host, operation)? {
+        return Ok(());
     }
-    if !postconditions(host, operation, &resolved)? {
+
+    let candidate = resolve(host, operation)?;
+
+    let downloaded = download_candidate(host, operation, candidate)?;
+
+    if operation.format == BinaryPackageFormat::Deb {
+        preflight_deb(host, operation, &downloaded)?;
+        install_deb(host, operation, &downloaded)?;
+    } else {
+        require_elf(downloaded.temporary.path(), &operation.name)?;
+        install_appimage(
+            host,
+            operation,
+            &downloaded.actual_sha256,
+            &downloaded,
+            appimage_expectation.unwrap(),
+        )?;
+    }
+
+    if !postconditions(host, operation, &downloaded.actual_sha256)? {
         bail!("binary package postconditions failed");
     }
-    state.validate_lock_entry(&lock)?;
-    publish_record(
-        &state,
-        &Record {
-            version: VERSION,
-            status: Status::Completed,
-            declaration,
-            resolved,
-            previous: None,
-        },
-    )
-}
-
-fn declaration(operation: &BinaryPackageOperation) -> Declaration {
-    let source = match &operation.source {
-        BinarySourceOperation::GithubLatest {
-            repository,
-            selector,
-            sha256,
-        } => SourceDeclaration::Github {
-            repository: repository.0.clone(),
-            pattern: selector.pattern.clone(),
-            sha256: sha256.map(BinarySha256::as_hex),
-        },
-        BinarySourceOperation::ChecksummedUrl { url, sha256 } => SourceDeclaration::Url {
-            url: url.as_str().into(),
-            sha256: sha256.as_hex(),
-        },
-    };
-    Declaration {
-        name: operation.name.clone(),
-        format: operation.format,
-        architecture: operation.architecture.canonical().into(),
-        commands: operation.commands.clone(),
-        source,
-    }
-}
-fn publish_record(state: &ManagedState, record: &Record) -> Result<()> {
-    state.publish(&serde_json::to_vec(record).context("serialize binary managed record")?)
-}
-fn parse_record(bytes: &[u8]) -> Result<Record> {
-    super::managed_state::parse_strict_json(bytes).context("parse strict binary managed record")
-}
-fn validate_record(record: &Record) -> Result<()> {
-    if record.version != VERSION {
-        bail!("unsupported binary managed record version {}", record.version);
-    }
-    validate_declaration(&record.declaration)?;
-    validate_resolved_for_declaration(&record.resolved, &record.declaration)?;
-    if let Some(previous) = &record.previous {
-        validate_declaration(&previous.declaration)?;
-        validate_resolved_for_declaration(&previous.resolved, &previous.declaration)?;
-        if previous.declaration.name != record.declaration.name
-            || previous.declaration.format != record.declaration.format
-            || previous.declaration.architecture != record.declaration.architecture
-        {
-            bail!("binary pending-update previous ownership has mismatched identity");
-        }
-    }
-    match record.status {
-        Status::Completed if record.previous.is_some() => {
-            bail!("completed binary record must not retain previous state")
-        }
-        Status::PendingInitial if record.previous.is_some() => {
-            bail!("pending initial binary record must not retain previous state")
-        }
-        Status::PendingUpdate if record.previous.is_none() => {
-            bail!("pending update binary record must retain previous state")
-        }
-        _ => Ok(()),
-    }
-}
-
-fn validate_declaration(stored: &Declaration) -> Result<()> {
-    validate_definition_name(&stored.name)?;
-    if Architecture::normalize(&stored.architecture)?.canonical() != stored.architecture {
-        bail!("binary record architecture is not canonical");
-    }
-    let source = match &stored.source {
-        SourceDeclaration::Github {
-            repository,
-            pattern,
-            sha256,
-        } => BinarySourceOperation::GithubLatest {
-            repository: GithubRepository::parse(repository)?,
-            selector: BinaryPackageSelector::new(pattern)?,
-            sha256: sha256.as_deref().map(BinarySha256::parse).transpose()?,
-        },
-        SourceDeclaration::Url { url, sha256 } => BinarySourceOperation::ChecksummedUrl {
-            url: HttpsUrl::parse(url)?,
-            sha256: BinarySha256::parse(sha256)?,
-        },
-    };
-    let operation = BinaryPackageOperation::new(
-        &stored.name,
-        stored.format,
-        stored.commands.clone(),
-        Architecture::normalize(&stored.architecture)?,
-        source,
-        BinaryPackageMode::EnsurePresent,
-    )?;
-    if declaration(&operation) != *stored {
-        bail!("binary declaration does not match its canonical operation identity");
-    }
     Ok(())
 }
 
-fn validate_resolved(value: &Resolved) -> Result<()> {
-    if let Some(tag) = &value.tag {
-        validate_safe_scalar(tag, "release tag")?;
+fn configured_checksum(source: &BinarySourceOperation) -> Option<String> {
+    match source {
+        BinarySourceOperation::GithubLatest { sha256, .. } => sha256.as_ref().map(|s| s.as_hex()),
+        BinarySourceOperation::ChecksummedUrl { sha256, .. } => Some(sha256.as_hex()),
     }
-    validate_asset_name(&value.asset_name)?;
-    let url = HttpsUrl::parse(&value.url)?;
-    if url.as_str() != value.url {
-        bail!("binary resolved URL is not canonical");
-    }
-    let actual = BinarySha256::parse(&value.actual_sha256)?;
-    if let Some(value) = &value.effective_sha256 {
-        if BinarySha256::parse(value)? != actual {
-            bail!("binary resolved actual and effective SHA-256 checksums differ");
-        }
-    }
-    Ok(())
 }
 
-fn validate_resolved_for_declaration(value: &Resolved, declaration: &Declaration) -> Result<()> {
-    validate_resolved(value)?;
-    match &declaration.source {
-        SourceDeclaration::Github { pattern, sha256, .. } => {
-            if value.tag.is_none()
-                || !regex_match(pattern, &value.asset_name)?
-                || sha256
-                    .as_ref()
-                    .is_some_and(|declared| value.effective_sha256.as_ref() != Some(declared))
-            {
-                bail!("binary GitHub resolved identity does not match its declaration");
+fn is_acceptable_live_state(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<bool> {
+    if operation.mode != BinaryPackageMode::EnsurePresent {
+        return Ok(false);
+    }
+    match operation.format {
+        BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
+        BinaryPackageFormat::AppImage => {
+            let artifact = data_artifact(host, operation);
+            let has_valid_artifact = if let Some(digest) = configured_checksum(&operation.source) {
+                valid_artifact(&artifact, &digest)?
+            } else {
+                valid_artifact_unchecksummed(&artifact)?
+            };
+            if !has_valid_artifact {
+                return Ok(false);
+            }
+            Ok(command_links(host, operation)
+                .iter()
+                .all(|link| managed_link(link, &artifact)))
+        }
+    }
+}
+
+fn valid_artifact_unchecksummed(path: &Path) -> Result<bool> {
+    let m = match fs::symlink_metadata(path) {
+        Ok(v) => v,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    Ok(m.file_type().is_file()
+        && m.uid() == rustix::process::geteuid().as_raw()
+        && m.nlink() == 1
+        && m.len() > 0
+        && m.permissions().mode() & 0o7777 == 0o755
+        && has_elf_magic(path))
+}
+
+#[derive(Debug)]
+pub(crate) enum PublicationExpectation {
+    Absent,
+    Existing(fs::File),
+}
+
+impl PublicationExpectation {
+    pub(crate) fn verify_identity(&self, path: &Path) -> Result<bool> {
+        match self {
+            PublicationExpectation::Absent => match fs::symlink_metadata(path) {
+                Ok(_) => Ok(false),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+                Err(e) => Err(e.into()),
+            },
+            PublicationExpectation::Existing(file) => match fs::symlink_metadata(path) {
+                Ok(current_metadata) => {
+                    let expected_metadata = file.metadata().context("inspect expected destination descriptor")?;
+                    Ok(current_metadata.dev() == expected_metadata.dev()
+                        && current_metadata.ino() == expected_metadata.ino())
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(e) => Err(e.into()),
+            },
+        }
+    }
+}
+
+pub(crate) fn capture_publication_expectation(destination: &Path) -> Result<PublicationExpectation> {
+    let open_result = rustix::fs::open(
+        destination,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    );
+
+    match open_result {
+        Ok(fd) => {
+            let file = std::fs::File::from(fd);
+            let metadata = file.metadata().context("inspect existing destination descriptor")?;
+            let uid = rustix::process::geteuid().as_raw();
+            if !metadata.file_type().is_file() {
+                bail!("destination is not a regular file");
+            }
+            if metadata.uid() != uid {
+                bail!("destination owner is not current user");
+            }
+            if metadata.nlink() != 1 {
+                bail!("destination has multiple hard links");
+            }
+            if (metadata.permissions().mode() & 0o7777) != 0o755 {
+                bail!("destination permissions are not exact 0755");
+            }
+            Ok(PublicationExpectation::Existing(file))
+        }
+        Err(rustix::io::Errno::NOENT) => Ok(PublicationExpectation::Absent),
+        Err(other_err) => Err(other_err).context("open existing destination file"),
+    }
+}
+
+pub(crate) fn publish_executable(source: &Path, destination: &Path, expectation: PublicationExpectation) -> Result<()> {
+    let parent = destination.parent().context("destination has no parent")?;
+    let mut source_file = fs::File::open(source)?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::copy(&mut source_file, staged.as_file_mut())?;
+    staged
+        .as_file_mut()
+        .set_permissions(fs::Permissions::from_mode(0o755))?;
+    staged.as_file_mut().sync_all()?;
+    let (file, staged_path) = staged.keep().map_err(|error| error.error)?;
+    // Linux rejects execution while any process still holds the inode open for writing.
+    drop(file);
+
+    let result = (|| -> Result<()> {
+        match expectation {
+            PublicationExpectation::Existing(file) => {
+                let metadata = file.metadata().context("inspect existing destination descriptor")?;
+                let validated_dev = metadata.dev();
+                let validated_ino = metadata.ino();
+
+                rustix::fs::renameat_with(
+                    rustix::fs::CWD,
+                    &staged_path,
+                    rustix::fs::CWD,
+                    destination,
+                    rustix::fs::RenameFlags::EXCHANGE,
+                )
+                .context("atomically exchange staged executable with destination")?;
+
+                let displaced_metadata =
+                    fs::symlink_metadata(&staged_path).context("inspect displaced destination file")?;
+                let displaced_dev = displaced_metadata.dev();
+                let displaced_ino = displaced_metadata.ino();
+
+                if displaced_dev != validated_dev || displaced_ino != validated_ino {
+                    let rollback_res = rustix::fs::renameat_with(
+                        rustix::fs::CWD,
+                        &staged_path,
+                        rustix::fs::CWD,
+                        destination,
+                        rustix::fs::RenameFlags::EXCHANGE,
+                    );
+                    if let Err(rollback_err) = rollback_res {
+                        bail!(
+                            "TOCTOU conflict detected (device/inode mismatch) and rollback exchange failed: {rollback_err:#}"
+                        );
+                    }
+                    bail!("TOCTOU conflict detected (device/inode mismatch), safely rolled back");
+                }
+
+                drop(file);
+
+                fs::remove_file(&staged_path).context("remove displaced old file")?;
+                fs::File::open(parent)?.sync_all().context("sync parent directory")?;
+            }
+            PublicationExpectation::Absent => {
+                rustix::fs::renameat_with(
+                    rustix::fs::CWD,
+                    &staged_path,
+                    rustix::fs::CWD,
+                    destination,
+                    rustix::fs::RenameFlags::NOREPLACE,
+                )
+                .context("atomically publish new executable to vacant destination")?;
+
+                fs::File::open(parent)?.sync_all().context("sync parent directory")?;
             }
         }
-        SourceDeclaration::Url { url, sha256 } => {
-            if value.tag.is_some()
-                || value.url != *url
-                || value.asset_name != fixed_asset_name(url)
-                || value.effective_sha256.as_ref() != Some(sha256)
-            {
-                bail!("binary fixed-URL resolved identity does not match its declaration");
-            }
-        }
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&staged_path);
     }
-    Ok(())
+    result
 }
 
 mod appimage {
     use super::*;
 
-    fn data_artifact(host: &Host<'_>, operation: &BinaryPackageOperation) -> PathBuf {
+    pub(super) fn data_artifact(host: &Host<'_>, operation: &BinaryPackageOperation) -> PathBuf {
         host.value("XDG_DATA_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| host.home().join(".local/share"))
             .join("cozydot/binaries")
             .join(format!("{}.AppImage", operation.name))
     }
-    fn command_links(host: &Host<'_>, operation: &BinaryPackageOperation) -> Vec<PathBuf> {
+    pub(super) fn command_links(host: &Host<'_>, operation: &BinaryPackageOperation) -> Vec<PathBuf> {
         let root = host
             .value("XDG_BIN_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| host.home().join(".local/bin"));
         operation.commands.iter().map(|name| root.join(name)).collect()
     }
-    pub(super) fn preflight_appimage(
-        host: &Host<'_>,
-        operation: &BinaryPackageOperation,
-        record: Option<&Record>,
-    ) -> Result<()> {
+    pub(super) fn preflight_appimage(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<()> {
         let artifact = data_artifact(host, operation);
         ensure_secure_data_parent(host, &artifact)?;
         ensure_secure_command_root(host)?;
         match fs::symlink_metadata(&artifact) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Ok(_) if record.is_some_and(|record| record_owns_artifact(&artifact, record)) => {}
-            Ok(_) => bail!("binary AppImage artifact conflict at {}", artifact.display()),
+            Ok(_) => {
+                if !valid_artifact_unchecksummed(&artifact)? {
+                    bail!("binary AppImage artifact conflict at {}", artifact.display());
+                }
+            }
             Err(error) => return Err(error.into()),
         }
-        for (command, link) in operation.commands.iter().zip(command_links(host, operation)) {
-            let retry_may_own_link = record.is_some_and(|record| match record.status {
-                Status::PendingInitial | Status::PendingUpdate => record.declaration.commands.contains(command),
-                Status::Completed => record.declaration.commands.contains(command),
-            });
-            preflight_link(&link, &artifact, !retry_may_own_link)?;
-        }
-        if let Some(previous) = record.and_then(|r| {
-            if r.status == Status::Completed {
-                Some(Previous {
-                    declaration: r.declaration.clone(),
-                    resolved: r.resolved.clone(),
-                })
-            } else {
-                r.previous.clone()
-            }
-        }) {
-            for command in previous
-                .declaration
-                .commands
-                .iter()
-                .filter(|name| !operation.commands.contains(name))
-            {
-                let link = command_link_for(host, command);
-                preflight_stale_link(
-                    &link,
-                    &artifact,
-                    record.is_some_and(|record| record.status == Status::PendingUpdate),
-                )?;
-            }
+        for link in command_links(host, operation) {
+            preflight_link(&link, &artifact, false)?;
         }
         Ok(())
     }
     pub(super) fn install_appimage(
         host: &Host<'_>,
         operation: &BinaryPackageOperation,
-        resolved: &Resolved,
-        downloaded: Option<&Downloaded>,
-        previous: Option<&Previous>,
-        retrying_update: bool,
+        actual_sha256: &str,
+        downloaded: &Downloaded,
+        expectation: PublicationExpectation,
     ) -> Result<()> {
         let artifact = data_artifact(host, operation);
         ensure_secure_data_parent(host, &artifact)?;
-        if !artifact_matches(host, operation, resolved)? {
-            let source = downloaded
-                .context("AppImage publication requires staged bytes")?
-                .temporary
-                .path();
+        if !valid_artifact(&artifact, actual_sha256)? {
+            let source = downloaded.temporary.path();
             require_elf(source, &operation.name)?;
-            let destination_absent = match fs::symlink_metadata(&artifact) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-                Ok(_)
-                    if previous.is_some_and(|previous| {
-                        previous.declaration.format == BinaryPackageFormat::AppImage
-                            && valid_artifact(&artifact, &previous.resolved.actual_sha256).unwrap_or(false)
-                    }) =>
-                {
-                    false
-                }
-                Ok(_) | Err(_) => bail!(
-                    "binary AppImage artifact ownership changed before publication at {}",
-                    artifact.display()
-                ),
-            };
-            publish_artifact(source, &artifact, previous.is_none() || destination_absent)?;
+            super::publish_executable(source, &artifact, expectation)?;
         }
         let links = command_links(host, operation);
         for link in &links {
             publish_link(link, &artifact)?;
         }
-        verify_appimage(&artifact, &links, resolved)?;
-        if let Some(previous) = previous {
-            for command in previous
-                .declaration
-                .commands
-                .iter()
-                .filter(|name| !operation.commands.contains(name))
-            {
-                let link = command_link_for(host, command);
-                match fs::symlink_metadata(&link) {
-                    Ok(_) if managed_link(&link, &artifact) => {
-                        fs::remove_file(&link)
-                            .with_context(|| format!("remove stale owned command {}", link.display()))?;
-                        if fs::symlink_metadata(&link).is_ok() {
-                            bail!("stale binary command removal failed");
-                        }
-                    }
-                    Err(error) if retrying_update && error.kind() == std::io::ErrorKind::NotFound => {}
-                    Ok(_) | Err(_) => bail!(
-                        "stale owned binary command at {} was changed or is missing",
-                        link.display()
-                    ),
-                }
-            }
-        }
+        verify_appimage(&artifact, &links, actual_sha256)?;
         Ok(())
-    }
-    fn command_link_for(host: &Host<'_>, command: &str) -> PathBuf {
-        let root = host
-            .value("XDG_BIN_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/bin"));
-        root.join(command)
     }
     fn ensure_secure_data_parent(host: &Host<'_>, artifact: &Path) -> Result<()> {
         let data = host
@@ -714,27 +514,7 @@ mod appimage {
         }
         Ok(())
     }
-    fn publish_artifact(source: &Path, destination: &Path, no_replace: bool) -> Result<()> {
-        let parent = destination
-            .parent()
-            .context("binary artifact destination has no parent")?;
-        let mut source_file = fs::File::open(source)?;
-        let mut staged = tempfile::NamedTempFile::new_in(parent)?;
-        std::io::copy(&mut source_file, staged.as_file_mut())?;
-        staged
-            .as_file_mut()
-            .set_permissions(fs::Permissions::from_mode(0o755))?;
-        staged.as_file_mut().sync_all()?;
-        if no_replace {
-            let path = staged.into_temp_path();
-            fs::hard_link(&path, destination).context("publish initial binary artifact without replacement")?;
-            fs::remove_file(&path)?;
-        } else {
-            staged.into_temp_path().persist(destination).map_err(|e| e.error)?;
-        }
-        fs::File::open(parent)?.sync_all()?;
-        Ok(())
-    }
+
     fn preflight_link(link: &Path, artifact: &Path, require_absent: bool) -> Result<()> {
         match fs::symlink_metadata(link) {
             Ok(_) if require_absent => {
@@ -744,16 +524,6 @@ mod appimage {
             Ok(_) => bail!("binary AppImage command conflict at {}", link.display()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
-        }
-    }
-    fn preflight_stale_link(link: &Path, artifact: &Path, allow_absent: bool) -> Result<()> {
-        match fs::symlink_metadata(link) {
-            Ok(_) if managed_link(link, artifact) => Ok(()),
-            Err(error) if allow_absent && error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Ok(_) | Err(_) => bail!(
-                "stale owned binary command at {} was changed or is missing",
-                link.display()
-            ),
         }
     }
     fn publish_link(link: &Path, artifact: &Path) -> Result<()> {
@@ -767,34 +537,17 @@ mod appimage {
             Err(e) => Err(e).context("publish binary AppImage command link"),
         }
     }
-    fn managed_link(link: &Path, artifact: &Path) -> bool {
+    pub(super) fn managed_link(link: &Path, artifact: &Path) -> bool {
         fs::symlink_metadata(link).is_ok_and(|m| m.file_type().is_symlink())
             && fs::read_link(link).is_ok_and(|target| target == artifact)
     }
-    fn verify_appimage(artifact: &Path, links: &[PathBuf], resolved: &Resolved) -> Result<()> {
-        if !valid_artifact(artifact, &resolved.actual_sha256)? || links.iter().any(|link| !managed_link(link, artifact))
-        {
+    fn verify_appimage(artifact: &Path, links: &[PathBuf], actual_sha256: &str) -> Result<()> {
+        if !valid_artifact(artifact, actual_sha256)? || links.iter().any(|link| !managed_link(link, artifact)) {
             bail!("binary AppImage verification failed");
         }
         Ok(())
     }
-    pub(super) fn artifact_matches(
-        host: &Host<'_>,
-        operation: &BinaryPackageOperation,
-        resolved: &Resolved,
-    ) -> Result<bool> {
-        let _ = host;
-        valid_artifact(&data_artifact(host, operation), &resolved.actual_sha256)
-    }
-    fn record_owns_artifact(artifact: &Path, record: &Record) -> bool {
-        record.declaration.format == BinaryPackageFormat::AppImage
-            && valid_artifact(artifact, &record.resolved.actual_sha256).unwrap_or(false)
-            || record.previous.as_ref().is_some_and(|previous| {
-                previous.declaration.format == BinaryPackageFormat::AppImage
-                    && valid_artifact(artifact, &previous.resolved.actual_sha256).unwrap_or(false)
-            })
-    }
-    fn valid_artifact(path: &Path, digest: &str) -> Result<bool> {
+    pub(super) fn valid_artifact(path: &Path, digest: &str) -> Result<bool> {
         let m = match fs::symlink_metadata(path) {
             Ok(v) => v,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -811,13 +564,13 @@ mod appimage {
     pub(super) fn postconditions(
         host: &Host<'_>,
         operation: &BinaryPackageOperation,
-        resolved: &Resolved,
+        actual_sha256: &str,
     ) -> Result<bool> {
         match operation.format {
             BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
             BinaryPackageFormat::AppImage => {
                 let artifact = data_artifact(host, operation);
-                Ok(valid_artifact(&artifact, &resolved.actual_sha256)?
+                Ok(valid_artifact(&artifact, actual_sha256)?
                     && command_links(host, operation)
                         .iter()
                         .all(|link| managed_link(link, &artifact)))
@@ -835,7 +588,7 @@ mod appimage {
         }
         Ok(())
     }
-    fn executable_on_path(host: &Host<'_>, name: &str) -> bool {
+    pub(super) fn executable_on_path(host: &Host<'_>, name: &str) -> bool {
         host.value("PATH")
             .and_then(|path| {
                 std::env::split_paths(&path).find(|dir| {
@@ -851,7 +604,7 @@ mod appimage {
         }
         Ok(())
     }
-    fn has_elf_magic(path: &Path) -> bool {
+    pub(super) fn has_elf_magic(path: &Path) -> bool {
         let mut magic = [0; 4];
         fs::File::open(path).and_then(|mut f| f.read_exact(&mut magic)).is_ok() && magic == *b"\x7fELF"
     }
@@ -863,11 +616,8 @@ mod source {
     pub(super) fn resolve(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<Candidate> {
         match &operation.source {
             BinarySourceOperation::ChecksummedUrl { url, sha256 } => Ok(Candidate {
-                tag: None,
-                asset_name: fixed_asset_name(url.as_str()),
                 url: url.clone(),
                 effective: Some(*sha256),
-                retry_actual: None,
             }),
             BinarySourceOperation::GithubLatest {
                 repository,
@@ -906,7 +656,7 @@ mod source {
             }
         }
     }
-    pub(super) fn select_asset(
+    fn select_asset(
         input: &str,
         selector: &BinaryPackageSelector,
         declared: Option<BinarySha256>,
@@ -950,7 +700,7 @@ mod source {
                 matches.len()
             );
         }
-        let (index, asset, name) = matches[0];
+        let (index, asset, _) = matches[0];
         let object = asset
             .as_object()
             .context("selected GitHub release asset must be an object")?;
@@ -970,11 +720,8 @@ mod source {
             bail!("declared and GitHub API SHA-256 checksums differ");
         }
         Ok(Candidate {
-            tag: Some(tag.into()),
-            asset_name: name.into(),
             url,
             effective: declared.or(api),
-            retry_actual: None,
         })
     }
     fn parse_asset_name(value: &Value, index: usize) -> Result<&str> {
@@ -988,30 +735,6 @@ mod source {
         validate_asset_name(name)?;
         Ok(name)
     }
-    pub(super) fn candidate_for_retry(operation: &BinaryPackageOperation, resolved: &Resolved) -> Result<Candidate> {
-        Ok(Candidate {
-            tag: resolved.tag.clone(),
-            asset_name: resolved.asset_name.clone(),
-            url: HttpsUrl::parse(&resolved.url)?,
-            effective: resolved
-                .effective_sha256
-                .as_deref()
-                .map(BinarySha256::parse)
-                .transpose()?
-                .or(match operation.source {
-                    BinarySourceOperation::ChecksummedUrl { sha256, .. } => Some(sha256),
-                    _ => None,
-                }),
-            retry_actual: Some(BinarySha256::parse(&resolved.actual_sha256)?),
-        })
-    }
-    pub(super) fn same_remote_identity(candidate: &Candidate, resolved: &Resolved) -> bool {
-        candidate.tag == resolved.tag
-            && candidate.asset_name == resolved.asset_name
-            && candidate.url.as_str() == resolved.url
-            && candidate.effective.map(BinarySha256::as_hex) == resolved.effective_sha256
-    }
-
     pub(super) fn download_candidate(
         host: &Host<'_>,
         operation: &BinaryPackageOperation,
@@ -1046,33 +769,13 @@ mod source {
             bail!("binary package downloaded an empty or non-regular artifact");
         }
         let actual = BinarySha256(sha256_file(temporary.path())?);
-        if candidate.effective.is_some_and(|expected| expected != actual)
-            || candidate.retry_actual.is_some_and(|expected| expected != actual)
-        {
+        if candidate.effective.is_some_and(|expected| expected != actual) {
             bail!("binary package SHA-256 checksum mismatch");
         }
         Ok(Downloaded {
             temporary,
-            resolved: Resolved {
-                tag: candidate.tag,
-                asset_name: candidate.asset_name,
-                url: candidate.url.as_str().into(),
-                actual_sha256: actual.as_hex(),
-                effective_sha256: candidate.effective.map(BinarySha256::as_hex),
-            },
+            actual_sha256: actual.as_hex(),
         })
-    }
-
-    pub(super) fn fixed_asset_name(url: &str) -> String {
-        url::Url::parse(url)
-            .ok()
-            .and_then(|url| {
-                url.path_segments()?
-                    .rev()
-                    .find(|segment| !segment.is_empty() && valid_asset_name(segment))
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| "artifact".into())
     }
 }
 
@@ -1230,16 +933,12 @@ fn valid_asset_name(value: &str) -> bool {
         && !value.contains(['/', '\\', '\0'])
         && !value.chars().any(char::is_control)
 }
-fn regex_match(pattern: &str, text: &str) -> Result<bool> {
-    Ok(Regex::new(pattern)?.is_match(text))
-}
 
 pub(crate) mod cargo_binstall {
 
-    use super::super::{managed_state::ManagedState, Host, TempDir, TempPath};
+    use super::super::{Host, TempDir, TempPath};
     use crate::{config::HttpsUrl, platform::Architecture};
     use anyhow::{bail, Context, Result};
-    use serde::{Deserialize, Serialize};
     use serde_json::Value;
     use sha2::{Digest, Sha256};
     use std::{
@@ -1248,7 +947,6 @@ pub(crate) mod cargo_binstall {
         path::{Path, PathBuf},
     };
 
-    const VERSION: u64 = 1;
     const RELEASE_ENDPOINT: &str = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/latest";
     const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
     const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
@@ -1269,32 +967,9 @@ pub(crate) mod cargo_binstall {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum Status {
-        Pending,
-        Completed,
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Record {
-        version: u64,
-        status: Status,
-        architecture: String,
-        target: String,
-        tag: String,
-        asset_name: String,
-        url: String,
-        archive_sha256: String,
-        executable_sha256: String,
-    }
-
     #[derive(Clone, Debug)]
     struct Release {
-        target: String,
         tag: String,
-        asset_name: String,
         url: HttpsUrl,
         sha256: String,
     }
@@ -1312,42 +987,18 @@ pub(crate) mod cargo_binstall {
         ensure_managed_directory(&bin)?;
         let destination = bin.join("cargo-binstall");
 
-        let state = ManagedState::open(host, "managers", "cargo-binstall", "cargo-binstall")?;
-        let lock = state.acquire_lock()?;
-        let record = state
-            .read()?
-            .map(|bytes| -> Result<Record> {
-                let record: Record = super::super::managed_state::parse_strict_json(&bytes)
-                    .context("parse strict cargo-binstall managed record")?;
-                validate_record(&record)?;
-                Ok(record)
-            })
-            .transpose()?;
-        state.validate_lock_entry(&lock)?;
-        if let Some(record) = &record {
-            if record.architecture != operation.architecture.canonical() {
-                bail!("cargo-binstall has managed state for a different architecture");
-            }
-            if valid_installed(host, &destination, record)? {
-                if record.status != Status::Completed {
-                    publish_record(&state, &lock, record, Status::Completed)?;
-                }
+        let release = resolve_release(host, operation.architecture)?;
+
+        let expectation = super::capture_publication_expectation(&destination)?;
+
+        if valid_installed(host, &destination, &release.tag)? {
+            if expectation.verify_identity(&destination)? {
                 return Ok(());
+            } else {
+                bail!("TOCTOU conflict detected: cargo-binstall version/live-state inspection passed but destination identity changed for {}", destination.display());
             }
-            if fs::symlink_metadata(&destination).is_ok() {
-                bail!("cargo-binstall managed executable changed at {}", destination.display());
-            }
-        } else if fs::symlink_metadata(&destination).is_ok() {
-            bail!(
-                "cargo-binstall executable conflict at {}; refusing to adopt it",
-                destination.display()
-            );
         }
 
-        let release = match &record {
-            Some(record) => release_from_record(record)?,
-            None => resolve_release(host, operation.architecture)?,
-        };
         let archive = TempPath::new_with_suffix(host, "cargo-binstall", ".tgz")?;
         host.require(
             "cargo-binstall archive download",
@@ -1393,31 +1044,11 @@ pub(crate) mod cargo_binstall {
         let staged = stage.path().join("cargo-binstall");
         validate_executable(&staged, "staged cargo-binstall executable")?;
         verify_version(host, &staged, &release.tag)?;
-        let executable_sha256 = sha256_file(&staged)?;
-        if record
-            .as_ref()
-            .is_some_and(|record| record.executable_sha256 != executable_sha256)
-        {
-            bail!("cargo-binstall staged executable changed from its managed record");
-        }
-        let pending = Record {
-            version: VERSION,
-            status: Status::Pending,
-            architecture: operation.architecture.canonical().into(),
-            target: release.target.clone(),
-            tag: release.tag.clone(),
-            asset_name: release.asset_name.clone(),
-            url: release.url.as_str().into(),
-            archive_sha256: release.sha256.clone(),
-            executable_sha256,
-        };
-        validate_record(&pending)?;
-        publish_record(&state, &lock, &pending, Status::Pending)?;
-        publish_executable(&staged, &destination)?;
-        if !valid_installed(host, &destination, &pending)? {
+        super::publish_executable(&staged, &destination, expectation)?;
+        if !valid_installed(host, &destination, &release.tag)? {
             bail!("cargo-binstall publication failed its exact postcondition");
         }
-        publish_record(&state, &lock, &pending, Status::Completed)
+        Ok(())
     }
 
     fn resolve_release(host: &Host<'_>, architecture: Architecture) -> Result<Release> {
@@ -1498,136 +1129,13 @@ pub(crate) mod cargo_binstall {
             bail!("cargo-binstall target asset URL does not match its release identity");
         }
         Ok(Release {
-            target: target.into(),
             tag: tag.into(),
-            asset_name,
             url,
             sha256,
         })
     }
 
-    fn release_from_record(record: &Record) -> Result<Release> {
-        validate_record(record)?;
-        Ok(Release {
-            target: record.target.clone(),
-            tag: record.tag.clone(),
-            asset_name: record.asset_name.clone(),
-            url: HttpsUrl::parse(&record.url)?,
-            sha256: record.archive_sha256.clone(),
-        })
-    }
-
-    fn publish_record(state: &ManagedState, lock: &fs::File, record: &Record, status: Status) -> Result<()> {
-        let mut record = record.clone();
-        record.status = status;
-        validate_record(&record)?;
-        state.validate_lock_entry(lock)?;
-        state.publish(&serde_json::to_vec(&record).context("serialize cargo-binstall record")?)
-    }
-
-    fn validate_record(record: &Record) -> Result<()> {
-        if record.version != VERSION {
-            bail!("unsupported cargo-binstall managed record version {}", record.version);
-        }
-        let architecture = Architecture::normalize(&record.architecture)?;
-        if architecture.canonical() != record.architecture || target(architecture) != record.target {
-            bail!("cargo-binstall managed record architecture or target is not canonical");
-        }
-        validate_version_tag(&record.tag)?;
-        if record.asset_name != format!("cargo-binstall-{}.tgz", record.target) {
-            bail!("cargo-binstall managed record asset name is inconsistent");
-        }
-        let url = HttpsUrl::parse(&record.url)?;
-        let expected_url = format!(
-            "https://github.com/cargo-bins/cargo-binstall/releases/download/{}/{}",
-            record.tag, record.asset_name
-        );
-        if url.as_str() != record.url || record.url != expected_url {
-            bail!("cargo-binstall managed record URL is not canonical");
-        }
-        validate_sha256(&record.archive_sha256)?;
-        validate_sha256(&record.executable_sha256)
-    }
-
-    fn target(architecture: Architecture) -> &'static str {
-        match architecture {
-            Architecture::Amd64 => "x86_64-unknown-linux-musl",
-            Architecture::Arm64 => "aarch64-unknown-linux-musl",
-            Architecture::Arm32 => "armv7-unknown-linux-musleabihf",
-        }
-    }
-
-    fn ensure_managed_directory(path: &Path) -> Result<()> {
-        let existed = fs::symlink_metadata(path).is_ok();
-        fs::create_dir_all(path).with_context(|| format!("create managed directory {}", path.display()))?;
-        if !existed {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-        }
-        let mut metadata = fs::symlink_metadata(path)?;
-        if metadata.file_type().is_dir()
-            && metadata.uid() == rustix::process::geteuid().as_raw()
-            && metadata.permissions().mode() & 0o022 != 0
-        {
-            let mode = metadata.permissions().mode() & 0o7777 & !0o022;
-            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-            metadata = fs::symlink_metadata(path)?;
-        }
-        if !metadata.file_type().is_dir()
-            || metadata.uid() != rustix::process::geteuid().as_raw()
-            || metadata.permissions().mode() & 0o022 != 0
-        {
-            bail!("managed directory {} is unsafe", path.display());
-        }
-        Ok(())
-    }
-
-    fn validate_archive_listing(output: &[u8]) -> Result<()> {
-        let output = std::str::from_utf8(output).context("cargo-binstall archive listing is not UTF-8")?;
-        let mut executable = 0;
-        for entry in output.lines() {
-            if entry.is_empty()
-                || entry.starts_with('/')
-                || entry.split('/').any(|component| component == "..")
-                || entry.chars().any(char::is_control)
-            {
-                bail!("cargo-binstall archive contains an unsafe path");
-            }
-            executable += usize::from(entry == "cargo-binstall");
-        }
-        if executable != 1 {
-            bail!("cargo-binstall archive must contain one root executable");
-        }
-        Ok(())
-    }
-
-    fn publish_executable(source: &Path, destination: &Path) -> Result<()> {
-        let parent = destination
-            .parent()
-            .context("cargo-binstall destination has no parent")?;
-        let mut source = fs::File::open(source)?;
-        let mut staged = tempfile::NamedTempFile::new_in(parent)?;
-        std::io::copy(&mut source, staged.as_file_mut())?;
-        staged
-            .as_file_mut()
-            .set_permissions(fs::Permissions::from_mode(0o755))?;
-        staged.as_file_mut().sync_all()?;
-        let (file, staged_path) = staged.keep().map_err(|error| error.error)?;
-        // Linux rejects execution while any process still holds the inode open for writing.
-        drop(file);
-        let publication = (|| -> Result<()> {
-            fs::hard_link(&staged_path, destination)
-                .context("publish cargo-binstall executable without replacement")?;
-            fs::remove_file(&staged_path)?;
-            fs::File::open(parent)?.sync_all()?;
-            Ok(())
-        })();
-        if publication.is_err() {
-            let _ = fs::remove_file(&staged_path);
-        }
-        publication
-    }
-
-    fn valid_installed(host: &Host<'_>, path: &Path, record: &Record) -> Result<bool> {
+    fn valid_installed(host: &Host<'_>, path: &Path, tag: &str) -> Result<bool> {
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -1637,7 +1145,6 @@ pub(crate) mod cargo_binstall {
             || metadata.uid() != rustix::process::geteuid().as_raw()
             || metadata.nlink() != 1
             || metadata.permissions().mode() & 0o7777 != 0o755
-            || sha256_file(path)? != record.executable_sha256
         {
             return Ok(false);
         }
@@ -1645,7 +1152,7 @@ pub(crate) mod cargo_binstall {
             .to_str()
             .with_context(|| format!("cargo-binstall path is not UTF-8: {}", path.display()))?;
         let output = host.require("managed cargo-binstall version postcondition", program, ["-V"])?;
-        Ok(parse_version_output(&output.stdout)? == record.tag.trim_start_matches('v'))
+        Ok(parse_version_output(&output.stdout)? == tag.trim_start_matches('v'))
     }
 
     fn verify_version(host: &Host<'_>, path: &Path, tag: &str) -> Result<()> {
@@ -1718,6 +1225,57 @@ pub(crate) mod cargo_binstall {
         let metadata = fs::symlink_metadata(path).with_context(|| format!("inspect {label}"))?;
         if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.permissions().mode() & 0o111 == 0 {
             bail!("{label} is not a nonempty regular executable");
+        }
+        Ok(())
+    }
+
+    fn target(architecture: Architecture) -> &'static str {
+        match architecture {
+            Architecture::Amd64 => "x86_64-unknown-linux-musl",
+            Architecture::Arm64 => "aarch64-unknown-linux-musl",
+            Architecture::Arm32 => "armv7-unknown-linux-musleabihf",
+        }
+    }
+
+    fn ensure_managed_directory(path: &Path) -> Result<()> {
+        let existed = fs::symlink_metadata(path).is_ok();
+        fs::create_dir_all(path).with_context(|| format!("create managed directory {}", path.display()))?;
+        if !existed {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        }
+        let mut metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_dir()
+            && metadata.uid() == rustix::process::geteuid().as_raw()
+            && metadata.permissions().mode() & 0o022 != 0
+        {
+            let mode = metadata.permissions().mode() & 0o7777 & !0o022;
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+            metadata = fs::symlink_metadata(path)?;
+        }
+        if !metadata.file_type().is_dir()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.permissions().mode() & 0o022 != 0
+        {
+            bail!("managed directory {} is unsafe", path.display());
+        }
+        Ok(())
+    }
+
+    fn validate_archive_listing(output: &[u8]) -> Result<()> {
+        let output = std::str::from_utf8(output).context("cargo-binstall archive listing is not UTF-8")?;
+        let mut executable = 0;
+        for entry in output.lines() {
+            if entry.is_empty()
+                || entry.starts_with('/')
+                || entry.split('/').any(|component| component == "..")
+                || entry.chars().any(char::is_control)
+            {
+                bail!("cargo-binstall archive contains an unsafe path");
+            }
+            executable += usize::from(entry == "cargo-binstall");
+        }
+        if executable != 1 {
+            bail!("cargo-binstall archive must contain one root executable");
         }
         Ok(())
     }
