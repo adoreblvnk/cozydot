@@ -50,11 +50,6 @@ writes the active config and bundled dotfiles under
 `${XDG_CONFIG_HOME:-$HOME/.config}/cozydot` without a checkout or network
 request.
 
-Preset intent and the complete `1.0.0` configuration contract are documented
-in [`docs/configuration.md`](docs/configuration.md). A smaller starting config
-is available at
-[`docs/examples/config-v1-beginner.yaml`](docs/examples/config-v1-beginner.yaml).
-
 ## Configuration sources
 
 `configs/cozydot.yaml` is the canonical, manually maintained base preset.
@@ -79,9 +74,6 @@ generated repository file. Edit that active file before running `apply`.
   checksum. The installer verifies that transport before replacing the binary.
   This does not imply that every upstream package or manager download has a
   checksum.
-
-See [`docs/rust-rewrite.md`](docs/rust-rewrite.md) for the architecture,
-operation boundaries, packaging details, and download trust boundaries.
 
 ## Development
 
