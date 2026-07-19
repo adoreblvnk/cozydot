@@ -318,7 +318,7 @@ optional within the mapping.
 
 | Field | Accepted value | Omission and interactions |
 | --- | --- | --- |
-| `tools.rust` | `stable`, `beta`, `nightly`, a real `nightly-YYYY-MM-DD` date, or a two/three-component numeric version | Required by `packages.cargo`; only undated channels are moving update targets |
+| `tools.rust` | Rustup-native `stable`, a `major.minor` version channel, or an exact `major.minor.patch` release | Required by `packages.cargo`; `stable` and two-component versions are moving update targets |
 | `tools.go` | `latest` or a two/three-component numeric version | Only `latest` is a moving update target |
 | `tools.node` | `lts`, `latest`, or a one/two/three-component numeric version | Required by `packages.npm`; only `lts` and `latest` are moving update targets |
 | `tools.python` | A two/three-component numeric version | No Python update field exists |
@@ -433,7 +433,7 @@ Every boolean leaf is true only; omit a target to disable it.
 | `updates.apt` | Optional: `standard` or `full` | `standard` runs `apt-get upgrade`; `full` runs `apt-get full-upgrade`, then `apt-get autoremove --purge`, which permanently removes automatically installed packages that APT considers unnecessary |
 | `updates.flatpak` | Optional, true only | Requires `packages.flatpak`; updates configured applications and required related refs |
 | `updates.tools` | Optional mapping containing at least one tool leaf | Empty mapping is invalid |
-| `updates.tools.rust` | Optional, true only | Requires `tools.rust` equal to `stable`, `beta`, or `nightly` |
+| `updates.tools.rust` | Optional, true only | Requires `tools.rust: stable` or a two-component Rust version channel such as `1.75` |
 | `updates.tools.go` | Optional, true only | Requires `tools.go: latest` |
 | `updates.tools.node` | Optional, true only | Requires `tools.node` equal to `lts` or `latest` |
 | `updates.packages` | Optional mapping containing at least one package leaf | Empty mapping is invalid |

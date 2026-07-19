@@ -196,6 +196,7 @@ use std::{
 const COZYDOT_RUNTIME_DIRECTORY: &str = "/run/cozydot";
 const DOCKER_LOCK: &str = "/run/cozydot/docker-daemon.lock";
 const EXECUTABLE_FILE_BUSY: i32 = 26;
+const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
@@ -813,9 +814,9 @@ pub(crate) mod apt {
 
 pub(crate) mod languages {
     use anyhow::{bail, Context, Result};
-    use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+    use std::{ffi::OsStr, os::unix::fs::PermissionsExt, path::PathBuf};
 
-    use crate::operations::{Host, TempPath};
+    use crate::operations::{Host, TempPath, RUSTUP_BOOTSTRAP_FLAGS};
 
     pub fn fnm_bootstrap(host: &Host<'_>) -> Result<()> {
         let data_home = host
@@ -920,7 +921,11 @@ pub(crate) mod languages {
                 "https://sh.rustup.rs",
             ],
         )?;
-        host.require("rustup bootstrap", "sh", [installer.path().as_os_str(), "-y".as_ref()])?;
+        host.require(
+            "rustup bootstrap",
+            "sh",
+            std::iter::once(installer.path().as_os_str()).chain(RUSTUP_BOOTSTRAP_FLAGS.map(OsStr::new)),
+        )?;
         if !executable_file(&cargo_home.join("bin/rustup")) {
             bail!("rustup bootstrap did not publish the managed rustup executable");
         }
@@ -2465,4 +2470,14 @@ fn stable_go_version(value: &str) -> bool {
         && parts
             .iter()
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RUSTUP_BOOTSTRAP_FLAGS;
+
+    #[test]
+    fn rustup_bootstrap_defers_toolchain_installation() {
+        assert_eq!(RUSTUP_BOOTSTRAP_FLAGS, ["-y", "--default-toolchain", "none"]);
+    }
 }
