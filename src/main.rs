@@ -54,9 +54,7 @@ fn apply() -> Result<()> {
         config::Config::load(&path).with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
     let steps = planner::plan(&config, &platform, &root.join("dotfiles"))?;
-    let mut runner_inst = runner::ProcessRunner {
-        dry_run: std::env::var_os("COZYDOT_DRY_RUN").is_some(),
-    };
+    let mut runner_inst = runner::ProcessRunner;
     runner::execute(&mut runner_inst, &steps)?;
     Ok(())
 }
