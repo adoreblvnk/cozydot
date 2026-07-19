@@ -609,8 +609,7 @@ fn resolve_home(env: &[(OsString, OsString)], process_home: Option<OsString>) ->
 
 pub(crate) mod apt {
     use crate::operations::Host;
-    use anyhow::{Context, Result};
-    use std::collections::BTreeSet;
+    use anyhow::Result;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum AptUpgradePolicy {
@@ -627,20 +626,15 @@ pub(crate) mod apt {
         if packages.is_empty() {
             anyhow::bail!("APT bootstrap package sequence must not be empty");
         }
-        let missing = select_packages(host, packages, false)?;
-        if missing.is_empty() {
-            return Ok(());
-        }
         host.require("APT bootstrap metadata refresh", "sudo", ["apt-get", "update", "-qq"])?;
-        install(host, "APT bootstrap package installation", missing)
+        install(host, "APT bootstrap package installation", packages.to_vec())
     }
 
     pub fn packages(host: &Host<'_>, packages: &[String]) -> Result<()> {
-        let missing = select_packages(host, packages, false)?;
-        if missing.is_empty() {
+        if packages.is_empty() {
             return Ok(());
         }
-        install(host, "APT package installation", missing)
+        install(host, "APT package installation", packages.to_vec())
     }
 
     fn install(host: &Host<'_>, operation: &str, packages: Vec<String>) -> Result<()> {
@@ -658,8 +652,7 @@ pub(crate) mod apt {
     }
 
     pub fn purge(host: &Host<'_>, packages: &[String]) -> Result<()> {
-        let installed = select_packages(host, packages, true)?;
-        if installed.is_empty() {
+        if packages.is_empty() {
             return Ok(());
         }
         let mut args = vec![
@@ -670,7 +663,7 @@ pub(crate) mod apt {
             "-qq".into(),
             "--".into(),
         ];
-        args.extend(installed.into_iter().map(|package| format!("{package}-")));
+        args.extend(packages.iter().cloned());
         host.require("APT package purge", "sudo", args)?;
         Ok(())
     }
@@ -720,95 +713,6 @@ pub(crate) mod apt {
             }
         }
         Ok(())
-    }
-
-    fn select_packages(host: &Host<'_>, packages: &[String], select_installed: bool) -> Result<Vec<String>> {
-        if packages.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut requested = BTreeSet::new();
-        for package in packages {
-            validate_package_name(package)?;
-            if !requested.insert(package.as_str()) {
-                anyhow::bail!("APT package state query has duplicate requested package: {package:?}");
-            }
-        }
-        let mut args = vec![
-            "-W".to_owned(),
-            "-f=${Package}\\t${db:Status-Abbrev}\\n".into(),
-            "--".into(),
-        ];
-        args.extend(packages.iter().cloned());
-        let output = host.run("dpkg-query", args)?;
-        if !output.status.success() && output.status.code() != Some(1) {
-            anyhow::bail!(
-                "APT package state query: dpkg-query failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        let installed = installed_packages(&output.stdout, &requested, output.status.success())?;
-        Ok(packages
-            .iter()
-            .filter(|package| installed.contains(package.as_str()) == select_installed)
-            .cloned()
-            .collect())
-    }
-
-    fn validate_package_name(package: &str) -> Result<()> {
-        let mut bytes = package.bytes();
-        let valid = bytes
-            .next()
-            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-            && bytes
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'+' | b'.' | b'-'));
-        if !valid {
-            anyhow::bail!("invalid canonical Debian package name: {package:?}");
-        }
-        Ok(())
-    }
-
-    fn installed_packages<'a>(
-        output: &'a [u8],
-        requested: &BTreeSet<&str>,
-        require_complete: bool,
-    ) -> Result<BTreeSet<&'a str>> {
-        let output = std::str::from_utf8(output).context("dpkg-query returned non-UTF-8 package state")?;
-        let mut installed = BTreeSet::new();
-        let mut returned = BTreeSet::new();
-        for line in output.lines().filter(|line| !line.is_empty()) {
-            let Some((package, status)) = line.split_once('\t') else {
-                anyhow::bail!("dpkg-query returned malformed package state: {line:?}");
-            };
-            let status = status.as_bytes();
-            if package.is_empty()
-                || status.len() != 3
-                || !matches!(status[0], b'u' | b'i' | b'h' | b'r' | b'p')
-                || !matches!(status[1], b'n' | b'c' | b'H' | b'U' | b'F' | b'W' | b't' | b'i')
-                || !matches!(status[2], b' ' | b'R')
-            {
-                anyhow::bail!("dpkg-query returned malformed package state: {line:?}");
-            }
-            if !requested.contains(package) {
-                anyhow::bail!("dpkg-query returned unrequested package record: {package:?}");
-            }
-            if !returned.insert(package) {
-                anyhow::bail!("dpkg-query returned duplicate package record: {package:?}");
-            }
-            if status[1] == b'i' {
-                installed.insert(package);
-            }
-        }
-        if require_complete && returned.len() != requested.len() {
-            let missing = requested
-                .iter()
-                .filter(|package| !returned.contains(**package))
-                .copied()
-                .collect::<Vec<_>>()
-                .join(", ");
-            anyhow::bail!("dpkg-query returned incomplete package state; missing records for: {missing}");
-        }
-        Ok(installed)
     }
 }
 
@@ -937,7 +841,6 @@ pub(crate) mod packages {
 
     pub(crate) mod cargo {
         use anyhow::{bail, Context, Result};
-        use semver::Version;
         use std::{
             collections::BTreeSet,
             os::unix::fs::PermissionsExt,
@@ -987,40 +890,15 @@ pub(crate) mod packages {
             if !cargo_home.is_absolute() {
                 bail!("Cargo package operation requires an absolute CARGO_HOME");
             }
-            let cargo = resolve_cargo(host, &cargo_home)?;
-            let installed = inspect_installed(host, &cargo)?;
-            let selected = match operation.mode {
-                CargoPackageMode::EnsurePresent => operation
-                    .packages
-                    .iter()
-                    .filter(|package| !installed.contains(package.as_str()))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                CargoPackageMode::UpdateCurrent => operation.packages.clone(),
-            };
-            if selected.is_empty() {
-                return Ok(());
-            }
-
             let binstall = resolve_binstall(&cargo_home)?
                 .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
             let mut args = vec!["--no-confirm".to_owned()];
             if operation.mode == CargoPackageMode::UpdateCurrent {
                 args.push("--force".into());
             }
-            args.extend(selected);
+            args.extend(operation.packages.clone());
             host.require("Cargo package mutation", &binstall, args)?;
-
-            let installed = inspect_installed(host, &cargo)?;
-            require_packages(&operation.packages, &installed)
-        }
-
-        fn resolve_cargo(_host: &Host<'_>, cargo_home: &Path) -> Result<String> {
-            let managed = cargo_home.join("bin/cargo");
-            if executable_file(&managed) {
-                return path_program(&managed, "Cargo executable path");
-            }
-            bail!("Cargo package operation: managed Cargo is unavailable after Rust bootstrap")
+            Ok(())
         }
 
         fn resolve_binstall(cargo_home: &Path) -> Result<Option<String>> {
@@ -1029,77 +907,6 @@ pub(crate) mod packages {
                 return path_program(&managed, "cargo-binstall executable path").map(Some);
             }
             Ok(None)
-        }
-
-        fn inspect_installed(host: &Host<'_>, cargo: &str) -> Result<BTreeSet<String>> {
-            let output = host.require("Cargo installed package query", cargo, ["install", "--list"])?;
-            installed_packages(&output.stdout)
-        }
-
-        fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
-            let output = std::str::from_utf8(output).context("cargo returned non-UTF-8 installed package state")?;
-            let mut installed = BTreeSet::new();
-            for line in output.lines().filter(|line| !line.is_empty()) {
-                if line.starts_with(char::is_whitespace) {
-                    continue;
-                }
-                let Some((package, version_and_source)) = line.split_once(" v") else {
-                    bail!("cargo returned malformed installed package state: {line:?}");
-                };
-                validate_package(package)
-                    .map_err(|_| anyhow::anyhow!("cargo returned malformed installed package state: {line:?}"))?;
-                let Some(record) = version_and_source.strip_suffix(':') else {
-                    bail!("cargo returned malformed installed package state: {line:?}");
-                };
-                let (version, source) = record
-                    .split_once(" (")
-                    .map_or((record, None), |parts| (parts.0, parts.1.strip_suffix(')')));
-                if Version::parse(version).is_err()
-                    || record.contains(" (") && source.is_none()
-                    || source.is_some_and(|source| !valid_display_source(source))
-                {
-                    bail!("cargo returned malformed installed package state: {line:?}");
-                }
-                if source.is_none() && !installed.insert(package.to_owned()) {
-                    bail!("cargo returned duplicate installed registry package: {package:?}");
-                }
-            }
-            Ok(installed)
-        }
-
-        fn valid_display_source(source: &str) -> bool {
-            if source.is_empty() || source.chars().any(char::is_control) {
-                return false;
-            }
-            let mut depth = 0_u32;
-            for character in source.chars() {
-                match character {
-                    '(' => depth += 1,
-                    ')' => {
-                        let Some(next) = depth.checked_sub(1) else {
-                            return false;
-                        };
-                        depth = next;
-                    }
-                    _ => {}
-                }
-            }
-            depth == 0
-        }
-
-        fn require_packages(packages: &[String], installed: &BTreeSet<String>) -> Result<()> {
-            let missing = packages
-                .iter()
-                .filter(|package| !installed.contains(package.as_str()))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
-                bail!(
-                    "Cargo package mutation did not install configured packages: {}",
-                    missing.join(", ")
-                );
-            }
-            Ok(())
         }
 
         fn validate_packages(packages: &[String]) -> Result<()> {
@@ -1140,7 +947,6 @@ pub(crate) mod packages {
 
     pub(crate) mod npm {
         use anyhow::{bail, Context, Result};
-        use serde_json::{Map, Value};
         use std::{
             collections::BTreeSet,
             os::unix::fs::PermissionsExt,
@@ -1185,26 +991,15 @@ pub(crate) mod packages {
             validate_packages(&operation.packages).context("validate npm package operation")?;
             let fnm = resolve_fnm(host)?;
             let version = selected_version(host, &fnm)?;
-            let installed = inspect_installed(host, &fnm, &version)?;
-            let selected = match operation.mode {
-                NpmPackageMode::EnsurePresent => operation
-                    .packages
-                    .iter()
-                    .filter(|package| !installed.contains(package.as_str()))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                NpmPackageMode::UpdateCurrent => operation.packages.clone(),
+
+            let command = match operation.mode {
+                NpmPackageMode::EnsurePresent => "install",
+                NpmPackageMode::UpdateCurrent => "update",
             };
-            if selected.is_empty() {
-                return Ok(());
-            }
-
-            let mut npm_args = vec!["install".to_owned(), "--global".into(), "--".into()];
-            npm_args.extend(selected);
+            let mut npm_args = vec![command.to_owned(), "--global".into(), "--".into()];
+            npm_args.extend(operation.packages.clone());
             run_npm_required(host, &fnm, &version, "npm package mutation", npm_args)?;
-
-            let installed = inspect_installed(host, &fnm, &version)?;
-            require_packages(&operation.packages, &installed)
+            Ok(())
         }
 
         fn resolve_fnm(host: &Host<'_>) -> Result<String> {
@@ -1235,17 +1030,6 @@ pub(crate) mod packages {
             Ok(version.to_owned())
         }
 
-        fn inspect_installed(host: &Host<'_>, fnm: &str, version: &str) -> Result<BTreeSet<String>> {
-            let output = run_npm_required(
-                host,
-                fnm,
-                version,
-                "npm global package query",
-                ["list", "--global", "--depth=0", "--json"],
-            )?;
-            installed_packages(&output.stdout)
-        }
-
         fn run_npm_required<I, S>(
             host: &Host<'_>,
             fnm: &str,
@@ -1266,77 +1050,6 @@ pub(crate) mod packages {
             ];
             args.extend(npm_args.into_iter().map(|arg| arg.as_ref().to_owned()));
             host.require(operation, fnm, args)
-        }
-
-        fn installed_packages(output: &[u8]) -> Result<BTreeSet<String>> {
-            let output = std::str::from_utf8(output).context("npm returned non-UTF-8 global package state")?;
-            let root: Value = serde_json::from_slice(output.as_bytes()).context("npm returned malformed JSON state")?;
-            let root = root
-                .as_object()
-                .context("npm global package state must be a JSON object")?;
-            reject_problem_state(root, "npm global package state")?;
-            if root.contains_key("error") {
-                bail!("npm global package state reported an error");
-            }
-            let dependencies = match root.get("dependencies") {
-                Some(dependencies) => dependencies
-                    .as_object()
-                    .context("npm global package state dependencies must be a JSON object")?,
-                None => return Ok(BTreeSet::new()),
-            };
-            let mut installed = BTreeSet::new();
-            for (package, metadata) in dependencies {
-                validate_package(package)
-                    .map_err(|_| anyhow::anyhow!("npm returned invalid global package name: {package:?}"))?;
-                let metadata = metadata
-                    .as_object()
-                    .with_context(|| format!("npm global package metadata for {package:?} must be a JSON object"))?;
-                reject_problem_state(metadata, &format!("npm global package {package:?}"))?;
-                if metadata.contains_key("error") {
-                    bail!("npm global package {package:?} reported an error");
-                }
-                let version = metadata
-                    .get("version")
-                    .and_then(Value::as_str)
-                    .with_context(|| format!("npm global package {package:?} must report a string version"))?;
-                if version.is_empty() || version.chars().any(char::is_control) {
-                    bail!("npm global package {package:?} reported an invalid version");
-                }
-                for flag in ["invalid", "missing"] {
-                    if metadata.get(flag).is_some_and(|value| value != &Value::Bool(false)) {
-                        bail!("npm global package {package:?} reported {flag} state");
-                    }
-                }
-                installed.insert(package.clone());
-            }
-            Ok(installed)
-        }
-
-        fn reject_problem_state(object: &Map<String, Value>, description: &str) -> Result<()> {
-            if let Some(problems) = object.get("problems") {
-                let problems = problems
-                    .as_array()
-                    .with_context(|| format!("{description} problems must be a JSON array"))?;
-                if !problems.is_empty() {
-                    bail!("{description} reported problems");
-                }
-            }
-            Ok(())
-        }
-
-        fn require_packages(packages: &[String], installed: &BTreeSet<String>) -> Result<()> {
-            let missing = packages
-                .iter()
-                .filter(|package| !installed.contains(package.as_str()))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
-                bail!(
-                    "npm package mutation did not install configured packages: {}",
-                    missing.join(", ")
-                );
-            }
-            Ok(())
         }
 
         fn validate_packages(packages: &[String]) -> Result<()> {
@@ -1396,50 +1109,46 @@ pub(crate) mod packages {
 
     pub(crate) mod flatpak {
         use super::super::Host;
-        use anyhow::{Context, Result};
-        use std::collections::{BTreeMap, BTreeSet};
+        use anyhow::Result;
+        use std::collections::BTreeSet;
 
         const FLATHUB_NAME: &str = "flathub";
         const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
-        const FLATHUB_REPOSITORY_URL: &str = "https://dl.flathub.org/repo/";
+        const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
 
         pub fn ensure_flathub(host: &Host<'_>) -> Result<()> {
-            if !validate_flathub(&inspect_user_remotes(host)?)? {
-                host.require(
-                    "Flathub remote ensure",
-                    "flatpak",
-                    ["--user", "remote-add", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
-                )?;
-                require_flathub(&inspect_user_remotes(host)?)?;
-            }
             host.require(
-                "Flathub dependency use enablement",
+                "Flathub remote ensure",
                 "flatpak",
-                ["--user", "remote-modify", "--use-for-deps", FLATHUB_NAME],
+                [
+                    "--user",
+                    "remote-add",
+                    "--if-not-exists",
+                    FLATHUB_NAME,
+                    FLATHUB_DESCRIPTOR_URL,
+                ],
             )?;
-            require_flathub(&inspect_user_remotes(host)?)?;
+            let url_arg = format!("--url={FLATHUB_URL}");
+            host.require(
+                "Flathub remote security canonicalization",
+                "flatpak",
+                [
+                    "--user",
+                    "remote-modify",
+                    &url_arg,
+                    "--gpg-verify",
+                    "--enumerate",
+                    "--use-for-deps",
+                    "--enable",
+                    "--no-filter",
+                    FLATHUB_NAME,
+                ],
+            )?;
             Ok(())
         }
 
         pub fn ensure_apps(host: &Host<'_>, refs: &[String]) -> Result<()> {
             validate_refs(refs)?;
-            let output = host.run("flatpak", ["--user", "list", "--app", "--columns=application"])?;
-            if !output.status.success() {
-                anyhow::bail!(
-                    "Flatpak installed application query: flatpak failed ({}): {}",
-                    output.status,
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            let installed = installed_apps(&output.stdout)?;
-            let missing = refs
-                .iter()
-                .filter(|app| !installed.contains(app.as_str()))
-                .cloned()
-                .collect::<Vec<_>>();
-            if missing.is_empty() {
-                return Ok(());
-            }
             let mut args = vec![
                 "--user".to_owned(),
                 "install".into(),
@@ -1449,7 +1158,7 @@ pub(crate) mod packages {
                 "flathub".into(),
                 "--".into(),
             ];
-            args.extend(missing);
+            args.extend(refs.iter().cloned());
             host.require("Flatpak application installation", "flatpak", args)?;
             Ok(())
         }
@@ -1481,118 +1190,6 @@ pub(crate) mod packages {
                 }
             }
             Ok(())
-        }
-
-        fn installed_apps(output: &[u8]) -> Result<BTreeSet<&str>> {
-            let output =
-                std::str::from_utf8(output).context("flatpak returned non-UTF-8 installed application state")?;
-            let mut installed = BTreeSet::new();
-            for app in output.lines() {
-                validate_app_id(app)
-                    .map_err(|_| anyhow::anyhow!("flatpak returned malformed installed application ID: {app:?}"))?;
-                installed.insert(app);
-            }
-            Ok(installed)
-        }
-
-        struct UserRemote {
-            url: String,
-            options: BTreeSet<String>,
-            filter: String,
-        }
-
-        fn inspect_user_remotes(host: &Host<'_>) -> Result<BTreeMap<String, UserRemote>> {
-            let output = host.run(
-                "flatpak",
-                [
-                    "--user",
-                    "remotes",
-                    "--show-disabled",
-                    "--columns=name,url,options,filter",
-                ],
-            )?;
-            if !output.status.success() {
-                anyhow::bail!(
-                    "Flathub remote query: flatpak failed ({}): {}",
-                    output.status,
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            user_remotes(&output.stdout)
-        }
-
-        fn require_flathub(remotes: &BTreeMap<String, UserRemote>) -> Result<()> {
-            if !validate_flathub(remotes)? {
-                anyhow::bail!(
-                    "Flathub remote mismatch: expected the per-user {FLATHUB_NAME:?} remote to exist after mutation"
-                );
-            }
-            Ok(())
-        }
-
-        fn validate_flathub(remotes: &BTreeMap<String, UserRemote>) -> Result<bool> {
-            let Some(remote) = remotes.get(FLATHUB_NAME) else {
-                return Ok(false);
-            };
-            let insecure = remote
-                .options
-                .iter()
-                .find(|option| matches!(option.as_str(), "disabled" | "no-gpg-verify" | "no-enumerate"));
-            if remote.url != FLATHUB_REPOSITORY_URL || insecure.is_some() || remote.filter != "-" {
-                let options = remote.options.iter().cloned().collect::<Vec<_>>().join(",");
-                anyhow::bail!(
-                    "Flathub remote mismatch: expected URL {FLATHUB_REPOSITORY_URL:?} with GPG verification and enumeration enabled and no local filter; found URL {:?}, options {options:?}, and filter {:?}. Repair or remove the per-user {FLATHUB_NAME:?} remote and retry",
-                    remote.url,
-                    remote.filter
-                );
-            }
-            Ok(true)
-        }
-
-        fn user_remotes(output: &[u8]) -> Result<BTreeMap<String, UserRemote>> {
-            let output = std::str::from_utf8(output).context("flatpak returned non-UTF-8 per-user remote state")?;
-            if output.trim().is_empty() {
-                return Ok(BTreeMap::new());
-            }
-            let mut remotes = BTreeMap::new();
-            for line in output.lines() {
-                let mut fields = line.split('\t');
-                let (Some(name), Some(url), Some(options), Some(filter), None) = (
-                    fields.next(),
-                    fields.next(),
-                    fields.next(),
-                    fields.next(),
-                    fields.next(),
-                ) else {
-                    anyhow::bail!("flatpak returned malformed per-user remote state: {line:?}");
-                };
-                if name.is_empty() || url.is_empty() || filter.is_empty() || url::Url::parse(url).is_err() {
-                    anyhow::bail!("flatpak returned malformed per-user remote state: {line:?}");
-                }
-                let options = if options.is_empty() {
-                    BTreeSet::new()
-                } else {
-                    let parsed = options.split(',').collect::<BTreeSet<_>>();
-                    if parsed.contains("") || parsed.len() != options.split(',').count() {
-                        anyhow::bail!("flatpak returned malformed per-user remote state: {line:?}");
-                    }
-                    parsed.into_iter().map(str::to_owned).collect()
-                };
-                if remotes
-                    .insert(
-                        name.to_owned(),
-                        UserRemote {
-                            url: url.to_owned(),
-                            options,
-                            filter: filter.to_owned(),
-                        },
-                    )
-                    .is_some()
-                {
-                    anyhow::bail!("flatpak returned duplicate per-user remote name: {name:?}");
-                }
-            }
-            Ok(remotes)
         }
 
         fn validate_app_id(app: &str) -> Result<()> {
@@ -1654,15 +1251,6 @@ pub(crate) mod packages {
 
         pub(crate) fn execute(host: &Host<'_>, operation: &NerdFontsOperation) -> Result<()> {
             validate_families(&operation.families).context("validate Nerd Fonts operation")?;
-            for family in &operation.families {
-                if operation.mode == NerdFontsMode::Update || !font_present(host, family)? {
-                    install_family(host, family)?;
-                }
-            }
-            Ok(())
-        }
-
-        fn install_family(host: &Host<'_>, family: &str) -> Result<()> {
             let data_home = host
                 .value("XDG_DATA_HOME")
                 .map(std::path::PathBuf::from)
@@ -1671,8 +1259,39 @@ pub(crate) mod packages {
                 bail!("Nerd Fonts XDG data directory must be absolute");
             }
             let parent = data_home.join("fonts/cozydot");
-            fs::create_dir_all(&parent).context("create Nerd Fonts destination directory")?;
-            let destination = parent.join(family);
+            for family in &operation.families {
+                let destination = parent.join(family);
+                let is_present = match fs::symlink_metadata(&destination) {
+                    Ok(metadata) => {
+                        if metadata.is_dir() {
+                            validate_extracted_tree(&destination)
+                                .with_context(|| format!("validate installed Nerd Font family {family:?}"))?;
+                            true
+                        } else {
+                            bail!("Nerd Font destination conflict at {}", destination.display());
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => {
+                        return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()))
+                    }
+                };
+                if operation.mode == NerdFontsMode::Update || !is_present {
+                    install_family_with_destination(host, family, &destination, &parent, &data_home)?;
+                }
+            }
+            refresh_cache(host, "Nerd Font cache refresh", &parent)?;
+            Ok(())
+        }
+
+        fn install_family_with_destination(
+            host: &Host<'_>,
+            family: &str,
+            destination: &Path,
+            parent: &Path,
+            data_home: &Path,
+        ) -> Result<()> {
+            fs::create_dir_all(parent).context("create Nerd Fonts destination directory")?;
             let archive = TempPath::new_with_suffix(host, "nerd-font", ".tar.xz")?;
             let mut url =
                 Url::parse("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/placeholder.tar.xz")?;
@@ -1705,7 +1324,7 @@ pub(crate) mod packages {
                 ["--list", "--xz", "--file", &archive.path().to_string_lossy()],
             )?;
             validate_archive_listing(&listing.stdout)?;
-            let stage = TempDir::new_in(&data_home, ".cozydot-font-stage")?;
+            let stage = TempDir::new_in(data_home, ".cozydot-font-stage")?;
             host.require(
                 "Nerd Font archive extraction",
                 "tar",
@@ -1719,21 +1338,14 @@ pub(crate) mod packages {
                 ],
             )?;
             validate_extracted_tree(stage.path())?;
-            let replacing = match fs::symlink_metadata(&destination) {
-                Ok(metadata) if metadata.file_type().is_dir() => true,
+            let replacing = match fs::symlink_metadata(destination) {
+                Ok(metadata) if metadata.is_dir() => true,
                 Ok(_) => bail!("Nerd Font destination conflict at {}", destination.display()),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                 Err(error) => return Err(error).context("inspect Nerd Font destination"),
             };
-            publish_family(stage.path(), &destination, replacing)?;
-            let postcondition = refresh_and_verify(host, family, stage.path(), &destination);
-            if let Err(error) = postcondition {
-                rollback_family(stage.path(), &destination, replacing)
-                    .with_context(|| format!("Nerd Font mutation failed and rollback failed: {error:#}"))?;
-                refresh_cache(host, "Nerd Font rollback cache refresh", &parent)
-                    .with_context(|| format!("Nerd Font mutation failed: {error:#}"))?;
-                return Err(error);
-            }
+            publish_family(stage.path(), destination, replacing)?;
+            sync_publication_directories(stage.path(), destination)?;
             Ok(())
         }
 
@@ -1745,30 +1357,6 @@ pub(crate) mod packages {
             };
             rustix::fs::renameat_with(rustix::fs::CWD, stage, rustix::fs::CWD, destination, flags)
                 .context("atomically publish Nerd Font family")
-        }
-
-        fn rollback_family(stage: &Path, destination: &Path, replacing: bool) -> Result<()> {
-            let flags = if replacing {
-                rustix::fs::RenameFlags::EXCHANGE
-            } else {
-                rustix::fs::RenameFlags::NOREPLACE
-            };
-            rustix::fs::renameat_with(rustix::fs::CWD, destination, rustix::fs::CWD, stage, flags)
-                .context("atomically restore previous Nerd Font family")?;
-            sync_publication_directories(stage, destination)
-        }
-
-        fn refresh_and_verify(host: &Host<'_>, family: &str, stage: &Path, destination: &Path) -> Result<()> {
-            sync_publication_directories(stage, destination)?;
-            refresh_cache(
-                host,
-                "Nerd Font cache refresh",
-                destination.parent().context("Nerd Font destination has no parent")?,
-            )?;
-            if !font_present(host, family)? {
-                bail!("Nerd Font mutation did not publish family {family:?}");
-            }
-            Ok(())
         }
 
         fn refresh_cache(host: &Host<'_>, operation: &str, directory: &Path) -> Result<()> {
@@ -1785,24 +1373,6 @@ pub(crate) mod packages {
             fs::File::open(destination_parent)?
                 .sync_all()
                 .context("sync Nerd Font destination directory")
-        }
-
-        fn font_present(host: &Host<'_>, family: &str) -> Result<bool> {
-            let expected = format!("{family} Nerd Font");
-            let pattern = format!(":family={expected}");
-            let output = host.require(
-                "Nerd Font state query",
-                "fc-list",
-                ["--format=%{family}\\n", "--", &pattern],
-            )?;
-            let output = std::str::from_utf8(&output.stdout).context("fc-list returned non-UTF-8 font state")?;
-            if output.chars().any(|character| character == '\r' || character == '\0') {
-                bail!("fc-list returned malformed font state");
-            }
-            Ok(output
-                .lines()
-                .flat_map(|line| line.split(','))
-                .any(|installed| installed == expected))
         }
 
         fn validate_archive_listing(output: &[u8]) -> Result<()> {

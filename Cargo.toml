@@ -15,7 +15,6 @@ unsafe_code = "forbid"
 anyhow = "1"
 clap = { version = "4.6", features = ["derive"] }
 humantime = "2"
-semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_path_to_error = "0.1"
 yaml_serde = "0.10"
