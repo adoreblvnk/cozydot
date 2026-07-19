@@ -1349,7 +1349,7 @@ impl ToolUpdates {
         if self.rust.is_some()
             && !tools
                 .and_then(|tools| tools.rust.as_deref())
-                .is_some_and(|value| matches!(value, "stable" | "beta" | "nightly"))
+                .is_some_and(rust_selector_is_moving)
         {
             bail!("updates.tools.rust: requires a configured moving Rust selector");
         }
@@ -1754,38 +1754,18 @@ fn validate_github_repository(value: &str, path: &str) -> Result<()> {
 }
 
 fn validate_rust_selector(value: &str, path: &str) -> Result<()> {
-    if matches!(value, "stable" | "beta" | "nightly") {
+    if value == "stable" {
         return Ok(());
     }
-    if let Some(date) = value.strip_prefix("nightly-") {
-        let parts = date.split('-').collect::<Vec<_>>();
-        if parts.len() == 3
-            && parts[0].len() == 4
-            && parts[1].len() == 2
-            && parts[2].len() == 2
-            && parts.iter().all(|part| part.bytes().all(|byte| byte.is_ascii_digit()))
-            && valid_calendar_date(&parts)
-        {
-            return Ok(());
-        }
+    validate_numeric_version(value, path, 2, 3)?;
+    if value.split('.').any(|part| part != "0" && part.starts_with('0')) {
+        bail!("{path}: invalid Rustup selector {value:?}; numeric components cannot have leading zeroes");
     }
-    validate_numeric_version(value, path, 2, 3)
+    Ok(())
 }
 
-fn valid_calendar_date(parts: &[&str]) -> bool {
-    let (Ok(year), Ok(month), Ok(day)) = (parts[0].parse::<u16>(), parts[1].parse::<u8>(), parts[2].parse::<u8>())
-    else {
-        return false;
-    };
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return false,
-    };
-    year != 0 && (1..=days).contains(&day)
+fn rust_selector_is_moving(value: &str) -> bool {
+    value == "stable" || value.split('.').count() == 2 && validate_numeric_version(value, "tools.rust", 2, 2).is_ok()
 }
 
 fn validate_numeric_version(value: &str, path: &str, min: usize, max: usize) -> Result<()> {
@@ -1915,6 +1895,31 @@ fn has_substitution(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::Config;
+
+    #[test]
+    fn rust_uses_native_stable_and_numeric_selectors() {
+        for selector in ["stable", "1.75", "1.75.0"] {
+            let yaml = format!("version: 1.0.0\ntools:\n  rust: {selector:?}\n");
+            Config::parse(&yaml).unwrap_or_else(|error| panic!("{selector} should be accepted: {error:#}"));
+        }
+        for selector in ["beta", "nightly", "nightly-2026-07-19", "1", "1.75.0.1", "01.75"] {
+            let yaml = format!("version: 1.0.0\ntools:\n  rust: {selector:?}\n");
+            assert!(Config::parse(&yaml).is_err(), "{selector} should be rejected");
+        }
+    }
+
+    #[test]
+    fn rust_updates_only_accept_moving_selectors() {
+        for selector in ["stable", "1.75"] {
+            let yaml = format!("version: 1.0.0\ntools:\n  rust: {selector:?}\nupdates:\n  tools:\n    rust: true\n");
+            Config::parse(&yaml).unwrap_or_else(|error| panic!("{selector} should be updateable: {error:#}"));
+        }
+        let pinned = "version: 1.0.0\ntools:\n  rust: \"1.75.0\"\nupdates:\n  tools:\n    rust: true\n";
+        assert!(
+            Config::parse(pinned).is_err(),
+            "an exact Rust release must remain pinned"
+        );
+    }
 
     #[test]
     fn desktop_idle_duration_uses_humantime_grammar() {

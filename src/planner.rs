@@ -773,12 +773,10 @@ fn plan_updates(
 }
 
 fn rust_selector_main(value: &str) -> RustToolchainSelector {
-    match value {
-        "stable" => RustToolchainSelector::Stable,
-        "beta" => RustToolchainSelector::Beta,
-        "nightly" => RustToolchainSelector::Nightly,
-        value if value.starts_with("nightly-") => RustToolchainSelector::DatedNightly(value.to_owned()),
-        value => RustToolchainSelector::Version(value.to_owned()),
+    if value == "stable" {
+        RustToolchainSelector::Stable
+    } else {
+        RustToolchainSelector::Version(value.to_owned())
     }
 }
 
