@@ -142,7 +142,7 @@ impl AptRepositoryOperation {
     }
 }
 
-pub(crate) fn execute(host: &Host<'_>, operation: &AptRepositoryOperation) -> Result<()> {
+pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result<()> {
     let keyring_path_str = operation.keyring_path.to_str().context("keyring path is not UTF-8")?;
     let use_armor = keyring_path_str.ends_with(".asc");
 
@@ -199,7 +199,7 @@ fn validate_canonical_url(url: &HttpsUrl, kind: &str) -> Result<()> {
     Ok(())
 }
 
-fn processed_key(host: &Host<'_>, url: &str, use_armor: bool) -> Result<Vec<u8>> {
+fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
     let downloaded = TempPath::new(host, "repository-key-download")?;
     host.require(
         "repository key download",
@@ -308,7 +308,7 @@ fn processed_key(host: &Host<'_>, url: &str, use_armor: bool) -> Result<Vec<u8>>
     Ok(bytes)
 }
 
-fn converge_owned_bytes(host: &Host<'_>, path: &Path, expected: &[u8], label: &str) -> Result<()> {
+fn converge_owned_bytes(host: &Host, path: &Path, expected: &[u8], label: &str) -> Result<()> {
     super::privileged_file::publish_bytes_with_policy(host, path, expected, &format!("{label} publication"), false)?;
     let final_bytes =
         inspect_owned_file(host, path, label)?.with_context(|| format!("{label} postcondition is missing"))?;
@@ -318,7 +318,7 @@ fn converge_owned_bytes(host: &Host<'_>, path: &Path, expected: &[u8], label: &s
     Ok(())
 }
 
-fn inspect_owned_file(host: &Host<'_>, path: &Path, label: &str) -> Result<Option<Vec<u8>>> {
+fn inspect_owned_file(host: &Host, path: &Path, label: &str) -> Result<Option<Vec<u8>>> {
     let path_arg = path.as_os_str();
     let absent = host
         .run(
@@ -459,7 +459,7 @@ pub(crate) mod managed_apt {
         replacement: Vec<u8>,
     }
 
-    pub(crate) fn execute(host: &Host<'_>, policy: &ManagedAptSources) -> Result<()> {
+    pub(crate) fn execute(host: &Host, policy: &ManagedAptSources) -> Result<()> {
         preflight_keyring(host, policy)?;
         let files = inspect_sources(host)?;
         let changes = reconcile(policy, &files)?;
@@ -485,7 +485,7 @@ pub(crate) mod managed_apt {
         Ok(())
     }
 
-    fn preflight_keyring(host: &Host<'_>, policy: &ManagedAptSources) -> Result<()> {
+    fn preflight_keyring(host: &Host, policy: &ManagedAptSources) -> Result<()> {
         let Some(keyring) = policy.stanzas.first().map(|stanza| stanza.signed_by.as_str()) else {
             bail!("managed APT policy has no source stanzas");
         };
@@ -513,7 +513,7 @@ pub(crate) mod managed_apt {
         Ok(())
     }
 
-    fn inspect_sources(host: &Host<'_>) -> Result<Vec<SourceFile>> {
+    fn inspect_sources(host: &Host) -> Result<Vec<SourceFile>> {
         for directory in [APT_ROOT, "/etc/apt/sources.list.d"] {
             host.require(
                 "managed APT source directory symlink check",
@@ -910,7 +910,7 @@ pub(crate) mod managed_apt {
         Ok(())
     }
 
-    fn backup(host: &Host<'_>, change: &SourceChange) -> Result<()> {
+    fn backup(host: &Host, change: &SourceChange) -> Result<()> {
         if !change.existed {
             return Ok(());
         }
@@ -933,7 +933,7 @@ pub(crate) mod managed_apt {
         )
     }
 
-    fn require_unchanged(host: &Host<'_>, change: &SourceChange) -> Result<()> {
+    fn require_unchanged(host: &Host, change: &SourceChange) -> Result<()> {
         if !change.existed {
             host.require(
                 "managed APT owned source absence check",

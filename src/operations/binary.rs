@@ -173,7 +173,7 @@ struct Downloaded {
     actual_sha256: String,
 }
 
-pub(crate) fn execute(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<()> {
+pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
     let appimage_expectation = if operation.format == BinaryPackageFormat::AppImage {
         let artifact = appimage::data_artifact(host, operation);
         let expectation = capture_publication_expectation(&artifact)?;
@@ -228,7 +228,7 @@ fn configured_checksum(source: &BinarySourceOperation) -> Option<String> {
     }
 }
 
-fn is_acceptable_live_state(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<bool> {
+fn is_acceptable_live_state(host: &Host, operation: &BinaryPackageOperation) -> Result<bool> {
     if operation.mode != BinaryPackageMode::EnsurePresent {
         return Ok(false);
     }
@@ -403,21 +403,21 @@ pub(crate) fn publish_executable(source: &Path, destination: &Path, expectation:
 mod appimage {
     use super::*;
 
-    pub(super) fn data_artifact(host: &Host<'_>, operation: &BinaryPackageOperation) -> PathBuf {
+    pub(super) fn data_artifact(host: &Host, operation: &BinaryPackageOperation) -> PathBuf {
         host.value("XDG_DATA_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| host.home().join(".local/share"))
             .join("cozydot/binaries")
             .join(format!("{}.AppImage", operation.name))
     }
-    pub(super) fn command_links(host: &Host<'_>, operation: &BinaryPackageOperation) -> Vec<PathBuf> {
+    pub(super) fn command_links(host: &Host, operation: &BinaryPackageOperation) -> Vec<PathBuf> {
         let root = host
             .value("XDG_BIN_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| host.home().join(".local/bin"));
         operation.commands.iter().map(|name| root.join(name)).collect()
     }
-    pub(super) fn preflight_appimage(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<()> {
+    pub(super) fn preflight_appimage(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
         let artifact = data_artifact(host, operation);
         ensure_secure_data_parent(host, &artifact)?;
         ensure_secure_command_root(host)?;
@@ -436,7 +436,7 @@ mod appimage {
         Ok(())
     }
     pub(super) fn install_appimage(
-        host: &Host<'_>,
+        host: &Host,
         operation: &BinaryPackageOperation,
         actual_sha256: &str,
         downloaded: &Downloaded,
@@ -456,7 +456,7 @@ mod appimage {
         verify_appimage(&artifact, &links, actual_sha256)?;
         Ok(())
     }
-    fn ensure_secure_data_parent(host: &Host<'_>, artifact: &Path) -> Result<()> {
+    fn ensure_secure_data_parent(host: &Host, artifact: &Path) -> Result<()> {
         let data = host
             .value("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -479,7 +479,7 @@ mod appimage {
         }
         Ok(())
     }
-    fn ensure_secure_command_root(host: &Host<'_>) -> Result<()> {
+    fn ensure_secure_command_root(host: &Host) -> Result<()> {
         let root = host
             .value("XDG_BIN_HOME")
             .map(PathBuf::from)
@@ -559,11 +559,7 @@ mod appimage {
             && has_elf_magic(path)
             && sha256_file(path)? == BinarySha256::parse(digest)?.0)
     }
-    pub(super) fn postconditions(
-        host: &Host<'_>,
-        operation: &BinaryPackageOperation,
-        actual_sha256: &str,
-    ) -> Result<bool> {
+    pub(super) fn postconditions(host: &Host, operation: &BinaryPackageOperation, actual_sha256: &str) -> Result<bool> {
         match operation.format {
             BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
             BinaryPackageFormat::AppImage => {
@@ -575,7 +571,7 @@ mod appimage {
             }
         }
     }
-    pub(super) fn verify_commands(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<()> {
+    pub(super) fn verify_commands(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
         let missing = operation
             .commands
             .iter()
@@ -586,7 +582,7 @@ mod appimage {
         }
         Ok(())
     }
-    pub(super) fn executable_on_path(host: &Host<'_>, name: &str) -> bool {
+    pub(super) fn executable_on_path(host: &Host, name: &str) -> bool {
         host.value("PATH")
             .and_then(|path| {
                 std::env::split_paths(&path).find(|dir| {
@@ -611,7 +607,7 @@ mod appimage {
 mod source {
     use super::*;
 
-    pub(super) fn resolve(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<Candidate> {
+    pub(super) fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<Candidate> {
         match &operation.source {
             BinarySourceOperation::ChecksummedUrl { url, sha256 } => Ok(Candidate {
                 url: url.clone(),
@@ -734,7 +730,7 @@ mod source {
         Ok(name)
     }
     pub(super) fn download_candidate(
-        host: &Host<'_>,
+        host: &Host,
         operation: &BinaryPackageOperation,
         candidate: Candidate,
     ) -> Result<Downloaded> {
@@ -780,7 +776,7 @@ mod source {
 use appimage::*;
 use source::*;
 
-fn install_deb(host: &Host<'_>, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
+fn install_deb(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
     let path = downloaded.temporary.path().as_os_str();
     host.require(
         "binary Debian install",
@@ -798,7 +794,7 @@ fn install_deb(host: &Host<'_>, operation: &BinaryPackageOperation, downloaded: 
     verify_commands(host, operation)
 }
 
-fn preflight_deb(host: &Host<'_>, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
+fn preflight_deb(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
     let path = downloaded.temporary.path().as_os_str();
     host.require(
         "binary Debian preflight",
@@ -957,7 +953,7 @@ pub(crate) mod cargo_binstall {
         sha256: String,
     }
 
-    pub(crate) fn execute(host: &Host<'_>, architecture: Architecture) -> Result<()> {
+    pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
         let cargo_home = host
             .value("CARGO_HOME")
             .map(PathBuf::from)
@@ -1034,7 +1030,7 @@ pub(crate) mod cargo_binstall {
         Ok(())
     }
 
-    fn resolve_release(host: &Host<'_>, architecture: Architecture) -> Result<Release> {
+    fn resolve_release(host: &Host, architecture: Architecture) -> Result<Release> {
         let target = target(architecture);
         let asset_name = format!("cargo-binstall-{target}.tgz");
         let output = host.require(
@@ -1118,7 +1114,7 @@ pub(crate) mod cargo_binstall {
         })
     }
 
-    fn valid_installed(host: &Host<'_>, path: &Path, tag: &str) -> Result<bool> {
+    fn valid_installed(host: &Host, path: &Path, tag: &str) -> Result<bool> {
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -1138,7 +1134,7 @@ pub(crate) mod cargo_binstall {
         Ok(parse_version_output(&output.stdout)? == tag.trim_start_matches('v'))
     }
 
-    fn verify_version(host: &Host<'_>, path: &Path, tag: &str) -> Result<()> {
+    fn verify_version(host: &Host, path: &Path, tag: &str) -> Result<()> {
         let program = path
             .to_str()
             .with_context(|| format!("cargo-binstall path is not UTF-8: {}", path.display()))?;

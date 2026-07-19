@@ -11,7 +11,7 @@ use super::{
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
 
-pub(crate) fn ensure_admin(host: &Host<'_>) -> Result<()> {
+pub(crate) fn ensure_admin(host: &Host) -> Result<()> {
     let (username, _) = effective_user(host)?;
     host.require(
         "administrative group membership",
@@ -21,7 +21,7 @@ pub(crate) fn ensure_admin(host: &Host<'_>) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn unattended_upgrades(host: &Host<'_>, enabled: bool) -> Result<()> {
+pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
     let contents = if enabled {
         b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n".as_slice()
     } else {
@@ -61,12 +61,12 @@ pub(crate) fn unattended_upgrades(host: &Host<'_>, enabled: bool) -> Result<()> 
     Ok(())
 }
 
-fn systemd_state(host: &Host<'_>, query: &str, unit: &str) -> Result<bool> {
+fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
     let output = host.run("systemctl", [query, unit])?;
     Ok(output.status.success())
 }
 
-pub(crate) fn ubuntu_snap(host: &Host<'_>, enabled: bool) -> Result<()> {
+pub(crate) fn ubuntu_snap(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
         host.require("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
         apt::packages(host, &["snapd".into()])?;
@@ -110,7 +110,7 @@ pub(crate) fn ubuntu_snap(host: &Host<'_>, enabled: bool) -> Result<()> {
     Ok(())
 }
 
-fn remove_snaps(host: &Host<'_>) -> Result<()> {
+fn remove_snaps(host: &Host) -> Result<()> {
     let output = host.run("snap", ["list"])?;
     if !output.status.success() {
         return Ok(());
@@ -142,7 +142,7 @@ fn valid_snap_name(name: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn effective_user(host: &Host<'_>) -> Result<(String, u32)> {
+fn effective_user(host: &Host) -> Result<(String, u32)> {
     let uid = rustix::process::geteuid().as_raw();
     let output = host.require("effective user query", "getent", ["passwd", &uid.to_string()])?;
     let record = one_record(&output.stdout, "getent passwd")?;
@@ -153,7 +153,7 @@ fn effective_user(host: &Host<'_>) -> Result<(String, u32)> {
     Ok((fields[0].to_owned(), uid))
 }
 
-fn group_exists(host: &Host<'_>, group: &str) -> Result<bool> {
+fn group_exists(host: &Host, group: &str) -> Result<bool> {
     let output = host.run("getent", ["group", group])?;
     match output.status.code() {
         Some(0) => Ok(true),
@@ -174,17 +174,16 @@ fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
 
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 
-pub(crate) fn docker_group(host: &Host<'_>) -> Result<()> {
+pub(crate) fn docker_group(host: &Host) -> Result<()> {
     ensure_product_group(host, Product::Docker)
 }
 
-pub(crate) fn virtualbox_group(host: &Host<'_>) -> Result<()> {
+pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
     ensure_product_group(host, Product::VirtualBox)
 }
 
-pub(crate) fn docker_local_log(host: &Host<'_>, max_size: Option<&str>) -> Result<()> {
+pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()> {
     preflight(host, Product::Docker)?;
-    let _lock = host.acquire_docker_lock()?;
     let current = read_daemon_config(host)?;
     let mut requested = current.clone();
     let object = requested
@@ -218,7 +217,7 @@ pub(crate) fn docker_local_log(host: &Host<'_>, max_size: Option<&str>) -> Resul
     Ok(())
 }
 
-pub(crate) fn vscode_extensions(host: &Host<'_>, extensions: &[String]) -> Result<()> {
+pub(crate) fn vscode_extensions(host: &Host, extensions: &[String]) -> Result<()> {
     preflight(host, Product::VsCode)?;
     for extension in extensions {
         host.require(
@@ -261,7 +260,7 @@ impl Product {
     }
 }
 
-fn preflight(host: &Host<'_>, product: Product) -> Result<()> {
+fn preflight(host: &Host, product: Product) -> Result<()> {
     let output = host
         .require(
             &format!("{} existing-product preflight", product.label()),
@@ -341,7 +340,7 @@ fn valid_token(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
 }
 
-fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
+fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
     let (username, _) = effective_user(host)?;
     preflight(host, product)?;
     let group = product.group().context("group integration requires a system group")?;
@@ -369,7 +368,7 @@ fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
     Ok(record)
 }
 
-fn read_daemon_config(host: &Host<'_>) -> Result<Value> {
+fn read_daemon_config(host: &Host) -> Result<Value> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
         host.require(
@@ -425,7 +424,7 @@ pub enum DesktopSetting {
     IdleDim(bool),
 }
 
-pub(crate) fn desktop_setting(host: &Host<'_>, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
+pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
     let prefix = match target {
         DesktopEnvironment::Gnome => "org.gnome",
         DesktopEnvironment::Cinnamon => "org.cinnamon",
@@ -463,7 +462,7 @@ pub(crate) fn desktop_setting(host: &Host<'_>, target: DesktopEnvironment, setti
     }
 }
 
-pub(crate) fn gnome_extensions(host: &Host<'_>, extensions: &[String]) -> Result<OperationOutcome> {
+pub(crate) fn gnome_extensions(host: &Host, extensions: &[String]) -> Result<OperationOutcome> {
     let mut outcome = OperationOutcome::Completed;
     for extension in extensions {
         if ensure_extension(host, extension)? == OperationOutcome::LoginRequired {
@@ -473,7 +472,7 @@ pub(crate) fn gnome_extensions(host: &Host<'_>, extensions: &[String]) -> Result
     Ok(outcome)
 }
 
-pub(crate) fn gnome_dock(host: &Host<'_>) -> Result<OperationOutcome> {
+pub(crate) fn gnome_dock(host: &Host) -> Result<OperationOutcome> {
     let outcome = ensure_extension(host, DASH_TO_DOCK_UUID)?;
     if outcome == OperationOutcome::LoginRequired {
         return Ok(outcome);
@@ -495,7 +494,7 @@ pub(crate) fn gnome_dock(host: &Host<'_>) -> Result<OperationOutcome> {
     Ok(OperationOutcome::Completed)
 }
 
-pub(crate) fn gnome_rounded_corners(host: &Host<'_>) -> Result<OperationOutcome> {
+pub(crate) fn gnome_rounded_corners(host: &Host) -> Result<OperationOutcome> {
     let outcome = ensure_extension(host, ROUNDED_CORNERS_UUID)?;
     if outcome == OperationOutcome::LoginRequired {
         return Ok(outcome);
@@ -509,7 +508,7 @@ pub(crate) fn gnome_rounded_corners(host: &Host<'_>) -> Result<OperationOutcome>
     Ok(OperationOutcome::Completed)
 }
 
-fn ensure_extension(host: &Host<'_>, extension: &str) -> Result<OperationOutcome> {
+fn ensure_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
     let installed = extension_state(host)?;
     let newly_installed = !installed.contains(extension);
     if newly_installed {
@@ -520,17 +519,17 @@ fn ensure_extension(host: &Host<'_>, extension: &str) -> Result<OperationOutcome
     Ok(OperationOutcome::Completed)
 }
 
-fn ensure_gsetting(host: &Host<'_>, schema: &str, key: &str, expected: &str) -> Result<()> {
+fn ensure_gsetting(host: &Host, schema: &str, key: &str, expected: &str) -> Result<()> {
     host.require("desktop setting mutation", "gsettings", ["set", schema, key, expected])?;
     Ok(())
 }
 
-fn ensure_dconf(host: &Host<'_>, key: &str, expected: &str) -> Result<()> {
+fn ensure_dconf(host: &Host, key: &str, expected: &str) -> Result<()> {
     host.require("GNOME dconf mutation", "dconf", ["write", key, expected])?;
     Ok(())
 }
 
-fn extension_state(host: &Host<'_>) -> Result<BTreeSet<String>> {
+fn extension_state(host: &Host) -> Result<BTreeSet<String>> {
     let output = host.require("GNOME extension state query", "gnome-extensions", ["list"])?;
     let output = std::str::from_utf8(&output.stdout).context("gnome-extensions returned non-UTF-8 state")?;
     let mut extensions = BTreeSet::new();
@@ -543,7 +542,7 @@ fn extension_state(host: &Host<'_>) -> Result<BTreeSet<String>> {
     Ok(extensions)
 }
 
-fn install_extension(host: &Host<'_>, extension: &str) -> Result<()> {
+fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.require("GNOME extension metadata", "curl", ["-fsSL", &endpoint])?;
     let shell = host.require("GNOME extension shell version", "gnome-shell", ["--version"])?;
@@ -569,7 +568,7 @@ fn install_extension(host: &Host<'_>, extension: &str) -> Result<()> {
     Ok(())
 }
 
-fn command_is_executable(host: &Host<'_>, executable: &str) -> bool {
+fn command_is_executable(host: &Host, executable: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     host.value("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|directory| {

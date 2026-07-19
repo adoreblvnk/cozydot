@@ -46,7 +46,7 @@ struct GoRelease {
 }
 
 pub(crate) fn execute_rust(
-    host: &Host<'_>,
+    host: &Host,
     selector: &RustToolchainSelector,
     architecture: Architecture,
     mode: ToolMutationMode,
@@ -80,7 +80,7 @@ pub(crate) fn execute_rust(
 }
 
 pub(crate) fn execute_go(
-    host: &Host<'_>,
+    host: &Host,
     selector: &GoToolchainSelector,
     architecture: Architecture,
     mode: ToolMutationMode,
@@ -204,7 +204,7 @@ pub(crate) fn execute_go(
 }
 
 pub(crate) fn execute_node(
-    host: &Host<'_>,
+    host: &Host,
     selector: &NodeToolchainSelector,
     _architecture: Architecture,
     mode: ToolMutationMode,
@@ -267,7 +267,7 @@ pub(crate) fn execute_node(
     Ok(())
 }
 
-pub(crate) fn execute_python(host: &Host<'_>, version: &str, architecture: Architecture) -> Result<()> {
+pub(crate) fn execute_python(host: &Host, version: &str, architecture: Architecture) -> Result<()> {
     let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
         .context("Python toolchain operation: uv is unavailable after bootstrap")?;
 
@@ -306,11 +306,7 @@ pub(crate) fn execute_python(host: &Host<'_>, version: &str, architecture: Archi
 mod resolution {
     use super::*;
 
-    pub(super) fn resolve_go_release(
-        host: &Host<'_>,
-        requested: &str,
-        architecture: Architecture,
-    ) -> Result<GoRelease> {
+    pub(super) fn resolve_go_release(host: &Host, requested: &str, architecture: Architecture) -> Result<GoRelease> {
         let metadata = host.require(
             "Go release resolution",
             "curl",
@@ -344,7 +340,7 @@ mod resolution {
     }
 
     pub(super) fn resolve_python_version(
-        host: &Host<'_>,
+        host: &Host,
         uv: &str,
         requested: &str,
         architecture: Architecture,
@@ -424,7 +420,7 @@ mod resolution {
 mod state {
     use super::*;
 
-    pub(super) fn inspect_rust(host: &Host<'_>, rustup: &str, toolchain: &str) -> Result<Option<RustState>> {
+    pub(super) fn inspect_rust(host: &Host, rustup: &str, toolchain: &str) -> Result<Option<RustState>> {
         let output = host.run(rustup, ["run", toolchain, "rustc", "--version", "--verbose"])?;
         if !output.status.success() {
             return Ok(None);
@@ -459,7 +455,7 @@ mod state {
         })
     }
 
-    pub(super) fn rust_default(host: &Host<'_>, rustup: &str) -> Result<Option<String>> {
+    pub(super) fn rust_default(host: &Host, rustup: &str) -> Result<Option<String>> {
         let output = host.run(rustup, ["default"])?;
         if !output.status.success() {
             return Ok(None);
@@ -483,7 +479,7 @@ mod state {
         pub(super) architecture: String,
     }
 
-    pub(super) fn inspect_go(host: &Host<'_>, program: &str) -> Result<Option<GoState>> {
+    pub(super) fn inspect_go(host: &Host, program: &str) -> Result<Option<GoState>> {
         if program.starts_with('/') && !executable_file(Path::new(program)) {
             return Ok(None);
         }
@@ -543,7 +539,7 @@ mod state {
         Ok(())
     }
 
-    pub(super) fn resolve_fnm(host: &Host<'_>) -> Result<String> {
+    pub(super) fn resolve_fnm(host: &Host) -> Result<String> {
         let data_home = host
             .value("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -558,7 +554,7 @@ mod state {
         bail!("Node toolchain operation: fnm is unavailable after bootstrap")
     }
 
-    pub(super) fn inspect_node(host: &Host<'_>, fnm: &str, selector: &str) -> Result<Option<String>> {
+    pub(super) fn inspect_node(host: &Host, fnm: &str, selector: &str) -> Result<Option<String>> {
         let output = host.run(fnm, ["exec", "--using", selector, "--", "node", "--version"])?;
         if !output.status.success() {
             return Ok(None);
@@ -566,7 +562,7 @@ mod state {
         parse_node_version(&output.stdout).map(Some)
     }
 
-    pub(super) fn resolve_node_version(host: &Host<'_>, fnm: &str, selector: &NodeToolchainSelector) -> Result<String> {
+    pub(super) fn resolve_node_version(host: &Host, fnm: &str, selector: &NodeToolchainSelector) -> Result<String> {
         if let NodeToolchainSelector::Version(version) = selector {
             if numeric_version(version, 3, 3) {
                 return Ok(format!("v{version}"));
@@ -608,7 +604,7 @@ mod state {
         Ok(format!("v{numeric}"))
     }
 
-    pub(super) fn fnm_default(host: &Host<'_>, fnm: &str) -> Result<Option<String>> {
+    pub(super) fn fnm_default(host: &Host, fnm: &str) -> Result<Option<String>> {
         let output = host.run(fnm, ["default"])?;
         if !output.status.success() {
             return Ok(None);
@@ -619,7 +615,7 @@ mod state {
         parse_node_version(&output.stdout).map(Some)
     }
 
-    pub(super) fn inspect_python(host: &Host<'_>, uv: &str, request: &str) -> Result<Option<String>> {
+    pub(super) fn inspect_python(host: &Host, uv: &str, request: &str) -> Result<Option<String>> {
         let output = host.run(
             uv,
             [
@@ -642,7 +638,7 @@ mod state {
     }
 
     pub(super) fn resolve_managed(
-        host: &Host<'_>,
+        host: &Host,
         directory_variable: &str,
         default_directory: &str,
         relative_program: &str,
