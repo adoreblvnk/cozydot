@@ -1,6 +1,6 @@
 # Rust rewrite
 
-cozydot is a Rust binary with one strict version `1.0.0` configuration. The implementation is split into CLI/config/platform planning and a small set of fixed-operation modules.
+cozydot is a Rust binary with one strict version `1.0.0` configuration. `main.rs` contains only CLI orchestration; `config.rs` owns the typed schema, strict parsing, and validation; `platform.rs`, `init.rs`, `planner.rs`, and `runner.rs` own their corresponding workflow stages; and `operations/` contains the closed operation enum and fixed executors.
 
 ## Compatibility
 
