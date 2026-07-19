@@ -1,16 +1,11 @@
 use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 use std::{
-    fs::File,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
-use super::{managed_state::ManagedState, Host, TempDir, TempPath};
-
-const TOOL_STATE_VERSION: u64 = 1;
-const RETIRED_RUST_SELECTOR_STATE_VERSION: u64 = 1;
+use super::{Host, TempDir, TempPath};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolMutationMode {
@@ -151,34 +146,6 @@ impl PythonToolchainOperation {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ToolKind {
-    Rust,
-    Go,
-    Node,
-    Python,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ToolStatus {
-    Pending,
-    Completed,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ToolRecord {
-    version: u64,
-    status: ToolStatus,
-    tool: ToolKind,
-    requested: String,
-    resolved: String,
-    release: String,
-    platform: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolResolution {
     resolved: String,
@@ -197,8 +164,6 @@ pub(crate) fn execute_rust(host: &Host<'_>, operation: &RustToolchainOperation) 
     let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
     let target = operation.architecture.rust_target();
-    let requested = rust_selector_name(&operation.selector);
-    let (state_store, lock, record) = read_tool_record(host, "rust", ToolKind::Rust)?;
     let refresh = operation.mode == ToolMutationMode::UpdateMoving && rust_selector_is_moving(&operation.selector);
     let toolchain = rust_toolchain_name(&operation.selector, target);
     let current = inspect_rust(host, &rustup, &toolchain)?;
@@ -221,19 +186,7 @@ pub(crate) fn execute_rust(host: &Host<'_>, operation: &RustToolchainOperation) 
     if rust_default(host, &rustup)?.as_deref() != Some(toolchain.as_str()) {
         bail!("Rust default toolchain mutation did not select {toolchain}");
     }
-    let resolution = ToolResolution {
-        resolved: state.release.clone(),
-        release: state.release,
-    };
-    publish_completed_record(
-        &state_store,
-        &lock,
-        record.as_ref(),
-        ToolKind::Rust,
-        requested,
-        &resolution,
-        target,
-    )
+    Ok(())
 }
 
 pub(crate) fn execute_go(host: &Host<'_>, operation: &GoToolchainOperation) -> Result<()> {
@@ -241,60 +194,40 @@ pub(crate) fn execute_go(host: &Host<'_>, operation: &GoToolchainOperation) -> R
         validate_numeric_version(version, 2, 3, "Go")?;
     }
     let expected_arch = operation.architecture.go();
-    let platform = operation.architecture.canonical();
+
+    let current = inspect_go(host, "/usr/local/go/bin/go")?;
+    if operation.mode == ToolMutationMode::EnsurePresent {
+        if let Some(state) = &current {
+            if state.architecture == expected_arch {
+                match &operation.selector {
+                    GoToolchainSelector::Latest => {
+                        return Ok(());
+                    }
+                    GoToolchainSelector::Version(requested) => {
+                        if version_matches(&state.version, requested) {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let requested = match &operation.selector {
         GoToolchainSelector::Latest => "latest",
         GoToolchainSelector::Version(version) => version,
     };
-    let (state_store, lock, record) = read_tool_record(host, "go", ToolKind::Go)?;
-    let refresh = operation.mode == ToolMutationMode::UpdateMoving && operation.selector == GoToolchainSelector::Latest;
-    let reusable = reusable_record(record.as_ref(), ToolKind::Go, requested, platform, refresh)?;
-    let mut release = None;
-    let resolution = match reusable {
-        Some(record) => ToolResolution {
-            resolved: record.resolved.clone(),
-            release: record.release.clone(),
-        },
-        None => {
-            let resolved = resolve_go_release(host, requested, operation.architecture)?;
-            let resolution = resolved.resolution.clone();
-            release = Some(resolved);
-            resolution
-        }
-    };
-    if reusable.is_none() {
-        publish_tool_record(
-            &state_store,
-            &lock,
-            ToolStatus::Pending,
-            ToolKind::Go,
-            requested,
-            &resolution,
-            platform,
-        )?;
-    }
-    let current = inspect_go(host, "/usr/local/go/bin/go")?;
+
+    let release = resolve_go_release(host, requested, operation.architecture)?;
+    let version = release.resolution.release.clone();
+
     if current
         .as_ref()
-        .is_some_and(|state| state.version == resolution.release && state.architecture == expected_arch)
+        .is_some_and(|state| state.version == version && state.architecture == expected_arch)
     {
-        return publish_completed_record(
-            &state_store,
-            &lock,
-            record.as_ref(),
-            ToolKind::Go,
-            requested,
-            &resolution,
-            platform,
-        );
+        return Ok(());
     }
-    let release = release
-        .map(Ok)
-        .unwrap_or_else(|| resolve_go_release(host, &resolution.resolved, operation.architecture))?;
-    if release.resolution != resolution {
-        bail!("Go release metadata changed for the pinned managed release");
-    }
-    let version = release.resolution.release;
+
     let filename = release.filename;
     let checksum = release.checksum;
     if checksum.len() != 64
@@ -375,15 +308,7 @@ pub(crate) fn execute_go(host: &Host<'_>, operation: &GoToolchainOperation) -> R
     if installed.version != version || installed.architecture != expected_arch {
         bail!("Go toolchain publication produced mismatched version or architecture");
     }
-    publish_completed_record(
-        &state_store,
-        &lock,
-        record.as_ref(),
-        ToolKind::Go,
-        requested,
-        &resolution,
-        platform,
-    )
+    Ok(())
 }
 
 pub(crate) fn execute_node(host: &Host<'_>, operation: &NodeToolchainOperation) -> Result<()> {
@@ -391,36 +316,38 @@ pub(crate) fn execute_node(host: &Host<'_>, operation: &NodeToolchainOperation) 
         validate_numeric_version(version, 1, 3, "Node")?;
     }
     let fnm = resolve_fnm(host)?;
-    let requested = node_selector_name(&operation.selector);
-    let platform = operation.architecture.canonical();
-    let (state_store, lock, record) = read_tool_record(host, "node", ToolKind::Node)?;
-    let refresh = operation.mode == ToolMutationMode::UpdateMoving
-        && !matches!(operation.selector, NodeToolchainSelector::Version(_));
-    let needs_pending = reusable_record(record.as_ref(), ToolKind::Node, requested, platform, refresh)?.is_none();
-    let resolution = select_resolution(record.as_ref(), ToolKind::Node, requested, platform, refresh, || {
-        resolve_node_version(host, &fnm, &operation.selector).map(|resolved| ToolResolution {
-            release: resolved.clone(),
-            resolved,
-        })
-    })?;
-    if needs_pending {
-        publish_tool_record(
-            &state_store,
-            &lock,
-            ToolStatus::Pending,
-            ToolKind::Node,
-            requested,
-            &resolution,
-            platform,
-        )?;
-    }
+
     let alias = node_alias(&operation.selector);
     let current = inspect_node(host, &fnm, &alias)?;
-    if current.as_deref() != Some(resolution.resolved.as_str()) {
+
+    if operation.mode == ToolMutationMode::EnsurePresent {
+        if let Some(version) = &current {
+            let accepted = match &operation.selector {
+                NodeToolchainSelector::Latest | NodeToolchainSelector::Lts => true,
+                NodeToolchainSelector::Version(requested) => {
+                    version_matches(version.trim_start_matches('v'), requested)
+                }
+            };
+            if accepted {
+                let default = fnm_default(host, &fnm)?;
+                if default.as_deref() != Some(version.as_str()) {
+                    host.require("Node default toolchain mutation", &fnm, ["default", version])?;
+                }
+                if fnm_default(host, &fnm)?.as_deref() != Some(version.as_str()) {
+                    bail!("Node default toolchain mutation did not select {}", version);
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    let resolved_version = resolve_node_version(host, &fnm, &operation.selector)?;
+
+    if current.as_deref() != Some(resolved_version.as_str()) {
         host.require(
             "Node toolchain mutation",
             &fnm,
-            ["install", &resolution.resolved, "--progress", "never"],
+            ["install", &resolved_version, "--progress", "never"],
         )?;
         if current.is_some() {
             host.require("Node toolchain alias replacement", &fnm, ["unalias", &alias])?;
@@ -428,63 +355,37 @@ pub(crate) fn execute_node(host: &Host<'_>, operation: &NodeToolchainOperation) 
         host.require(
             "Node toolchain alias publication",
             &fnm,
-            ["alias", &resolution.resolved, &alias],
+            ["alias", &resolved_version, &alias],
         )?;
     }
     let default = fnm_default(host, &fnm)?;
-    if default.as_deref() != Some(resolution.resolved.as_str()) {
-        host.require(
-            "Node default toolchain mutation",
-            &fnm,
-            ["default", &resolution.resolved],
-        )?;
+    if default.as_deref() != Some(resolved_version.as_str()) {
+        host.require("Node default toolchain mutation", &fnm, ["default", &resolved_version])?;
     }
     let installed = inspect_node(host, &fnm, &alias)?
         .context("Node toolchain mutation did not publish the managed selector alias")?;
-    if installed != resolution.release || installed != resolution.resolved {
+    if installed != resolved_version {
         bail!("Node toolchain mutation produced mismatched version state");
     }
-    if fnm_default(host, &fnm)?.as_deref() != Some(resolution.resolved.as_str()) {
-        bail!("Node default toolchain mutation did not select {}", resolution.resolved);
+    if fnm_default(host, &fnm)?.as_deref() != Some(resolved_version.as_str()) {
+        bail!("Node default toolchain mutation did not select {}", resolved_version);
     }
-    publish_completed_record(
-        &state_store,
-        &lock,
-        record.as_ref(),
-        ToolKind::Node,
-        requested,
-        &resolution,
-        platform,
-    )
+    Ok(())
 }
 
 pub(crate) fn execute_python(host: &Host<'_>, operation: &PythonToolchainOperation) -> Result<()> {
     validate_numeric_version(&operation.version, 2, 3, "Python")?;
     let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
         .context("Python toolchain operation: uv is unavailable after bootstrap")?;
-    let platform = operation.architecture.canonical();
-    let (state_store, lock, record) = read_tool_record(host, "python", ToolKind::Python)?;
-    let needs_pending =
-        reusable_record(record.as_ref(), ToolKind::Python, &operation.version, platform, false)?.is_none();
-    let resolution = select_resolution(
-        record.as_ref(),
-        ToolKind::Python,
-        &operation.version,
-        platform,
-        false,
-        || resolve_python_version(host, &uv, &operation.version, operation.architecture),
-    )?;
-    if needs_pending {
-        publish_tool_record(
-            &state_store,
-            &lock,
-            ToolStatus::Pending,
-            ToolKind::Python,
-            &operation.version,
-            &resolution,
-            platform,
-        )?;
+
+    if let Some(version) = inspect_python(host, &uv, &operation.version)? {
+        if version_matches(&version, &operation.version) {
+            return Ok(());
+        }
     }
+
+    let resolution = resolve_python_version(host, &uv, &operation.version, operation.architecture)?;
+
     let current = inspect_python(host, &uv, &resolution.resolved)?;
     if current.as_deref() != Some(resolution.release.as_str()) {
         host.require(
@@ -506,212 +407,7 @@ pub(crate) fn execute_python(host: &Host<'_>, operation: &PythonToolchainOperati
     if installed != resolution.release {
         bail!("Python toolchain mutation installed mismatched version {installed}");
     }
-    publish_completed_record(
-        &state_store,
-        &lock,
-        record.as_ref(),
-        ToolKind::Python,
-        &operation.version,
-        &resolution,
-        platform,
-    )
-}
-
-fn read_tool_record(
-    host: &Host<'_>,
-    stem: &str,
-    expected_tool: ToolKind,
-) -> Result<(ManagedState, File, Option<ToolRecord>)> {
-    let state = ManagedState::open(host, "tools", stem, "toolchain")?;
-    let lock = state.acquire_lock()?;
-    let record = state
-        .read()?
-        .map(|bytes| {
-            let record: ToolRecord =
-                super::managed_state::parse_strict_json(&bytes).context("parse strict toolchain managed record")?;
-            prepare_tool_record(record, expected_tool)
-        })
-        .transpose()?
-        .flatten();
-    state.validate_lock_entry(&lock)?;
-    Ok((state, lock, record))
-}
-
-fn prepare_tool_record(record: ToolRecord, expected_tool: ToolKind) -> Result<Option<ToolRecord>> {
-    if record.tool != expected_tool {
-        bail!("toolchain managed record has a mismatched tool identity");
-    }
-    // Retired selectors are never reused or interpreted. Ignoring a version-1
-    // Rust record lets the supported declaration replace old beta/nightly state.
-    if record.version == RETIRED_RUST_SELECTOR_STATE_VERSION
-        && record.tool == ToolKind::Rust
-        && (matches!(record.requested.as_str(), "beta" | "nightly") || record.requested.starts_with("nightly-"))
-    {
-        return Ok(None);
-    }
-    validate_tool_record(&record)?;
-    Ok(Some(record))
-}
-
-fn reusable_record<'a>(
-    record: Option<&'a ToolRecord>,
-    tool: ToolKind,
-    requested: &str,
-    platform: &str,
-    refresh: bool,
-) -> Result<Option<&'a ToolRecord>> {
-    let Some(record) = record else {
-        return Ok(None);
-    };
-    let matches = record.tool == tool && record.requested == requested && record.platform == platform;
-    Ok((matches && (record.status == ToolStatus::Pending || !refresh)).then_some(record))
-}
-
-fn select_resolution<F>(
-    record: Option<&ToolRecord>,
-    tool: ToolKind,
-    requested: &str,
-    platform: &str,
-    refresh: bool,
-    resolve: F,
-) -> Result<ToolResolution>
-where
-    F: FnOnce() -> Result<ToolResolution>,
-{
-    match reusable_record(record, tool, requested, platform, refresh)? {
-        Some(record) => Ok(ToolResolution {
-            resolved: record.resolved.clone(),
-            release: record.release.clone(),
-        }),
-        None => resolve(),
-    }
-}
-
-fn publish_tool_record(
-    state: &ManagedState,
-    lock: &File,
-    status: ToolStatus,
-    tool: ToolKind,
-    requested: &str,
-    resolution: &ToolResolution,
-    platform: &str,
-) -> Result<()> {
-    let record = ToolRecord {
-        version: TOOL_STATE_VERSION,
-        status,
-        tool,
-        requested: requested.into(),
-        resolved: resolution.resolved.clone(),
-        release: resolution.release.clone(),
-        platform: platform.into(),
-    };
-    validate_tool_record(&record)?;
-    state.validate_lock_entry(lock)?;
-    state.publish(&serde_json::to_vec(&record).context("serialize toolchain managed record")?)
-}
-
-fn publish_completed_record(
-    state: &ManagedState,
-    lock: &File,
-    existing: Option<&ToolRecord>,
-    tool: ToolKind,
-    requested: &str,
-    resolution: &ToolResolution,
-    platform: &str,
-) -> Result<()> {
-    let completed = ToolRecord {
-        version: TOOL_STATE_VERSION,
-        status: ToolStatus::Completed,
-        tool,
-        requested: requested.into(),
-        resolved: resolution.resolved.clone(),
-        release: resolution.release.clone(),
-        platform: platform.into(),
-    };
-    if existing == Some(&completed) {
-        return Ok(());
-    }
-    validate_tool_record(&completed)?;
-    state.validate_lock_entry(lock)?;
-    state.publish(&serde_json::to_vec(&completed).context("serialize toolchain managed record")?)
-}
-
-fn validate_tool_record(record: &ToolRecord) -> Result<()> {
-    if record.version != TOOL_STATE_VERSION {
-        bail!("unsupported toolchain managed record version {}", record.version);
-    }
-    match record.tool {
-        ToolKind::Rust => validate_rust_record(record),
-        ToolKind::Go => {
-            validate_canonical_architecture(&record.platform)?;
-            if record.requested != "latest" {
-                validate_numeric_version(&record.requested, 2, 3, "Go record")?;
-            }
-            validate_numeric_version(&record.resolved, 3, 3, "Go resolved record")?;
-            if record.release != record.resolved
-                || record.requested != "latest" && !version_matches(&record.resolved, &record.requested)
-            {
-                bail!("Go managed record does not match its declaration");
-            }
-            Ok(())
-        }
-        ToolKind::Node => {
-            validate_canonical_architecture(&record.platform)?;
-            if record.requested != "lts" && record.requested != "latest" {
-                validate_numeric_version(&record.requested, 1, 3, "Node record")?;
-            }
-            let numeric = record
-                .resolved
-                .strip_prefix('v')
-                .context("Node managed record resolved version must start with v")?;
-            validate_numeric_version(numeric, 3, 3, "Node resolved record")?;
-            if record.release != record.resolved
-                || record.requested != "lts"
-                    && record.requested != "latest"
-                    && !version_matches(numeric, &record.requested)
-            {
-                bail!("Node managed record does not match its declaration");
-            }
-            Ok(())
-        }
-        ToolKind::Python => {
-            validate_canonical_architecture(&record.platform)?;
-            validate_numeric_version(&record.requested, 2, 3, "Python record")?;
-            validate_numeric_version(&record.resolved, 3, 3, "Python resolved record")?;
-            if record.release != record.resolved || !version_matches(&record.resolved, &record.requested) {
-                bail!("Python managed record does not match its declaration");
-            }
-            Ok(())
-        }
-    }
-}
-
-fn validate_rust_record(record: &ToolRecord) -> Result<()> {
-    if !canonical_rust_target(&record.platform) || !numeric_release(&record.release) {
-        bail!("Rust managed record has an invalid target or release");
-    }
-    if record.requested != "stable" {
-        validate_numeric_version(&record.requested, 2, 3, "Rust record")?;
-    }
-    if record.resolved != record.release
-        || record.requested != "stable" && !version_matches(&record.release, &record.requested)
-    {
-        bail!("Rust managed record has a mismatched release");
-    }
     Ok(())
-}
-
-fn validate_canonical_architecture(value: &str) -> Result<()> {
-    if Architecture::normalize(value)?.canonical() != value {
-        bail!("toolchain managed record architecture is not canonical");
-    }
-    Ok(())
-}
-
-fn canonical_rust_target(value: &str) -> bool {
-    [Architecture::Amd64, Architecture::Arm64, Architecture::Arm32]
-        .iter()
-        .any(|architecture| architecture.rust_target() == value)
 }
 
 mod resolution {
