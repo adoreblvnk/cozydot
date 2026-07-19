@@ -14,4 +14,4 @@ The public workflow remains `install -> init -> edit cozydot.yaml -> apply`. Ver
 
 Docker, VirtualBox, and VS Code integrations configure existing products only. They do not implicitly install those products.
 
-The release target is Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` and `aarch64` hosts. Configuration uses the canonical selector keys `amd64` and `arm64`. Managed base APT sources are intentionally limited to pure Ubuntu, pure Debian, and Kali; derivatives preserve distro-owned sources.
+The release target is Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64`, `aarch64`, and 32-bit ARMv7 hosts. Configuration uses the canonical selector keys `amd64`, `arm64`, and `arm32`; other architectures are rejected. Managed base APT sources are intentionally limited to pure Ubuntu, pure Debian, and Kali; derivatives preserve distro-owned sources.

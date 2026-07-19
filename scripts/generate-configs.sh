@@ -72,8 +72,7 @@ generate_full() {
           "assets": {
             "amd64": "^fastfetch-linux-amd64\\.deb$",
             "arm64": "^fastfetch-linux-aarch64\\.deb$",
-            "arm32": "^fastfetch-linux-armv7l.*\\.deb$",
-            "riscv64": "^fastfetch-linux-riscv64.*\\.deb$"
+            "arm32": "^fastfetch-linux-armv7l.*\\.deb$"
           }
         }
       },
@@ -214,8 +213,7 @@ generate_vm() {
           "assets": {
             "amd64": "^fastfetch-linux-amd64\\.deb$",
             "arm64": "^fastfetch-linux-aarch64\\.deb$",
-            "arm32": "^fastfetch-linux-armv7l.*\\.deb$",
-            "riscv64": "^fastfetch-linux-riscv64.*\\.deb$"
+            "arm32": "^fastfetch-linux-armv7l.*\\.deb$"
           }
         }
       },

@@ -4,9 +4,9 @@ Cozydot is a Linux bootstrapper that provisions packages, development tools,
 dotfiles, integrations, desktop settings, and updates from one active YAML
 configuration.
 
-Released builds support Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64`
-and `aarch64`. The configuration parser recognizes some additional platform
-values for modeling purposes; those values are not released support targets.
+Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
+`aarch64` (`arm64`), and 32-bit ARMv7 (`arm32`). Other architectures are
+rejected.
 
 ## Install
 
@@ -16,9 +16,10 @@ On a supported host:
 curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh | bash
 ```
 
-The installer selects the `amd64` or `arm64` release, verifies its published
-SHA-256 file, requires the archive to contain exactly one regular `cozydot`
-entry, and atomically installs the binary in the configured install directory.
+The installer selects the `amd64`, `arm64`, or `arm32` release, verifies its
+published SHA-256 file, requires the archive to contain exactly one regular
+`cozydot` entry, and atomically installs the binary in the configured install
+directory.
 
 These environment variables override the defaults:
 

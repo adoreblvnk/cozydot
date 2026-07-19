@@ -1554,7 +1554,6 @@ pub(crate) mod cargo_binstall {
             Architecture::Amd64 => "x86_64-unknown-linux-musl",
             Architecture::Arm64 => "aarch64-unknown-linux-musl",
             Architecture::Arm32 => "armv7-unknown-linux-musleabihf",
-            Architecture::Riscv64 => "riscv64gc-unknown-linux-musl",
         }
     }
 

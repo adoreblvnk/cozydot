@@ -741,14 +741,9 @@ fn validate_canonical_architecture(value: &str) -> Result<()> {
 }
 
 fn canonical_rust_target(value: &str) -> bool {
-    [
-        Architecture::Amd64,
-        Architecture::Arm64,
-        Architecture::Arm32,
-        Architecture::Riscv64,
-    ]
-    .iter()
-    .any(|architecture| architecture.rust_target() == value)
+    [Architecture::Amd64, Architecture::Arm64, Architecture::Arm32]
+        .iter()
+        .any(|architecture| architecture.rust_target() == value)
 }
 
 mod resolution {
@@ -961,7 +956,6 @@ mod resolution {
             Architecture::Amd64 => "x86_64",
             Architecture::Arm64 => "aarch64",
             Architecture::Arm32 => "armv7",
-            Architecture::Riscv64 => "riscv64",
         };
         let mut matches = Vec::new();
         for (index, value) in entries.iter().enumerate() {
@@ -1101,10 +1095,7 @@ mod state {
         if fields.len() != 4
             || fields[0] != "go"
             || fields[1] != "version"
-            || fields[3] != "linux/amd64"
-                && fields[3] != "linux/arm64"
-                && fields[3] != "linux/arm"
-                && fields[3] != "linux/riscv64"
+            || fields[3] != "linux/amd64" && fields[3] != "linux/arm64" && fields[3] != "linux/arm"
         {
             bail!("go returned malformed version state");
         }

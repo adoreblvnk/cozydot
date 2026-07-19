@@ -11,3 +11,4 @@ cozydot aims to support these platforms:
 
 - x86_64
 - aarch64
+- ARMv7 (32-bit)

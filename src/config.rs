@@ -2,7 +2,6 @@ use crate::platform::{Architecture, Platform};
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::{de, Deserialize, Deserializer};
-use serde_yaml::Value;
 use std::{
     collections::{BTreeMap, HashSet},
     fmt, fs,
@@ -13,6 +12,7 @@ use yaml_rust2::{
     parser::{Event, MarkedEventReceiver, Parser},
     scanner::{Marker, Scanner, TokenType},
 };
+use yaml_serde::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigVersion;
@@ -51,7 +51,7 @@ impl Config {
     pub fn parse(text: &str) -> Result<Self> {
         reject_yaml_extensions(text)?;
         preflight_document(text)?;
-        let deserializer = serde_yaml::Deserializer::from_str(text);
+        let deserializer = yaml_serde::Deserializer::from_str(text);
         let config: Self = serde_path_to_error::deserialize(deserializer).map_err(|error| {
             let path = error.path().to_string();
             let path = if path == "." { "config" } else { path.as_str() };
@@ -111,25 +111,6 @@ impl Config {
             .enumerate()
         {
             repository.validate_for_platform(index, platform, distro, upstream)?;
-        }
-
-        for (index, binary) in self
-            .packages
-            .as_ref()
-            .and_then(|packages| packages.binaries.as_ref())
-            .into_iter()
-            .flatten()
-            .enumerate()
-        {
-            binary
-                .source
-                .require_architecture(platform.architecture)
-                .with_context(|| {
-                    format!(
-                        "packages.binaries[{index}].source.{}",
-                        platform.architecture.canonical()
-                    )
-                })?;
         }
 
         if let Some(configured) = &self.desktop {
@@ -855,30 +836,19 @@ impl BinarySource {
         }
     }
 
-    pub fn require_architecture(&self, architecture: Architecture) -> Result<()> {
-        self.resolve_native(architecture).map(|_| ())
-    }
-
     pub fn is_github(&self) -> bool {
         matches!(self, Self::Github { .. })
     }
 
-    pub fn resolve_native(&self, architecture: Architecture) -> Result<ResolvedNativeBinary<'_>> {
+    pub fn resolve_native(&self, architecture: Architecture) -> Option<ResolvedNativeBinary<'_>> {
         match self {
-            Self::Github { repository, assets } => Ok(ResolvedNativeBinary::Github {
-                repository,
-                selector: assets
-                    .get(architecture)
-                    .ok_or_else(|| anyhow::anyhow!("missing native architecture selector"))?,
-            }),
-            Self::Url { urls, sha256 } => Ok(ResolvedNativeBinary::Url {
-                url: urls
-                    .get(architecture)
-                    .ok_or_else(|| anyhow::anyhow!("missing native architecture selector"))?,
-                sha256: sha256
-                    .get(architecture)
-                    .ok_or_else(|| anyhow::anyhow!("missing native architecture selector"))?,
-            }),
+            Self::Github { repository, assets } => assets
+                .get(architecture)
+                .map(|selector| ResolvedNativeBinary::Github { repository, selector }),
+            Self::Url { urls, sha256 } => urls
+                .get(architecture)
+                .zip(sha256.get(architecture))
+                .map(|(url, sha256)| ResolvedNativeBinary::Url { url, sha256 }),
         }
     }
 }
@@ -894,7 +864,6 @@ pub struct AssetMap {
     pub amd64: Option<String>,
     pub arm64: Option<String>,
     pub arm32: Option<String>,
-    pub riscv64: Option<String>,
 }
 
 impl AssetMap {
@@ -910,12 +879,11 @@ impl AssetMap {
         Ok(())
     }
 
-    fn values(&self) -> [(&'static str, Option<&String>); 4] {
+    fn values(&self) -> [(&'static str, Option<&String>); 3] {
         [
             ("amd64", self.amd64.as_ref()),
             ("arm64", self.arm64.as_ref()),
             ("arm32", self.arm32.as_ref()),
-            ("riscv64", self.riscv64.as_ref()),
         ]
     }
 
@@ -924,7 +892,6 @@ impl AssetMap {
             Architecture::Amd64 => self.amd64.as_deref(),
             Architecture::Arm64 => self.arm64.as_deref(),
             Architecture::Arm32 => self.arm32.as_deref(),
-            Architecture::Riscv64 => self.riscv64.as_deref(),
         }
     }
 }
@@ -973,7 +940,6 @@ pub struct ArchitectureUrls {
     pub amd64: Option<HttpsUrl>,
     pub arm64: Option<HttpsUrl>,
     pub arm32: Option<HttpsUrl>,
-    pub riscv64: Option<HttpsUrl>,
 }
 
 impl ArchitectureUrls {
@@ -985,12 +951,7 @@ impl ArchitectureUrls {
     }
 
     fn keys(&self) -> Vec<Architecture> {
-        architecture_keys(
-            self.amd64.is_some(),
-            self.arm64.is_some(),
-            self.arm32.is_some(),
-            self.riscv64.is_some(),
-        )
+        architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
     fn get(&self, architecture: Architecture) -> Option<&HttpsUrl> {
@@ -998,7 +959,6 @@ impl ArchitectureUrls {
             Architecture::Amd64 => self.amd64.as_ref(),
             Architecture::Arm64 => self.arm64.as_ref(),
             Architecture::Arm32 => self.arm32.as_ref(),
-            Architecture::Riscv64 => self.riscv64.as_ref(),
         }
     }
 }
@@ -1009,7 +969,6 @@ pub struct ArchitectureHashes {
     pub amd64: Option<Sha256>,
     pub arm64: Option<Sha256>,
     pub arm32: Option<Sha256>,
-    pub riscv64: Option<Sha256>,
 }
 
 impl ArchitectureHashes {
@@ -1021,7 +980,6 @@ impl ArchitectureHashes {
             ("amd64", self.amd64.as_ref()),
             ("arm64", self.arm64.as_ref()),
             ("arm32", self.arm32.as_ref()),
-            ("riscv64", self.riscv64.as_ref()),
         ] {
             if let Some(hash) = hash {
                 hash.validate(&format!("{path}.{architecture}"))?;
@@ -1031,12 +989,7 @@ impl ArchitectureHashes {
     }
 
     fn keys(&self) -> Vec<Architecture> {
-        architecture_keys(
-            self.amd64.is_some(),
-            self.arm64.is_some(),
-            self.arm32.is_some(),
-            self.riscv64.is_some(),
-        )
+        architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
     fn get(&self, architecture: Architecture) -> Option<&Sha256> {
@@ -1044,17 +997,15 @@ impl ArchitectureHashes {
             Architecture::Amd64 => self.amd64.as_ref(),
             Architecture::Arm64 => self.arm64.as_ref(),
             Architecture::Arm32 => self.arm32.as_ref(),
-            Architecture::Riscv64 => self.riscv64.as_ref(),
         }
     }
 }
 
-fn architecture_keys(amd64: bool, arm64: bool, arm32: bool, riscv64: bool) -> Vec<Architecture> {
+fn architecture_keys(amd64: bool, arm64: bool, arm32: bool) -> Vec<Architecture> {
     [
         (Architecture::Amd64, amd64),
         (Architecture::Arm64, arm64),
         (Architecture::Arm32, arm32),
-        (Architecture::Riscv64, riscv64),
     ]
     .into_iter()
     .filter_map(|(architecture, present)| present.then_some(architecture))
@@ -1431,7 +1382,7 @@ impl PackageUpdates {
 }
 
 fn preflight_document(text: &str) -> Result<()> {
-    let value: Value = serde_yaml::from_str(text).context("parse YAML preflight")?;
+    let value: Value = yaml_serde::from_str(text).context("parse YAML preflight")?;
     let root = value
         .as_mapping()
         .ok_or_else(|| anyhow::anyhow!("config: expected a YAML mapping"))?;

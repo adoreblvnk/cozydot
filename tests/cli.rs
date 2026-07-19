@@ -87,3 +87,35 @@ fn canonical_init_and_dry_run_apply_succeeds() {
         .success()
         .stdout(predicate::str::contains("summary:"));
 }
+
+#[test]
+fn unsupported_architecture_selector_is_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: "1.0.0"
+packages:
+  binaries:
+    - name: unsupported
+      format: appimage
+      commands: [unsupported]
+      source:
+        provider: github
+        repository: example/unsupported
+        assets:
+          riscv64: ^unsupported$
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .arg("apply")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown field `riscv64`"));
+}

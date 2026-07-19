@@ -8,6 +8,7 @@ BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) ARCH=amd64 ;;
   Linux:aarch64 | Linux:arm64) ARCH=arm64 ;;
+  Linux:armv7 | Linux:armv7l | Linux:armhf) ARCH=arm32 ;;
   *) printf 'cozydot: unsupported platform\n' >&2; exit 1 ;;
 esac
 
