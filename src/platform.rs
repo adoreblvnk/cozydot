@@ -126,7 +126,6 @@ pub enum Architecture {
     Amd64,
     Arm64,
     Arm32,
-    Riscv64,
 }
 
 impl Architecture {
@@ -135,8 +134,7 @@ impl Architecture {
             "x86_64" | "amd64" => Ok(Self::Amd64),
             "aarch64" | "arm64" => Ok(Self::Arm64),
             "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
-            "riscv64" => Ok(Self::Riscv64),
-            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32, riscv64"),
+            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"),
         }
     }
 
@@ -145,7 +143,6 @@ impl Architecture {
             Self::Amd64 => "amd64",
             Self::Arm64 => "arm64",
             Self::Arm32 => "arm32",
-            Self::Riscv64 => "riscv64",
         }
     }
 
@@ -154,7 +151,6 @@ impl Architecture {
             Self::Amd64 => "amd64",
             Self::Arm64 => "arm64",
             Self::Arm32 => "armhf",
-            Self::Riscv64 => "riscv64",
         }
     }
 
@@ -163,7 +159,6 @@ impl Architecture {
             Self::Amd64 => "amd64",
             Self::Arm64 => "arm64",
             Self::Arm32 => "arm",
-            Self::Riscv64 => "riscv64",
         }
     }
 
@@ -179,7 +174,6 @@ impl Architecture {
             Self::Amd64 => "x86_64-unknown-linux-gnu",
             Self::Arm64 => "aarch64-unknown-linux-gnu",
             Self::Arm32 => "armv7-unknown-linux-gnueabihf",
-            Self::Riscv64 => "riscv64gc-unknown-linux-gnu",
         }
     }
 }
@@ -344,9 +338,6 @@ impl Platform {
                         release
                     );
                 }
-                if architecture == Architecture::Riscv64 && release != "trixie" {
-                    bail!("system.apt.sources: Debian {release} does not support architecture riscv64");
-                }
                 let keyring = "/usr/share/keyrings/debian-archive-keyring.gpg";
                 (
                     release.to_owned(),
@@ -364,19 +355,14 @@ impl Platform {
                     ],
                 )
             }
-            "kali" => {
-                if architecture == Architecture::Riscv64 {
-                    bail!("system.apt.sources: Kali rolling does not support architecture riscv64");
-                }
-                (
-                    "kali-rolling".into(),
-                    vec![ManagedAptStanza {
-                        uri: "https://http.kali.org/kali".into(),
-                        suites: vec!["kali-rolling".into()],
-                        signed_by: "/usr/share/keyrings/kali-archive-keyring.gpg".into(),
-                    }],
-                )
-            }
+            "kali" => (
+                "kali-rolling".into(),
+                vec![ManagedAptStanza {
+                    uri: "https://http.kali.org/kali".into(),
+                    suites: vec!["kali-rolling".into()],
+                    signed_by: "/usr/share/keyrings/kali-archive-keyring.gpg".into(),
+                }],
+            ),
             _ => unreachable!(),
         };
         Ok(ManagedAptSources {
@@ -502,4 +488,23 @@ pub fn read_system_os_release_from(etc_path: &Path, usr_path: &Path) -> Result<O
 
 fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
     os.get(key).map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Architecture;
+
+    #[test]
+    fn architecture_support_is_closed() {
+        for (input, expected) in [
+            ("x86_64", Architecture::Amd64),
+            ("aarch64", Architecture::Arm64),
+            ("armv7l", Architecture::Arm32),
+        ] {
+            assert_eq!(Architecture::normalize(input).unwrap(), expected);
+        }
+        for input in ["i686", "riscv64", "s390x"] {
+            assert!(Architecture::normalize(input).is_err());
+        }
+    }
 }

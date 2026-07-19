@@ -185,10 +185,12 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     }
 
     if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
-        prerequisites.insert("ca-certificates");
-        prerequisites.insert("curl");
         for binary in binaries {
-            let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)?;
+            let Some(planned) = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)? else {
+                continue;
+            };
+            prerequisites.insert("ca-certificates");
+            prerequisites.insert("curl");
             match binary.format {
                 BinaryFormat::Deb => {
                     prerequisites.insert("dpkg");
@@ -334,8 +336,11 @@ fn plan_binary(
     binary: &crate::config::BinaryPackage,
     architecture: Architecture,
     mode: BinaryPackageMode,
-) -> Result<BinaryPackageOperation> {
-    let source = match binary.source.resolve_native(architecture)? {
+) -> Result<Option<BinaryPackageOperation>> {
+    let Some(native) = binary.source.resolve_native(architecture) else {
+        return Ok(None);
+    };
+    let source = match native {
         ResolvedNativeBinary::Github { repository, selector } => BinarySourceOperation::GithubLatest {
             repository: GithubRepository::parse(repository.to_owned())?,
             selector: BinaryPackageSelector::new(selector.to_owned())?,
@@ -357,6 +362,7 @@ fn plan_binary(
         source,
         mode,
     )
+    .map(Some)
 }
 
 fn plan_system_states(
@@ -733,11 +739,12 @@ fn plan_updates(
             if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
                 for binary in binaries {
                     let is_github = matches!(
-                        binary.source.resolve_native(platform.architecture)?,
-                        ResolvedNativeBinary::Github { .. }
+                        binary.source.resolve_native(platform.architecture),
+                        Some(ResolvedNativeBinary::Github { .. })
                     );
                     if is_github {
-                        let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?;
+                        let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
+                            .expect("native GitHub source was resolved");
                         push_step(
                             phases,
                             ExecutionPhase::Updates,
@@ -812,4 +819,33 @@ fn duration_seconds(value: &str) -> Result<u32> {
         .checked_mul(multiplier)
         .and_then(|seconds| u32::try_from(seconds).ok())
         .context("desktop idle duration exceeds the supported uint32 range")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plan;
+    use crate::{config::Config, platform::Platform};
+    use std::path::Path;
+
+    #[test]
+    fn every_preset_plans_for_arm32() {
+        let platform = Platform::from_parts(
+            "debian".into(),
+            "debian".into(),
+            "bookworm".into(),
+            "gnome".into(),
+            "armv7l",
+        )
+        .unwrap();
+        for (name, yaml) in [
+            ("cozydot", include_str!("../configs/cozydot.yaml")),
+            ("full", include_str!("../configs/full.yaml")),
+            ("cli", include_str!("../configs/cli.yaml")),
+            ("vm", include_str!("../configs/vm.yaml")),
+        ] {
+            let config = Config::parse(yaml).unwrap_or_else(|error| panic!("{name} config failed: {error:#}"));
+            plan(&config, &platform, Path::new("/tmp/cozydot-arm32-test"))
+                .unwrap_or_else(|error| panic!("{name} ARM32 plan failed: {error:#}"));
+        }
+    }
 }

@@ -508,7 +508,7 @@ fn valid_vscode_version(value: &str) -> bool {
             .is_some_and(|commit| commit.len() >= 7 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()))
         && lines
             .next()
-            .is_some_and(|arch| matches!(arch, "x64" | "arm64" | "armhf" | "ia32"));
+            .is_some_and(|arch| matches!(arch, "x64" | "arm64" | "armhf"));
     valid && lines.next().is_none()
 }
 fn valid_version_token(value: &str) -> bool {
