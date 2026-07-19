@@ -181,3 +181,31 @@ packages:
         .failure()
         .stderr(predicate::str::contains("unknown field `riscv64`"));
 }
+
+#[test]
+fn noncanonical_tool_selectors_and_gnome_uuids_are_rejected() {
+    for (config, message) in [
+        (
+            "version: 1.0.0\ntools:\n  go: \"01.2\"\n",
+            "numeric components cannot have leading zeroes",
+        ),
+        (
+            "version: 1.0.0\ndesktop:\n  gnome:\n    extensions: [bad/uuid@example.com]\n",
+            "invalid GNOME extension UUID",
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("cozydot");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
+
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg("apply")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(message));
+    }
+}

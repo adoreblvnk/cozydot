@@ -20,72 +20,9 @@ pub enum RustToolchainSelector {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RustToolchainOperation {
-    selector: RustToolchainSelector,
-    architecture: Architecture,
-    mode: ToolMutationMode,
-}
-
-impl RustToolchainOperation {
-    pub fn new(selector: RustToolchainSelector, architecture: Architecture, mode: ToolMutationMode) -> Result<Self> {
-        validate_rust_selector(&selector)?;
-        if mode == ToolMutationMode::UpdateMoving && !rust_selector_is_moving(&selector) {
-            bail!("Rust toolchain updates require stable or a major.minor version channel");
-        }
-        Ok(Self {
-            selector,
-            architecture,
-            mode,
-        })
-    }
-
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        vec![
-            "rust-toolchain".into(),
-            mutation_name(self.mode).into(),
-            rust_selector_name(&self.selector).into(),
-            self.architecture.rust_target().into(),
-        ]
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
     Latest,
     Version(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GoToolchainOperation {
-    selector: GoToolchainSelector,
-    architecture: Architecture,
-    mode: ToolMutationMode,
-}
-
-impl GoToolchainOperation {
-    pub fn new(selector: GoToolchainSelector, architecture: Architecture, mode: ToolMutationMode) -> Result<Self> {
-        if let GoToolchainSelector::Version(version) = &selector {
-            validate_numeric_version(version, 2, 3, "Go")?;
-        }
-        Ok(Self {
-            selector,
-            architecture,
-            mode,
-        })
-    }
-
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        vec![
-            "go-toolchain".into(),
-            mutation_name(self.mode).into(),
-            match &self.selector {
-                GoToolchainSelector::Latest => "latest",
-                GoToolchainSelector::Version(version) => version,
-            }
-            .into(),
-            self.architecture.go_archive().into(),
-        ]
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,57 +30,6 @@ pub enum NodeToolchainSelector {
     Lts,
     Latest,
     Version(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NodeToolchainOperation {
-    selector: NodeToolchainSelector,
-    architecture: Architecture,
-    mode: ToolMutationMode,
-}
-
-impl NodeToolchainOperation {
-    pub fn new(selector: NodeToolchainSelector, architecture: Architecture, mode: ToolMutationMode) -> Result<Self> {
-        if let NodeToolchainSelector::Version(version) = &selector {
-            validate_numeric_version(version, 1, 3, "Node")?;
-        }
-        Ok(Self {
-            selector,
-            architecture,
-            mode,
-        })
-    }
-
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        vec![
-            "node-toolchain".into(),
-            mutation_name(self.mode).into(),
-            node_selector_name(&self.selector).into(),
-            self.architecture.canonical().into(),
-        ]
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PythonToolchainOperation {
-    version: String,
-    architecture: Architecture,
-}
-
-impl PythonToolchainOperation {
-    pub fn new(version: impl Into<String>, architecture: Architecture) -> Result<Self> {
-        let version = version.into();
-        validate_numeric_version(&version, 2, 3, "Python")?;
-        Ok(Self { version, architecture })
-    }
-
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        vec![
-            "python-toolchain".into(),
-            self.version.clone(),
-            self.architecture.canonical().into(),
-        ]
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -159,18 +45,22 @@ struct GoRelease {
     checksum: String,
 }
 
-pub(crate) fn execute_rust(host: &Host<'_>, operation: &RustToolchainOperation) -> Result<()> {
-    validate_rust_selector(&operation.selector).context("validate Rust toolchain operation")?;
+pub(crate) fn execute_rust(
+    host: &Host<'_>,
+    selector: &RustToolchainSelector,
+    architecture: Architecture,
+    mode: ToolMutationMode,
+) -> Result<()> {
     let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
-    let target = operation.architecture.rust_target();
-    let refresh = operation.mode == ToolMutationMode::UpdateMoving && rust_selector_is_moving(&operation.selector);
-    let toolchain = rust_toolchain_name(&operation.selector, target);
+    let target = architecture.rust_target();
+    let refresh = mode == ToolMutationMode::UpdateMoving && rust_selector_is_moving(selector);
+    let toolchain = rust_toolchain_name(selector, target);
     let current = inspect_rust(host, &rustup, &toolchain)?;
     if refresh
         || current
             .as_ref()
-            .is_none_or(|state| state.host != target || !rust_release_matches(&state.release, &operation.selector))
+            .is_none_or(|state| state.host != target || !rust_release_matches(&state.release, selector))
     {
         host.require("Rust toolchain mutation", &rustup, rust_install_args(&toolchain))?;
     }
@@ -180,7 +70,7 @@ pub(crate) fn execute_rust(host: &Host<'_>, operation: &RustToolchainOperation) 
     }
     let state = inspect_rust(host, &rustup, &toolchain)?
         .with_context(|| format!("Rust toolchain mutation did not install requested toolchain {toolchain}"))?;
-    if state.host != target || !rust_release_matches(&state.release, &operation.selector) {
+    if state.host != target || !rust_release_matches(&state.release, selector) {
         bail!("Rust toolchain mutation produced mismatched release or host state");
     }
     if rust_default(host, &rustup)?.as_deref() != Some(toolchain.as_str()) {
@@ -189,17 +79,19 @@ pub(crate) fn execute_rust(host: &Host<'_>, operation: &RustToolchainOperation) 
     Ok(())
 }
 
-pub(crate) fn execute_go(host: &Host<'_>, operation: &GoToolchainOperation) -> Result<()> {
-    if let GoToolchainSelector::Version(version) = &operation.selector {
-        validate_numeric_version(version, 2, 3, "Go")?;
-    }
-    let expected_arch = operation.architecture.go();
+pub(crate) fn execute_go(
+    host: &Host<'_>,
+    selector: &GoToolchainSelector,
+    architecture: Architecture,
+    mode: ToolMutationMode,
+) -> Result<()> {
+    let expected_arch = architecture.go();
 
     let current = inspect_go(host, "/usr/local/go/bin/go")?;
-    if operation.mode == ToolMutationMode::EnsurePresent {
+    if mode == ToolMutationMode::EnsurePresent {
         if let Some(state) = &current {
             if state.architecture == expected_arch {
-                match &operation.selector {
+                match selector {
                     GoToolchainSelector::Latest => {
                         return Ok(());
                     }
@@ -213,12 +105,12 @@ pub(crate) fn execute_go(host: &Host<'_>, operation: &GoToolchainOperation) -> R
         }
     }
 
-    let requested = match &operation.selector {
+    let requested = match selector {
         GoToolchainSelector::Latest => "latest",
         GoToolchainSelector::Version(version) => version,
     };
 
-    let release = resolve_go_release(host, requested, operation.architecture)?;
+    let release = resolve_go_release(host, requested, architecture)?;
     let version = release.resolution.release.clone();
 
     if current
@@ -311,18 +203,20 @@ pub(crate) fn execute_go(host: &Host<'_>, operation: &GoToolchainOperation) -> R
     Ok(())
 }
 
-pub(crate) fn execute_node(host: &Host<'_>, operation: &NodeToolchainOperation) -> Result<()> {
-    if let NodeToolchainSelector::Version(version) = &operation.selector {
-        validate_numeric_version(version, 1, 3, "Node")?;
-    }
+pub(crate) fn execute_node(
+    host: &Host<'_>,
+    selector: &NodeToolchainSelector,
+    _architecture: Architecture,
+    mode: ToolMutationMode,
+) -> Result<()> {
     let fnm = resolve_fnm(host)?;
 
-    let alias = node_alias(&operation.selector);
+    let alias = node_alias(selector);
     let current = inspect_node(host, &fnm, &alias)?;
 
-    if operation.mode == ToolMutationMode::EnsurePresent {
+    if mode == ToolMutationMode::EnsurePresent {
         if let Some(version) = &current {
-            let accepted = match &operation.selector {
+            let accepted = match selector {
                 NodeToolchainSelector::Latest | NodeToolchainSelector::Lts => true,
                 NodeToolchainSelector::Version(requested) => {
                     version_matches(version.trim_start_matches('v'), requested)
@@ -341,7 +235,7 @@ pub(crate) fn execute_node(host: &Host<'_>, operation: &NodeToolchainOperation) 
         }
     }
 
-    let resolved_version = resolve_node_version(host, &fnm, &operation.selector)?;
+    let resolved_version = resolve_node_version(host, &fnm, selector)?;
 
     if current.as_deref() != Some(resolved_version.as_str()) {
         host.require(
@@ -373,18 +267,17 @@ pub(crate) fn execute_node(host: &Host<'_>, operation: &NodeToolchainOperation) 
     Ok(())
 }
 
-pub(crate) fn execute_python(host: &Host<'_>, operation: &PythonToolchainOperation) -> Result<()> {
-    validate_numeric_version(&operation.version, 2, 3, "Python")?;
+pub(crate) fn execute_python(host: &Host<'_>, version: &str, architecture: Architecture) -> Result<()> {
     let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
         .context("Python toolchain operation: uv is unavailable after bootstrap")?;
 
-    if let Some(version) = inspect_python(host, &uv, &operation.version)? {
-        if version_matches(&version, &operation.version) {
+    if let Some(current_version) = inspect_python(host, &uv, version)? {
+        if version_matches(&current_version, version) {
             return Ok(());
         }
     }
 
-    let resolution = resolve_python_version(host, &uv, &operation.version, operation.architecture)?;
+    let resolution = resolve_python_version(host, &uv, version, architecture)?;
 
     let current = inspect_python(host, &uv, &resolution.resolved)?;
     if current.as_deref() != Some(resolution.release.as_str()) {
@@ -783,13 +676,6 @@ mod state {
 use resolution::*;
 use state::*;
 
-fn mutation_name(mode: ToolMutationMode) -> &'static str {
-    match mode {
-        ToolMutationMode::EnsurePresent => "ensure-present",
-        ToolMutationMode::UpdateMoving => "update-moving",
-    }
-}
-
 fn rust_selector_name(selector: &RustToolchainSelector) -> &str {
     match selector {
         RustToolchainSelector::Stable => "stable",
@@ -825,21 +711,6 @@ fn rust_release_matches(release: &str, selector: &RustToolchainSelector) -> bool
         }
 }
 
-fn validate_rust_selector(selector: &RustToolchainSelector) -> Result<()> {
-    match selector {
-        RustToolchainSelector::Stable => Ok(()),
-        RustToolchainSelector::Version(version) => validate_numeric_version(version, 2, 3, "Rust"),
-    }
-}
-
-fn node_selector_name(selector: &NodeToolchainSelector) -> &str {
-    match selector {
-        NodeToolchainSelector::Lts => "lts",
-        NodeToolchainSelector::Latest => "latest",
-        NodeToolchainSelector::Version(version) => version,
-    }
-}
-
 fn node_alias(selector: &NodeToolchainSelector) -> String {
     match selector {
         NodeToolchainSelector::Lts => "cozydot-lts".into(),
@@ -865,13 +736,6 @@ fn version_matches(actual: &str, requested: &str) -> bool {
     actual == requested || actual.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
 }
 
-fn validate_numeric_version(value: &str, min_parts: usize, max_parts: usize, tool: &str) -> Result<()> {
-    if !numeric_version(value, min_parts, max_parts) {
-        bail!("invalid {tool} version {value:?}; expected {min_parts} to {max_parts} numeric components");
-    }
-    Ok(())
-}
-
 fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {
     let parts = value.split('.').collect::<Vec<_>>();
     (min_parts..=max_parts).contains(&parts.len())
@@ -880,6 +744,13 @@ fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {
                 && part.bytes().all(|byte| byte.is_ascii_digit())
                 && (*part == "0" || !part.starts_with('0'))
         })
+}
+
+fn validate_numeric_version(value: &str, min_parts: usize, max_parts: usize, label: &str) -> Result<()> {
+    if !numeric_version(value, min_parts, max_parts) {
+        bail!("invalid {label} version {value:?}; expected {min_parts} to {max_parts} numeric components");
+    }
+    Ok(())
 }
 
 fn single_line<'a>(output: &'a [u8], command: &str) -> Result<&'a str> {

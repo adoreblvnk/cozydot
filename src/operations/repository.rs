@@ -143,8 +143,6 @@ impl AptRepositoryOperation {
 }
 
 pub(crate) fn execute(host: &Host<'_>, operation: &AptRepositoryOperation) -> Result<()> {
-    validate_operation(operation)?;
-
     let keyring_path_str = operation.keyring_path.to_str().context("keyring path is not UTF-8")?;
     let use_armor = keyring_path_str.ends_with(".asc");
 
@@ -154,21 +152,6 @@ pub(crate) fn execute(host: &Host<'_>, operation: &AptRepositoryOperation) -> Re
     converge_owned_bytes(host, &operation.keyring_path, &key, "APT repository key")?;
     converge_owned_bytes(host, &operation.source_list_path, &source, "APT repository source")?;
 
-    Ok(())
-}
-
-fn validate_operation(operation: &AptRepositoryOperation) -> Result<()> {
-    let rebuilt = AptRepositoryOperation::new(
-        operation.name.clone(),
-        operation.key_url.clone(),
-        operation.source_url.clone(),
-        operation.architecture,
-        operation.layout.clone(),
-        operation.keyring_path.clone(),
-    )?;
-    if rebuilt != *operation {
-        bail!("APT repository operation is not canonical");
-    }
     Ok(())
 }
 
@@ -447,7 +430,7 @@ fn validate_source_list_destination(destination: &Path, filename_stem: &str) -> 
 pub(crate) mod managed_apt {
 
     use super::super::{privileged_file, Host};
-    use crate::platform::{Architecture, ManagedAptSources, Platform};
+    use crate::platform::{Architecture, ManagedAptSources};
     use anyhow::{bail, Context, Result};
     use sha2::{Digest, Sha256};
     use std::{
@@ -461,27 +444,6 @@ pub(crate) mod managed_apt {
     const APT_ROOT: &str = "/etc/apt";
     const OWNED_SOURCE: &str = "/etc/apt/sources.list.d/cozydot-base.sources";
     const BACKUP_ROOT: &str = "/var/lib/cozydot/apt-source-backups";
-
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct ManagedAptSourcesOperation {
-        policy: ManagedAptSources,
-    }
-
-    impl ManagedAptSourcesOperation {
-        pub fn from_policy(policy: ManagedAptSources) -> Result<Self> {
-            validate_policy(&policy)?;
-            Ok(Self { policy })
-        }
-
-        pub(crate) fn display_args(&self) -> Vec<String> {
-            vec![
-                "managed-apt-sources".into(),
-                self.policy.distro.clone(),
-                self.policy.release.clone(),
-                self.policy.architecture.canonical().into(),
-            ]
-        }
-    }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct SourceFile {
@@ -497,11 +459,10 @@ pub(crate) mod managed_apt {
         replacement: Vec<u8>,
     }
 
-    pub(crate) fn execute(host: &Host<'_>, operation: &ManagedAptSourcesOperation) -> Result<()> {
-        validate_policy(&operation.policy)?;
-        preflight_keyring(host, &operation.policy)?;
+    pub(crate) fn execute(host: &Host<'_>, policy: &ManagedAptSources) -> Result<()> {
+        preflight_keyring(host, policy)?;
         let files = inspect_sources(host)?;
-        let changes = reconcile(&operation.policy, &files)?;
+        let changes = reconcile(policy, &files)?;
 
         for change in &changes {
             backup(host, change)?;
@@ -517,25 +478,9 @@ pub(crate) mod managed_apt {
             privileged_file::sync_parent(host, Path::new(OWNED_SOURCE), "managed APT publication")?;
         }
 
-        let remaining = reconcile(&operation.policy, &inspect_sources(host)?)?;
+        let remaining = reconcile(policy, &inspect_sources(host)?)?;
         if !remaining.is_empty() {
             bail!("managed APT publication did not establish the exact source postcondition");
-        }
-        Ok(())
-    }
-
-    fn validate_policy(policy: &ManagedAptSources) -> Result<()> {
-        let upstream = if policy.distro == "ubuntu" { "ubuntu" } else { "debian" };
-        let platform = Platform::from_parts(
-            policy.distro.clone(),
-            upstream.into(),
-            policy.release.clone(),
-            "none".into(),
-            policy.architecture.canonical(),
-        )?;
-        let component_refs = policy.components.iter().map(String::as_str).collect::<Vec<_>>();
-        if platform.managed_apt_sources(&component_refs)? != *policy {
-            bail!("managed APT operation policy is not canonical");
         }
         Ok(())
     }

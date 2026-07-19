@@ -160,28 +160,18 @@ mod system;
 mod tools;
 
 pub use apt::AptUpgradePolicy;
-pub use binary::cargo_binstall::CargoBinstallBootstrapOperation;
 pub use binary::{
     BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
     BinarySourceOperation, GithubRepository,
 };
-pub use packages::cargo::{CargoPackageMode, CargoPackageOperation};
-pub use packages::dotfiles::DotfilesOperation;
-pub use packages::fonts::{NerdFontsMode, NerdFontsOperation};
-pub use packages::npm::{NpmPackageMode, NpmPackageOperation};
-pub use repository::managed_apt::ManagedAptSourcesOperation;
+pub use packages::cargo::CargoPackageMode;
+pub use packages::fonts::NerdFontsMode;
+pub use packages::npm::NpmPackageMode;
 pub use repository::{AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken};
-pub use system::{
-    DesktopEnvironment, DesktopSetting, DesktopSettingOperation, DesktopTheme, GnomeDockOperation,
-    GnomeExtensionsOperation, GnomeRoundedCornersOperation,
-};
-pub use system::{DockerLocalLogOperation, VsCodeExtensionOperation};
-pub use system::{EnsureAdminOperation, UbuntuSnapOperation, UnattendedUpgradesOperation};
-pub use tools::{
-    GoToolchainOperation, GoToolchainSelector, NodeToolchainOperation, NodeToolchainSelector, PythonToolchainOperation,
-    RustToolchainOperation, RustToolchainSelector, ToolMutationMode,
-};
+pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
+pub use tools::{GoToolchainSelector, NodeToolchainSelector, RustToolchainSelector, ToolMutationMode};
 
+use crate::platform::{Architecture, ManagedAptSources};
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::{OsStr, OsString},
@@ -200,40 +190,94 @@ const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    AptBootstrapPackages { packages: Vec<String> },
+    AptBootstrapPackages {
+        packages: Vec<String>,
+    },
     AptMetadataRefresh,
     AptRepository(AptRepositoryOperation),
-    ManagedAptSources(ManagedAptSourcesOperation),
-    AptPackages { packages: Vec<String> },
-    AptPurge { packages: Vec<String> },
-    AptUpgrade { policy: AptUpgradePolicy },
+    ManagedAptSources(ManagedAptSources),
+    AptPackages {
+        packages: Vec<String>,
+    },
+    AptPurge {
+        packages: Vec<String>,
+    },
+    AptUpgrade {
+        policy: AptUpgradePolicy,
+    },
     DockerGroup,
-    DockerLocalLog(DockerLocalLogOperation),
-    DesktopSetting(DesktopSettingOperation),
+    DockerLocalLog {
+        max_size: Option<String>,
+    },
+    DesktopSetting {
+        target: DesktopEnvironment,
+        setting: DesktopSetting,
+    },
     BinaryPackage(BinaryPackageOperation),
-    Dotfiles(DotfilesOperation),
+    Dotfiles {
+        root: PathBuf,
+        packages: Vec<String>,
+    },
     FlatpakEnsureFlathub,
-    FlatpakEnsureApps { refs: Vec<String> },
-    FlatpakUpdateApps { refs: Vec<String> },
+    FlatpakEnsureApps {
+        refs: Vec<String>,
+    },
+    FlatpakUpdateApps {
+        refs: Vec<String>,
+    },
     FnmBootstrap,
-    EnsureAdmin(EnsureAdminOperation),
-    GnomeExtensions(GnomeExtensionsOperation),
-    GnomeDock(GnomeDockOperation),
-    GnomeRoundedCorners(GnomeRoundedCornersOperation),
-    GoToolchain(GoToolchainOperation),
-    NerdFonts(NerdFontsOperation),
+    EnsureAdmin,
+    GnomeExtensions {
+        extensions: Vec<String>,
+    },
+    GnomeDock,
+    GnomeRoundedCorners,
+    GoToolchain {
+        selector: GoToolchainSelector,
+        architecture: Architecture,
+        mode: ToolMutationMode,
+    },
+    NerdFonts {
+        families: Vec<String>,
+        mode: NerdFontsMode,
+    },
     RustupBootstrap,
-    CargoBinstallBootstrap(CargoBinstallBootstrapOperation),
-    RustToolchain(RustToolchainOperation),
-    CargoPackageSet(CargoPackageOperation),
-    NodeToolchain(NodeToolchainOperation),
-    NpmPackageSet(NpmPackageOperation),
-    UbuntuSnap(UbuntuSnapOperation),
-    UnattendedUpgrades(UnattendedUpgradesOperation),
+    CargoBinstallBootstrap {
+        architecture: Architecture,
+    },
+    RustToolchain {
+        selector: RustToolchainSelector,
+        architecture: Architecture,
+        mode: ToolMutationMode,
+    },
+    CargoPackageSet {
+        packages: Vec<String>,
+        mode: CargoPackageMode,
+    },
+    NodeToolchain {
+        selector: NodeToolchainSelector,
+        architecture: Architecture,
+        mode: ToolMutationMode,
+    },
+    NpmPackageSet {
+        packages: Vec<String>,
+        mode: NpmPackageMode,
+    },
+    UbuntuSnap {
+        enabled: bool,
+    },
+    UnattendedUpgrades {
+        enabled: bool,
+    },
     UvBootstrap,
-    PythonToolchain(PythonToolchainOperation),
+    PythonToolchain {
+        version: String,
+        architecture: Architecture,
+    },
     VirtualBoxGroup,
-    VsCodeExtensionSet(VsCodeExtensionOperation),
+    VsCodeExtensionSet {
+        extensions: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,7 +294,12 @@ impl Operation {
                 .collect(),
             Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
             Self::AptRepository(operation) => operation.display_args(),
-            Self::ManagedAptSources(operation) => operation.display_args(),
+            Self::ManagedAptSources(policy) => vec![
+                "managed-apt-sources".into(),
+                policy.distro.clone(),
+                policy.release.clone(),
+                policy.architecture.canonical().into(),
+            ],
             Self::AptPackages { packages } => std::iter::once("apt-packages".into()).chain(packages.clone()).collect(),
             Self::AptPurge { packages } => std::iter::once("apt-purge".into()).chain(packages.clone()).collect(),
             Self::AptUpgrade { policy } => vec![
@@ -262,10 +311,27 @@ impl Operation {
                 .into(),
             ],
             Self::DockerGroup => vec!["docker-group".into()],
-            Self::DockerLocalLog(operation) => operation.display_args(),
-            Self::DesktopSetting(operation) => operation.display_args(),
+            Self::DockerLocalLog { max_size } => std::iter::once("docker-local-log".into())
+                .chain(max_size.iter().cloned())
+                .collect(),
+            Self::DesktopSetting { target, setting } => {
+                let target_str = match target {
+                    DesktopEnvironment::Gnome => "gnome",
+                    DesktopEnvironment::Cinnamon => "cinnamon",
+                };
+                let (name, value) = match setting {
+                    DesktopSetting::Theme(DesktopTheme::Light) => ("theme", "light".into()),
+                    DesktopSetting::Theme(DesktopTheme::Dark) => ("theme", "dark".into()),
+                    DesktopSetting::Terminal(executable) => ("terminal", executable.clone()),
+                    DesktopSetting::IdleTimeoutSeconds(seconds) => ("idle-timeout-seconds", seconds.to_string()),
+                    DesktopSetting::IdleDim(enabled) => ("idle-dim", enabled.to_string()),
+                };
+                vec!["desktop-setting".into(), target_str.into(), name.into(), value]
+            }
             Self::BinaryPackage(package) => package.display_args(),
-            Self::Dotfiles(operation) => operation.display_args(),
+            Self::Dotfiles { packages, .. } => std::iter::once("dotfiles-backup-stow".into())
+                .chain(packages.iter().cloned())
+                .collect(),
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
             Self::FlatpakEnsureApps { refs } => std::iter::once("flatpak-ensure-apps".into())
                 .chain(refs.clone())
@@ -274,24 +340,113 @@ impl Operation {
                 .chain(refs.clone())
                 .collect(),
             Self::FnmBootstrap => vec!["fnm-bootstrap".into()],
-            Self::EnsureAdmin(operation) => operation.display_args(),
-            Self::GnomeExtensions(operation) => operation.display_args(),
-            Self::GnomeDock(operation) => operation.display_args(),
-            Self::GnomeRoundedCorners(operation) => operation.display_args(),
-            Self::GoToolchain(operation) => operation.display_args(),
-            Self::NerdFonts(operation) => operation.display_args(),
+            Self::EnsureAdmin => vec!["ensure-admin".into()],
+            Self::GnomeExtensions { extensions } => std::iter::once("gnome-extensions".into())
+                .chain(extensions.iter().cloned())
+                .collect(),
+            Self::GnomeDock => vec!["gnome-dock".into()],
+            Self::GnomeRoundedCorners => vec!["gnome-rounded-corners".into()],
+            Self::GoToolchain {
+                selector,
+                architecture,
+                mode,
+            } => vec![
+                "go-toolchain".into(),
+                match mode {
+                    ToolMutationMode::EnsurePresent => "ensure-present",
+                    ToolMutationMode::UpdateMoving => "update-moving",
+                }
+                .into(),
+                match selector {
+                    GoToolchainSelector::Latest => "latest",
+                    GoToolchainSelector::Version(v) => v,
+                }
+                .into(),
+                architecture.go_archive().into(),
+            ],
+            Self::NerdFonts { families, mode } => [
+                "nerd-fonts".into(),
+                match mode {
+                    NerdFontsMode::EnsurePresent => "ensure-present".into(),
+                    NerdFontsMode::Update => "update".into(),
+                },
+            ]
+            .into_iter()
+            .chain(families.iter().cloned())
+            .collect(),
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
-            Self::CargoBinstallBootstrap(operation) => operation.display_args(),
-            Self::RustToolchain(operation) => operation.display_args(),
-            Self::CargoPackageSet(operation) => operation.display_args(),
-            Self::NodeToolchain(operation) => operation.display_args(),
-            Self::NpmPackageSet(operation) => operation.display_args(),
-            Self::UbuntuSnap(operation) => operation.display_args(),
-            Self::UnattendedUpgrades(operation) => operation.display_args(),
+            Self::CargoBinstallBootstrap { architecture } => {
+                vec!["cargo-binstall-bootstrap".into(), architecture.canonical().into()]
+            }
+            Self::RustToolchain {
+                selector,
+                architecture,
+                mode,
+            } => vec![
+                "rust-toolchain".into(),
+                match mode {
+                    ToolMutationMode::EnsurePresent => "ensure-present",
+                    ToolMutationMode::UpdateMoving => "update-moving",
+                }
+                .into(),
+                match selector {
+                    RustToolchainSelector::Stable => "stable",
+                    RustToolchainSelector::Version(v) => v,
+                }
+                .into(),
+                architecture.rust_target().into(),
+            ],
+            Self::CargoPackageSet { packages, mode } => std::iter::once("cargo-package-set".into())
+                .chain(std::iter::once(
+                    match mode {
+                        CargoPackageMode::EnsurePresent => "ensure-present",
+                        CargoPackageMode::UpdateCurrent => "update-current",
+                    }
+                    .into(),
+                ))
+                .chain(packages.iter().cloned())
+                .collect(),
+            Self::NodeToolchain {
+                selector,
+                architecture,
+                mode,
+            } => vec![
+                "node-toolchain".into(),
+                match mode {
+                    ToolMutationMode::EnsurePresent => "ensure-present",
+                    ToolMutationMode::UpdateMoving => "update-moving",
+                }
+                .into(),
+                match selector {
+                    NodeToolchainSelector::Lts => "lts",
+                    NodeToolchainSelector::Latest => "latest",
+                    NodeToolchainSelector::Version(v) => v,
+                }
+                .into(),
+                architecture.canonical().into(),
+            ],
+            Self::NpmPackageSet { packages, mode } => std::iter::once("npm-package-set".into())
+                .chain(std::iter::once(
+                    match mode {
+                        NpmPackageMode::EnsurePresent => "ensure-present",
+                        NpmPackageMode::UpdateCurrent => "update-current",
+                    }
+                    .into(),
+                ))
+                .chain(packages.iter().cloned())
+                .collect(),
+            Self::UbuntuSnap { enabled } => vec!["ubuntu-snap".into(), enabled.to_string()],
+            Self::UnattendedUpgrades { enabled } => vec!["unattended-upgrades".into(), enabled.to_string()],
             Self::UvBootstrap => vec!["uv-bootstrap".into()],
-            Self::PythonToolchain(operation) => operation.display_args(),
+            Self::PythonToolchain { version, architecture } => vec![
+                "python-toolchain".into(),
+                version.clone(),
+                architecture.canonical().into(),
+            ],
             Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
-            Self::VsCodeExtensionSet(operation) => operation.display_args(),
+            Self::VsCodeExtensionSet { extensions } => std::iter::once("vscode-extension-set".into())
+                .chain(extensions.iter().cloned())
+                .collect(),
         }
     }
 }
@@ -305,37 +460,53 @@ fn execute_on_host(operation: &Operation, host: Host<'_>) -> Result<OperationOut
         Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
         Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
-        Operation::ManagedAptSources(operation) => completed(repository::managed_apt::execute(&host, operation)),
+        Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptPurge { packages } => completed(apt::purge(&host, packages)),
         Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
         Operation::DockerGroup => completed(system::docker_group(&host)),
-        Operation::DockerLocalLog(operation) => completed(system::docker_local_log(&host, operation)),
-        Operation::DesktopSetting(operation) => completed(system::desktop_setting(&host, operation)),
+        Operation::DockerLocalLog { max_size } => completed(system::docker_local_log(&host, max_size.as_deref())),
+        Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
         Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
-        Operation::Dotfiles(operation) => completed(packages::dotfiles::execute(&host, operation)),
+        Operation::Dotfiles { root, packages } => completed(packages::dotfiles::execute(&host, root, packages)),
         Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
         Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
         Operation::FlatpakUpdateApps { refs } => completed(packages::flatpak::update_apps(&host, refs)),
         Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
-        Operation::EnsureAdmin(operation) => completed(system::ensure_admin(&host, operation)),
-        Operation::GnomeExtensions(operation) => system::gnome_extensions(&host, operation),
-        Operation::GnomeDock(operation) => system::gnome_dock(&host, operation),
-        Operation::GnomeRoundedCorners(operation) => system::gnome_rounded_corners(&host, operation),
-        Operation::GoToolchain(operation) => completed(tools::execute_go(&host, operation)),
-        Operation::NerdFonts(operation) => completed(packages::fonts::execute(&host, operation)),
+        Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
+        Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
+        Operation::GnomeDock => system::gnome_dock(&host),
+        Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
+        Operation::GoToolchain {
+            selector,
+            architecture,
+            mode,
+        } => completed(tools::execute_go(&host, selector, *architecture, *mode)),
+        Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
-        Operation::CargoBinstallBootstrap(operation) => completed(binary::cargo_binstall::execute(&host, operation)),
-        Operation::RustToolchain(operation) => completed(tools::execute_rust(&host, operation)),
-        Operation::CargoPackageSet(operation) => completed(packages::cargo::execute(&host, operation)),
-        Operation::NodeToolchain(operation) => completed(tools::execute_node(&host, operation)),
-        Operation::NpmPackageSet(operation) => completed(packages::npm::execute(&host, operation)),
-        Operation::UbuntuSnap(operation) => completed(system::ubuntu_snap(&host, operation)),
-        Operation::UnattendedUpgrades(operation) => completed(system::unattended_upgrades(&host, operation)),
+        Operation::CargoBinstallBootstrap { architecture } => {
+            completed(binary::cargo_binstall::execute(&host, *architecture))
+        }
+        Operation::RustToolchain {
+            selector,
+            architecture,
+            mode,
+        } => completed(tools::execute_rust(&host, selector, *architecture, *mode)),
+        Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
+        Operation::NodeToolchain {
+            selector,
+            architecture,
+            mode,
+        } => completed(tools::execute_node(&host, selector, *architecture, *mode)),
+        Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
+        Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
+        Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
         Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::PythonToolchain(operation) => completed(tools::execute_python(&host, operation)),
+        Operation::PythonToolchain { version, architecture } => {
+            completed(tools::execute_python(&host, version, *architecture))
+        }
         Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
-        Operation::VsCodeExtensionSet(operation) => completed(system::vscode_extensions(&host, operation)),
+        Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
     }
 }
 
@@ -842,7 +1013,6 @@ pub(crate) mod packages {
     pub(crate) mod cargo {
         use anyhow::{bail, Context, Result};
         use std::{
-            collections::BTreeSet,
             os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
         };
@@ -855,34 +1025,7 @@ pub(crate) mod packages {
             UpdateCurrent,
         }
 
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct CargoPackageOperation {
-            packages: Vec<String>,
-            mode: CargoPackageMode,
-        }
-
-        impl CargoPackageOperation {
-            pub fn new(packages: Vec<String>, mode: CargoPackageMode) -> Result<Self> {
-                validate_packages(&packages)?;
-                Ok(Self { packages, mode })
-            }
-
-            pub(crate) fn display_args(&self) -> Vec<String> {
-                std::iter::once("cargo-package-set".into())
-                    .chain(std::iter::once(
-                        match self.mode {
-                            CargoPackageMode::EnsurePresent => "ensure-present",
-                            CargoPackageMode::UpdateCurrent => "update-current",
-                        }
-                        .into(),
-                    ))
-                    .chain(self.packages.iter().cloned())
-                    .collect()
-            }
-        }
-
-        pub(crate) fn execute(host: &Host<'_>, operation: &CargoPackageOperation) -> Result<()> {
-            validate_packages(&operation.packages).context("validate Cargo package operation")?;
+        pub(crate) fn execute(host: &Host<'_>, packages: &[String], mode: CargoPackageMode) -> Result<()> {
             let cargo_home = host
                 .value("CARGO_HOME")
                 .map(PathBuf::from)
@@ -893,10 +1036,10 @@ pub(crate) mod packages {
             let binstall = resolve_binstall(&cargo_home)?
                 .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
             let mut args = vec!["--no-confirm".to_owned()];
-            if operation.mode == CargoPackageMode::UpdateCurrent {
+            if mode == CargoPackageMode::UpdateCurrent {
                 args.push("--force".into());
             }
-            args.extend(operation.packages.clone());
+            args.extend(packages.to_vec());
             host.require("Cargo package mutation", &binstall, args)?;
             Ok(())
         }
@@ -907,30 +1050,6 @@ pub(crate) mod packages {
                 return path_program(&managed, "cargo-binstall executable path").map(Some);
             }
             Ok(None)
-        }
-
-        fn validate_packages(packages: &[String]) -> Result<()> {
-            if packages.is_empty() {
-                bail!("Cargo package sequence must not be empty");
-            }
-            let mut seen = BTreeSet::new();
-            for package in packages {
-                validate_package(package)?;
-                if !seen.insert(package.as_str()) {
-                    bail!("duplicate Cargo package name: {package:?}");
-                }
-            }
-            Ok(())
-        }
-
-        fn validate_package(package: &str) -> Result<()> {
-            let mut bytes = package.bytes();
-            let valid = bytes.next().is_some_and(|byte| byte.is_ascii_alphanumeric())
-                && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
-            if !valid {
-                bail!("invalid unversioned Cargo package name: {package:?}");
-            }
-            Ok(())
         }
 
         fn executable_file(path: &Path) -> bool {
@@ -948,7 +1067,6 @@ pub(crate) mod packages {
     pub(crate) mod npm {
         use anyhow::{bail, Context, Result};
         use std::{
-            collections::BTreeSet,
             os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
         };
@@ -961,43 +1079,16 @@ pub(crate) mod packages {
             UpdateCurrent,
         }
 
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct NpmPackageOperation {
-            packages: Vec<String>,
-            mode: NpmPackageMode,
-        }
-
-        impl NpmPackageOperation {
-            pub fn new(packages: Vec<String>, mode: NpmPackageMode) -> Result<Self> {
-                validate_packages(&packages)?;
-                Ok(Self { packages, mode })
-            }
-
-            pub(crate) fn display_args(&self) -> Vec<String> {
-                std::iter::once("npm-package-set".into())
-                    .chain(std::iter::once(
-                        match self.mode {
-                            NpmPackageMode::EnsurePresent => "ensure-present",
-                            NpmPackageMode::UpdateCurrent => "update-current",
-                        }
-                        .into(),
-                    ))
-                    .chain(self.packages.iter().cloned())
-                    .collect()
-            }
-        }
-
-        pub(crate) fn execute(host: &Host<'_>, operation: &NpmPackageOperation) -> Result<()> {
-            validate_packages(&operation.packages).context("validate npm package operation")?;
+        pub(crate) fn execute(host: &Host<'_>, packages: &[String], mode: NpmPackageMode) -> Result<()> {
             let fnm = resolve_fnm(host)?;
             let version = selected_version(host, &fnm)?;
 
-            let command = match operation.mode {
+            let command = match mode {
                 NpmPackageMode::EnsurePresent => "install",
                 NpmPackageMode::UpdateCurrent => "update",
             };
             let mut npm_args = vec![command.to_owned(), "--global".into(), "--".into()];
-            npm_args.extend(operation.packages.clone());
+            npm_args.extend(packages.to_vec());
             run_npm_required(host, &fnm, &version, "npm package mutation", npm_args)?;
             Ok(())
         }
@@ -1052,42 +1143,6 @@ pub(crate) mod packages {
             host.require(operation, fnm, args)
         }
 
-        fn validate_packages(packages: &[String]) -> Result<()> {
-            if packages.is_empty() {
-                bail!("npm package sequence must not be empty");
-            }
-            let mut seen = BTreeSet::new();
-            for package in packages {
-                validate_package(package)?;
-                if !seen.insert(package.as_str()) {
-                    bail!("duplicate npm package name: {package:?}");
-                }
-            }
-            Ok(())
-        }
-
-        fn validate_package(package: &str) -> Result<()> {
-            let valid_part = |part: &str| {
-                let mut bytes = part.bytes();
-                bytes
-                    .next()
-                    .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-                    && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte))
-            };
-            let valid = if let Some(scoped) = package.strip_prefix('@') {
-                let mut parts = scoped.split('/');
-                valid_part(parts.next().unwrap_or_default())
-                    && valid_part(parts.next().unwrap_or_default())
-                    && parts.next().is_none()
-            } else {
-                !package.contains('/') && valid_part(package)
-            };
-            if !valid {
-                bail!("invalid unversioned lowercase npm package name: {package:?}");
-            }
-            Ok(())
-        }
-
         fn valid_node_version(version: &str) -> bool {
             let Some(version) = version.strip_prefix('v') else {
                 return false;
@@ -1110,7 +1165,6 @@ pub(crate) mod packages {
     pub(crate) mod flatpak {
         use super::super::Host;
         use anyhow::Result;
-        use std::collections::BTreeSet;
 
         const FLATHUB_NAME: &str = "flathub";
         const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
@@ -1148,7 +1202,6 @@ pub(crate) mod packages {
         }
 
         pub fn ensure_apps(host: &Host<'_>, refs: &[String]) -> Result<()> {
-            validate_refs(refs)?;
             let mut args = vec![
                 "--user".to_owned(),
                 "install".into(),
@@ -1164,7 +1217,6 @@ pub(crate) mod packages {
         }
 
         pub fn update_apps(host: &Host<'_>, refs: &[String]) -> Result<()> {
-            validate_refs(refs)?;
             let mut args = vec![
                 "--user".to_owned(),
                 "update".into(),
@@ -1177,42 +1229,11 @@ pub(crate) mod packages {
             host.require("Flatpak configured application update", "flatpak", args)?;
             Ok(())
         }
-
-        fn validate_refs(refs: &[String]) -> Result<()> {
-            if refs.is_empty() {
-                anyhow::bail!("Flatpak application sequence must not be empty");
-            }
-            let mut unique = BTreeSet::new();
-            for app in refs {
-                validate_app_id(app)?;
-                if !unique.insert(app.as_str()) {
-                    anyhow::bail!("duplicate Flatpak application ID: {app:?}");
-                }
-            }
-            Ok(())
-        }
-
-        fn validate_app_id(app: &str) -> Result<()> {
-            let mut count = 0;
-            for segment in app.split('.') {
-                count += 1;
-                let mut bytes = segment.bytes();
-                let valid = bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-                    && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
-                if !valid {
-                    anyhow::bail!("invalid canonical Flatpak application ID: {app:?}");
-                }
-            }
-            if count < 3 {
-                anyhow::bail!("invalid canonical Flatpak application ID: {app:?}");
-            }
-            Ok(())
-        }
     }
 
     pub(crate) mod fonts {
         use anyhow::{bail, Context, Result};
-        use std::{collections::BTreeSet, ffi::OsStr, fs, path::Path};
+        use std::{ffi::OsStr, fs, path::Path};
         use url::Url;
 
         use super::super::{Host, TempDir, TempPath};
@@ -1223,34 +1244,7 @@ pub(crate) mod packages {
             Update,
         }
 
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct NerdFontsOperation {
-            families: Vec<String>,
-            mode: NerdFontsMode,
-        }
-
-        impl NerdFontsOperation {
-            pub fn new(families: Vec<String>, mode: NerdFontsMode) -> Result<Self> {
-                validate_families(&families)?;
-                Ok(Self { families, mode })
-            }
-
-            pub(crate) fn display_args(&self) -> Vec<String> {
-                [
-                    "nerd-fonts".into(),
-                    match self.mode {
-                        NerdFontsMode::EnsurePresent => "ensure-present".into(),
-                        NerdFontsMode::Update => "update".into(),
-                    },
-                ]
-                .into_iter()
-                .chain(self.families.iter().cloned())
-                .collect()
-            }
-        }
-
-        pub(crate) fn execute(host: &Host<'_>, operation: &NerdFontsOperation) -> Result<()> {
-            validate_families(&operation.families).context("validate Nerd Fonts operation")?;
+        pub(crate) fn execute(host: &Host<'_>, families: &[String], mode: NerdFontsMode) -> Result<()> {
             let data_home = host
                 .value("XDG_DATA_HOME")
                 .map(std::path::PathBuf::from)
@@ -1259,7 +1253,7 @@ pub(crate) mod packages {
                 bail!("Nerd Fonts XDG data directory must be absolute");
             }
             let parent = data_home.join("fonts/cozydot");
-            for family in &operation.families {
+            for family in families {
                 let destination = parent.join(family);
                 let is_present = match fs::symlink_metadata(&destination) {
                     Ok(metadata) => {
@@ -1276,7 +1270,7 @@ pub(crate) mod packages {
                         return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()))
                     }
                 };
-                if operation.mode == NerdFontsMode::Update || !is_present {
+                if mode == NerdFontsMode::Update || !is_present {
                     install_family_with_destination(host, family, &destination, &parent, &data_home)?;
                 }
             }
@@ -1428,71 +1422,25 @@ pub(crate) mod packages {
             }
             Ok(())
         }
-
-        fn validate_families(families: &[String]) -> Result<()> {
-            if families.is_empty() {
-                bail!("Nerd Font family sequence must not be empty");
-            }
-            let mut seen = BTreeSet::new();
-            for family in families {
-                let bytes = family.as_bytes();
-                if bytes.first().is_none_or(|byte| !byte.is_ascii_alphanumeric())
-                    || bytes.last().is_none_or(|byte| !byte.is_ascii_alphanumeric())
-                    || !bytes
-                        .iter()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(byte))
-                {
-                    bail!("invalid Nerd Font family name {family:?}");
-                }
-                if !seen.insert(family) {
-                    bail!("duplicate Nerd Font family {family:?}");
-                }
-            }
-            Ok(())
-        }
     }
 
     pub(crate) mod dotfiles {
         use anyhow::{bail, Context, Result};
         use std::{
-            collections::BTreeSet,
             fs,
-            path::{Component, Path, PathBuf},
+            path::{Path, PathBuf},
             time::{SystemTime, UNIX_EPOCH},
         };
 
         use super::super::Host;
 
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct DotfilesOperation {
-            root: PathBuf,
-            packages: Vec<String>,
-        }
-
-        impl DotfilesOperation {
-            pub fn new(root: PathBuf, packages: Vec<String>) -> Result<Self> {
-                validate_packages(&packages)?;
-                if root.as_os_str().is_empty() {
-                    bail!("dotfiles root must not be empty");
-                }
-                Ok(Self { root, packages })
-            }
-
-            pub(crate) fn display_args(&self) -> Vec<String> {
-                std::iter::once("dotfiles-backup-stow".into())
-                    .chain(self.packages.iter().cloned())
-                    .collect()
-            }
-        }
-
-        pub(crate) fn execute(host: &Host<'_>, operation: &DotfilesOperation) -> Result<()> {
-            validate_packages(&operation.packages).context("validate dotfiles operation")?;
-            let root = fs::canonicalize(&operation.root)
-                .with_context(|| format!("dotfiles operation: canonicalize root {}", operation.root.display()))?;
+        pub(crate) fn execute(host: &Host<'_>, root: &Path, packages: &[String]) -> Result<()> {
+            let root = fs::canonicalize(root)
+                .with_context(|| format!("dotfiles operation: canonicalize root {}", root.display()))?;
             if !fs::symlink_metadata(&root)?.file_type().is_dir() {
                 bail!("dotfiles root is not a directory: {}", root.display());
             }
-            for package in &operation.packages {
+            for package in packages {
                 apply_package(host, &root, package)?;
             }
             Ok(())
@@ -1615,26 +1563,6 @@ pub(crate) mod packages {
             fs::canonicalize(target)
                 .and_then(|target| fs::canonicalize(source).map(|source| target == source))
                 .unwrap_or(false)
-        }
-
-        fn validate_packages(packages: &[String]) -> Result<()> {
-            if packages.is_empty() {
-                bail!("dotfiles package sequence must not be empty");
-            }
-            let mut seen = BTreeSet::new();
-            for package in packages {
-                let mut components = Path::new(package).components();
-                if !matches!(components.next(), Some(Component::Normal(_)))
-                    || components.next().is_some()
-                    || package.contains(['\n', '\r'])
-                {
-                    bail!("invalid dotfiles package directory name {package:?}");
-                }
-                if !seen.insert(package) {
-                    bail!("duplicate dotfiles package {package:?}");
-                }
-            }
-            Ok(())
         }
     }
 }

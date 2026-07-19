@@ -233,10 +233,6 @@ impl Platform {
         Self::from_os_release(&os, desktop, &arch)
     }
 
-    pub fn from_parts(distro: String, upstream: String, codename: String, desktop: String, arch: &str) -> Result<Self> {
-        Self::from_release_parts(distro, upstream, codename.clone(), codename, desktop, arch)
-    }
-
     pub fn from_release_parts(
         distro: String,
         upstream: String,

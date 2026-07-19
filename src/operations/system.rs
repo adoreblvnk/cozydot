@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use serde_json::{Map, Value};
 use std::{collections::BTreeSet, path::Path};
 
 use super::{
@@ -6,55 +7,11 @@ use super::{
     privileged_file::{publish_bytes, sync_parent},
     Host, OperationOutcome, TempPath,
 };
-use serde_json::{Map, Value};
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct EnsureAdminOperation;
-
-impl EnsureAdminOperation {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub(crate) fn display_args(self) -> Vec<String> {
-        vec!["ensure-admin".into()]
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnattendedUpgradesOperation {
-    enabled: bool,
-}
-
-impl UnattendedUpgradesOperation {
-    pub fn new(enabled: bool) -> Self {
-        Self { enabled }
-    }
-
-    pub(crate) fn display_args(self) -> Vec<String> {
-        vec!["unattended-upgrades".into(), self.enabled.to_string()]
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UbuntuSnapOperation {
-    enabled: bool,
-}
-
-impl UbuntuSnapOperation {
-    pub fn new(enabled: bool) -> Self {
-        Self { enabled }
-    }
-
-    pub(crate) fn display_args(self) -> Vec<String> {
-        vec!["ubuntu-snap".into(), self.enabled.to_string()]
-    }
-}
-
-pub(crate) fn ensure_admin(host: &Host<'_>, _: &EnsureAdminOperation) -> Result<()> {
+pub(crate) fn ensure_admin(host: &Host<'_>) -> Result<()> {
     let (username, _) = effective_user(host)?;
     host.require(
         "administrative group membership",
@@ -64,13 +21,13 @@ pub(crate) fn ensure_admin(host: &Host<'_>, _: &EnsureAdminOperation) -> Result<
     Ok(())
 }
 
-pub(crate) fn unattended_upgrades(host: &Host<'_>, operation: &UnattendedUpgradesOperation) -> Result<()> {
-    let contents = if operation.enabled {
+pub(crate) fn unattended_upgrades(host: &Host<'_>, enabled: bool) -> Result<()> {
+    let contents = if enabled {
         b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n".as_slice()
     } else {
         b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n".as_slice()
     };
-    if operation.enabled {
+    if enabled {
         apt::packages(host, &["unattended-upgrades".into()])?;
         publish_bytes(
             host,
@@ -109,8 +66,8 @@ fn systemd_state(host: &Host<'_>, query: &str, unit: &str) -> Result<bool> {
     Ok(output.status.success())
 }
 
-pub(crate) fn ubuntu_snap(host: &Host<'_>, operation: &UbuntuSnapOperation) -> Result<()> {
-    if operation.enabled {
+pub(crate) fn ubuntu_snap(host: &Host<'_>, enabled: bool) -> Result<()> {
+    if enabled {
         host.require("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
         apt::packages(host, &["snapd".into()])?;
         host.require(
@@ -216,44 +173,16 @@ fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
 }
 
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DockerLocalLogOperation {
-    max_size: Option<String>,
-}
-impl DockerLocalLogOperation {
-    pub fn new(max_size: Option<String>) -> Result<Self> {
-        validate_max_size(max_size.as_deref())?;
-        Ok(Self { max_size })
-    }
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        std::iter::once("docker-local-log".into())
-            .chain(self.max_size.iter().cloned())
-            .collect()
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VsCodeExtensionOperation {
-    extensions: Vec<String>,
-}
-impl VsCodeExtensionOperation {
-    pub fn new(extensions: Vec<String>) -> Result<Self> {
-        let extensions = canonical_extensions(&extensions)?;
-        Ok(Self { extensions })
-    }
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        std::iter::once("vscode-extension-set".into())
-            .chain(self.extensions.iter().cloned())
-            .collect()
-    }
-}
+
 pub(crate) fn docker_group(host: &Host<'_>) -> Result<()> {
     ensure_product_group(host, Product::Docker)
 }
+
 pub(crate) fn virtualbox_group(host: &Host<'_>) -> Result<()> {
     ensure_product_group(host, Product::VirtualBox)
 }
-pub(crate) fn docker_local_log(host: &Host<'_>, operation: &DockerLocalLogOperation) -> Result<()> {
-    validate_max_size(operation.max_size.as_deref()).context("validate Docker logging operation")?;
+
+pub(crate) fn docker_local_log(host: &Host<'_>, max_size: Option<&str>) -> Result<()> {
     preflight(host, Product::Docker)?;
     let _lock = host.acquire_docker_lock()?;
     let current = read_daemon_config(host)?;
@@ -262,13 +191,13 @@ pub(crate) fn docker_local_log(host: &Host<'_>, operation: &DockerLocalLogOperat
         .as_object_mut()
         .context("Docker daemon config must be a JSON object")?;
     object.insert("log-driver".into(), Value::String("local".into()));
-    if let Some(max_size) = &operation.max_size {
+    if let Some(max_size) = max_size {
         let log_options = object
             .entry("log-opts")
             .or_insert_with(|| Value::Object(Map::new()))
             .as_object_mut()
             .context("Docker daemon config log-opts must be a JSON object")?;
-        log_options.insert("max-size".into(), Value::String(max_size.clone()));
+        log_options.insert("max-size".into(), Value::String(max_size.to_owned()));
     }
     if requested == current {
         sync_parent(
@@ -288,8 +217,8 @@ pub(crate) fn docker_local_log(host: &Host<'_>, operation: &DockerLocalLogOperat
     )?;
     Ok(())
 }
-pub(crate) fn vscode_extensions(host: &Host<'_>, operation: &VsCodeExtensionOperation) -> Result<()> {
-    let extensions = canonical_extensions(&operation.extensions).context("validate VS Code extension operation")?;
+
+pub(crate) fn vscode_extensions(host: &Host<'_>, extensions: &[String]) -> Result<()> {
     preflight(host, Product::VsCode)?;
     for extension in extensions {
         host.require(
@@ -300,12 +229,14 @@ pub(crate) fn vscode_extensions(host: &Host<'_>, operation: &VsCodeExtensionOper
     }
     Ok(())
 }
+
 #[derive(Clone, Copy)]
 enum Product {
     Docker,
     VirtualBox,
     VsCode,
 }
+
 impl Product {
     fn label(self) -> &'static str {
         match self {
@@ -329,6 +260,7 @@ impl Product {
         }
     }
 }
+
 fn preflight(host: &Host<'_>, product: Product) -> Result<()> {
     let output = host
         .require(
@@ -355,6 +287,7 @@ fn preflight(host: &Host<'_>, product: Product) -> Result<()> {
     }
     Ok(())
 }
+
 fn valid_docker_version(value: &str) -> bool {
     let value = value.strip_suffix('\n').unwrap_or(value);
     let Some(value) = value.strip_prefix("Docker version ") else {
@@ -365,6 +298,7 @@ fn valid_docker_version(value: &str) -> bool {
     };
     valid_version_token(version) && valid_token(build)
 }
+
 fn valid_virtualbox_version(value: &str) -> bool {
     let value = value.strip_suffix('\n').unwrap_or(value);
     !value.contains(['\n', '\r'])
@@ -372,6 +306,7 @@ fn valid_virtualbox_version(value: &str) -> bool {
             valid_version_token(version) && !revision.is_empty() && revision.bytes().all(|byte| byte.is_ascii_digit())
         })
 }
+
 fn valid_vscode_version(value: &str) -> bool {
     let mut lines = value.lines();
     let valid = lines.next().is_some_and(valid_version_token)
@@ -383,6 +318,7 @@ fn valid_vscode_version(value: &str) -> bool {
             .is_some_and(|arch| matches!(arch, "x64" | "arm64" | "armhf"));
     valid && lines.next().is_none()
 }
+
 fn valid_version_token(value: &str) -> bool {
     let suffix = value
         .find(|character: char| !character.is_ascii_digit() && character != '.')
@@ -395,6 +331,7 @@ fn valid_version_token(value: &str) -> bool {
             .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
         && (suffix.is_empty() || matches!(suffix.as_bytes()[0], b'-' | b'+' | b'_') && valid_token(&suffix[1..]))
 }
+
 fn valid_token(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().next().is_some_and(|byte| byte.is_ascii_alphanumeric())
@@ -403,6 +340,7 @@ fn valid_token(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
 }
+
 fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
     let (username, _) = effective_user(host)?;
     preflight(host, product)?;
@@ -421,6 +359,7 @@ fn ensure_product_group(host: &Host<'_>, product: Product) -> Result<()> {
     )?;
     Ok(())
 }
+
 fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
     let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
     let record = output.strip_suffix('\n').unwrap_or(output);
@@ -429,6 +368,7 @@ fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
     }
     Ok(record)
 }
+
 fn read_daemon_config(host: &Host<'_>) -> Result<Value> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
@@ -461,65 +401,22 @@ fn read_daemon_config(host: &Host<'_>) -> Result<Value> {
     }
     Ok(value)
 }
-fn canonical_extensions(extensions: &[String]) -> Result<Vec<String>> {
-    if extensions.is_empty() {
-        bail!("VS Code extension operation requires at least one extension");
-    }
-    let mut unique = BTreeSet::new();
-    let mut canonical = Vec::with_capacity(extensions.len());
-    for extension in extensions {
-        let Some(normalized) = canonical_extension(extension) else {
-            bail!("invalid VS Code publisher.extension identifier: {extension:?}");
-        };
-        if !unique.insert(normalized.clone()) {
-            bail!("duplicate VS Code extension identifier: {extension:?}");
-        }
-        canonical.push(normalized);
-    }
-    Ok(canonical)
-}
-fn canonical_extension(value: &str) -> Option<String> {
-    let mut parts = value.split('.');
-    (valid_identifier(parts.next().unwrap_or_default())
-        && valid_identifier(parts.next().unwrap_or_default())
-        && parts.next().is_none())
-    .then(|| value.to_ascii_lowercase())
-}
-fn valid_identifier(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    bytes.next().is_some_and(|byte| byte.is_ascii_alphanumeric())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-}
-fn validate_max_size(value: Option<&str>) -> Result<()> {
-    let Some(value) = value else {
-        return Ok(());
-    };
-    let number = value
-        .strip_suffix('k')
-        .or_else(|| value.strip_suffix('m'))
-        .or_else(|| value.strip_suffix('g'));
-    if number.is_none_or(|number| {
-        number.is_empty()
-            || !number.bytes().all(|byte| byte.is_ascii_digit())
-            || number.bytes().all(|byte| byte == b'0')
-    }) {
-        bail!("Docker max size must be a positive integer followed by k, m, or g");
-    }
-    Ok(())
-}
 
 const DASH_TO_DOCK_UUID: &str = "dash-to-dock@micxgx.gmail.com";
 const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopEnvironment {
     Gnome,
     Cinnamon,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopTheme {
     Light,
     Dark,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DesktopSetting {
     Theme(DesktopTheme),
@@ -527,74 +424,13 @@ pub enum DesktopSetting {
     IdleTimeoutSeconds(u32),
     IdleDim(bool),
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DesktopSettingOperation {
-    target: DesktopEnvironment,
-    setting: DesktopSetting,
-}
-impl DesktopSettingOperation {
-    pub fn new(target: DesktopEnvironment, setting: DesktopSetting) -> Result<Self> {
-        if let DesktopSetting::Terminal(executable) = &setting {
-            validate_executable(executable)?;
-        }
-        Ok(Self { target, setting })
-    }
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        let target = match self.target {
-            DesktopEnvironment::Gnome => "gnome",
-            DesktopEnvironment::Cinnamon => "cinnamon",
-        };
-        let (name, value) = match &self.setting {
-            DesktopSetting::Theme(DesktopTheme::Light) => ("theme", "light".into()),
-            DesktopSetting::Theme(DesktopTheme::Dark) => ("theme", "dark".into()),
-            DesktopSetting::Terminal(executable) => ("terminal", executable.clone()),
-            DesktopSetting::IdleTimeoutSeconds(seconds) => ("idle-timeout-seconds", seconds.to_string()),
-            DesktopSetting::IdleDim(enabled) => ("idle-dim", enabled.to_string()),
-        };
-        vec!["desktop-setting".into(), target.into(), name.into(), value]
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GnomeExtensionsOperation {
-    extensions: Vec<String>,
-}
-impl GnomeExtensionsOperation {
-    pub fn new(extensions: Vec<String>) -> Result<Self> {
-        validate_extensions(&extensions)?;
-        Ok(Self { extensions })
-    }
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        std::iter::once("gnome-extensions".into())
-            .chain(self.extensions.iter().cloned())
-            .collect()
-    }
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct GnomeDockOperation;
-impl GnomeDockOperation {
-    pub fn new() -> Self {
-        Self
-    }
-    pub(crate) fn display_args(self) -> Vec<String> {
-        vec!["gnome-dock".into()]
-    }
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct GnomeRoundedCornersOperation;
-impl GnomeRoundedCornersOperation {
-    pub fn new() -> Self {
-        Self
-    }
-    pub(crate) fn display_args(self) -> Vec<String> {
-        vec!["gnome-rounded-corners".into()]
-    }
-}
-pub(crate) fn desktop_setting(host: &Host<'_>, operation: &DesktopSettingOperation) -> Result<()> {
-    let prefix = match operation.target {
+
+pub(crate) fn desktop_setting(host: &Host<'_>, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
+    let prefix = match target {
         DesktopEnvironment::Gnome => "org.gnome",
         DesktopEnvironment::Cinnamon => "org.cinnamon",
     };
-    match &operation.setting {
+    match setting {
         DesktopSetting::Theme(theme) => ensure_gsetting(
             host,
             &format!("{prefix}.desktop.interface"),
@@ -605,7 +441,6 @@ pub(crate) fn desktop_setting(host: &Host<'_>, operation: &DesktopSettingOperati
             },
         ),
         DesktopSetting::Terminal(executable) => {
-            validate_executable(executable).context("validate desktop terminal operation")?;
             if !command_is_executable(host, executable) {
                 bail!("desktop terminal executable {executable:?} is unavailable");
             }
@@ -627,17 +462,18 @@ pub(crate) fn desktop_setting(host: &Host<'_>, operation: &DesktopSettingOperati
         ),
     }
 }
-pub(crate) fn gnome_extensions(host: &Host<'_>, operation: &GnomeExtensionsOperation) -> Result<OperationOutcome> {
-    validate_extensions(&operation.extensions).context("validate GNOME extensions operation")?;
+
+pub(crate) fn gnome_extensions(host: &Host<'_>, extensions: &[String]) -> Result<OperationOutcome> {
     let mut outcome = OperationOutcome::Completed;
-    for extension in &operation.extensions {
+    for extension in extensions {
         if ensure_extension(host, extension)? == OperationOutcome::LoginRequired {
             outcome = OperationOutcome::LoginRequired;
         }
     }
     Ok(outcome)
 }
-pub(crate) fn gnome_dock(host: &Host<'_>, _: &GnomeDockOperation) -> Result<OperationOutcome> {
+
+pub(crate) fn gnome_dock(host: &Host<'_>) -> Result<OperationOutcome> {
     let outcome = ensure_extension(host, DASH_TO_DOCK_UUID)?;
     if outcome == OperationOutcome::LoginRequired {
         return Ok(outcome);
@@ -658,7 +494,8 @@ pub(crate) fn gnome_dock(host: &Host<'_>, _: &GnomeDockOperation) -> Result<Oper
     }
     Ok(OperationOutcome::Completed)
 }
-pub(crate) fn gnome_rounded_corners(host: &Host<'_>, _: &GnomeRoundedCornersOperation) -> Result<OperationOutcome> {
+
+pub(crate) fn gnome_rounded_corners(host: &Host<'_>) -> Result<OperationOutcome> {
     let outcome = ensure_extension(host, ROUNDED_CORNERS_UUID)?;
     if outcome == OperationOutcome::LoginRequired {
         return Ok(outcome);
@@ -671,8 +508,8 @@ pub(crate) fn gnome_rounded_corners(host: &Host<'_>, _: &GnomeRoundedCornersOper
     )?;
     Ok(OperationOutcome::Completed)
 }
+
 fn ensure_extension(host: &Host<'_>, extension: &str) -> Result<OperationOutcome> {
-    validate_extension(extension).context("validate fixed GNOME extension provider")?;
     let installed = extension_state(host)?;
     let newly_installed = !installed.contains(extension);
     if newly_installed {
@@ -682,14 +519,17 @@ fn ensure_extension(host: &Host<'_>, extension: &str) -> Result<OperationOutcome
     host.require("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
     Ok(OperationOutcome::Completed)
 }
+
 fn ensure_gsetting(host: &Host<'_>, schema: &str, key: &str, expected: &str) -> Result<()> {
     host.require("desktop setting mutation", "gsettings", ["set", schema, key, expected])?;
     Ok(())
 }
+
 fn ensure_dconf(host: &Host<'_>, key: &str, expected: &str) -> Result<()> {
     host.require("GNOME dconf mutation", "dconf", ["write", key, expected])?;
     Ok(())
 }
+
 fn extension_state(host: &Host<'_>) -> Result<BTreeSet<String>> {
     let output = host.require("GNOME extension state query", "gnome-extensions", ["list"])?;
     let output = std::str::from_utf8(&output.stdout).context("gnome-extensions returned non-UTF-8 state")?;
@@ -702,6 +542,7 @@ fn extension_state(host: &Host<'_>) -> Result<BTreeSet<String>> {
     }
     Ok(extensions)
 }
+
 fn install_extension(host: &Host<'_>, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.require("GNOME extension metadata", "curl", ["-fsSL", &endpoint])?;
@@ -727,6 +568,7 @@ fn install_extension(host: &Host<'_>, extension: &str) -> Result<()> {
     )?;
     Ok(())
 }
+
 fn command_is_executable(host: &Host<'_>, executable: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     host.value("PATH").is_some_and(|path| {
@@ -736,28 +578,7 @@ fn command_is_executable(host: &Host<'_>, executable: &str) -> bool {
         })
     })
 }
-fn validate_executable(value: &str) -> Result<()> {
-    let mut bytes = value.bytes();
-    if bytes.next().is_none_or(|byte| !byte.is_ascii_alphanumeric())
-        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte))
-    {
-        bail!("invalid desktop terminal executable {value:?}");
-    }
-    Ok(())
-}
-fn validate_extensions(extensions: &[String]) -> Result<()> {
-    if extensions.is_empty() {
-        bail!("GNOME extension sequence must not be empty");
-    }
-    let mut seen = BTreeSet::new();
-    for extension in extensions {
-        validate_extension(extension)?;
-        if !seen.insert(extension) {
-            bail!("duplicate GNOME extension UUID {extension:?}");
-        }
-    }
-    Ok(())
-}
+
 fn validate_extension(value: &str) -> Result<()> {
     let mut parts = value.split('@');
     if !valid_uuid_part(parts.next().unwrap_or_default())
@@ -768,6 +589,7 @@ fn validate_extension(value: &str) -> Result<()> {
     }
     Ok(())
 }
+
 fn valid_uuid_part(value: &str) -> bool {
     !value.is_empty()
         && value

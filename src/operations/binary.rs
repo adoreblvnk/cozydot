@@ -174,8 +174,6 @@ struct Downloaded {
 }
 
 pub(crate) fn execute(host: &Host<'_>, operation: &BinaryPackageOperation) -> Result<()> {
-    operation.validate().context("validate binary package operation")?;
-
     let appimage_expectation = if operation.format == BinaryPackageFormat::AppImage {
         let artifact = appimage::data_artifact(host, operation);
         let expectation = capture_publication_expectation(&artifact)?;
@@ -952,21 +950,6 @@ pub(crate) mod cargo_binstall {
     const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
     const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct CargoBinstallBootstrapOperation {
-        architecture: Architecture,
-    }
-
-    impl CargoBinstallBootstrapOperation {
-        pub fn new(architecture: Architecture) -> Self {
-            Self { architecture }
-        }
-
-        pub(crate) fn display_args(&self) -> Vec<String> {
-            vec!["cargo-binstall-bootstrap".into(), self.architecture.canonical().into()]
-        }
-    }
-
     #[derive(Clone, Debug)]
     struct Release {
         tag: String,
@@ -974,7 +957,7 @@ pub(crate) mod cargo_binstall {
         sha256: String,
     }
 
-    pub(crate) fn execute(host: &Host<'_>, operation: &CargoBinstallBootstrapOperation) -> Result<()> {
+    pub(crate) fn execute(host: &Host<'_>, architecture: Architecture) -> Result<()> {
         let cargo_home = host
             .value("CARGO_HOME")
             .map(PathBuf::from)
@@ -987,7 +970,7 @@ pub(crate) mod cargo_binstall {
         ensure_managed_directory(&bin)?;
         let destination = bin.join("cargo-binstall");
 
-        let release = resolve_release(host, operation.architecture)?;
+        let release = resolve_release(host, architecture)?;
 
         let expectation = super::capture_publication_expectation(&destination)?;
 
