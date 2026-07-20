@@ -162,7 +162,7 @@ fn is_acceptable_live_state(host: &Host, operation: &BinaryPackageOperation) -> 
     }
     match operation.format {
         BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
-        BinaryPackageFormat::AppImage => Ok(valid_appimage(&appimage_destination(host, operation))),
+        BinaryPackageFormat::AppImage => valid_appimage(&appimage_destination(host, operation), &operation.source),
     }
 }
 
@@ -170,13 +170,21 @@ fn appimage_destination(host: &Host, operation: &BinaryPackageOperation) -> Path
     host.home().join("Applications").join(format!("{}.AppImage", operation.name))
 }
 
-fn valid_appimage(path: &Path) -> bool {
-    fs::symlink_metadata(path).is_ok_and(|metadata| {
+fn valid_appimage(path: &Path, source: &BinarySourceOperation) -> Result<bool> {
+    let valid = fs::symlink_metadata(path).is_ok_and(|metadata| {
         metadata.file_type().is_file()
             && metadata.len() > 0
             && metadata.permissions().mode() & 0o111 != 0
             && has_elf_magic(path)
-    })
+    });
+    if !valid {
+        return Ok(false);
+    }
+    let expected = match source {
+        BinarySourceOperation::GithubLatest { sha256, .. } => *sha256,
+        BinarySourceOperation::ChecksummedUrl { sha256, .. } => Some(*sha256),
+    };
+    Ok(expected.is_none_or(|expected| sha256_file(path).is_ok_and(|actual| actual == expected.0)))
 }
 
 fn install_appimage(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {

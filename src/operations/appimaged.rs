@@ -2,7 +2,7 @@ use super::{Host, TempPath};
 use crate::{config::HttpsUrl, platform::Architecture};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use std::{fs, io::Read, os::unix::fs::PermissionsExt, path::Path};
+use std::{fs, io::Read, os::unix::fs::PermissionsExt, path::Path, thread, time::Duration};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
@@ -60,18 +60,35 @@ pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
     let program =
         destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?;
     host.require("launch appimaged", program, std::iter::empty::<&str>())?;
-    host.require("appimaged readiness", "systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?;
+    wait_until_active(host)?;
     Ok(())
 }
 
 fn ensure_fuse(host: &Host) -> Result<()> {
     let package =
         if host.run("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
-    if !host.run("dpkg", ["--status", package])?.status.success() {
+    if !package_is_installed(host, package)? {
         host.require("refresh APT for appimaged", "sudo", ["apt-get", "update", "-qq"])?;
         host.require("install appimaged FUSE support", "sudo", ["apt-get", "install", "-y", "-qq", "--", package])?;
     }
     Ok(())
+}
+
+fn package_is_installed(host: &Host, package: &str) -> Result<bool> {
+    let output = host.run("dpkg-query", ["--show", "--showformat=${db:Status-Abbrev}", package])?;
+    Ok(output.status.success() && output.stdout == b"ii ")
+}
+
+fn wait_until_active(host: &Host) -> Result<()> {
+    for attempt in 0..20 {
+        if host.run("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
+            return Ok(());
+        }
+        if attempt < 19 {
+            thread::sleep(Duration::from_millis(250));
+        }
+    }
+    bail!("appimaged did not become active after launch")
 }
 
 fn resolve_asset(host: &Host, architecture: Architecture) -> Result<HttpsUrl> {
@@ -132,8 +149,10 @@ fn clear_integration_cache(applications: &Path) -> Result<()> {
     };
     for entry in entries {
         let path = entry?.path();
-        if path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("appimage")) {
-            remove_path(&path)?;
+        if path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("appimage"))
+            && !fs::symlink_metadata(&path)?.file_type().is_dir()
+        {
+            remove_file(&path)?;
         }
     }
     Ok(())
@@ -141,18 +160,17 @@ fn clear_integration_cache(applications: &Path) -> Result<()> {
 
 fn remove_if_present(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(_) => remove_path(path),
+        Ok(_) => remove_file(path),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
 }
 
-fn remove_path(path: &Path) -> Result<()> {
+fn remove_file(path: &Path) -> Result<()> {
     if fs::symlink_metadata(path)?.file_type().is_dir() {
-        fs::remove_dir_all(path)?;
-    } else {
-        fs::remove_file(path)?;
+        bail!("refusing to recursively remove directory {}", path.display());
     }
+    fs::remove_file(path)?;
     Ok(())
 }
 

@@ -432,6 +432,7 @@ fn appimaged_is_ensured_once_before_appimages_are_published() {
     let fake_bin = temp.path().join("bin");
     let systemctl_log = temp.path().join("systemctl.log");
     let systemctl_count = temp.path().join("systemctl.count");
+    let sudo_log = temp.path().join("sudo.log");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("cozydot.yaml"),
@@ -456,14 +457,27 @@ packages:
           amd64: ^Zen\.AppImage$
           arm64: ^Zen\.AppImage$
           arm32: ^Zen\.AppImage$
+    - name: fixed
+      format: appimage
+      source:
+        provider: url
+        urls:
+          amd64: https://example.com/fixed.AppImage
+          arm64: https://example.com/fixed.AppImage
+          arm32: https://example.com/fixed.AppImage
+        sha256:
+          amd64: 13ecaa8c8c200cefa4b472684d16c033d6d4b0e45be25cf6402ecfb19b9bf6cb
+          arm64: 13ecaa8c8c200cefa4b472684d16c033d6d4b0e45be25cf6402ecfb19b9bf6cb
+          arm32: 13ecaa8c8c200cefa4b472684d16c033d6d4b0e45be25cf6402ecfb19b9bf6cb
 integrations:
   appimaged: true
 "#,
     )
     .unwrap();
 
-    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_SUDO_LOG\"\n");
     write_executable(&fake_bin.join("apt-cache"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'rc '\n");
     write_executable(
         &fake_bin.join("dpkg"),
         "#!/bin/sh\ncase \"$*\" in *appimagelauncher*) exit 1;; *) exit 0;; esac\n",
@@ -478,7 +492,7 @@ case "$*" in
     [ ! -f "$COZYDOT_SYSTEMCTL_COUNT" ] || count=$(cat "$COZYDOT_SYSTEMCTL_COUNT")
     count=$((count + 1))
     printf '%s\n' "$count" > "$COZYDOT_SYSTEMCTL_COUNT"
-    [ "$count" -gt 1 ]
+    [ "$count" -gt 2 ]
     ;;
   *) exit 0 ;;
 esac
@@ -497,7 +511,10 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 if [ -n "$output" ]; then
-  cp /bin/true "$output"
+  case "$args" in
+    *fixed.AppImage*) printf '\177ELFcozydot-test-appimage\n' > "$output" ;;
+    *) cp /bin/true "$output" ;;
+  esac
   exit 0
 fi
 case "$args" in
@@ -515,6 +532,11 @@ esac
 "#,
     );
 
+    fs::create_dir_all(home.join("Applications")).unwrap();
+    fs::copy("/bin/true", home.join("Applications/fixed.AppImage")).unwrap();
+    let user_cache_directory = home.join(".local/share/applications/appimage-backup");
+    fs::create_dir_all(&user_cache_directory).unwrap();
+
     Command::cargo_bin("cozydot")
         .unwrap()
         .env("HOME", &home)
@@ -522,6 +544,7 @@ esac
         .env("XDG_CURRENT_DESKTOP", "gnome")
         .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
         .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
+        .env("COZYDOT_SUDO_LOG", &sudo_log)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()
@@ -531,13 +554,33 @@ esac
             "Applying appimaged\n",
             "Applying binary package\n",
             "Applying binary package\n",
+            "Applying binary package\n",
         ));
 
-    for name in ["obsidian.AppImage", "zen-browser.AppImage"] {
+    for name in ["obsidian.AppImage", "zen-browser.AppImage", "fixed.AppImage"] {
         let appimage = home.join("Applications").join(name);
         assert!(fs::metadata(appimage).unwrap().permissions().mode() & 0o111 != 0);
     }
+    assert_eq!(fs::read(home.join("Applications/fixed.AppImage")).unwrap(), b"\x7fELFcozydot-test-appimage\n");
+    assert!(user_cache_directory.is_dir());
+    assert!(fs::read_to_string(&sudo_log).unwrap().contains("apt-get install -y -qq -- libfuse2t64"));
     assert!(!home.join(".local/bin").exists());
+    let systemctl_calls = fs::read_to_string(&systemctl_log).unwrap();
+    assert_eq!(systemctl_calls.matches("is-active").count(), 3);
+
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 1\n");
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
+        .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
+        .env("COZYDOT_SUDO_LOG", &sudo_log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
     let systemctl_calls = fs::read_to_string(systemctl_log).unwrap();
-    assert_eq!(systemctl_calls.matches("is-active").count(), 2);
+    assert_eq!(systemctl_calls.matches("is-active").count(), 4);
 }
