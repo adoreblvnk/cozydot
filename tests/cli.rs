@@ -31,9 +31,7 @@ fn missing_config_fails_apply() {
         .arg("apply")
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "active config is missing or invalid",
-        ));
+        .stderr(predicate::str::contains("active config is missing or invalid"));
 }
 
 #[test]
@@ -45,9 +43,7 @@ fn unknown_preset_rejected() {
         .args(["init", "--preset", "invalid_preset_name"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "invalid value 'invalid_preset_name'",
-        ));
+        .stderr(predicate::str::contains("invalid value 'invalid_preset_name'"));
 }
 
 #[test]
@@ -84,10 +80,7 @@ fn init_updates_unmodified_files_and_preserves_modified_files() {
             .assert()
             .success();
     }
-    assert_eq!(
-        fs::read_to_string(&config_path).unwrap(),
-        fs::read_to_string("configs/vm.yaml").unwrap()
-    );
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), fs::read_to_string("configs/vm.yaml").unwrap());
 
     fs::write(&config_path, "user-owned config\n").unwrap();
     fs::write(&dotfile_path, "user-owned dotfile\n").unwrap();
@@ -97,14 +90,8 @@ fn init_updates_unmodified_files_and_preserves_modified_files() {
         .args(["init", "--preset", "full"])
         .assert()
         .success();
-    assert_eq!(
-        fs::read_to_string(config_path).unwrap(),
-        "user-owned config\n"
-    );
-    assert_eq!(
-        fs::read_to_string(dotfile_path).unwrap(),
-        "user-owned dotfile\n"
-    );
+    assert_eq!(fs::read_to_string(config_path).unwrap(), "user-owned config\n");
+    assert_eq!(fs::read_to_string(dotfile_path).unwrap(), "user-owned dotfile\n");
 }
 
 #[test]
@@ -117,21 +104,10 @@ fn init_preserves_unmanaged_existing_config_and_dotfile() {
     fs::write(&config_path, "existing config\n").unwrap();
     fs::write(&dotfile_path, "existing dotfile\n").unwrap();
 
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", temp.path())
-        .arg("init")
-        .assert()
-        .success();
+    Command::cargo_bin("cozydot").unwrap().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
 
-    assert_eq!(
-        fs::read_to_string(config_path).unwrap(),
-        "existing config\n"
-    );
-    assert_eq!(
-        fs::read_to_string(dotfile_path).unwrap(),
-        "existing dotfile\n"
-    );
+    assert_eq!(fs::read_to_string(config_path).unwrap(), "existing config\n");
+    assert_eq!(fs::read_to_string(dotfile_path).unwrap(), "existing dotfile\n");
 }
 
 #[test]
@@ -171,11 +147,7 @@ fn standard_yaml_null_is_accepted() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
-        "version: 1.0.0\nsystem: null\n",
-    )
-    .unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\nsystem: null\n").unwrap();
 
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -201,9 +173,7 @@ fn invalid_yaml_fails_apply() {
         .arg("apply")
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "active config is missing or invalid",
-        ));
+        .stderr(predicate::str::contains("active config is missing or invalid"));
 }
 
 #[test]
@@ -241,10 +211,7 @@ packages:
 #[test]
 fn noncanonical_tool_selectors_and_gnome_uuids_are_rejected() {
     for (config, message) in [
-        (
-            "version: 1.0.0\ntools:\n  go: \"01.2\"\n",
-            "numeric components cannot have leading zeroes",
-        ),
+        ("version: 1.0.0\ntools:\n  go: \"01.2\"\n", "numeric components cannot have leading zeroes"),
         (
             "version: 1.0.0\ndesktop:\n  gnome:\n    extensions: [bad/uuid@example.com]\n",
             "invalid GNOME extension UUID",

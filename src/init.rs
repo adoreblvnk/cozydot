@@ -57,11 +57,7 @@ pub fn run(preset_val: Preset) -> Result<PathBuf> {
     let root = config_root()?;
     let preset_rec = preset(preset_val.name()).context("embedded preset is missing")?;
     let mut records_vec = Vec::with_capacity(records().len() + 1);
-    records_vec.push(Record {
-        path: "cozydot.yaml",
-        bytes: preset_rec.bytes,
-        mode: 0o644,
-    });
+    records_vec.push(Record { path: "cozydot.yaml", bytes: preset_rec.bytes, mode: 0o644 });
     records_vec.extend_from_slice(records());
     sync(&root, &records_vec)?;
     Ok(root)
@@ -82,9 +78,7 @@ fn sync(root: &Path, records: &[Record]) -> Result<()> {
             Err(e) if e.kind() == io::ErrorKind::NotFound => true,
             Err(e) => return Err(e.into()),
             Ok(metadata) if !metadata.file_type().is_file() => false,
-            Ok(_) => old_hash
-                .as_ref()
-                .is_some_and(|hash| hash_file(&destination).ok().as_ref() == Some(hash)),
+            Ok(_) => old_hash.as_ref().is_some_and(|hash| hash_file(&destination).ok().as_ref() == Some(hash)),
         };
         if !install {
             continue;
@@ -108,14 +102,10 @@ fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     ensure_directory_path(root, parent)?;
     let destination = root.join(relative);
     let destination_parent = required_parent(&destination)?;
-    let mut temporary = tempfile::Builder::new()
-        .prefix(".cozydot.")
-        .tempfile_in(destination_parent)?;
+    let mut temporary = tempfile::Builder::new().prefix(".cozydot.").tempfile_in(destination_parent)?;
     temporary.write_all(record.bytes)?;
     temporary.as_file_mut().sync_all()?;
-    temporary
-        .as_file_mut()
-        .set_permissions(fs::Permissions::from_mode(record.mode))?;
+    temporary.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
     temporary.persist(&destination).map_err(|e| e.error)?;
     sync_directory(destination_parent)?;
     Ok(())
@@ -155,9 +145,7 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
         Err(e) => return Err(e.into()),
     };
     for line in text.lines() {
-        let (hash, relative) = line
-            .split_once('\t')
-            .context("malformed managed-files record")?;
+        let (hash, relative) = line.split_once('\t').context("malformed managed-files record")?;
         let relative = PathBuf::from(relative);
         validate_hash(hash)?;
         validate_relative(&relative)?;
@@ -170,9 +158,7 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
 
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
     let parent = required_parent(path)?;
-    let mut temporary = tempfile::Builder::new()
-        .prefix(".managed-files.")
-        .tempfile_in(parent)?;
+    let mut temporary = tempfile::Builder::new().prefix(".managed-files.").tempfile_in(parent)?;
     for (relative, hash) in managed {
         writeln!(temporary, "{}\t{}", hash, relative.display())?;
     }
@@ -183,8 +169,7 @@ fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()
 }
 
 fn required_parent(path: &Path) -> Result<&Path> {
-    path.parent()
-        .with_context(|| format!("path has no parent: {}", path.display()))
+    path.parent().with_context(|| format!("path has no parent: {}", path.display()))
 }
 
 fn sync_directory(path: &Path) -> Result<()> {
@@ -206,9 +191,7 @@ fn hash_file(path: &Path) -> Result<String> {
 }
 fn validate_relative(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty()
-        || path
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
+        || path.components().any(|c| !matches!(c, Component::Normal(_)))
         || path.to_string_lossy().contains(['\t', '\n'])
     {
         bail!("unsafe managed path: {}", path.display());

@@ -16,9 +16,7 @@ impl Architecture {
             "x86_64" | "amd64" => Ok(Self::Amd64),
             "aarch64" | "arm64" => Ok(Self::Arm64),
             "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
-            _ => bail!(
-                "unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"
-            ),
+            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"),
         }
     }
 
@@ -111,16 +109,9 @@ impl ManagedAptSources {
 impl Platform {
     pub fn detect() -> Result<Self> {
         let os = OsRelease::open().context("read os-release")?;
-        let uname = Command::new("uname")
-            .arg("-m")
-            .output()
-            .context("run uname -m")?;
+        let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
         let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-        let desktop = desktop(
-            std::env::var("XDG_CURRENT_DESKTOP")
-                .unwrap_or_default()
-                .as_str(),
-        );
+        let desktop = desktop(std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().as_str());
         Self::from_os_release(&os, desktop, &arch)
     }
 
@@ -154,36 +145,22 @@ impl Platform {
         }
         .unwrap_or(&distro_codename)
         .to_owned();
-        Self::from_release_parts(
-            distro,
-            upstream,
-            distro_codename,
-            base_codename,
-            desktop,
-            arch,
-        )
+        Self::from_release_parts(distro, upstream, distro_codename, base_codename, desktop, arch)
     }
 
     pub fn managed_apt_sources(&self, configured_components: &[&str]) -> Result<ManagedAptSources> {
         if !matches!(self.distro.as_str(), "ubuntu" | "debian" | "kali") {
-            bail!(
-                "system.apt.sources: managed is unsupported for distribution {:?}; use preserve",
-                self.distro
-            );
+            bail!("system.apt.sources: managed is unsupported for distribution {:?}; use preserve", self.distro);
         }
         let components = managed_components(self, configured_components)?;
         let architecture = self.architecture;
         if matches!(self.distro.as_str(), "ubuntu" | "debian")
             && (self.distro_codename.is_empty()
-                || !self
-                    .distro_codename
-                    .bytes()
-                    .enumerate()
-                    .all(|(index, byte)| {
-                        byte.is_ascii_lowercase()
-                            || byte.is_ascii_digit()
-                            || index != 0 && matches!(byte, b'.' | b'_' | b'+' | b'-')
-                    }))
+                || !self.distro_codename.bytes().enumerate().all(|(index, byte)| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || index != 0 && matches!(byte, b'.' | b'_' | b'+' | b'-')
+                }))
         {
             bail!("system.apt.sources: managed requires a valid platform codename");
         }
@@ -196,18 +173,14 @@ impl Platform {
                         release
                     );
                 }
-                let main_archive = architecture == Architecture::Amd64
-                    || architecture == Architecture::Arm64 && release == "resolute";
+                let main_archive =
+                    architecture == Architecture::Amd64 || architecture == Architecture::Arm64 && release == "resolute";
                 let keyring = "/usr/share/keyrings/ubuntu-archive-keyring.gpg";
                 let stanzas = if main_archive {
                     vec![
                         ManagedAptStanza {
                             uri: "https://archive.ubuntu.com/ubuntu".into(),
-                            suites: vec![
-                                release.into(),
-                                format!("{release}-updates"),
-                                format!("{release}-backports"),
-                            ],
+                            suites: vec![release.into(), format!("{release}-updates"), format!("{release}-backports")],
                             signed_by: keyring.into(),
                         },
                         ManagedAptStanza {
@@ -265,13 +238,7 @@ impl Platform {
             ),
             _ => unreachable!(),
         };
-        Ok(ManagedAptSources {
-            distro: self.distro.clone(),
-            release,
-            architecture,
-            components,
-            stanzas,
-        })
+        Ok(ManagedAptSources { distro: self.distro.clone(), release, architecture, components, stanzas })
     }
 }
 
@@ -279,9 +246,7 @@ fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
     if !success {
         bail!("uname -m failed");
     }
-    let machine = std::str::from_utf8(stdout)
-        .context("uname -m output is not UTF-8")?
-        .trim();
+    let machine = std::str::from_utf8(stdout).context("uname -m output is not UTF-8")?.trim();
     if machine.is_empty() {
         bail!("uname -m returned an empty machine architecture");
     }
@@ -314,16 +279,9 @@ fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
 }
 
 fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<String>> {
-    let defaults: &[&str] = if platform.distro == "kali" {
-        &["main", "contrib", "non-free", "non-free-firmware"]
-    } else {
-        &["main"]
-    };
-    let components = if configured.is_empty() {
-        defaults
-    } else {
-        configured
-    };
+    let defaults: &[&str] =
+        if platform.distro == "kali" { &["main", "contrib", "non-free", "non-free-firmware"] } else { &["main"] };
+    let components = if configured.is_empty() { defaults } else { configured };
     let supported: &[&str] = match platform.distro.as_str() {
         "ubuntu" => &["main", "restricted", "universe", "multiverse"],
         "debian" if platform.distro_codename == "bullseye" => &["main", "contrib", "non-free"],
