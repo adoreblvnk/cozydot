@@ -34,27 +34,17 @@ fn generate() -> io::Result<()> {
     writeln!(file, "pub static RECORDS: &[Record] = &[")?;
     for (path, (source, mode)) in records {
         let bytes = fs::read(source)?;
-        writeln!(
-            file,
-            "    Record {{ path: {path:?}, bytes: &{bytes:?}, mode: {mode:#o} }},"
-        )?;
+        writeln!(file, "    Record {{ path: {path:?}, bytes: &{bytes:?}, mode: {mode:#o} }},")?;
     }
     writeln!(file, "];")?;
     writeln!(file, "pub static PRESETS: &[PresetRecord] = &[")?;
     for (name, bytes) in presets {
-        writeln!(
-            file,
-            "    PresetRecord {{ name: {name:?}, bytes: &{bytes:?} }},"
-        )?;
+        writeln!(file, "    PresetRecord {{ name: {name:?}, bytes: &{bytes:?} }},")?;
     }
     writeln!(file, "];")
 }
 
-fn walk(
-    source: &Path,
-    destination: &Path,
-    records: &mut BTreeMap<String, (PathBuf, u32)>,
-) -> io::Result<()> {
+fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathBuf, u32)>) -> io::Result<()> {
     println!("cargo:rerun-if-changed={}", source.display());
     let metadata = fs::symlink_metadata(source)?;
     if !metadata.is_dir() {
@@ -78,38 +68,22 @@ fn walk(
     Ok(())
 }
 
-fn add_file(
-    source: &Path,
-    destination: &Path,
-    records: &mut BTreeMap<String, (PathBuf, u32)>,
-) -> io::Result<()> {
+fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathBuf, u32)>) -> io::Result<()> {
     println!("cargo:rerun-if-changed={}", source.display());
     let metadata = fs::symlink_metadata(source)?;
     if !metadata.file_type().is_file() {
         return Err(invalid(source, "asset is not a regular file"));
     }
     let destination = valid_destination(destination, source)?;
-    let mode = if fs::read(source)?.starts_with(b"#!") {
-        0o755
-    } else {
-        0o644
-    };
-    if records
-        .insert(destination.clone(), (source.to_path_buf(), mode))
-        .is_some()
-    {
-        return Err(invalid(
-            source,
-            &format!("duplicate destination {destination}"),
-        ));
+    let mode = if fs::read(source)?.starts_with(b"#!") { 0o755 } else { 0o644 };
+    if records.insert(destination.clone(), (source.to_path_buf(), mode)).is_some() {
+        return Err(invalid(source, &format!("duplicate destination {destination}")));
     }
     Ok(())
 }
 
 fn valid_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
-    let name = name
-        .to_str()
-        .ok_or_else(|| invalid(source, "asset path is not UTF-8"))?;
+    let name = name.to_str().ok_or_else(|| invalid(source, "asset path is not UTF-8"))?;
     if name.is_empty() || name.contains(['\t', '\n', '\r']) {
         return Err(invalid(source, "asset path contains an unsafe character"));
     }
@@ -117,10 +91,7 @@ fn valid_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
 }
 
 fn valid_destination(destination: &Path, source: &Path) -> io::Result<String> {
-    if destination.as_os_str().is_empty()
-        || destination
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
+    if destination.as_os_str().is_empty() || destination.components().any(|part| !matches!(part, Component::Normal(_)))
     {
         return Err(invalid(source, "asset destination is unsafe"));
     }
@@ -128,17 +99,9 @@ fn valid_destination(destination: &Path, source: &Path) -> io::Result<String> {
         .to_str()
         .filter(|path| !path.contains(['\t', '\n', '\r']))
         .map(str::to_owned)
-        .ok_or_else(|| {
-            invalid(
-                source,
-                "asset destination is invalid UTF-8 or contains controls",
-            )
-        })
+        .ok_or_else(|| invalid(source, "asset destination is invalid UTF-8 or contains controls"))
 }
 
 fn invalid(path: &Path, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("{message}: {}", path.display()),
-    )
+    io::Error::new(io::ErrorKind::InvalidData, format!("{message}: {}", path.display()))
 }

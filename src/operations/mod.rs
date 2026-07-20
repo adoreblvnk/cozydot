@@ -5,12 +5,7 @@ pub(crate) mod privileged_file {
     use anyhow::{bail, Context, Result};
     use std::{ffi::OsStr, fs, io::Write, path::Path};
 
-    pub(crate) fn publish_bytes(
-        host: &Host,
-        destination: &Path,
-        contents: &[u8],
-        operation: &str,
-    ) -> Result<()> {
+    pub(crate) fn publish_bytes(host: &Host, destination: &Path, contents: &[u8], operation: &str) -> Result<()> {
         publish_bytes_with_mode(host, destination, contents, operation, "0644")
     }
 
@@ -31,14 +26,7 @@ pub(crate) mod privileged_file {
         operation: &str,
         no_replace: bool,
     ) -> Result<()> {
-        publish_bytes_with_mode_and_policy(
-            host,
-            destination,
-            contents,
-            operation,
-            "0644",
-            no_replace,
-        )
+        publish_bytes_with_mode_and_policy(host, destination, contents, operation, "0644", no_replace)
     }
 
     fn publish_bytes_with_mode_and_policy(
@@ -58,23 +46,12 @@ pub(crate) mod privileged_file {
             .truncate(true)
             .open(local.path())
             .context("open local publication staging file")?;
-        file.write_all(contents)
-            .context("write local publication staging file")?;
-        file.sync_all()
-            .context("sync local publication staging file")?;
+        file.write_all(contents).context("write local publication staging file")?;
+        file.sync_all().context("sync local publication staging file")?;
         drop(file);
-        let parent = destination
-            .parent()
-            .context("publication destination has no parent")?;
-        let file_name = destination
-            .file_name()
-            .context("publication destination has no filename")?
-            .to_string_lossy();
-        let nonce = local
-            .path()
-            .file_name()
-            .context("publication staging file has no filename")?
-            .to_string_lossy();
+        let parent = destination.parent().context("publication destination has no parent")?;
+        let file_name = destination.file_name().context("publication destination has no filename")?.to_string_lossy();
+        let nonce = local.path().file_name().context("publication staging file has no filename")?.to_string_lossy();
         let staged = parent.join(format!(".{file_name}.{nonce}.tmp"));
         let parent_arg = parent.as_os_str();
         let local_arg = local.path().as_os_str();
@@ -113,85 +90,38 @@ pub(crate) mod privileged_file {
                     staged_arg,
                 ],
             )?;
-            host.require(
-                operation,
-                "sudo",
-                [OsStr::new("sync"), OsStr::new("--"), staged_arg],
-            )?;
+            host.require(operation, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
             if no_replace {
                 // `link(2)` is an atomic no-replace publication here: both names are in the
                 // destination directory, and an existing destination makes `ln` fail rather
                 // than report a skipped move as success. The staging name is removed only
                 // after the destination link exists.
-                host.require(
-                    operation,
-                    "sudo",
-                    [
-                        OsStr::new("ln"),
-                        OsStr::new("--"),
-                        staged_arg,
-                        destination_arg,
-                    ],
-                )?;
-                host.require(
-                    operation,
-                    "sudo",
-                    [
-                        OsStr::new("rm"),
-                        OsStr::new("-f"),
-                        OsStr::new("--"),
-                        staged_arg,
-                    ],
-                )?;
+                host.require(operation, "sudo", [OsStr::new("ln"), OsStr::new("--"), staged_arg, destination_arg])?;
+                host.require(operation, "sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg])?;
             } else {
                 host.require(
                     operation,
                     "sudo",
-                    [
-                        OsStr::new("test"),
-                        OsStr::new("!"),
-                        OsStr::new("-d"),
-                        destination_arg,
-                    ],
+                    [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg],
                 )?;
                 host.require(
                     operation,
                     "sudo",
-                    [
-                        OsStr::new("mv"),
-                        OsStr::new("-fT"),
-                        OsStr::new("--"),
-                        staged_arg,
-                        destination_arg,
-                    ],
+                    [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg],
                 )?;
             }
             sync_parent(host, destination, operation)?;
             Ok(())
         })();
         if result.is_err() {
-            let _ = host.run(
-                "sudo",
-                [
-                    OsStr::new("rm"),
-                    OsStr::new("-f"),
-                    OsStr::new("--"),
-                    staged_arg,
-                ],
-            );
+            let _ = host.run("sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg]);
         }
         result
     }
 
     pub(crate) fn sync_parent(host: &Host, destination: &Path, operation: &str) -> Result<()> {
-        let parent = destination
-            .parent()
-            .context("publication destination has no parent")?;
-        host.require(
-            operation,
-            "sudo",
-            [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()],
-        )?;
+        let parent = destination.parent().context("publication destination has no parent")?;
+        host.require(operation, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()])?;
         Ok(())
     }
 }
@@ -202,19 +132,15 @@ mod tools;
 
 pub use apt::AptUpgradePolicy;
 pub use binary::{
-    BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector,
-    BinarySha256, BinarySourceOperation, GithubRepository,
+    BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
+    BinarySourceOperation, GithubRepository,
 };
 pub use packages::cargo::CargoPackageMode;
 pub use packages::fonts::NerdFontsMode;
 pub use packages::npm::NpmPackageMode;
-pub use repository::{
-    AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken,
-};
+pub use repository::{AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken};
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
-pub use tools::{
-    GoToolchainSelector, NodeToolchainSelector, RustToolchainSelector, ToolMutationMode,
-};
+pub use tools::{GoToolchainSelector, NodeToolchainSelector, RustToolchainSelector, ToolMutationMode};
 
 use crate::platform::{Architecture, ManagedAptSources};
 use anyhow::{bail, Context, Result};
@@ -229,92 +155,40 @@ const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    AptBootstrapPackages {
-        packages: Vec<String>,
-    },
+    AptBootstrapPackages { packages: Vec<String> },
     AptMetadataRefresh,
     AptRepository(AptRepositoryOperation),
     ManagedAptSources(ManagedAptSources),
-    AptPackages {
-        packages: Vec<String>,
-    },
-    AptPurge {
-        packages: Vec<String>,
-    },
-    AptUpgrade {
-        policy: AptUpgradePolicy,
-    },
+    AptPackages { packages: Vec<String> },
+    AptPurge { packages: Vec<String> },
+    AptUpgrade { policy: AptUpgradePolicy },
     DockerGroup,
-    DockerLocalLog {
-        max_size: Option<String>,
-    },
-    DesktopSetting {
-        target: DesktopEnvironment,
-        setting: DesktopSetting,
-    },
+    DockerLocalLog { max_size: Option<String> },
+    DesktopSetting { target: DesktopEnvironment, setting: DesktopSetting },
     BinaryPackage(BinaryPackageOperation),
-    Dotfiles {
-        root: PathBuf,
-        packages: Vec<String>,
-    },
+    Dotfiles { root: PathBuf, packages: Vec<String> },
     FlatpakEnsureFlathub,
-    FlatpakEnsureApps {
-        refs: Vec<String>,
-    },
-    FlatpakUpdateApps {
-        refs: Vec<String>,
-    },
+    FlatpakEnsureApps { refs: Vec<String> },
+    FlatpakUpdateApps { refs: Vec<String> },
     FnmBootstrap,
     EnsureAdmin,
-    GnomeExtensions {
-        extensions: Vec<String>,
-    },
+    GnomeExtensions { extensions: Vec<String> },
     GnomeDock,
     GnomeRoundedCorners,
-    GoToolchain {
-        selector: GoToolchainSelector,
-        architecture: Architecture,
-        mode: ToolMutationMode,
-    },
-    NerdFonts {
-        families: Vec<String>,
-        mode: NerdFontsMode,
-    },
+    GoToolchain { selector: GoToolchainSelector, architecture: Architecture, mode: ToolMutationMode },
+    NerdFonts { families: Vec<String>, mode: NerdFontsMode },
     RustupBootstrap,
     CargoBinstallBootstrap,
-    RustToolchain {
-        selector: RustToolchainSelector,
-        architecture: Architecture,
-        mode: ToolMutationMode,
-    },
-    CargoPackageSet {
-        packages: Vec<String>,
-        mode: CargoPackageMode,
-    },
-    NodeToolchain {
-        selector: NodeToolchainSelector,
-        architecture: Architecture,
-        mode: ToolMutationMode,
-    },
-    NpmPackageSet {
-        packages: Vec<String>,
-        mode: NpmPackageMode,
-    },
-    UbuntuSnap {
-        enabled: bool,
-    },
-    UnattendedUpgrades {
-        enabled: bool,
-    },
+    RustToolchain { selector: RustToolchainSelector, architecture: Architecture, mode: ToolMutationMode },
+    CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
+    NodeToolchain { selector: NodeToolchainSelector, architecture: Architecture, mode: ToolMutationMode },
+    NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
+    UbuntuSnap { enabled: bool },
+    UnattendedUpgrades { enabled: bool },
     UvBootstrap,
-    PythonToolchain {
-        version: String,
-        architecture: Architecture,
-    },
+    PythonToolchain { version: String, architecture: Architecture },
     VirtualBoxGroup,
-    VsCodeExtensionSet {
-        extensions: Vec<String>,
-    },
+    VsCodeExtensionSet { extensions: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -327,9 +201,7 @@ impl Operation {
     pub fn display_args(&self) -> Vec<String> {
         match self {
             Self::AptBootstrapPackages { packages } => {
-                std::iter::once("apt-bootstrap-packages".into())
-                    .chain(packages.clone())
-                    .collect()
+                std::iter::once("apt-bootstrap-packages".into()).chain(packages.clone()).collect()
             }
             Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
             Self::AptRepository(operation) => operation.display_args(),
@@ -339,12 +211,8 @@ impl Operation {
                 policy.release.clone(),
                 policy.architecture.canonical().into(),
             ],
-            Self::AptPackages { packages } => std::iter::once("apt-packages".into())
-                .chain(packages.clone())
-                .collect(),
-            Self::AptPurge { packages } => std::iter::once("apt-purge".into())
-                .chain(packages.clone())
-                .collect(),
+            Self::AptPackages { packages } => std::iter::once("apt-packages".into()).chain(packages.clone()).collect(),
+            Self::AptPurge { packages } => std::iter::once("apt-purge".into()).chain(packages.clone()).collect(),
             Self::AptUpgrade { policy } => vec![
                 "apt-upgrade".into(),
                 match policy {
@@ -354,9 +222,9 @@ impl Operation {
                 .into(),
             ],
             Self::DockerGroup => vec!["docker-group".into()],
-            Self::DockerLocalLog { max_size } => std::iter::once("docker-local-log".into())
-                .chain(max_size.iter().cloned())
-                .collect(),
+            Self::DockerLocalLog { max_size } => {
+                std::iter::once("docker-local-log".into()).chain(max_size.iter().cloned()).collect()
+            }
             Self::DesktopSetting { target, setting } => {
                 let target_str = match target {
                     DesktopEnvironment::Gnome => "gnome",
@@ -366,41 +234,30 @@ impl Operation {
                     DesktopSetting::Theme(DesktopTheme::Light) => ("theme", "light".into()),
                     DesktopSetting::Theme(DesktopTheme::Dark) => ("theme", "dark".into()),
                     DesktopSetting::Terminal(executable) => ("terminal", executable.clone()),
-                    DesktopSetting::IdleTimeoutSeconds(seconds) => {
-                        ("idle-timeout-seconds", seconds.to_string())
-                    }
+                    DesktopSetting::IdleTimeoutSeconds(seconds) => ("idle-timeout-seconds", seconds.to_string()),
                     DesktopSetting::IdleDim(enabled) => ("idle-dim", enabled.to_string()),
                 };
-                vec![
-                    "desktop-setting".into(),
-                    target_str.into(),
-                    name.into(),
-                    value,
-                ]
+                vec!["desktop-setting".into(), target_str.into(), name.into(), value]
             }
             Self::BinaryPackage(package) => package.display_args(),
-            Self::Dotfiles { packages, .. } => std::iter::once("dotfiles-backup-stow".into())
-                .chain(packages.iter().cloned())
-                .collect(),
+            Self::Dotfiles { packages, .. } => {
+                std::iter::once("dotfiles-backup-stow".into()).chain(packages.iter().cloned()).collect()
+            }
             Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
-            Self::FlatpakEnsureApps { refs } => std::iter::once("flatpak-ensure-apps".into())
-                .chain(refs.clone())
-                .collect(),
-            Self::FlatpakUpdateApps { refs } => std::iter::once("flatpak-update-apps".into())
-                .chain(refs.clone())
-                .collect(),
+            Self::FlatpakEnsureApps { refs } => {
+                std::iter::once("flatpak-ensure-apps".into()).chain(refs.clone()).collect()
+            }
+            Self::FlatpakUpdateApps { refs } => {
+                std::iter::once("flatpak-update-apps".into()).chain(refs.clone()).collect()
+            }
             Self::FnmBootstrap => vec!["fnm-bootstrap".into()],
             Self::EnsureAdmin => vec!["ensure-admin".into()],
-            Self::GnomeExtensions { extensions } => std::iter::once("gnome-extensions".into())
-                .chain(extensions.iter().cloned())
-                .collect(),
+            Self::GnomeExtensions { extensions } => {
+                std::iter::once("gnome-extensions".into()).chain(extensions.iter().cloned()).collect()
+            }
             Self::GnomeDock => vec!["gnome-dock".into()],
             Self::GnomeRoundedCorners => vec!["gnome-rounded-corners".into()],
-            Self::GoToolchain {
-                selector,
-                architecture,
-                mode,
-            } => vec![
+            Self::GoToolchain { selector, architecture, mode } => vec![
                 "go-toolchain".into(),
                 match mode {
                     ToolMutationMode::EnsurePresent => "ensure-present",
@@ -426,11 +283,7 @@ impl Operation {
             .collect(),
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
             Self::CargoBinstallBootstrap => vec!["cargo-binstall-bootstrap".into()],
-            Self::RustToolchain {
-                selector,
-                architecture,
-                mode,
-            } => vec![
+            Self::RustToolchain { selector, architecture, mode } => vec![
                 "rust-toolchain".into(),
                 match mode {
                     ToolMutationMode::EnsurePresent => "ensure-present",
@@ -454,11 +307,7 @@ impl Operation {
                 ))
                 .chain(packages.iter().cloned())
                 .collect(),
-            Self::NodeToolchain {
-                selector,
-                architecture,
-                mode,
-            } => vec![
+            Self::NodeToolchain { selector, architecture, mode } => vec![
                 "node-toolchain".into(),
                 match mode {
                     ToolMutationMode::EnsurePresent => "ensure-present",
@@ -488,19 +337,12 @@ impl Operation {
                 vec!["unattended-upgrades".into(), enabled.to_string()]
             }
             Self::UvBootstrap => vec!["uv-bootstrap".into()],
-            Self::PythonToolchain {
-                version,
-                architecture,
-            } => vec![
-                "python-toolchain".into(),
-                version.clone(),
-                architecture.canonical().into(),
-            ],
+            Self::PythonToolchain { version, architecture } => {
+                vec!["python-toolchain".into(), version.clone(), architecture.canonical().into()]
+            }
             Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
             Self::VsCodeExtensionSet { extensions } => {
-                std::iter::once("vscode-extension-set".into())
-                    .chain(extensions.iter().cloned())
-                    .collect()
+                std::iter::once("vscode-extension-set".into()).chain(extensions.iter().cloned()).collect()
             }
         }
     }
@@ -512,79 +354,48 @@ pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
 
 fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
     match operation {
-        Operation::AptBootstrapPackages { packages } => {
-            completed(apt::bootstrap_packages(&host, packages))
-        }
+        Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
         Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
-        Operation::ManagedAptSources(policy) => {
-            completed(repository::managed_apt::execute(&host, policy))
-        }
+        Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptPurge { packages } => completed(apt::purge(&host, packages)),
         Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
         Operation::DockerGroup => completed(system::docker_group(&host)),
-        Operation::DockerLocalLog { max_size } => {
-            completed(system::docker_local_log(&host, max_size.as_deref()))
-        }
-        Operation::DesktopSetting { target, setting } => {
-            completed(system::desktop_setting(&host, *target, setting))
-        }
+        Operation::DockerLocalLog { max_size } => completed(system::docker_local_log(&host, max_size.as_deref())),
+        Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
         Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
-        Operation::Dotfiles { root, packages } => {
-            completed(packages::dotfiles::execute(&host, root, packages))
-        }
+        Operation::Dotfiles { root, packages } => completed(packages::dotfiles::execute(&host, root, packages)),
         Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
-        Operation::FlatpakEnsureApps { refs } => {
-            completed(packages::flatpak::ensure_apps(&host, refs))
-        }
-        Operation::FlatpakUpdateApps { refs } => {
-            completed(packages::flatpak::update_apps(&host, refs))
-        }
+        Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
+        Operation::FlatpakUpdateApps { refs } => completed(packages::flatpak::update_apps(&host, refs)),
         Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
         Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
         Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
         Operation::GnomeDock => system::gnome_dock(&host),
         Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
-        Operation::GoToolchain {
-            selector,
-            architecture,
-            mode,
-        } => completed(tools::execute_go(&host, selector, *architecture, *mode)),
-        Operation::NerdFonts { families, mode } => {
-            completed(packages::fonts::execute(&host, families, *mode))
+        Operation::GoToolchain { selector, architecture, mode } => {
+            completed(tools::execute_go(&host, selector, *architecture, *mode))
         }
+        Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
         Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::RustToolchain {
-            selector,
-            architecture,
-            mode,
-        } => completed(tools::execute_rust(&host, selector, *architecture, *mode)),
-        Operation::CargoPackageSet { packages, mode } => {
-            completed(packages::cargo::execute(&host, packages, *mode))
+        Operation::RustToolchain { selector, architecture, mode } => {
+            completed(tools::execute_rust(&host, selector, *architecture, *mode))
         }
-        Operation::NodeToolchain {
-            selector,
-            architecture,
-            mode,
-        } => completed(tools::execute_node(&host, selector, *architecture, *mode)),
-        Operation::NpmPackageSet { packages, mode } => {
-            completed(packages::npm::execute(&host, packages, *mode))
+        Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
+        Operation::NodeToolchain { selector, architecture, mode } => {
+            completed(tools::execute_node(&host, selector, *architecture, *mode))
         }
+        Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
         Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
-        Operation::UnattendedUpgrades { enabled } => {
-            completed(system::unattended_upgrades(&host, *enabled))
-        }
+        Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
         Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::PythonToolchain {
-            version,
-            architecture,
-        } => completed(tools::execute_python(&host, version, *architecture)),
-        Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
-        Operation::VsCodeExtensionSet { extensions } => {
-            completed(system::vscode_extensions(&host, extensions))
+        Operation::PythonToolchain { version, architecture } => {
+            completed(tools::execute_python(&host, version, *architecture))
         }
+        Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
+        Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
     }
 }
 
@@ -598,9 +409,7 @@ pub(crate) struct Host {
 
 impl Host {
     fn new() -> Result<Self> {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .context("HOME is not set")?;
+        let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
         Ok(Self { home })
     }
 
@@ -609,15 +418,10 @@ impl Host {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let args = args
-            .into_iter()
-            .map(|arg| arg.as_ref().to_os_string())
-            .collect::<Vec<_>>();
+        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
         let mut command = Command::new(program);
         command.args(&args);
-        command
-            .output()
-            .with_context(|| format!("{program} operation: start {}", display(program, &args)))
+        command.output().with_context(|| format!("{program} operation: start {}", display(program, &args)))
     }
 
     pub fn require<I, S>(&self, operation: &str, program: &str, args: I) -> Result<Output>
@@ -636,31 +440,16 @@ impl Host {
         Ok(output)
     }
 
-    pub fn require_input<I, S>(
-        &self,
-        operation: &str,
-        program: &str,
-        args: I,
-        input: &[u8],
-    ) -> Result<()>
+    pub fn require_input<I, S>(&self, operation: &str, program: &str, args: I, input: &[u8]) -> Result<()>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let args = args
-            .into_iter()
-            .map(|arg| arg.as_ref().to_os_string())
-            .collect::<Vec<_>>();
+        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
         let mut command = Command::new(program);
         command.args(&args).stdin(Stdio::piped());
-        let mut child = command
-            .spawn()
-            .with_context(|| format!("{operation}: start {}", display(program, &args)))?;
-        child
-            .stdin
-            .take()
-            .context("command stdin unavailable")?
-            .write_all(input)?;
+        let mut child = command.spawn().with_context(|| format!("{operation}: start {}", display(program, &args)))?;
+        child.stdin.take().context("command stdin unavailable")?.write_all(input)?;
         let status = child.wait()?;
         if !status.success() {
             bail!("{operation}: {program} failed ({status})");
@@ -673,9 +462,7 @@ impl Host {
     }
 
     pub fn temp_dir(&self) -> PathBuf {
-        self.value("TMPDIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
+        self.value("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
     }
 
     pub fn value(&self, name: &str) -> Option<OsString> {
@@ -751,16 +538,8 @@ pub(crate) mod apt {
         if packages.is_empty() {
             anyhow::bail!("APT bootstrap package sequence must not be empty");
         }
-        host.require(
-            "APT bootstrap metadata refresh",
-            "sudo",
-            ["apt-get", "update", "-qq"],
-        )?;
-        install(
-            host,
-            "APT bootstrap package installation",
-            packages.to_vec(),
-        )
+        host.require("APT bootstrap metadata refresh", "sudo", ["apt-get", "update", "-qq"])?;
+        install(host, "APT bootstrap package installation", packages.to_vec())
     }
 
     pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
@@ -807,41 +586,19 @@ pub(crate) mod apt {
                 host.require(
                     "APT standard upgrade",
                     "sudo",
-                    [
-                        "DEBIAN_FRONTEND=noninteractive",
-                        "apt-get",
-                        "upgrade",
-                        "-y",
-                        "-qq",
-                        "--",
-                    ],
+                    ["DEBIAN_FRONTEND=noninteractive", "apt-get", "upgrade", "-y", "-qq", "--"],
                 )?;
             }
             AptUpgradePolicy::Full => {
                 host.require(
                     "APT full upgrade",
                     "sudo",
-                    [
-                        "DEBIAN_FRONTEND=noninteractive",
-                        "apt-get",
-                        "full-upgrade",
-                        "-y",
-                        "-qq",
-                        "--",
-                    ],
+                    ["DEBIAN_FRONTEND=noninteractive", "apt-get", "full-upgrade", "-y", "-qq", "--"],
                 )?;
                 host.require(
                     "APT purge autoremove",
                     "sudo",
-                    [
-                        "DEBIAN_FRONTEND=noninteractive",
-                        "apt-get",
-                        "autoremove",
-                        "--purge",
-                        "-y",
-                        "-qq",
-                        "--",
-                    ],
+                    ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq", "--"],
                 )?;
             }
         }
@@ -856,10 +613,8 @@ pub(crate) mod languages {
     use crate::operations::{Host, TempPath, RUSTUP_BOOTSTRAP_FLAGS};
 
     pub fn fnm_bootstrap(host: &Host) -> Result<()> {
-        let data_home = host
-            .value("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/share"));
+        let data_home =
+            host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
         if !data_home.is_absolute() {
             bail!("FNM managed data directory must be absolute");
         }
@@ -871,32 +626,18 @@ pub(crate) mod languages {
         host.require(
             "FNM bootstrap download",
             "curl",
-            [
-                "-fsSL",
-                "-o",
-                &installer.path().to_string_lossy(),
-                "https://fnm.vercel.app/install",
-            ],
+            ["-fsSL", "-o", &installer.path().to_string_lossy(), "https://fnm.vercel.app/install"],
         )?;
-        host.require(
-            "FNM bootstrap",
-            "bash",
-            [&installer.path().to_string_lossy(), "--skip-shell"],
-        )?;
+        host.require("FNM bootstrap", "bash", [&installer.path().to_string_lossy(), "--skip-shell"])?;
         if !executable_file(&installed) {
-            bail!(
-                "FNM bootstrap did not publish executable {}",
-                installed.display()
-            );
+            bail!("FNM bootstrap did not publish executable {}", installed.display());
         }
         Ok(())
     }
 
     pub fn uv_bootstrap(host: &Host) -> Result<()> {
-        let install_dir = host
-            .value("UV_INSTALL_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/bin"));
+        let install_dir =
+            host.value("UV_INSTALL_DIR").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
         if !install_dir.is_absolute() {
             bail!("UV managed install directory must be absolute");
         }
@@ -908,12 +649,7 @@ pub(crate) mod languages {
         host.require(
             "UV bootstrap download",
             "curl",
-            [
-                "-LsSf",
-                "-o",
-                &installer.path().to_string_lossy(),
-                "https://astral.sh/uv/install.sh",
-            ],
+            ["-LsSf", "-o", &installer.path().to_string_lossy(), "https://astral.sh/uv/install.sh"],
         )?;
         std::fs::create_dir_all(&install_dir).context("UV bootstrap: create install directory")?;
         host.require(
@@ -926,25 +662,18 @@ pub(crate) mod languages {
             ],
         )?;
         if !executable_file(&installed) {
-            bail!(
-                "UV bootstrap did not publish executable {}",
-                installed.display()
-            );
+            bail!("UV bootstrap did not publish executable {}", installed.display());
         }
         Ok(())
     }
 
     fn executable_file(path: &std::path::Path) -> bool {
-        std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-            metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0
-        })
+        std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
     }
 
     pub fn rustup(host: &Host) -> Result<()> {
-        let cargo_home = host
-            .value("CARGO_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".cargo"));
+        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
         if !cargo_home.is_absolute() {
             bail!("rustup managed CARGO_HOME must be absolute");
         }
@@ -968,8 +697,7 @@ pub(crate) mod languages {
         host.require(
             "rustup bootstrap",
             "sh",
-            std::iter::once(installer.path().as_os_str())
-                .chain(RUSTUP_BOOTSTRAP_FLAGS.map(OsStr::new)),
+            std::iter::once(installer.path().as_os_str()).chain(RUSTUP_BOOTSTRAP_FLAGS.map(OsStr::new)),
         )?;
         if !executable_file(&cargo_home.join("bin/rustup")) {
             bail!("rustup bootstrap did not publish the managed rustup executable");
@@ -995,21 +723,13 @@ pub(crate) mod packages {
             UpdateCurrent,
         }
 
-        pub(crate) fn execute(
-            host: &Host,
-            packages: &[String],
-            mode: CargoPackageMode,
-        ) -> Result<()> {
-            let cargo_home = host
-                .value("CARGO_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| host.home().join(".cargo"));
+        pub(crate) fn execute(host: &Host, packages: &[String], mode: CargoPackageMode) -> Result<()> {
+            let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
             if !cargo_home.is_absolute() {
                 bail!("Cargo package operation requires an absolute CARGO_HOME");
             }
-            let binstall = resolve_binstall(&cargo_home)?.context(
-                "Cargo package operation: managed cargo-binstall is unavailable after bootstrap",
-            )?;
+            let binstall = resolve_binstall(&cargo_home)?
+                .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
             let mut args = vec!["--no-confirm".to_owned()];
             if mode == CargoPackageMode::UpdateCurrent {
                 args.push("--force".into());
@@ -1028,15 +748,12 @@ pub(crate) mod packages {
         }
 
         fn executable_file(path: &Path) -> bool {
-            std::fs::metadata(path).is_ok_and(|metadata| {
-                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
-            })
+            std::fs::metadata(path)
+                .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
         }
 
         fn path_program(path: &Path, description: &str) -> Result<String> {
-            path.to_str()
-                .map(str::to_owned)
-                .with_context(|| format!("{description} is not UTF-8: {}", path.display()))
+            path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
         }
     }
 
@@ -1055,11 +772,7 @@ pub(crate) mod packages {
             UpdateCurrent,
         }
 
-        pub(crate) fn execute(
-            host: &Host,
-            packages: &[String],
-            mode: NpmPackageMode,
-        ) -> Result<()> {
+        pub(crate) fn execute(host: &Host, packages: &[String], mode: NpmPackageMode) -> Result<()> {
             let fnm = resolve_fnm(host)?;
             let version = selected_version(host, &fnm)?;
 
@@ -1074,27 +787,21 @@ pub(crate) mod packages {
         }
 
         fn resolve_fnm(host: &Host) -> Result<String> {
-            let data_home = host
-                .value("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| host.home().join(".local/share"));
+            let data_home =
+                host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
             if !data_home.is_absolute() {
                 bail!("npm package operation requires an absolute managed FNM data directory");
             }
             let managed = data_home.join("fnm/fnm");
             if executable_file(&managed) {
-                return managed
-                    .to_str()
-                    .map(str::to_owned)
-                    .context("managed fnm executable path is not UTF-8");
+                return managed.to_str().map(str::to_owned).context("managed fnm executable path is not UTF-8");
             }
             bail!("npm package operation: managed fnm is unavailable after bootstrap")
         }
 
         fn selected_version(host: &Host, fnm: &str) -> Result<String> {
             let output = host.require("fnm default Node query", fnm, ["default"])?;
-            let output = std::str::from_utf8(&output.stdout)
-                .context("fnm returned non-UTF-8 default Node version")?;
+            let output = std::str::from_utf8(&output.stdout).context("fnm returned non-UTF-8 default Node version")?;
             let version = output.strip_suffix('\n').unwrap_or(output);
             if version.contains(['\n', '\r']) || !valid_node_version(version) {
                 bail!("fnm returned invalid default Node version: {version:?}");
@@ -1113,13 +820,7 @@ pub(crate) mod packages {
             I: IntoIterator<Item = S>,
             S: AsRef<str>,
         {
-            let mut args = vec![
-                "exec".to_owned(),
-                "--using".into(),
-                version.to_owned(),
-                "--".into(),
-                "npm".into(),
-            ];
+            let mut args = vec!["exec".to_owned(), "--using".into(), version.to_owned(), "--".into(), "npm".into()];
             args.extend(npm_args.into_iter().map(|arg| arg.as_ref().to_owned()));
             host.require(operation, fnm, args)
         }
@@ -1138,9 +839,8 @@ pub(crate) mod packages {
         }
 
         fn executable_file(path: &Path) -> bool {
-            std::fs::metadata(path).is_ok_and(|metadata| {
-                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
-            })
+            std::fs::metadata(path)
+                .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
         }
     }
 
@@ -1156,13 +856,7 @@ pub(crate) mod packages {
             host.require(
                 "Flathub remote ensure",
                 "flatpak",
-                [
-                    "--user",
-                    "remote-add",
-                    "--if-not-exists",
-                    FLATHUB_NAME,
-                    FLATHUB_DESCRIPTOR_URL,
-                ],
+                ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
             )?;
             let url_arg = format!("--url={FLATHUB_URL}");
             host.require(
@@ -1240,33 +934,20 @@ pub(crate) mod packages {
                 let is_present = match fs::symlink_metadata(&destination) {
                     Ok(metadata) => {
                         if metadata.is_dir() {
-                            validate_extracted_tree(&destination).with_context(|| {
-                                format!("validate installed Nerd Font family {family:?}")
-                            })?;
+                            validate_extracted_tree(&destination)
+                                .with_context(|| format!("validate installed Nerd Font family {family:?}"))?;
                             true
                         } else {
-                            bail!(
-                                "Nerd Font destination conflict at {}",
-                                destination.display()
-                            );
+                            bail!("Nerd Font destination conflict at {}", destination.display());
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                     Err(error) => {
-                        return Err(error).context(format!(
-                            "inspect Nerd Font destination {}",
-                            destination.display()
-                        ))
+                        return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()))
                     }
                 };
                 if mode == NerdFontsMode::Update || !is_present {
-                    install_family_with_destination(
-                        host,
-                        family,
-                        &destination,
-                        &parent,
-                        &data_home,
-                    )?;
+                    install_family_with_destination(host, family, &destination, &parent, &data_home)?;
                 }
             }
             refresh_cache(host, "Nerd Font cache refresh", &parent)?;
@@ -1310,12 +991,7 @@ pub(crate) mod packages {
             let listing = host.require(
                 "Nerd Font archive preflight",
                 "tar",
-                [
-                    "--list",
-                    "--xz",
-                    "--file",
-                    &archive.path().to_string_lossy(),
-                ],
+                ["--list", "--xz", "--file", &archive.path().to_string_lossy()],
             )?;
             validate_archive_listing(&listing.stdout)?;
             let stage = TempDir::new_in(data_home, ".cozydot-font-stage")?;
@@ -1334,10 +1010,7 @@ pub(crate) mod packages {
             validate_extracted_tree(stage.path())?;
             let replacing = match fs::symlink_metadata(destination) {
                 Ok(metadata) if metadata.is_dir() => true,
-                Ok(_) => bail!(
-                    "Nerd Font destination conflict at {}",
-                    destination.display()
-                ),
+                Ok(_) => bail!("Nerd Font destination conflict at {}", destination.display()),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                 Err(error) => return Err(error).context("inspect Nerd Font destination"),
             };
@@ -1347,40 +1020,25 @@ pub(crate) mod packages {
         }
 
         fn publish_family(stage: &Path, destination: &Path, replacing: bool) -> Result<()> {
-            let flags = if replacing {
-                rustix::fs::RenameFlags::EXCHANGE
-            } else {
-                rustix::fs::RenameFlags::NOREPLACE
-            };
+            let flags = if replacing { rustix::fs::RenameFlags::EXCHANGE } else { rustix::fs::RenameFlags::NOREPLACE };
             rustix::fs::renameat_with(rustix::fs::CWD, stage, rustix::fs::CWD, destination, flags)
                 .context("atomically publish Nerd Font family")
         }
 
         fn refresh_cache(host: &Host, operation: &str, directory: &Path) -> Result<()> {
-            host.require(
-                operation,
-                "fc-cache",
-                [OsStr::new("--force"), directory.as_os_str()],
-            )?;
+            host.require(operation, "fc-cache", [OsStr::new("--force"), directory.as_os_str()])?;
             Ok(())
         }
 
         fn sync_publication_directories(stage: &Path, destination: &Path) -> Result<()> {
             let stage_parent = stage.parent().context("Nerd Font stage has no parent")?;
-            let destination_parent = destination
-                .parent()
-                .context("Nerd Font destination has no parent")?;
-            fs::File::open(stage_parent)?
-                .sync_all()
-                .context("sync Nerd Font staging directory")?;
-            fs::File::open(destination_parent)?
-                .sync_all()
-                .context("sync Nerd Font destination directory")
+            let destination_parent = destination.parent().context("Nerd Font destination has no parent")?;
+            fs::File::open(stage_parent)?.sync_all().context("sync Nerd Font staging directory")?;
+            fs::File::open(destination_parent)?.sync_all().context("sync Nerd Font destination directory")
         }
 
         fn validate_archive_listing(output: &[u8]) -> Result<()> {
-            let output =
-                std::str::from_utf8(output).context("Nerd Font archive listing is not UTF-8")?;
+            let output = std::str::from_utf8(output).context("Nerd Font archive listing is not UTF-8")?;
             if output.is_empty() {
                 bail!("Nerd Font archive is empty");
             }
@@ -1415,18 +1073,12 @@ pub(crate) mod packages {
                     if metadata.file_type().is_dir() {
                         directories.push(path);
                     } else if metadata.file_type().is_file() {
-                        let extension = path
-                            .extension()
-                            .and_then(|value| value.to_str())
-                            .unwrap_or_default();
+                        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default();
                         if matches!(extension, "ttf" | "otf") && metadata.len() > 0 {
                             fonts += 1;
                         }
                     } else {
-                        bail!(
-                            "Nerd Font archive contains an unsupported file type at {}",
-                            path.display()
-                        );
+                        bail!("Nerd Font archive contains an unsupported file type at {}", path.display());
                     }
                 }
             }
@@ -1448,9 +1100,8 @@ pub(crate) mod packages {
         use super::super::Host;
 
         pub(crate) fn execute(host: &Host, root: &Path, packages: &[String]) -> Result<()> {
-            let root = fs::canonicalize(root).with_context(|| {
-                format!("dotfiles operation: canonicalize root {}", root.display())
-            })?;
+            let root = fs::canonicalize(root)
+                .with_context(|| format!("dotfiles operation: canonicalize root {}", root.display()))?;
             if !fs::symlink_metadata(&root)?.file_type().is_dir() {
                 bail!("dotfiles root is not a directory: {}", root.display());
             }
@@ -1485,29 +1136,19 @@ pub(crate) mod packages {
                     package.as_ref(),
                 ],
             )?;
-            verify_tree(&source, host.home())
-                .with_context(|| format!("dotfiles package {package:?} postcondition"))
+            verify_tree(&source, host.home()).with_context(|| format!("dotfiles package {package:?} postcondition"))
         }
 
-        fn collect_conflicts(
-            source: &Path,
-            target: PathBuf,
-            conflicts: &mut Vec<PathBuf>,
-        ) -> Result<()> {
+        fn collect_conflicts(source: &Path, target: PathBuf, conflicts: &mut Vec<PathBuf>) -> Result<()> {
             let source_metadata = fs::symlink_metadata(source)
                 .with_context(|| format!("inspect dotfiles source {}", source.display()))?;
             if source_metadata.file_type().is_dir() {
                 match fs::symlink_metadata(&target) {
                     Ok(metadata) if metadata.file_type().is_dir() => {
-                        let mut entries =
-                            fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
+                        let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
                         entries.sort_by_key(|entry| entry.file_name());
                         for entry in entries {
-                            collect_conflicts(
-                                &entry.path(),
-                                target.join(entry.file_name()),
-                                conflicts,
-                            )?;
+                            collect_conflicts(&entry.path(), target.join(entry.file_name()), conflicts)?;
                         }
                     }
                     Ok(_) if !resolves_to(&target, source) => conflicts.push(target),
@@ -1515,9 +1156,7 @@ pub(crate) mod packages {
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => return Err(error).context("inspect dotfiles target"),
                 }
-            } else if source_metadata.file_type().is_file()
-                || source_metadata.file_type().is_symlink()
-            {
+            } else if source_metadata.file_type().is_file() || source_metadata.file_type().is_symlink() {
                 match fs::symlink_metadata(&target) {
                     Ok(_) if !resolves_to(&target, source) => conflicts.push(target),
                     Ok(_) => {}
@@ -1531,10 +1170,8 @@ pub(crate) mod packages {
         }
 
         fn backup_conflicts(host: &Host, package: &str, conflicts: &[PathBuf]) -> Result<()> {
-            let state_home = host
-                .value("XDG_STATE_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| host.home().join(".local/state"));
+            let state_home =
+                host.value("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/state"));
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .context("dotfiles backup timestamp is before the Unix epoch")?
@@ -1544,32 +1181,19 @@ pub(crate) mod packages {
                 .join(format!("{timestamp}-{}", std::process::id()))
                 .join(package);
             for conflict in conflicts {
-                let relative = conflict.strip_prefix(host.home()).with_context(|| {
-                    format!(
-                        "dotfiles conflict escaped the home directory: {}",
-                        conflict.display()
-                    )
-                })?;
+                let relative = conflict
+                    .strip_prefix(host.home())
+                    .with_context(|| format!("dotfiles conflict escaped the home directory: {}", conflict.display()))?;
                 let backup = backup_root.join(relative);
                 let parent = backup.parent().context("dotfiles backup has no parent")?;
                 fs::create_dir_all(parent).context("create dotfiles backup directory")?;
                 host.require(
                     "dotfiles conflict backup",
                     "mv",
-                    [
-                        "--no-clobber".as_ref(),
-                        "--".as_ref(),
-                        conflict.as_os_str(),
-                        backup.as_os_str(),
-                    ],
+                    ["--no-clobber".as_ref(), "--".as_ref(), conflict.as_os_str(), backup.as_os_str()],
                 )?;
-                if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err()
-                {
-                    bail!(
-                        "dotfiles conflict backup did not move {} to {}",
-                        conflict.display(),
-                        backup.display()
-                    );
+                if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err() {
+                    bail!("dotfiles conflict backup did not move {} to {}", conflict.display(), backup.display());
                 }
             }
             Ok(())
@@ -1584,11 +1208,7 @@ pub(crate) mod packages {
                     verify_tree(&entry.path(), target.join(entry.file_name()))?;
                 }
             } else if !resolves_to(&target, source) {
-                bail!(
-                    "Stow did not link {} to {}",
-                    target.display(),
-                    source.display()
-                );
+                bail!("Stow did not link {} to {}", target.display(), source.display());
             }
             Ok(())
         }
@@ -1601,11 +1221,7 @@ pub(crate) mod packages {
     }
 }
 
-pub(super) fn latest_go(
-    input: &str,
-    requested: &str,
-    arch: &str,
-) -> anyhow::Result<(String, String, String)> {
+pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Result<(String, String, String)> {
     use anyhow::Context;
     let value: serde_json::Value = serde_json::from_str(input).context("parse Go release JSON")?;
     let releases = value.as_array().context("Go metadata must be an array")?;
@@ -1617,8 +1233,7 @@ pub(super) fn latest_go(
         .find(|v| {
             requested == "latest"
                 || *v == requested
-                || v.strip_prefix(requested)
-                    .is_some_and(|rest| rest.starts_with('.'))
+                || v.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
         })
         .context("Go metadata has no matching stable release")?;
     let filename = format!("go{version}.linux-{arch}.tar.gz");
@@ -1626,11 +1241,7 @@ pub(super) fn latest_go(
         .iter()
         .find(|release| release["version"].as_str() == Some(&format!("go{version}")))
         .and_then(|release| release["files"].as_array())
-        .and_then(|files| {
-            files
-                .iter()
-                .find(|file| file["filename"].as_str() == Some(&filename))
-        })
+        .and_then(|files| files.iter().find(|file| file["filename"].as_str() == Some(&filename)))
         .and_then(|file| file["sha256"].as_str())
         .context("Go metadata has no matching archive checksum")?;
     Ok((version.to_owned(), filename, checksum.to_owned()))
@@ -1638,17 +1249,11 @@ pub(super) fn latest_go(
 
 pub(super) fn gnome_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {
     use anyhow::{bail, Context};
-    let value: serde_json::Value =
-        serde_json::from_str(input).context("parse GNOME extension JSON")?;
-    let versions = value["shell_version_map"]
-        .as_object()
-        .context("GNOME response has no shell_version_map")?;
+    let value: serde_json::Value = serde_json::from_str(input).context("parse GNOME extension JSON")?;
+    let versions = value["shell_version_map"].as_object().context("GNOME response has no shell_version_map")?;
     let mut candidate = shell_version;
     loop {
-        if let Some(version) = versions
-            .get(candidate)
-            .and_then(|entry| entry["version"].as_u64())
-        {
+        if let Some(version) = versions.get(candidate).and_then(|entry| entry["version"].as_u64()) {
             return Ok(version);
         }
         let Some((parent, _)) = candidate.rsplit_once('.') else {
@@ -1662,14 +1267,12 @@ pub(super) fn gnome_shell_version(input: &str) -> anyhow::Result<String> {
     use anyhow::Context;
     input
         .split_whitespace()
-        .map(|part| {
-            part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.')
-        })
+        .map(|part| part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.'))
         .find(|part| {
             !part.is_empty()
-                && part.split('.').all(|component| {
-                    !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
-                })
+                && part
+                    .split('.')
+                    .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
         })
         .map(str::to_owned)
         .context("GNOME Shell version output has no numeric version")
@@ -1681,7 +1284,5 @@ fn stable_go_version(value: &str) -> bool {
     };
     let parts = rest.split('.').collect::<Vec<_>>();
     (parts.len() == 2 || parts.len() == 3)
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+        && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }

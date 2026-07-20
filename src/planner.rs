@@ -1,14 +1,13 @@
 use crate::{
     config::{
-        resolve_platform_identity, AptUpdate, BinaryFormat, Config, EnabledDisabled,
-        InstalledState, ResolvedNativeBinary, SourceMode, Theme,
+        resolve_platform_identity, AptUpdate, BinaryFormat, Config, EnabledDisabled, InstalledState,
+        ResolvedNativeBinary, SourceMode, Theme,
     },
     operations::{
-        AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken,
-        AptUpgradePolicy, BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation,
-        BinaryPackageSelector, BinarySha256, BinarySourceOperation, CargoPackageMode,
-        DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository, GoToolchainSelector,
-        NerdFontsMode, NodeToolchainSelector, NpmPackageMode, Operation, RustToolchainSelector,
+        AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
+        BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
+        BinarySourceOperation, CargoPackageMode, DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository,
+        GoToolchainSelector, NerdFontsMode, NodeToolchainSelector, NpmPackageMode, Operation, RustToolchainSelector,
         ToolMutationMode,
     },
     platform::{Architecture, Platform},
@@ -84,33 +83,17 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     let packages = config.packages.as_ref();
     let apt = packages.and_then(|packages| packages.apt.as_ref());
 
-    if config
-        .system
-        .as_ref()
-        .is_some_and(|system| system.ensure_admin == Some(true))
-    {
-        push_operation(
-            &mut phases,
-            PlannerPhase::AdministrativeVerification,
-            Operation::EnsureAdmin,
-        );
+    if config.system.as_ref().is_some_and(|system| system.ensure_admin == Some(true)) {
+        push_operation(&mut phases, PlannerPhase::AdministrativeVerification, Operation::EnsureAdmin);
     }
 
-    if let Some(sources) = config
-        .system
-        .as_ref()
-        .and_then(|system| system.apt.as_ref())
-        .and_then(|apt| apt.sources.as_ref())
+    if let Some(sources) =
+        config.system.as_ref().and_then(|system| system.apt.as_ref()).and_then(|apt| apt.sources.as_ref())
     {
         if sources.mode == SourceMode::Managed {
-            let managed = sources
-                .resolve_managed(platform, identity)?
-                .expect("managed source resolution returns an intent");
-            push_operation(
-                &mut phases,
-                PlannerPhase::OfficialAptSources,
-                Operation::ManagedAptSources(managed),
-            );
+            let managed =
+                sources.resolve_managed(platform, identity)?.expect("managed source resolution returns an intent");
+            push_operation(&mut phases, PlannerPhase::OfficialAptSources, Operation::ManagedAptSources(managed));
         }
     }
 
@@ -120,17 +103,11 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         prerequisites.insert("gnupg");
         for repository in repositories {
             let operation = plan_repository(repository, platform, identity)?;
-            push_operation(
-                &mut phases,
-                PlannerPhase::ThirdPartyRepositories,
-                Operation::AptRepository(operation),
-            );
+            push_operation(&mut phases, PlannerPhase::ThirdPartyRepositories, Operation::AptRepository(operation));
             push_operation(
                 &mut phases,
                 PlannerPhase::RepositoryPackages,
-                Operation::AptPackages {
-                    packages: repository.packages.clone(),
-                },
+                Operation::AptPackages { packages: repository.packages.clone() },
             );
             needs_apt_refresh = true;
         }
@@ -139,23 +116,11 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     plan_system_states(config, platform, &mut phases, &mut needs_apt_refresh);
 
     if let Some(remove) = apt.and_then(|apt| apt.remove.as_ref()) {
-        push_operation(
-            &mut phases,
-            PlannerPhase::AptPurge,
-            Operation::AptPurge {
-                packages: remove.clone(),
-            },
-        );
+        push_operation(&mut phases, PlannerPhase::AptPurge, Operation::AptPurge { packages: remove.clone() });
         needs_apt_refresh = true;
     }
     if let Some(install) = apt.and_then(|apt| apt.install.as_ref()) {
-        push_operation(
-            &mut phases,
-            PlannerPhase::AptPackages,
-            Operation::AptPackages {
-                packages: install.clone(),
-            },
-        );
+        push_operation(&mut phases, PlannerPhase::AptPackages, Operation::AptPackages { packages: install.clone() });
         needs_apt_refresh = true;
     }
 
@@ -166,19 +131,11 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::FlatpakApplications,
-            Operation::FlatpakEnsureApps {
-                refs: applications.clone(),
-            },
+            Operation::FlatpakEnsureApps { refs: applications.clone() },
         );
     }
 
-    plan_tools(
-        config,
-        platform,
-        &mut phases,
-        &mut prerequisites,
-        &mut managers,
-    )?;
+    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers)?;
 
     if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()) {
         prerequisites.insert("ca-certificates");
@@ -188,10 +145,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::CargoPackageSet {
-                packages: cargo.clone(),
-                mode: CargoPackageMode::EnsurePresent,
-            },
+            Operation::CargoPackageSet { packages: cargo.clone(), mode: CargoPackageMode::EnsurePresent },
         );
     }
     if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()) {
@@ -201,21 +155,13 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::NpmPackageSet {
-                packages: npm.clone(),
-                mode: NpmPackageMode::EnsurePresent,
-            },
+            Operation::NpmPackageSet { packages: npm.clone(), mode: NpmPackageMode::EnsurePresent },
         );
     }
 
     if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
         for binary in binaries {
-            let Some(planned) = plan_binary(
-                binary,
-                platform.architecture,
-                BinaryPackageMode::EnsurePresent,
-            )?
-            else {
+            let Some(planned) = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)? else {
                 continue;
             };
             prerequisites.insert("ca-certificates");
@@ -227,11 +173,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
                 }
                 BinaryFormat::Appimage => {}
             }
-            push_operation(
-                &mut phases,
-                PlannerPhase::BinaryPackages,
-                Operation::BinaryPackage(planned),
-            );
+            push_operation(&mut phases, PlannerPhase::BinaryPackages, Operation::BinaryPackage(planned));
         }
     }
 
@@ -244,10 +186,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::Fonts,
-            Operation::NerdFonts {
-                families: fonts.clone(),
-                mode: NerdFontsMode::EnsurePresent,
-            },
+            Operation::NerdFonts { families: fonts.clone(), mode: NerdFontsMode::EnsurePresent },
         );
     }
 
@@ -259,10 +198,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::Dotfiles,
-            Operation::Dotfiles {
-                root: dotfiles_root.to_path_buf(),
-                packages: dotfiles.packages.clone(),
-            },
+            Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages: dotfiles.packages.clone() },
         );
     }
 
@@ -271,11 +207,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     plan_updates(config, platform, &mut phases, &mut needs_apt_refresh)?;
 
     if needs_apt_refresh {
-        push_operation(
-            &mut phases,
-            PlannerPhase::AptMetadataRefresh,
-            Operation::AptMetadataRefresh,
-        );
+        push_operation(&mut phases, PlannerPhase::AptMetadataRefresh, Operation::AptMetadataRefresh);
     }
 
     if managers.contains(&ManagerBootstrap::Flatpak) {
@@ -289,25 +221,17 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(
             &mut phases,
             PlannerPhase::SystemPrerequisites,
-            Operation::AptBootstrapPackages {
-                packages: prerequisites.iter().map(|s| (*s).to_owned()).collect(),
-            },
+            Operation::AptBootstrapPackages { packages: prerequisites.iter().map(|s| (*s).to_owned()).collect() },
         );
     }
 
     for manager in &managers {
         let (phase, operation) = match manager {
-            ManagerBootstrap::Flatpak => (
-                PlannerPhase::ManagerBootstraps,
-                Operation::FlatpakEnsureFlathub,
-            ),
-            ManagerBootstrap::Rustup => {
-                (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap)
+            ManagerBootstrap::Flatpak => (PlannerPhase::ManagerBootstraps, Operation::FlatpakEnsureFlathub),
+            ManagerBootstrap::Rustup => (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap),
+            ManagerBootstrap::CargoBinstall => {
+                (PlannerPhase::CargoBinstallBootstrap, Operation::CargoBinstallBootstrap)
             }
-            ManagerBootstrap::CargoBinstall => (
-                PlannerPhase::CargoBinstallBootstrap,
-                Operation::CargoBinstallBootstrap,
-            ),
             ManagerBootstrap::Fnm => (PlannerPhase::ManagerBootstraps, Operation::FnmBootstrap),
             ManagerBootstrap::Uv => (PlannerPhase::ManagerBootstraps, Operation::UvBootstrap),
         };
@@ -322,17 +246,8 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     Ok(final_operations)
 }
 
-fn push_operation(
-    phases: &mut [(PlannerPhase, Vec<Operation>)],
-    phase: PlannerPhase,
-    op: Operation,
-) {
-    phases
-        .iter_mut()
-        .find(|(p, _)| *p == phase)
-        .expect("phase exists")
-        .1
-        .push(op);
+fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerPhase, op: Operation) {
+    phases.iter_mut().find(|(p, _)| *p == phase).expect("phase exists").1.push(op);
 }
 
 fn plan_repository(
@@ -344,10 +259,7 @@ fn plan_repository(
     let layout = if let Some(path) = &repository.path {
         AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?)
     } else {
-        let suite_token = resolved
-            .suite
-            .as_ref()
-            .expect("validated suite/components repository");
+        let suite_token = resolved.suite.as_ref().expect("validated suite/components repository");
         AptRepositorySourceLayout::SuiteComponents {
             suite: AptRepositoryToken::parse(suite_token.as_str())?,
             components: repository
@@ -378,18 +290,14 @@ fn plan_binary(
         return Ok(None);
     };
     let source = match native {
-        ResolvedNativeBinary::Github {
-            repository,
-            selector,
-        } => BinarySourceOperation::GithubLatest {
+        ResolvedNativeBinary::Github { repository, selector } => BinarySourceOperation::GithubLatest {
             repository: GithubRepository::parse(repository.to_owned())?,
             selector: BinaryPackageSelector::new(selector.to_owned())?,
             sha256: None,
         },
-        ResolvedNativeBinary::Url { url, sha256 } => BinarySourceOperation::ChecksummedUrl {
-            url: url.clone(),
-            sha256: BinarySha256::parse(sha256.as_str())?,
-        },
+        ResolvedNativeBinary::Url { url, sha256 } => {
+            BinarySourceOperation::ChecksummedUrl { url: url.clone(), sha256: BinarySha256::parse(sha256.as_str())? }
+        }
     };
     BinaryPackageOperation::new(
         binary.name.clone(),
@@ -416,9 +324,7 @@ fn plan_system_states(
         push_operation(
             phases,
             PlannerPhase::SystemPackageStates,
-            Operation::UnattendedUpgrades {
-                enabled: enabled(state),
-            },
+            Operation::UnattendedUpgrades { enabled: enabled(state) },
         );
         *needs_apt_refresh = true;
     }
@@ -430,9 +336,7 @@ fn plan_system_states(
             push_operation(
                 phases,
                 PlannerPhase::SystemPackageStates,
-                Operation::UbuntuSnap {
-                    enabled: enabled(state),
-                },
+                Operation::UbuntuSnap { enabled: enabled(state) },
             );
         }
     }
@@ -443,9 +347,7 @@ fn plan_system_states(
                 push_operation(
                     phases,
                     PlannerPhase::SystemPackageStates,
-                    Operation::AptPackages {
-                        packages: vec!["ubuntu-restricted-extras".into()],
-                    },
+                    Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
                 );
             }
         }
@@ -507,10 +409,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::PythonToolchain {
-                version: selector.clone(),
-                architecture: platform.architecture,
-            },
+            Operation::PythonToolchain { version: selector.clone(), architecture: platform.architecture },
         );
     }
     Ok(())
@@ -528,33 +427,15 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
             push_operation(
                 phases,
                 PlannerPhase::Integrations,
-                Operation::DockerLocalLog {
-                    max_size: logging.max_size.clone(),
-                },
+                Operation::DockerLocalLog { max_size: logging.max_size.clone() },
             );
         }
     }
-    if integrations
-        .virtualbox
-        .as_ref()
-        .is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true))
-    {
-        push_operation(
-            phases,
-            PlannerPhase::Integrations,
-            Operation::VirtualBoxGroup,
-        );
+    if integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true)) {
+        push_operation(phases, PlannerPhase::Integrations, Operation::VirtualBoxGroup);
     }
-    if let Some(extensions) = integrations
-        .vscode
-        .as_ref()
-        .map(|vscode| vscode.extensions.clone())
-    {
-        push_operation(
-            phases,
-            PlannerPhase::Integrations,
-            Operation::VsCodeExtensionSet { extensions },
-        );
+    if let Some(extensions) = integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()) {
+        push_operation(phases, PlannerPhase::Integrations, Operation::VsCodeExtensionSet { extensions });
     }
     Ok(())
 }
@@ -591,10 +472,7 @@ fn plan_desktop(
         push_operation(
             phases,
             PlannerPhase::Desktop,
-            Operation::DesktopSetting {
-                target,
-                setting: DesktopSetting::Terminal(executable.clone()),
-            },
+            Operation::DesktopSetting { target, setting: DesktopSetting::Terminal(executable.clone()) },
         );
     }
     if let Some(idle) = &desktop.idle {
@@ -602,20 +480,14 @@ fn plan_desktop(
             push_operation(
                 phases,
                 PlannerPhase::Desktop,
-                Operation::DesktopSetting {
-                    target,
-                    setting: DesktopSetting::IdleTimeoutSeconds(timeout.seconds()),
-                },
+                Operation::DesktopSetting { target, setting: DesktopSetting::IdleTimeoutSeconds(timeout.seconds()) },
             );
         }
         if let Some(enabled) = idle.dim {
             push_operation(
                 phases,
                 PlannerPhase::Desktop,
-                Operation::DesktopSetting {
-                    target,
-                    setting: DesktopSetting::IdleDim(enabled),
-                },
+                Operation::DesktopSetting { target, setting: DesktopSetting::IdleDim(enabled) },
             );
         }
     }
@@ -626,9 +498,7 @@ fn plan_desktop(
                 push_operation(
                     phases,
                     PlannerPhase::Desktop,
-                    Operation::GnomeExtensions {
-                        extensions: extensions.clone(),
-                    },
+                    Operation::GnomeExtensions { extensions: extensions.clone() },
                 );
             }
             if gnome.dock == Some(true) {
@@ -637,11 +507,7 @@ fn plan_desktop(
             }
             if gnome.rounded_corners == Some(true) {
                 prerequisites.insert("gnome-shell");
-                push_operation(
-                    phases,
-                    PlannerPhase::Desktop,
-                    Operation::GnomeRoundedCorners,
-                );
+                push_operation(phases, PlannerPhase::Desktop, Operation::GnomeRoundedCorners);
             }
         }
     }
@@ -677,9 +543,7 @@ fn plan_updates(
             phases,
             PlannerPhase::Updates,
             Operation::FlatpakUpdateApps {
-                refs: packages
-                    .and_then(|packages| packages.flatpak.clone())
-                    .expect("validated update target"),
+                refs: packages.and_then(|packages| packages.flatpak.clone()).expect("validated update target"),
             },
         );
     }
@@ -690,9 +554,7 @@ fn plan_updates(
                 PlannerPhase::Updates,
                 Operation::RustToolchain {
                     selector: rust_selector_main(
-                        tools
-                            .and_then(|tools| tools.rust.as_deref())
-                            .expect("validated update target"),
+                        tools.and_then(|tools| tools.rust.as_deref()).expect("validated update target"),
                     ),
                     architecture: platform.architecture,
                     mode: ToolMutationMode::UpdateMoving,
@@ -705,9 +567,7 @@ fn plan_updates(
                 PlannerPhase::Updates,
                 Operation::GoToolchain {
                     selector: go_selector_main(
-                        tools
-                            .and_then(|tools| tools.go.as_deref())
-                            .expect("validated update target"),
+                        tools.and_then(|tools| tools.go.as_deref()).expect("validated update target"),
                     ),
                     architecture: platform.architecture,
                     mode: ToolMutationMode::UpdateMoving,
@@ -720,9 +580,7 @@ fn plan_updates(
                 PlannerPhase::Updates,
                 Operation::NodeToolchain {
                     selector: node_selector_main(
-                        tools
-                            .and_then(|tools| tools.node.as_deref())
-                            .expect("validated update target"),
+                        tools.and_then(|tools| tools.node.as_deref()).expect("validated update target"),
                     ),
                     architecture: platform.architecture,
                     mode: ToolMutationMode::UpdateMoving,
@@ -736,9 +594,7 @@ fn plan_updates(
                 phases,
                 PlannerPhase::Updates,
                 Operation::CargoPackageSet {
-                    packages: packages
-                        .and_then(|packages| packages.cargo.clone())
-                        .expect("validated update target"),
+                    packages: packages.and_then(|packages| packages.cargo.clone()).expect("validated update target"),
                     mode: CargoPackageMode::UpdateCurrent,
                 },
             );
@@ -748,9 +604,7 @@ fn plan_updates(
                 phases,
                 PlannerPhase::Updates,
                 Operation::NpmPackageSet {
-                    packages: packages
-                        .and_then(|packages| packages.npm.clone())
-                        .expect("validated update target"),
+                    packages: packages.and_then(|packages| packages.npm.clone()).expect("validated update target"),
                     mode: NpmPackageMode::UpdateCurrent,
                 },
             );
@@ -763,14 +617,9 @@ fn plan_updates(
                         Some(ResolvedNativeBinary::Github { .. })
                     );
                     if is_github {
-                        let planned =
-                            plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
-                                .expect("native GitHub source was resolved");
-                        push_operation(
-                            phases,
-                            PlannerPhase::Updates,
-                            Operation::BinaryPackage(planned),
-                        );
+                        let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
+                            .expect("native GitHub source was resolved");
+                        push_operation(phases, PlannerPhase::Updates, Operation::BinaryPackage(planned));
                     }
                 }
             }
@@ -781,11 +630,7 @@ fn plan_updates(
             phases,
             PlannerPhase::Updates,
             Operation::NerdFonts {
-                families: config
-                    .fonts
-                    .as_ref()
-                    .and_then(|fonts| fonts.nerd.clone())
-                    .expect("validated update target"),
+                families: config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).expect("validated update target"),
                 mode: NerdFontsMode::Update,
             },
         );

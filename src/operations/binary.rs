@@ -49,9 +49,7 @@ pub struct BinaryPackageSelector {
 }
 impl BinaryPackageSelector {
     pub fn new(pattern: impl Into<String>) -> Result<Self> {
-        let value = Self {
-            pattern: pattern.into(),
-        };
+        let value = Self { pattern: pattern.into() };
         value.validate()?;
         Ok(value)
     }
@@ -80,15 +78,8 @@ impl BinarySha256 {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
-    GithubLatest {
-        repository: GithubRepository,
-        selector: BinaryPackageSelector,
-        sha256: Option<BinarySha256>,
-    },
-    ChecksummedUrl {
-        url: HttpsUrl,
-        sha256: BinarySha256,
-    },
+    GithubLatest { repository: GithubRepository, selector: BinaryPackageSelector, sha256: Option<BinarySha256> },
+    ChecksummedUrl { url: HttpsUrl, sha256: BinarySha256 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,14 +100,7 @@ impl BinaryPackageOperation {
         source: BinarySourceOperation,
         mode: BinaryPackageMode,
     ) -> Result<Self> {
-        let value = Self {
-            name: name.into(),
-            format,
-            commands,
-            architecture,
-            source,
-            mode,
-        };
+        let value = Self { name: name.into(), format, commands, architecture, source, mode };
         value.validate()?;
         Ok(value)
     }
@@ -135,10 +119,7 @@ impl BinaryPackageOperation {
     fn validate(&self) -> Result<()> {
         validate_definition_name(&self.name)?;
         if self.commands.is_empty() {
-            bail!(
-                "binary package {:?} must declare at least one command",
-                self.name
-            );
+            bail!("binary package {:?} must declare at least one command", self.name);
         }
         let mut seen = HashSet::new();
         for command in &self.commands {
@@ -148,11 +129,7 @@ impl BinaryPackageOperation {
             }
         }
         match &self.source {
-            BinarySourceOperation::GithubLatest {
-                repository,
-                selector,
-                ..
-            } => {
+            BinarySourceOperation::GithubLatest { repository, selector, .. } => {
                 validate_repository(repository.as_str())?;
                 selector.validate()?;
             }
@@ -211,13 +188,7 @@ pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result
         install_deb(host, operation, &downloaded)?;
     } else {
         require_elf(downloaded.temporary.path(), &operation.name)?;
-        install_appimage(
-            host,
-            operation,
-            &downloaded.actual_sha256,
-            &downloaded,
-            appimage_expectation.unwrap(),
-        )?;
+        install_appimage(host, operation, &downloaded.actual_sha256, &downloaded, appimage_expectation.unwrap())?;
     }
 
     if !postconditions(host, operation, &downloaded.actual_sha256)? {
@@ -238,10 +209,7 @@ fn is_acceptable_live_state(host: &Host, operation: &BinaryPackageOperation) -> 
         return Ok(false);
     }
     match operation.format {
-        BinaryPackageFormat::Deb => Ok(operation
-            .commands
-            .iter()
-            .all(|name| executable_on_path(host, name))),
+        BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
         BinaryPackageFormat::AppImage => {
             let artifact = data_artifact(host, operation);
             let has_valid_artifact = if let Some(digest) = configured_checksum(&operation.source) {
@@ -252,9 +220,7 @@ fn is_acceptable_live_state(host: &Host, operation: &BinaryPackageOperation) -> 
             if !has_valid_artifact {
                 return Ok(false);
             }
-            Ok(command_links(host, operation)
-                .iter()
-                .all(|link| managed_link(link, &artifact)))
+            Ok(command_links(host, operation).iter().all(|link| managed_link(link, &artifact)))
         }
     }
 }
@@ -289,9 +255,7 @@ impl PublicationExpectation {
             },
             PublicationExpectation::Existing(file) => match fs::symlink_metadata(path) {
                 Ok(current_metadata) => {
-                    let expected_metadata = file
-                        .metadata()
-                        .context("inspect expected destination descriptor")?;
+                    let expected_metadata = file.metadata().context("inspect expected destination descriptor")?;
                     Ok(current_metadata.dev() == expected_metadata.dev()
                         && current_metadata.ino() == expected_metadata.ino())
                 }
@@ -302,9 +266,7 @@ impl PublicationExpectation {
     }
 }
 
-pub(crate) fn capture_publication_expectation(
-    destination: &Path,
-) -> Result<PublicationExpectation> {
+pub(crate) fn capture_publication_expectation(destination: &Path) -> Result<PublicationExpectation> {
     let open_result = rustix::fs::open(
         destination,
         rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
@@ -314,9 +276,7 @@ pub(crate) fn capture_publication_expectation(
     match open_result {
         Ok(fd) => {
             let file = std::fs::File::from(fd);
-            let metadata = file
-                .metadata()
-                .context("inspect existing destination descriptor")?;
+            let metadata = file.metadata().context("inspect existing destination descriptor")?;
             let uid = rustix::process::geteuid().as_raw();
             if !metadata.file_type().is_file() {
                 bail!("destination is not a regular file");
@@ -337,18 +297,12 @@ pub(crate) fn capture_publication_expectation(
     }
 }
 
-pub(crate) fn publish_executable(
-    source: &Path,
-    destination: &Path,
-    expectation: PublicationExpectation,
-) -> Result<()> {
+pub(crate) fn publish_executable(source: &Path, destination: &Path, expectation: PublicationExpectation) -> Result<()> {
     let parent = destination.parent().context("destination has no parent")?;
     let mut source_file = fs::File::open(source)?;
     let mut staged = tempfile::NamedTempFile::new_in(parent)?;
     std::io::copy(&mut source_file, staged.as_file_mut())?;
-    staged
-        .as_file_mut()
-        .set_permissions(fs::Permissions::from_mode(0o755))?;
+    staged.as_file_mut().set_permissions(fs::Permissions::from_mode(0o755))?;
     staged.as_file_mut().sync_all()?;
     let (file, staged_path) = staged.keep().map_err(|error| error.error)?;
     // Linux rejects execution while any process still holds the inode open for writing.
@@ -357,9 +311,7 @@ pub(crate) fn publish_executable(
     let result = (|| -> Result<()> {
         match expectation {
             PublicationExpectation::Existing(file) => {
-                let metadata = file
-                    .metadata()
-                    .context("inspect existing destination descriptor")?;
+                let metadata = file.metadata().context("inspect existing destination descriptor")?;
                 let validated_dev = metadata.dev();
                 let validated_ino = metadata.ino();
 
@@ -372,8 +324,8 @@ pub(crate) fn publish_executable(
                 )
                 .context("atomically exchange staged executable with destination")?;
 
-                let displaced_metadata = fs::symlink_metadata(&staged_path)
-                    .context("inspect displaced destination file")?;
+                let displaced_metadata =
+                    fs::symlink_metadata(&staged_path).context("inspect displaced destination file")?;
                 let displaced_dev = displaced_metadata.dev();
                 let displaced_ino = displaced_metadata.ino();
 
@@ -396,9 +348,7 @@ pub(crate) fn publish_executable(
                 drop(file);
 
                 fs::remove_file(&staged_path).context("remove displaced old file")?;
-                fs::File::open(parent)?
-                    .sync_all()
-                    .context("sync parent directory")?;
+                fs::File::open(parent)?.sync_all().context("sync parent directory")?;
             }
             PublicationExpectation::Absent => {
                 rustix::fs::renameat_with(
@@ -410,9 +360,7 @@ pub(crate) fn publish_executable(
                 )
                 .context("atomically publish new executable to vacant destination")?;
 
-                fs::File::open(parent)?
-                    .sync_all()
-                    .context("sync parent directory")?;
+                fs::File::open(parent)?.sync_all().context("sync parent directory")?;
             }
         }
         Ok(())
@@ -435,20 +383,10 @@ mod appimage {
             .join(format!("{}.AppImage", operation.name))
     }
     pub(super) fn command_links(host: &Host, operation: &BinaryPackageOperation) -> Vec<PathBuf> {
-        let root = host
-            .value("XDG_BIN_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/bin"));
-        operation
-            .commands
-            .iter()
-            .map(|name| root.join(name))
-            .collect()
+        let root = host.value("XDG_BIN_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
+        operation.commands.iter().map(|name| root.join(name)).collect()
     }
-    pub(super) fn preflight_appimage(
-        host: &Host,
-        operation: &BinaryPackageOperation,
-    ) -> Result<()> {
+    pub(super) fn preflight_appimage(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
         let artifact = data_artifact(host, operation);
         ensure_secure_data_parent(host, &artifact)?;
         ensure_secure_command_root(host)?;
@@ -456,10 +394,7 @@ mod appimage {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Ok(_) => {
                 if !valid_artifact_unchecksummed(&artifact)? {
-                    bail!(
-                        "binary AppImage artifact conflict at {}",
-                        artifact.display()
-                    );
+                    bail!("binary AppImage artifact conflict at {}", artifact.display());
                 }
             }
             Err(error) => return Err(error.into()),
@@ -491,10 +426,7 @@ mod appimage {
         Ok(())
     }
     fn ensure_secure_data_parent(host: &Host, artifact: &Path) -> Result<()> {
-        let data = host
-            .value("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/share"));
+        let data = host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
         if !data.is_absolute() {
             bail!("binary data directory must be absolute");
         }
@@ -514,10 +446,7 @@ mod appimage {
         Ok(())
     }
     fn ensure_secure_command_root(host: &Host) -> Result<()> {
-        let root = host
-            .value("XDG_BIN_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/bin"));
+        let root = host.value("XDG_BIN_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
         if !root.is_absolute() {
             bail!("binary command directory must be absolute");
         }
@@ -526,8 +455,7 @@ mod appimage {
         if !existed {
             fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
         }
-        validate_owned_directory(&root)
-            .context("binary command directory has unsafe type, owner, or permissions")
+        validate_owned_directory(&root).context("binary command directory has unsafe type, owner, or permissions")
     }
     fn create_owned_directory(path: &Path) -> Result<()> {
         match fs::create_dir(path) {
@@ -566,12 +494,7 @@ mod appimage {
         fs::create_dir_all(link.parent().context("binary command link has no parent")?)?;
         match symlink(artifact, link) {
             Ok(()) => Ok(()),
-            Err(e)
-                if e.kind() == std::io::ErrorKind::AlreadyExists
-                    && managed_link(link, artifact) =>
-            {
-                Ok(())
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && managed_link(link, artifact) => Ok(()),
             Err(e) => Err(e).context("publish binary AppImage command link"),
         }
     }
@@ -580,9 +503,7 @@ mod appimage {
             && fs::read_link(link).is_ok_and(|target| target == artifact)
     }
     fn verify_appimage(artifact: &Path, links: &[PathBuf], actual_sha256: &str) -> Result<()> {
-        if !valid_artifact(artifact, actual_sha256)?
-            || links.iter().any(|link| !managed_link(link, artifact))
-        {
+        if !valid_artifact(artifact, actual_sha256)? || links.iter().any(|link| !managed_link(link, artifact)) {
             bail!("binary AppImage verification failed");
         }
         Ok(())
@@ -601,31 +522,18 @@ mod appimage {
             && has_elf_magic(path)
             && sha256_file(path)? == BinarySha256::parse(digest)?.0)
     }
-    pub(super) fn postconditions(
-        host: &Host,
-        operation: &BinaryPackageOperation,
-        actual_sha256: &str,
-    ) -> Result<bool> {
+    pub(super) fn postconditions(host: &Host, operation: &BinaryPackageOperation, actual_sha256: &str) -> Result<bool> {
         match operation.format {
-            BinaryPackageFormat::Deb => Ok(operation
-                .commands
-                .iter()
-                .all(|name| executable_on_path(host, name))),
+            BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
             BinaryPackageFormat::AppImage => {
                 let artifact = data_artifact(host, operation);
                 Ok(valid_artifact(&artifact, actual_sha256)?
-                    && command_links(host, operation)
-                        .iter()
-                        .all(|link| managed_link(link, &artifact)))
+                    && command_links(host, operation).iter().all(|link| managed_link(link, &artifact)))
             }
         }
     }
     pub(super) fn verify_commands(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
-        let missing = operation
-            .commands
-            .iter()
-            .filter(|name| !executable_on_path(host, name))
-            .collect::<Vec<_>>();
+        let missing = operation.commands.iter().filter(|name| !executable_on_path(host, name)).collect::<Vec<_>>();
         if !missing.is_empty() {
             bail!("binary package installed but commands remain unavailable: {missing:?}");
         }
@@ -635,8 +543,7 @@ mod appimage {
         host.value("PATH")
             .and_then(|path| {
                 std::env::split_paths(&path).find(|dir| {
-                    fs::metadata(dir.join(name))
-                        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                    fs::metadata(dir.join(name)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
                 })
             })
             .is_some()
@@ -650,10 +557,7 @@ mod appimage {
     }
     pub(super) fn has_elf_magic(path: &Path) -> bool {
         let mut magic = [0; 4];
-        fs::File::open(path)
-            .and_then(|mut f| f.read_exact(&mut magic))
-            .is_ok()
-            && magic == *b"\x7fELF"
+        fs::File::open(path).and_then(|mut f| f.read_exact(&mut magic)).is_ok() && magic == *b"\x7fELF"
     }
 }
 
@@ -662,19 +566,11 @@ mod source {
 
     pub(super) fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<Candidate> {
         match &operation.source {
-            BinarySourceOperation::ChecksummedUrl { url, sha256 } => Ok(Candidate {
-                url: url.clone(),
-                effective: Some(*sha256),
-            }),
-            BinarySourceOperation::GithubLatest {
-                repository,
-                selector,
-                sha256,
-            } => {
-                let endpoint = format!(
-                    "https://api.github.com/repos/{}/releases/latest",
-                    repository.as_str()
-                );
+            BinarySourceOperation::ChecksummedUrl { url, sha256 } => {
+                Ok(Candidate { url: url.clone(), effective: Some(*sha256) })
+            }
+            BinarySourceOperation::GithubLatest { repository, selector, sha256 } => {
+                let endpoint = format!("https://api.github.com/repos/{}/releases/latest", repository.as_str());
                 let output = host.require(
                     "resolve binary package release",
                     "curl",
@@ -698,8 +594,7 @@ mod source {
                     ],
                 )?;
                 select_asset(
-                    std::str::from_utf8(&output.stdout)
-                        .context("GitHub release metadata is not UTF-8")?,
+                    std::str::from_utf8(&output.stdout).context("GitHub release metadata is not UTF-8")?,
                     selector,
                     *sha256,
                     operation,
@@ -714,9 +609,7 @@ mod source {
         operation: &BinaryPackageOperation,
     ) -> Result<Candidate> {
         let value: Value = serde_json::from_str(input).context("parse GitHub release JSON")?;
-        let object = value
-            .as_object()
-            .context("GitHub release JSON must be an object")?;
+        let object = value.as_object().context("GitHub release JSON must be an object")?;
         for field in ["draft", "prerelease"] {
             match object.get(field) {
                 Some(Value::Bool(false)) => {}
@@ -741,10 +634,7 @@ mod source {
             named.push((index, value, parse_asset_name(value, index)?));
         }
         let pattern = Regex::new(&selector.pattern).context("compile binary asset regex")?;
-        let matches = named
-            .into_iter()
-            .filter(|(_, _, name)| pattern.is_match(name))
-            .collect::<Vec<_>>();
+        let matches = named.into_iter().filter(|(_, _, name)| pattern.is_match(name)).collect::<Vec<_>>();
         if matches.len() != 1 {
             bail!(
                 "binary package {:?} ({}) selector matched {} assets",
@@ -754,19 +644,13 @@ mod source {
             );
         }
         let (index, asset, _) = matches[0];
-        let object = asset
-            .as_object()
-            .context("selected GitHub release asset must be an object")?;
+        let object = asset.as_object().context("selected GitHub release asset must be an object")?;
         let url = HttpsUrl::parse(
             object
                 .get("browser_download_url")
-                .with_context(|| {
-                    format!("GitHub release asset {index} is missing browser_download_url")
-                })?
+                .with_context(|| format!("GitHub release asset {index} is missing browser_download_url"))?
                 .as_str()
-                .with_context(|| {
-                    format!("GitHub release asset {index} browser_download_url must be a string")
-                })?,
+                .with_context(|| format!("GitHub release asset {index} browser_download_url must be a string"))?,
         )?;
         let api = match object.get("digest") {
             None | Some(Value::Null) => None,
@@ -776,10 +660,7 @@ mod source {
         if declared.is_some() && api.is_some() && declared != api {
             bail!("declared and GitHub API SHA-256 checksums differ");
         }
-        Ok(Candidate {
-            url,
-            effective: declared.or(api),
-        })
+        Ok(Candidate { url, effective: declared.or(api) })
     }
     fn parse_asset_name(value: &Value, index: usize) -> Result<&str> {
         let name = value
@@ -826,27 +707,17 @@ mod source {
             bail!("binary package downloaded an empty or non-regular artifact");
         }
         let actual = BinarySha256(sha256_file(temporary.path())?);
-        if candidate
-            .effective
-            .is_some_and(|expected| expected != actual)
-        {
+        if candidate.effective.is_some_and(|expected| expected != actual) {
             bail!("binary package SHA-256 checksum mismatch");
         }
-        Ok(Downloaded {
-            temporary,
-            actual_sha256: actual.as_hex(),
-        })
+        Ok(Downloaded { temporary, actual_sha256: actual.as_hex() })
     }
 }
 
 use appimage::*;
 use source::*;
 
-fn install_deb(
-    host: &Host,
-    operation: &BinaryPackageOperation,
-    downloaded: &Downloaded,
-) -> Result<()> {
+fn install_deb(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
     let path = downloaded.temporary.path().as_os_str();
     host.require(
         "binary Debian install",
@@ -864,45 +735,22 @@ fn install_deb(
     verify_commands(host, operation)
 }
 
-fn preflight_deb(
-    host: &Host,
-    operation: &BinaryPackageOperation,
-    downloaded: &Downloaded,
-) -> Result<()> {
+fn preflight_deb(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
     let path = downloaded.temporary.path().as_os_str();
-    host.require(
-        "binary Debian preflight",
-        "dpkg-deb",
-        ["--info".as_ref(), "--".as_ref(), path],
-    )?;
+    host.require("binary Debian preflight", "dpkg-deb", ["--info".as_ref(), "--".as_ref(), path])?;
     let fields = host.require(
         "binary Debian metadata",
         "dpkg-deb",
-        [
-            "--field".as_ref(),
-            "--".as_ref(),
-            path,
-            "Package".as_ref(),
-            "Architecture".as_ref(),
-        ],
+        ["--field".as_ref(), "--".as_ref(), path, "Package".as_ref(), "Architecture".as_ref()],
     )?;
     let text = std::str::from_utf8(&fields.stdout).context("dpkg-deb metadata is not UTF-8")?;
-    let lines = text
-        .strip_suffix('\n')
-        .unwrap_or(text)
-        .split('\n')
-        .collect::<Vec<_>>();
-    let package = lines
-        .first()
-        .and_then(|line| line.strip_prefix("Package: "));
-    let architecture = lines
-        .get(1)
-        .and_then(|line| line.strip_prefix("Architecture: "));
+    let lines = text.strip_suffix('\n').unwrap_or(text).split('\n').collect::<Vec<_>>();
+    let package = lines.first().and_then(|line| line.strip_prefix("Package: "));
+    let architecture = lines.get(1).and_then(|line| line.strip_prefix("Architecture: "));
     if lines.len() != 2
         || !package.is_some_and(valid_debian_package)
-        || !architecture.is_some_and(|architecture| {
-            architecture == "all" || architecture == operation.architecture.debian()
-        })
+        || !architecture
+            .is_some_and(|architecture| architecture == "all" || architecture == operation.architecture.debian())
     {
         bail!("dpkg-deb Package/Architecture output is malformed or does not match native architecture");
     }
@@ -916,18 +764,10 @@ fn sha256_file(path: &Path) -> Result<[u8; 32]> {
     Ok(hash.finalize().into())
 }
 fn parse_digest(value: &str) -> Result<[u8; 32]> {
-    parse_hex(
-        value
-            .strip_prefix("sha256:")
-            .context("digest must use sha256:<64-lowercase-hex>")?,
-    )
+    parse_hex(value.strip_prefix("sha256:").context("digest must use sha256:<64-lowercase-hex>")?)
 }
 fn parse_hex(value: &str) -> Result<[u8; 32]> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
+    if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
         bail!("SHA-256 must be exactly 64 lowercase hexadecimal characters");
     }
     let mut out = [0; 32];
@@ -956,20 +796,10 @@ fn validate_repository(value: &str) -> Result<()> {
     if p.next().is_some()
         || owner.is_empty()
         || repo.is_empty()
-        || !owner
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-        || !owner
-            .as_bytes()
-            .first()
-            .is_some_and(u8::is_ascii_alphanumeric)
-        || !owner
-            .as_bytes()
-            .last()
-            .is_some_and(u8::is_ascii_alphanumeric)
-        || !repo
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        || !owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !owner.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        || !owner.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        || !repo.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
         || repo.bytes().all(|b| b == b'.')
     {
         bail!("GitHub repository must be an owner/repository coordinate");
@@ -983,17 +813,9 @@ fn validate_definition_name(value: &str) -> Result<()> {
     Ok(())
 }
 fn valid_definition(value: &str) -> bool {
-    value
-        .as_bytes()
-        .first()
-        .is_some_and(u8::is_ascii_alphanumeric)
-        && value
-            .as_bytes()
-            .last()
-            .is_some_and(u8::is_ascii_alphanumeric)
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+    value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 fn validate_executable(value: &str) -> Result<()> {
     let mut b = value.bytes();
@@ -1005,13 +827,8 @@ fn validate_executable(value: &str) -> Result<()> {
     Ok(())
 }
 fn valid_debian_package(value: &str) -> bool {
-    value
-        .as_bytes()
-        .first()
-        .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"+.-".contains(&b))
+    value.as_bytes().first().is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"+.-".contains(&b))
 }
 fn validate_asset_regex(value: &str) -> Result<()> {
     if value.is_empty() || !value.starts_with('^') || !value.ends_with('$') {
@@ -1040,26 +857,16 @@ pub(crate) mod cargo_binstall {
     use std::path::PathBuf;
 
     pub(crate) fn execute(host: &Host) -> Result<()> {
-        let cargo_home = host
-            .value("CARGO_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".cargo"));
+        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
         if !cargo_home.is_absolute() {
             bail!("cargo-binstall managed CARGO_HOME must be absolute");
         }
         let cargo_bin = cargo_home.join("bin/cargo");
-        let program = cargo_bin.to_str().with_context(|| {
-            format!(
-                "Cargo executable path is not UTF-8: {}",
-                cargo_bin.display()
-            )
-        })?;
+        let program = cargo_bin
+            .to_str()
+            .with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo_bin.display()))?;
 
-        host.require(
-            "cargo-binstall-bootstrap",
-            program,
-            ["install", "cargo-binstall", "--locked"],
-        )?;
+        host.require("cargo-binstall-bootstrap", program, ["install", "cargo-binstall", "--locked"])?;
         Ok(())
     }
 }

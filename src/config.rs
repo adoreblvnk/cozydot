@@ -65,35 +65,17 @@ impl Config {
         let (distro, upstream) = (identity.distro, identity.upstream);
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
-        if let Some(require) = self
-            .system
-            .as_ref()
-            .and_then(|system| system.require.as_ref())
-        {
-            if require
-                .distros
-                .as_ref()
-                .is_some_and(|allowed| !allowed.contains(&distro))
-            {
+        if let Some(require) = self.system.as_ref().and_then(|system| system.require.as_ref()) {
+            if require.distros.as_ref().is_some_and(|allowed| !allowed.contains(&distro)) {
                 map_distro_error(platform, distro)?;
             }
-            if require
-                .desktops
-                .as_ref()
-                .is_some_and(|allowed| !allowed.contains(&desktop))
-            {
-                bail!(
-                    "system.require.desktops: detected desktop {:?} is not allowed",
-                    platform.desktop
-                );
+            if require.desktops.as_ref().is_some_and(|allowed| !allowed.contains(&desktop)) {
+                bail!("system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
             }
         }
 
-        if let Some(sources) = self
-            .system
-            .as_ref()
-            .and_then(|system| system.apt.as_ref())
-            .and_then(|apt| apt.sources.as_ref())
+        if let Some(sources) =
+            self.system.as_ref().and_then(|system| system.apt.as_ref()).and_then(|apt| apt.sources.as_ref())
         {
             sources.validate_for_platform(platform, distro, upstream)?;
         }
@@ -111,17 +93,13 @@ impl Config {
         }
 
         if let Some(configured) = &self.desktop {
-            if configured.has_neutral_intent()
-                && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
-            {
+            if configured.has_neutral_intent() && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon) {
                 bail!(
                     "desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
                     platform.desktop
                 );
             }
-            if configured.gnome.is_some()
-                && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
-            {
+            if configured.gnome.is_some() && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon) {
                 bail!(
                     "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
@@ -156,29 +134,13 @@ impl Config {
         if let Some(updates) = &self.updates {
             updates.validate(self)?;
         }
-        if self
-            .packages
-            .as_ref()
-            .and_then(|packages| packages.cargo.as_ref())
-            .is_some()
-            && self
-                .tools
-                .as_ref()
-                .and_then(|tools| tools.rust.as_ref())
-                .is_none()
+        if self.packages.as_ref().and_then(|packages| packages.cargo.as_ref()).is_some()
+            && self.tools.as_ref().and_then(|tools| tools.rust.as_ref()).is_none()
         {
             bail!("packages.cargo: requires tools.rust");
         }
-        if self
-            .packages
-            .as_ref()
-            .and_then(|packages| packages.npm.as_ref())
-            .is_some()
-            && self
-                .tools
-                .as_ref()
-                .and_then(|tools| tools.node.as_ref())
-                .is_none()
+        if self.packages.as_ref().and_then(|packages| packages.npm.as_ref()).is_some()
+            && self.tools.as_ref().and_then(|tools| tools.node.as_ref()).is_none()
         {
             bail!("packages.npm: requires tools.node");
         }
@@ -187,10 +149,7 @@ impl Config {
 }
 
 fn map_distro_error(platform: &Platform, _distro: Distro) -> Result<()> {
-    bail!(
-        "system.require.distros: detected distribution {:?} is not allowed",
-        platform.distro
-    );
+    bail!("system.require.distros: detected distribution {:?} is not allowed", platform.distro);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
@@ -243,9 +202,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     };
     let valid = match distro {
         Distro::Ubuntu | Distro::Pop | Distro::Zorin => upstream == Family::Ubuntu,
-        Distro::Debian | Distro::Kali | Distro::Tails | Distro::Deepin => {
-            upstream == Family::Debian
-        }
+        Distro::Debian | Distro::Kali | Distro::Tails | Distro::Deepin => upstream == Family::Debian,
         Distro::Linuxmint => true,
     };
     if !valid {
@@ -289,10 +246,7 @@ pub struct System {
 impl System {
     fn validate(&self) -> Result<()> {
         require_effective(
-            self.require.is_some()
-                || self.ensure_admin.is_some()
-                || self.apt.is_some()
-                || self.ubuntu.is_some(),
+            self.require.is_some() || self.ensure_admin.is_some() || self.apt.is_some() || self.ubuntu.is_some(),
             "system",
         )?;
         if let Some(require) = &self.require {
@@ -318,10 +272,7 @@ pub struct PlatformRequirements {
 
 impl PlatformRequirements {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.distros.is_some() || self.desktops.is_some(),
-            "system.require",
-        )?;
+        require_effective(self.distros.is_some() || self.desktops.is_some(), "system.require")?;
         validate_non_empty_unique(self.distros.as_deref(), "system.require.distros")?;
         validate_non_empty_unique(self.desktops.as_deref(), "system.require.desktops")
     }
@@ -336,10 +287,7 @@ pub struct SystemApt {
 
 impl SystemApt {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.sources.is_some() || self.unattended_upgrades.is_some(),
-            "system.apt",
-        )?;
+        require_effective(self.sources.is_some() || self.unattended_upgrades.is_some(), "system.apt")?;
         if let Some(sources) = &self.sources {
             sources.validate()?;
         }
@@ -384,12 +332,7 @@ impl OfficialSources {
         Ok(())
     }
 
-    pub fn validate_for_platform(
-        &self,
-        platform: &Platform,
-        distro: Distro,
-        upstream: Family,
-    ) -> Result<()> {
+    pub fn validate_for_platform(&self, platform: &Platform, distro: Distro, upstream: Family) -> Result<()> {
         if self.mode == SourceMode::Preserve {
             return Ok(());
         }
@@ -412,10 +355,7 @@ impl OfficialSources {
         if self.mode == SourceMode::Preserve {
             return Ok(None);
         }
-        let components = self
-            .components
-            .as_ref()
-            .context("managed APT sources require components")?;
+        let components = self.components.as_ref().context("managed APT sources require components")?;
         let (_, selected) = select_distro_map(components, identity.distro, identity.upstream).ok_or_else(|| {
             anyhow::anyhow!(
                 "system.apt.sources.components: no entry for distribution {:?}, upstream {:?}, or default",
@@ -423,10 +363,7 @@ impl OfficialSources {
                 platform.upstream
             )
         })?;
-        let names = selected
-            .iter()
-            .map(AptComponent::as_str)
-            .collect::<Vec<_>>();
+        let names = selected.iter().map(AptComponent::as_str).collect::<Vec<_>>();
         platform.managed_apt_sources(&names).map(Some)
     }
 }
@@ -479,10 +416,7 @@ pub struct UbuntuSystem {
 
 impl UbuntuSystem {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.snap.is_some() || self.codecs.is_some(),
-            "system.ubuntu",
-        )
+        require_effective(self.snap.is_some() || self.codecs.is_some(), "system.ubuntu")
     }
 }
 
@@ -512,16 +446,8 @@ impl Packages {
         if let Some(apt) = &self.apt {
             apt.validate()?;
         }
-        validate_string_list(
-            self.flatpak.as_deref(),
-            "packages.flatpak",
-            validate_flatpak_id,
-        )?;
-        validate_string_list(
-            self.cargo.as_deref(),
-            "packages.cargo",
-            validate_cargo_package,
-        )?;
+        validate_string_list(self.flatpak.as_deref(), "packages.flatpak", validate_flatpak_id)?;
+        validate_string_list(self.cargo.as_deref(), "packages.cargo", validate_cargo_package)?;
         validate_string_list(self.npm.as_deref(), "packages.npm", validate_npm_package)?;
         if let Some(binaries) = &self.binaries {
             if binaries.is_empty() {
@@ -532,17 +458,11 @@ impl Packages {
             for (index, binary) in binaries.iter().enumerate() {
                 binary.validate(index)?;
                 if !names.insert(binary.name.as_str()) {
-                    bail!(
-                        "packages.binaries[{index}].name: duplicate binary name {:?}",
-                        binary.name
-                    );
+                    bail!("packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
                 }
                 for (command_index, command) in binary.commands.iter().enumerate() {
-                    let command_path =
-                        format!("packages.binaries[{index}].commands[{command_index}]");
-                    if let Some(owner_path) =
-                        command_owners.insert(command.as_str(), command_path.clone())
-                    {
+                    let command_path = format!("packages.binaries[{index}].commands[{command_index}]");
+                    if let Some(owner_path) = command_owners.insert(command.as_str(), command_path.clone()) {
                         bail!("{command_path}: command {command:?} is already claimed by {owner_path}");
                     }
                 }
@@ -568,16 +488,8 @@ impl AptPackages {
             self.remove.is_some() || self.install.is_some() || self.repositories.is_some(),
             "packages.apt",
         )?;
-        validate_string_list(
-            self.remove.as_deref(),
-            "packages.apt.remove",
-            validate_debian_package,
-        )?;
-        validate_string_list(
-            self.install.as_deref(),
-            "packages.apt.install",
-            validate_debian_package,
-        )?;
+        validate_string_list(self.remove.as_deref(), "packages.apt.remove", validate_debian_package)?;
+        validate_string_list(self.install.as_deref(), "packages.apt.install", validate_debian_package)?;
         let mut installed = HashSet::new();
         for package in self.install.iter().flatten() {
             installed.insert(package.as_str());
@@ -591,10 +503,7 @@ impl AptPackages {
             for (index, repository) in repositories.iter().enumerate() {
                 repository.validate(index)?;
                 if !names.insert(repository.name.as_str()) {
-                    bail!(
-                        "packages.apt.repositories[{index}].name: duplicate repository name {:?}",
-                        repository.name
-                    );
+                    bail!("packages.apt.repositories[{index}].name: duplicate repository name {:?}", repository.name);
                 }
                 if !key_paths.insert(repository.key_path.as_str()) {
                     bail!(
@@ -678,10 +587,7 @@ pub fn select_distro_map<T>(
     map.get(&exact)
         .map(|value| (exact, value))
         .or_else(|| map.get(&family).map(|value| (family, value)))
-        .or_else(|| {
-            map.get(&DistroMapKey::Default)
-                .map(|value| (DistroMapKey::Default, value))
-        })
+        .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -707,11 +613,7 @@ impl Repository {
         let path = format!("packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
-        validate_string_values(
-            &self.packages,
-            &format!("{path}.packages"),
-            validate_debian_package,
-        )?;
+        validate_string_values(&self.packages, &format!("{path}.packages"), validate_debian_package)?;
         validate_key_path(&self.key_path, &format!("{path}.key_path"))?;
         match (&self.suite, &self.components, &self.path) {
             (Some(suite), Some(components), None) => {
@@ -721,16 +623,11 @@ impl Repository {
                     let component_path = format!("{path}.components[{component_index}]");
                     validate_apt_token(component.as_str(), &component_path)?;
                     if component.as_str() == "system" {
-                        bail!(
-                            "{component_path}: value {:?} is reserved for the suite field",
-                            component.as_str()
-                        );
+                        bail!("{component_path}: value {:?} is reserved for the suite field", component.as_str());
                     }
                 }
             }
-            (None, None, Some(exact_path)) => {
-                validate_repository_path(exact_path, &format!("{path}.path"))?
-            }
+            (None, None, Some(exact_path)) => validate_repository_path(exact_path, &format!("{path}.path"))?,
             _ => bail!("{path}: requires exactly suite with non-empty components, or path"),
         }
         Ok(())
@@ -747,11 +644,7 @@ impl Repository {
         let resolved = self.resolve_for_platform(index, platform, identity)?;
         if self.suite.as_deref() == Some("system") {
             validate_apt_token(
-                resolved
-                    .suite
-                    .as_ref()
-                    .context("system repository suite did not resolve")?
-                    .as_str(),
+                resolved.suite.as_ref().context("system repository suite did not resolve")?.as_str(),
                 &format!("packages.apt.repositories[{index}].suite resolved codename"),
             )?;
         }
@@ -789,11 +682,7 @@ pub struct ResolvedRepository<'a> {
     pub suite: Option<AptToken>,
 }
 
-fn selected_repository_codename(
-    key: DistroMapKey,
-    platform: &Platform,
-    distro: Distro,
-) -> Option<&str> {
+fn selected_repository_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> Option<&str> {
     if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
         Some(&platform.distro_codename)
     } else {
@@ -842,11 +731,7 @@ impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("packages.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        validate_string_values(
-            &self.commands,
-            &format!("{path}.commands"),
-            validate_executable,
-        )?;
+        validate_string_values(&self.commands, &format!("{path}.commands"), validate_executable)?;
         self.source.validate(&format!("{path}.source"))
     }
 }
@@ -876,9 +761,7 @@ impl BinarySource {
                 urls.validate(&format!("{path}.urls"))?;
                 sha256.validate(&format!("{path}.sha256"))?;
                 if urls.keys() != sha256.keys() {
-                    bail!(
-                        "{path}: urls and sha256 must contain exactly the same architecture keys"
-                    );
+                    bail!("{path}: urls and sha256 must contain exactly the same architecture keys");
                 }
                 Ok(())
             }
@@ -892,12 +775,7 @@ impl BinarySource {
     pub fn resolve_native(&self, architecture: Architecture) -> Option<ResolvedNativeBinary<'_>> {
         match self {
             Self::Github { repository, assets } => {
-                assets
-                    .get(architecture)
-                    .map(|selector| ResolvedNativeBinary::Github {
-                        repository,
-                        selector,
-                    })
+                assets.get(architecture).map(|selector| ResolvedNativeBinary::Github { repository, selector })
             }
             Self::Url { urls, sha256 } => urls
                 .get(architecture)
@@ -908,14 +786,8 @@ impl BinarySource {
 }
 
 pub enum ResolvedNativeBinary<'a> {
-    Github {
-        repository: &'a str,
-        selector: &'a str,
-    },
-    Url {
-        url: &'a HttpsUrl,
-        sha256: &'a Sha256,
-    },
+    Github { repository: &'a str, selector: &'a str },
+    Url { url: &'a HttpsUrl, sha256: &'a Sha256 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -940,11 +812,7 @@ impl AssetMap {
     }
 
     fn values(&self) -> [(&'static str, Option<&String>); 3] {
-        [
-            ("amd64", self.amd64.as_ref()),
-            ("arm64", self.arm64.as_ref()),
-            ("arm32", self.arm32.as_ref()),
-        ]
+        [("amd64", self.amd64.as_ref()), ("arm64", self.arm64.as_ref()), ("arm32", self.arm32.as_ref())]
     }
 
     fn get(&self, architecture: Architecture) -> Option<&str> {
@@ -974,11 +842,7 @@ impl Sha256 {
 
     fn validate(&self, path: &str) -> Result<()> {
         let value = &self.0;
-        if value.len() != 64
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
+        if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
             bail!("{path}: invalid SHA-256 {value:?}; must be exactly 64 lowercase hexadecimal characters");
         }
         Ok(())
@@ -1011,11 +875,7 @@ impl ArchitectureUrls {
     }
 
     fn keys(&self) -> Vec<Architecture> {
-        architecture_keys(
-            self.amd64.is_some(),
-            self.arm64.is_some(),
-            self.arm32.is_some(),
-        )
+        architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
     fn get(&self, architecture: Architecture) -> Option<&HttpsUrl> {
@@ -1040,11 +900,9 @@ impl ArchitectureHashes {
         if self.keys().is_empty() {
             bail!("{path}: must contain at least one canonical architecture hash");
         }
-        for (architecture, hash) in [
-            ("amd64", self.amd64.as_ref()),
-            ("arm64", self.arm64.as_ref()),
-            ("arm32", self.arm32.as_ref()),
-        ] {
+        for (architecture, hash) in
+            [("amd64", self.amd64.as_ref()), ("arm64", self.arm64.as_ref()), ("arm32", self.arm32.as_ref())]
+        {
             if let Some(hash) = hash {
                 hash.validate(&format!("{path}.{architecture}"))?;
             }
@@ -1053,11 +911,7 @@ impl ArchitectureHashes {
     }
 
     fn keys(&self) -> Vec<Architecture> {
-        architecture_keys(
-            self.amd64.is_some(),
-            self.arm64.is_some(),
-            self.arm32.is_some(),
-        )
+        architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
     fn get(&self, architecture: Architecture) -> Option<&Sha256> {
@@ -1070,14 +924,10 @@ impl ArchitectureHashes {
 }
 
 fn architecture_keys(amd64: bool, arm64: bool, arm32: bool) -> Vec<Architecture> {
-    [
-        (Architecture::Amd64, amd64),
-        (Architecture::Arm64, arm64),
-        (Architecture::Arm32, arm32),
-    ]
-    .into_iter()
-    .filter_map(|(architecture, present)| present.then_some(architecture))
-    .collect()
+    [(Architecture::Amd64, amd64), (Architecture::Arm64, arm64), (Architecture::Arm32, arm32)]
+        .into_iter()
+        .filter_map(|(architecture, present)| present.then_some(architecture))
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1096,10 +946,7 @@ pub struct Tools {
 impl Tools {
     fn validate(&self) -> Result<()> {
         require_effective(
-            self.rust.is_some()
-                || self.go.is_some()
-                || self.node.is_some()
-                || self.python.is_some(),
+            self.rust.is_some() || self.go.is_some() || self.node.is_some() || self.python.is_some(),
             "tools",
         )?;
         if let Some(value) = &self.rust {
@@ -1145,11 +992,7 @@ pub struct Dotfiles {
 
 impl Dotfiles {
     fn validate(&self) -> Result<()> {
-        validate_string_values(
-            &self.packages,
-            "dotfiles.packages",
-            validate_dotfile_package,
-        )
+        validate_string_values(&self.packages, "dotfiles.packages", validate_dotfile_package)
     }
 }
 
@@ -1163,10 +1006,7 @@ pub struct Integrations {
 
 impl Integrations {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.docker.is_some() || self.virtualbox.is_some() || self.vscode.is_some(),
-            "integrations",
-        )?;
+        require_effective(self.docker.is_some() || self.virtualbox.is_some() || self.vscode.is_some(), "integrations")?;
         if let Some(docker) = &self.docker {
             docker.validate()?;
         }
@@ -1189,14 +1029,8 @@ pub struct DockerIntegration {
 
 impl DockerIntegration {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.add_user_to_group.is_some() || self.logging.is_some(),
-            "integrations.docker",
-        )?;
-        true_only(
-            self.add_user_to_group,
-            "integrations.docker.add_user_to_group",
-        )?;
+        require_effective(self.add_user_to_group.is_some() || self.logging.is_some(), "integrations.docker")?;
+        true_only(self.add_user_to_group, "integrations.docker.add_user_to_group")?;
         if let Some(logging) = &self.logging {
             logging.validate()?;
         }
@@ -1236,10 +1070,7 @@ pub struct VirtualBoxIntegration {
 impl VirtualBoxIntegration {
     fn validate(&self) -> Result<()> {
         require_effective(self.add_user_to_group.is_some(), "integrations.virtualbox")?;
-        true_only(
-            self.add_user_to_group,
-            "integrations.virtualbox.add_user_to_group",
-        )
+        true_only(self.add_user_to_group, "integrations.virtualbox.add_user_to_group")
     }
 }
 
@@ -1252,11 +1083,7 @@ pub struct VsCodeIntegration {
 
 impl VsCodeIntegration {
     fn validate(&self) -> Result<()> {
-        validate_string_values(
-            &self.extensions,
-            "integrations.vscode.extensions",
-            validate_vscode_id,
-        )
+        validate_string_values(&self.extensions, "integrations.vscode.extensions", validate_vscode_id)
     }
 }
 
@@ -1280,10 +1107,7 @@ pub struct Desktop {
 impl Desktop {
     fn validate(&self) -> Result<()> {
         require_effective(
-            self.theme.is_some()
-                || self.terminal.is_some()
-                || self.idle.is_some()
-                || self.gnome.is_some(),
+            self.theme.is_some() || self.terminal.is_some() || self.idle.is_some() || self.gnome.is_some(),
             "desktop",
         )?;
         if let Some(terminal) = &self.terminal {
@@ -1333,9 +1157,7 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
         let value = deserialize_string(deserializer)?;
         let duration = humantime::parse_duration(&value).map_err(de::Error::custom)?;
         if duration.subsec_nanos() != 0 {
-            return Err(de::Error::custom(
-                "duration must resolve to a whole number of seconds",
-            ));
+            return Err(de::Error::custom("duration must resolve to a whole number of seconds"));
         }
         u32::try_from(duration.as_secs())
             .map(Self)
@@ -1358,11 +1180,7 @@ impl Gnome {
             self.extensions.is_some() || self.dock.is_some() || self.rounded_corners.is_some(),
             "desktop.gnome",
         )?;
-        validate_string_list(
-            self.extensions.as_deref(),
-            "desktop.gnome.extensions",
-            validate_gnome_uuid,
-        )?;
+        validate_string_list(self.extensions.as_deref(), "desktop.gnome.extensions", validate_gnome_uuid)?;
         true_only(self.dock, "desktop.gnome.dock")?;
         true_only(self.rounded_corners, "desktop.gnome.rounded_corners")
     }
@@ -1390,22 +1208,10 @@ impl Updates {
         )?;
         true_only(self.flatpak, "updates.flatpak")?;
         true_only(self.fonts, "updates.fonts")?;
-        if self.flatpak.is_some()
-            && config
-                .packages
-                .as_ref()
-                .and_then(|packages| packages.flatpak.as_ref())
-                .is_none()
-        {
+        if self.flatpak.is_some() && config.packages.as_ref().and_then(|packages| packages.flatpak.as_ref()).is_none() {
             bail!("updates.flatpak: requires configured packages.flatpak targets");
         }
-        if self.fonts.is_some()
-            && config
-                .fonts
-                .as_ref()
-                .and_then(|fonts| fonts.nerd.as_ref())
-                .is_none()
-        {
+        if self.fonts.is_some() && config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()).is_none() {
             bail!("updates.fonts: requires configured fonts.nerd targets");
         }
         if let Some(tools) = &self.tools {
@@ -1435,27 +1241,18 @@ pub struct ToolUpdates {
 
 impl ToolUpdates {
     fn validate(&self, tools: Option<&Tools>) -> Result<()> {
-        require_effective(
-            self.rust.is_some() || self.go.is_some() || self.node.is_some(),
-            "updates.tools",
-        )?;
+        require_effective(self.rust.is_some() || self.go.is_some() || self.node.is_some(), "updates.tools")?;
         true_only(self.rust, "updates.tools.rust")?;
         true_only(self.go, "updates.tools.go")?;
         true_only(self.node, "updates.tools.node")?;
-        if self.rust.is_some()
-            && !tools
-                .and_then(|tools| tools.rust.as_deref())
-                .is_some_and(rust_selector_is_moving)
-        {
+        if self.rust.is_some() && !tools.and_then(|tools| tools.rust.as_deref()).is_some_and(rust_selector_is_moving) {
             bail!("updates.tools.rust: requires a configured moving Rust selector");
         }
         if self.go.is_some() && tools.and_then(|tools| tools.go.as_deref()) != Some("latest") {
             bail!("updates.tools.go: requires tools.go: latest");
         }
         if self.node.is_some()
-            && !tools
-                .and_then(|tools| tools.node.as_deref())
-                .is_some_and(|value| matches!(value, "lts" | "latest"))
+            && !tools.and_then(|tools| tools.node.as_deref()).is_some_and(|value| matches!(value, "lts" | "latest"))
         {
             bail!("updates.tools.node: requires a configured moving Node selector");
         }
@@ -1473,25 +1270,14 @@ pub struct PackageUpdates {
 
 impl PackageUpdates {
     fn validate(&self, packages: Option<&Packages>) -> Result<()> {
-        require_effective(
-            self.cargo.is_some() || self.npm.is_some() || self.binaries.is_some(),
-            "updates.packages",
-        )?;
+        require_effective(self.cargo.is_some() || self.npm.is_some() || self.binaries.is_some(), "updates.packages")?;
         true_only(self.cargo, "updates.packages.cargo")?;
         true_only(self.npm, "updates.packages.npm")?;
         true_only(self.binaries, "updates.packages.binaries")?;
-        if self.cargo.is_some()
-            && packages
-                .and_then(|packages| packages.cargo.as_ref())
-                .is_none()
-        {
+        if self.cargo.is_some() && packages.and_then(|packages| packages.cargo.as_ref()).is_none() {
             bail!("updates.packages.cargo: requires configured packages.cargo targets");
         }
-        if self.npm.is_some()
-            && packages
-                .and_then(|packages| packages.npm.as_ref())
-                .is_none()
-        {
+        if self.npm.is_some() && packages.and_then(|packages| packages.npm.as_ref()).is_none() {
             bail!("updates.packages.npm: requires configured packages.npm targets");
         }
         if self.binaries.is_some()
@@ -1499,9 +1285,7 @@ impl PackageUpdates {
                 .and_then(|packages| packages.binaries.as_ref())
                 .is_some_and(|binaries| binaries.iter().any(|binary| binary.source.is_github()))
         {
-            bail!(
-                "updates.packages.binaries: requires at least one configured GitHub binary target"
-            );
+            bail!("updates.packages.binaries: requires at least one configured GitHub binary target");
         }
         Ok(())
     }
@@ -1514,9 +1298,7 @@ where
     deserializer.deserialize_any(StrictStringVisitor)
 }
 
-fn deserialize_optional_string<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<String>, D::Error>
+fn deserialize_optional_string<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1547,9 +1329,7 @@ where
     deserializer.deserialize_seq(Visitor)
 }
 
-fn deserialize_optional_strings<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Vec<String>>, D::Error>
+fn deserialize_optional_strings<'de, D>(deserializer: D) -> std::result::Result<Option<Vec<String>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1601,10 +1381,7 @@ fn validate_non_empty_map<K, V>(map: &BTreeMap<K, V>, path: &str) -> Result<()> 
     Ok(())
 }
 
-fn validate_non_empty_unique<T: Eq + std::hash::Hash + fmt::Debug>(
-    values: Option<&[T]>,
-    path: &str,
-) -> Result<()> {
+fn validate_non_empty_unique<T: Eq + std::hash::Hash + fmt::Debug>(values: Option<&[T]>, path: &str) -> Result<()> {
     let Some(values) = values else {
         return Ok(());
     };
@@ -1620,22 +1397,14 @@ fn validate_non_empty_unique<T: Eq + std::hash::Hash + fmt::Debug>(
     Ok(())
 }
 
-fn validate_string_list(
-    values: Option<&[String]>,
-    path: &str,
-    validator: fn(&str, &str) -> Result<()>,
-) -> Result<()> {
+fn validate_string_list(values: Option<&[String]>, path: &str, validator: fn(&str, &str) -> Result<()>) -> Result<()> {
     let Some(values) = values else {
         return Ok(());
     };
     validate_string_values(values, path, validator)
 }
 
-fn validate_string_values(
-    values: &[String],
-    path: &str,
-    validator: fn(&str, &str) -> Result<()>,
-) -> Result<()> {
+fn validate_string_values(values: &[String], path: &str, validator: fn(&str, &str) -> Result<()>) -> Result<()> {
     if values.is_empty() {
         bail!("{path}: must be a non-empty sequence");
     }
@@ -1666,28 +1435,20 @@ fn validate_key_path(value: &str, path: &str) -> Result<()> {
     if !p.is_absolute() {
         bail!("{path}: key path must be absolute");
     }
-    let parent = p
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("{path}: key path has no parent"))?;
+    let parent = p.parent().ok_or_else(|| anyhow::anyhow!("{path}: key path has no parent"))?;
     if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
-        bail!(
-            "{path}: key path must be a direct child of /etc/apt/keyrings/ or /usr/share/keyrings/"
-        );
+        bail!("{path}: key path must be a direct child of /etc/apt/keyrings/ or /usr/share/keyrings/");
     }
-    let file_name = p
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow::anyhow!("{path}: key path has no file name"))?;
+    let file_name =
+        p.file_name().and_then(|f| f.to_str()).ok_or_else(|| anyhow::anyhow!("{path}: key path has no file name"))?;
     if parent.join(file_name).to_str() != Some(value) {
         bail!("{path}: key path must use its canonical direct-child spelling");
     }
     if !file_name.ends_with(".asc") && !file_name.ends_with(".gpg") {
         bail!("{path}: key path extension must be .asc or .gpg");
     }
-    let stem = p
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("{path}: key path has no file stem"))?;
+    let stem =
+        p.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow::anyhow!("{path}: key path has no file stem"))?;
     validate_definition_name(stem, &format!("{path} file stem"))?;
     Ok(())
 }
@@ -1724,8 +1485,7 @@ fn validate_cargo_package(value: &str, path: &str) -> Result<()> {
 }
 
 fn validate_npm_package(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^(?:@[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$")
-        .unwrap();
+    let re = Regex::new(r"^(?:@[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$").unwrap();
     if !re.is_match(value) {
         bail!("{path}: invalid npm package name {value:?}; must be an unversioned lowercase name or @scope/name");
     }
@@ -1793,9 +1553,7 @@ fn validate_repository_path(value: &str, path: &str) -> Result<()> {
 fn validate_github_repository(value: &str, path: &str) -> Result<()> {
     let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
     if !re.is_match(value) {
-        bail!(
-            "{path}: invalid GitHub repository {value:?}; must be an owner/repository coordinate"
-        );
+        bail!("{path}: invalid GitHub repository {value:?}; must be an owner/repository coordinate");
     }
     Ok(())
 }
@@ -1808,24 +1566,17 @@ fn validate_rust_selector(value: &str, path: &str) -> Result<()> {
 }
 
 fn rust_selector_is_moving(value: &str) -> bool {
-    value == "stable"
-        || value.split('.').count() == 2
-            && validate_numeric_version(value, "tools.rust", 2, 2).is_ok()
+    value == "stable" || value.split('.').count() == 2 && validate_numeric_version(value, "tools.rust", 2, 2).is_ok()
 }
 
 fn validate_numeric_version(value: &str, path: &str, min: usize, max: usize) -> Result<()> {
     let parts = value.split('.').collect::<Vec<_>>();
     if !(min..=max).contains(&parts.len())
-        || parts
-            .iter()
-            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+        || parts.iter().any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
     {
         bail!("{path}: invalid selector {value:?}; expected {min} to {max} numeric components");
     }
-    if parts
-        .iter()
-        .any(|part| *part != "0" && part.starts_with('0'))
-    {
+    if parts.iter().any(|part| *part != "0" && part.starts_with('0')) {
         bail!("{path}: invalid selector {value:?}; numeric components cannot have leading zeroes");
     }
     Ok(())
@@ -1856,14 +1607,11 @@ impl HttpsUrl {
         {
             bail!("invalid HTTPS URL {value:?}; must be literal and contain no whitespace or substitutions");
         }
-        let parsed = Url::parse(value).with_context(|| {
-            format!("invalid HTTPS URL {value:?}; must be a valid absolute URL")
-        })?;
+        let parsed =
+            Url::parse(value).with_context(|| format!("invalid HTTPS URL {value:?}; must be a valid absolute URL"))?;
         let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
         let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
-        let host_port = authority
-            .rsplit_once('@')
-            .map_or(authority, |(_, host)| host);
+        let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
         let (raw_host, empty_port) = if let Some(rest) = host_port.strip_prefix('[') {
             let closing = rest.find(']').map(|index| index + 1);
             let raw_host = closing.map_or(host_port, |index| &host_port[..=index]);
@@ -1936,17 +1684,9 @@ fn valid_domain_host(domain: &str) -> bool {
         && domain.len() <= 253
         && domain.split('.').all(|label| {
             label.len() <= 63
-                && label
-                    .as_bytes()
-                    .first()
-                    .is_some_and(u8::is_ascii_alphanumeric)
-                && label
-                    .as_bytes()
-                    .last()
-                    .is_some_and(u8::is_ascii_alphanumeric)
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                && label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
 }
 
