@@ -13,15 +13,6 @@ pub enum ToolMutationMode {
     UpdateMoving,
 }
 
-impl ToolMutationMode {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::EnsurePresent => "ensure-present",
-            Self::UpdateMoving => "update-moving",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
     Latest,

@@ -49,13 +49,13 @@ fn apply() -> Result<()> {
     let platform = platform::Platform::detect()?;
     let operations = planner::plan(&config, &platform, &root.join("dotfiles"))?;
     for operation in operations {
-        let display = operation.display_args().join(" ");
-        println!("Applying {display}");
+        let label = operation.label();
+        println!("Applying {label}");
         if matches!(
-            operations::execute(&operation).with_context(|| format!("apply {display}"))?,
+            operations::execute(&operation).with_context(|| format!("apply {label}"))?,
             operations::OperationOutcome::LoginRequired
         ) {
-            println!("Login required to finish {display}");
+            println!("Login required to finish {label}");
         }
     }
     Ok(())

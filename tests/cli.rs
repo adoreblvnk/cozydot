@@ -284,7 +284,7 @@ updates:
 }
 
 #[test]
-fn true_updates_require_nonempty_targets_and_rendered_values_stay_valid() {
+fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
     for (config, message) in [
         (
             "version: 1.0.0\npackages:\n  flatpak: []\nupdates:\n  flatpak: true\n",
@@ -356,7 +356,16 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()
-        .success();
+        .success()
+        .stdout(concat!(
+            "Applying APT bootstrap packages\n",
+            "Applying Rustup bootstrap\n",
+            "Applying FNM bootstrap\n",
+            "Applying uv bootstrap\n",
+            "Applying Rust toolchain\n",
+            "Applying Node.js toolchain\n",
+            "Applying Python toolchain\n",
+        ));
 
     assert_eq!(
         fs::read_to_string(&log).unwrap(),

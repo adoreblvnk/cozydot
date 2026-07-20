@@ -164,119 +164,42 @@ pub enum OperationOutcome {
 }
 
 impl Operation {
-    pub fn display_args(&self) -> Vec<String> {
+    pub fn label(&self) -> &'static str {
         match self {
-            Self::AptBootstrapPackages { packages } => {
-                std::iter::once("apt-bootstrap-packages".into()).chain(packages.clone()).collect()
-            }
-            Self::AptMetadataRefresh => vec!["apt-metadata-refresh".into()],
-            Self::AptRepository(operation) => operation.display_args(),
-            Self::ManagedAptSources(policy) => vec![
-                "managed-apt-sources".into(),
-                policy.distro.clone(),
-                policy.release.clone(),
-                policy.architecture.canonical().into(),
-            ],
-            Self::AptPackages { packages } => std::iter::once("apt-packages".into()).chain(packages.clone()).collect(),
-            Self::AptPurge { packages } => std::iter::once("apt-purge".into()).chain(packages.clone()).collect(),
-            Self::AptUpgrade { policy } => vec![
-                "apt-upgrade".into(),
-                match policy {
-                    AptUpgradePolicy::Standard => "standard",
-                    AptUpgradePolicy::Full => "full",
-                }
-                .into(),
-            ],
-            Self::DockerGroup => vec!["docker-group".into()],
-            Self::DockerLocalLog { max_size } => {
-                std::iter::once("docker-local-log".into()).chain(max_size.iter().cloned()).collect()
-            }
-            Self::DesktopSetting { target, setting } => {
-                let target_str = match target {
-                    DesktopEnvironment::Gnome => "gnome",
-                    DesktopEnvironment::Cinnamon => "cinnamon",
-                };
-                let (name, value) = match setting {
-                    DesktopSetting::Theme(DesktopTheme::Light) => ("theme", "light".into()),
-                    DesktopSetting::Theme(DesktopTheme::Dark) => ("theme", "dark".into()),
-                    DesktopSetting::Terminal(executable) => ("terminal", executable.clone()),
-                    DesktopSetting::IdleTimeoutSeconds(seconds) => ("idle-timeout-seconds", seconds.to_string()),
-                    DesktopSetting::IdleDim(enabled) => ("idle-dim", enabled.to_string()),
-                };
-                vec!["desktop-setting".into(), target_str.into(), name.into(), value]
-            }
-            Self::BinaryPackage(package) => package.display_args(),
-            Self::Dotfiles { packages, .. } => {
-                std::iter::once("dotfiles-backup-stow".into()).chain(packages.iter().cloned()).collect()
-            }
-            Self::FlatpakEnsureFlathub => vec!["flatpak-ensure-flathub".into()],
-            Self::FlatpakEnsureApps { refs } => {
-                std::iter::once("flatpak-ensure-apps".into()).chain(refs.clone()).collect()
-            }
-            Self::FlatpakUpdateApps { refs } => {
-                std::iter::once("flatpak-update-apps".into()).chain(refs.clone()).collect()
-            }
-            Self::FnmBootstrap => vec!["fnm-bootstrap".into()],
-            Self::EnsureAdmin => vec!["ensure-admin".into()],
-            Self::GnomeExtensions { extensions } => {
-                std::iter::once("gnome-extensions".into()).chain(extensions.iter().cloned()).collect()
-            }
-            Self::GnomeDock => vec!["gnome-dock".into()],
-            Self::GnomeRoundedCorners => vec!["gnome-rounded-corners".into()],
-            Self::GoToolchain { selector, architecture, mode } => vec![
-                "go-toolchain".into(),
-                mode.as_str().into(),
-                match selector {
-                    GoToolchainSelector::Latest => "latest",
-                    GoToolchainSelector::Version(v) => v,
-                }
-                .into(),
-                architecture.go_archive().into(),
-            ],
-            Self::NerdFonts { families, mode } => [
-                "nerd-fonts".into(),
-                match mode {
-                    NerdFontsMode::EnsurePresent => "ensure-present".into(),
-                    NerdFontsMode::Update => "update".into(),
-                },
-            ]
-            .into_iter()
-            .chain(families.iter().cloned())
-            .collect(),
-            Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
-            Self::CargoBinstallBootstrap => vec!["cargo-binstall-bootstrap".into()],
-            Self::RustToolchain { selector } => vec!["rust-toolchain".into(), selector.clone()],
-            Self::CargoPackageSet { packages, mode } => std::iter::once("cargo-package-set".into())
-                .chain(std::iter::once(
-                    match mode {
-                        CargoPackageMode::EnsurePresent => "ensure-present",
-                        CargoPackageMode::UpdateCurrent => "update-current",
-                    }
-                    .into(),
-                ))
-                .chain(packages.iter().cloned())
-                .collect(),
-            Self::NodeToolchain { selector } => vec!["node-toolchain".into(), selector.clone()],
-            Self::NpmPackageSet { packages, mode } => std::iter::once("npm-package-set".into())
-                .chain(std::iter::once(
-                    match mode {
-                        NpmPackageMode::EnsurePresent => "ensure-present",
-                        NpmPackageMode::UpdateCurrent => "update-current",
-                    }
-                    .into(),
-                ))
-                .chain(packages.iter().cloned())
-                .collect(),
-            Self::UbuntuSnap { enabled } => vec!["ubuntu-snap".into(), enabled.to_string()],
-            Self::UnattendedUpgrades { enabled } => {
-                vec!["unattended-upgrades".into(), enabled.to_string()]
-            }
-            Self::UvBootstrap => vec!["uv-bootstrap".into()],
-            Self::PythonToolchain { version } => vec!["python-toolchain".into(), version.clone()],
-            Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
-            Self::VsCodeExtensionSet { extensions } => {
-                std::iter::once("vscode-extension-set".into()).chain(extensions.iter().cloned()).collect()
-            }
+            Self::AptBootstrapPackages { .. } => "APT bootstrap packages",
+            Self::AptMetadataRefresh => "APT metadata refresh",
+            Self::AptRepository(_) => "APT repository",
+            Self::ManagedAptSources(_) => "managed APT sources",
+            Self::AptPackages { .. } => "APT packages",
+            Self::AptPurge { .. } => "APT package removal",
+            Self::AptUpgrade { .. } => "APT upgrade",
+            Self::DockerGroup => "Docker group membership",
+            Self::DockerLocalLog { .. } => "Docker logging",
+            Self::DesktopSetting { .. } => "desktop setting",
+            Self::BinaryPackage(_) => "binary package",
+            Self::Dotfiles { .. } => "dotfiles",
+            Self::FlatpakEnsureFlathub => "Flathub remote",
+            Self::FlatpakEnsureApps { .. } => "Flatpak applications",
+            Self::FlatpakUpdateApps { .. } => "Flatpak application updates",
+            Self::FnmBootstrap => "FNM bootstrap",
+            Self::EnsureAdmin => "administrator access",
+            Self::GnomeExtensions { .. } => "GNOME extensions",
+            Self::GnomeDock => "GNOME dock",
+            Self::GnomeRoundedCorners => "GNOME rounded corners",
+            Self::GoToolchain { .. } => "Go toolchain",
+            Self::NerdFonts { .. } => "Nerd Fonts",
+            Self::RustupBootstrap => "Rustup bootstrap",
+            Self::CargoBinstallBootstrap => "cargo-binstall bootstrap",
+            Self::RustToolchain { .. } => "Rust toolchain",
+            Self::CargoPackageSet { .. } => "Cargo packages",
+            Self::NodeToolchain { .. } => "Node.js toolchain",
+            Self::NpmPackageSet { .. } => "npm packages",
+            Self::UbuntuSnap { .. } => "Ubuntu Snap",
+            Self::UnattendedUpgrades { .. } => "unattended upgrades",
+            Self::UvBootstrap => "uv bootstrap",
+            Self::PythonToolchain { .. } => "Python toolchain",
+            Self::VirtualBoxGroup => "VirtualBox group membership",
+            Self::VsCodeExtensionSet { .. } => "Visual Studio Code extensions",
         }
     }
 }
