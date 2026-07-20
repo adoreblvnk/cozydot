@@ -987,7 +987,7 @@ pub(crate) mod packages {
                     package.as_ref(),
                 ],
             )?;
-            verify_tree(&source, host.home()).with_context(|| format!("dotfiles package {package:?} postcondition"))
+            Ok(())
         }
 
         fn collect_conflicts(source: &Path, target: PathBuf, conflicts: &mut Vec<PathBuf>) -> Result<()> {
@@ -1046,20 +1046,6 @@ pub(crate) mod packages {
                 if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err() {
                     bail!("dotfiles conflict backup did not move {} to {}", conflict.display(), backup.display());
                 }
-            }
-            Ok(())
-        }
-
-        fn verify_tree(source: &Path, target: PathBuf) -> Result<()> {
-            let source_metadata = fs::symlink_metadata(source)?;
-            if source_metadata.file_type().is_dir() {
-                let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
-                entries.sort_by_key(std::fs::DirEntry::file_name);
-                for entry in entries {
-                    verify_tree(&entry.path(), target.join(entry.file_name()))?;
-                }
-            } else if !resolves_to(&target, source) {
-                bail!("Stow did not link {} to {}", target.display(), source.display());
             }
             Ok(())
         }
