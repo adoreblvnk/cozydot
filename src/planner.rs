@@ -7,8 +7,7 @@ use crate::{
         AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
         BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
         BinarySourceOperation, CargoPackageMode, DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository,
-        GoToolchainSelector, NerdFontsMode, NodeToolchainSelector, NpmPackageMode, Operation, RustToolchainSelector,
-        ToolMutationMode,
+        GoToolchainSelector, NerdFontsMode, NpmPackageMode, Operation, ToolMutationMode,
     },
     platform::{Architecture, Platform},
 };
@@ -362,11 +361,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::RustToolchain {
-                selector: rust_selector_main(selector),
-                architecture: platform.architecture,
-                mode: ToolMutationMode::EnsurePresent,
-            },
+            Operation::RustToolchain { selector: selector.to_owned() },
         );
     }
     if let Some(selector) = tools.go.as_deref() {
@@ -387,11 +382,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::NodeToolchain {
-                selector: node_selector_main(selector),
-                architecture: platform.architecture,
-                mode: ToolMutationMode::EnsurePresent,
-            },
+            Operation::NodeToolchain { selector: selector.to_owned() },
         );
     }
     if let Some(selector) = &tools.python {
@@ -400,7 +391,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::PythonToolchain { version: selector.clone(), architecture: platform.architecture },
+            Operation::PythonToolchain { version: selector.clone() },
         );
     }
 }
@@ -529,46 +520,18 @@ fn plan_updates(
     {
         push_operation(phases, PlannerPhase::Updates, Operation::FlatpakUpdateApps { refs });
     }
-    if let Some(tool_updates) = &updates.tools {
-        if tool_updates.rust == Some(true) {
-            push_operation(
-                phases,
-                PlannerPhase::Updates,
-                Operation::RustToolchain {
-                    selector: rust_selector_main(
-                        tools.and_then(|tools| tools.rust.as_deref()).expect("validated update target"),
-                    ),
-                    architecture: platform.architecture,
-                    mode: ToolMutationMode::UpdateMoving,
-                },
-            );
-        }
-        if tool_updates.go == Some(true) {
-            push_operation(
-                phases,
-                PlannerPhase::Updates,
-                Operation::GoToolchain {
-                    selector: go_selector_main(
-                        tools.and_then(|tools| tools.go.as_deref()).expect("validated update target"),
-                    ),
-                    architecture: platform.architecture,
-                    mode: ToolMutationMode::UpdateMoving,
-                },
-            );
-        }
-        if tool_updates.node == Some(true) {
-            push_operation(
-                phases,
-                PlannerPhase::Updates,
-                Operation::NodeToolchain {
-                    selector: node_selector_main(
-                        tools.and_then(|tools| tools.node.as_deref()).expect("validated update target"),
-                    ),
-                    architecture: platform.architecture,
-                    mode: ToolMutationMode::UpdateMoving,
-                },
-            );
-        }
+    if updates.tools.as_ref().is_some_and(|tools| tools.go == Some(true)) {
+        push_operation(
+            phases,
+            PlannerPhase::Updates,
+            Operation::GoToolchain {
+                selector: go_selector_main(
+                    tools.and_then(|tools| tools.go.as_deref()).expect("validated update target"),
+                ),
+                architecture: platform.architecture,
+                mode: ToolMutationMode::UpdateMoving,
+            },
+        );
     }
     if let Some(package_updates) = &updates.packages {
         if package_updates.cargo == Some(true)
@@ -615,20 +578,8 @@ fn plan_updates(
     Ok(())
 }
 
-fn rust_selector_main(value: &str) -> RustToolchainSelector {
-    if value == "stable" { RustToolchainSelector::Stable } else { RustToolchainSelector::Version(value.to_owned()) }
-}
-
 fn go_selector_main(value: &str) -> GoToolchainSelector {
     if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
-}
-
-fn node_selector_main(value: &str) -> NodeToolchainSelector {
-    match value {
-        "lts" => NodeToolchainSelector::Lts,
-        "latest" => NodeToolchainSelector::Latest,
-        value => NodeToolchainSelector::Version(value.to_owned()),
-    }
 }
 
 fn enabled(state: EnabledDisabled) -> bool {

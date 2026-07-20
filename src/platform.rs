@@ -50,14 +50,6 @@ impl Architecture {
             other => other.go(),
         }
     }
-
-    pub fn rust_target(self) -> &'static str {
-        match self {
-            Self::Amd64 => "x86_64-unknown-linux-gnu",
-            Self::Arm64 => "aarch64-unknown-linux-gnu",
-            Self::Arm32 => "armv7-unknown-linux-gnueabihf",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
