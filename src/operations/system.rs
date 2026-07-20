@@ -23,9 +23,11 @@ pub(crate) fn ensure_admin(host: &Host) -> Result<()> {
 
 pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
     let contents = if enabled {
-        b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n".as_slice()
+        b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n"
+            .as_slice()
     } else {
-        b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n".as_slice()
+        b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n"
+            .as_slice()
     };
     if enabled {
         apt::packages(host, &["unattended-upgrades".into()])?;
@@ -38,7 +40,12 @@ pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
         host.require(
             "unattended-upgrades service enablement",
             "sudo",
-            ["systemctl", "enable", "--now", "unattended-upgrades.service"],
+            [
+                "systemctl",
+                "enable",
+                "--now",
+                "unattended-upgrades.service",
+            ],
         )?;
     } else {
         publish_bytes(
@@ -53,7 +60,12 @@ pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
             host.require(
                 "unattended-upgrades service disablement",
                 "sudo",
-                ["systemctl", "disable", "--now", "unattended-upgrades.service"],
+                [
+                    "systemctl",
+                    "disable",
+                    "--now",
+                    "unattended-upgrades.service",
+                ],
             )?;
         }
         apt::purge(host, &["unattended-upgrades".into()])?;
@@ -68,7 +80,11 @@ fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
 
 pub(crate) fn ubuntu_snap(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
-        host.require("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
+        host.require(
+            "no-Snap APT pin removal",
+            "sudo",
+            ["rm", "-f", "--", NO_SNAP_PIN],
+        )?;
         apt::packages(host, &["snapd".into()])?;
         host.require(
             "Snap service enablement",
@@ -106,7 +122,12 @@ pub(crate) fn ubuntu_snap(host: &Host, enabled: bool) -> Result<()> {
         ],
     )?;
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
-    publish_bytes(host, Path::new(NO_SNAP_PIN), pin, "no-Snap APT pin publication")?;
+    publish_bytes(
+        host,
+        Path::new(NO_SNAP_PIN),
+        pin,
+        "no-Snap APT pin publication",
+    )?;
     Ok(())
 }
 
@@ -115,7 +136,8 @@ fn remove_snaps(host: &Host) -> Result<()> {
     if !output.status.success() {
         return Ok(());
     }
-    let output = std::str::from_utf8(&output.stdout).context("snap list returned non-UTF-8 state")?;
+    let output =
+        std::str::from_utf8(&output.stdout).context("snap list returned non-UTF-8 state")?;
     let mut names = Vec::new();
     for (index, line) in output.lines().enumerate() {
         if index == 0 {
@@ -129,7 +151,11 @@ fn remove_snaps(host: &Host) -> Result<()> {
     }
     names.sort_by_key(|name| matches!(name.as_str(), "snapd" | "bare") || name.starts_with("core"));
     for name in names {
-        host.require("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
+        host.require(
+            "Snap package removal",
+            "sudo",
+            ["snap", "remove", "--purge", &name],
+        )?;
     }
     Ok(())
 }
@@ -144,7 +170,11 @@ fn valid_snap_name(name: &str) -> bool {
 
 fn effective_user(host: &Host) -> Result<(String, u32)> {
     let uid = rustix::process::geteuid().as_raw();
-    let output = host.require("effective user query", "getent", ["passwd", &uid.to_string()])?;
+    let output = host.require(
+        "effective user query",
+        "getent",
+        ["passwd", &uid.to_string()],
+    )?;
     let record = one_record(&output.stdout, "getent passwd")?;
     let fields = record.split(':').collect::<Vec<_>>();
     if fields.len() != 7 || fields[0].is_empty() || fields[2].parse::<u32>().ok() != Some(uid) {
@@ -164,7 +194,8 @@ fn group_exists(host: &Host, group: &str) -> Result<bool> {
 }
 
 fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
-    let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
+    let output = std::str::from_utf8(bytes)
+        .with_context(|| format!("{command} returned non-UTF-8 output"))?;
     let record = output.strip_suffix('\n').unwrap_or(output);
     if record.is_empty() || record.contains(['\n', '\r']) {
         bail!("{command} returned malformed record output");
@@ -206,7 +237,8 @@ pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()
         )?;
         return Ok(());
     }
-    let mut bytes = serde_json::to_vec_pretty(&requested).context("serialize Docker daemon configuration")?;
+    let mut bytes =
+        serde_json::to_vec_pretty(&requested).context("serialize Docker daemon configuration")?;
     bytes.push(b'\n');
     publish_bytes(
         host,
@@ -274,15 +306,22 @@ fn preflight(host: &Host, product: Product) -> Result<()> {
                 product.program()
             )
         })?;
-    let version = std::str::from_utf8(&output.stdout)
-        .with_context(|| format!("{} version probe returned non-UTF-8 output", product.label()))?;
+    let version = std::str::from_utf8(&output.stdout).with_context(|| {
+        format!(
+            "{} version probe returned non-UTF-8 output",
+            product.label()
+        )
+    })?;
     let valid = match product {
         Product::Docker => valid_docker_version(version),
         Product::VirtualBox => valid_virtualbox_version(version),
         Product::VsCode => valid_vscode_version(version),
     };
     if !valid {
-        bail!("{} version probe returned malformed output", product.label());
+        bail!(
+            "{} version probe returned malformed output",
+            product.label()
+        );
     }
     Ok(())
 }
@@ -302,16 +341,18 @@ fn valid_virtualbox_version(value: &str) -> bool {
     let value = value.strip_suffix('\n').unwrap_or(value);
     !value.contains(['\n', '\r'])
         && value.split_once('r').is_some_and(|(version, revision)| {
-            valid_version_token(version) && !revision.is_empty() && revision.bytes().all(|byte| byte.is_ascii_digit())
+            valid_version_token(version)
+                && !revision.is_empty()
+                && revision.bytes().all(|byte| byte.is_ascii_digit())
         })
 }
 
 fn valid_vscode_version(value: &str) -> bool {
     let mut lines = value.lines();
     let valid = lines.next().is_some_and(valid_version_token)
-        && lines
-            .next()
-            .is_some_and(|commit| commit.len() >= 7 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        && lines.next().is_some_and(|commit| {
+            commit.len() >= 7 && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
         && lines
             .next()
             .is_some_and(|arch| matches!(arch, "x64" | "arm64" | "armhf"));
@@ -325,16 +366,23 @@ fn valid_version_token(value: &str) -> bool {
     let core = &value[..value.len() - suffix.len()];
     let components = core.split('.').collect::<Vec<_>>();
     components.len() >= 2
-        && components
-            .iter()
-            .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
-        && (suffix.is_empty() || matches!(suffix.as_bytes()[0], b'-' | b'+' | b'_') && valid_token(&suffix[1..]))
+        && components.iter().all(|component| {
+            !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        && (suffix.is_empty()
+            || matches!(suffix.as_bytes()[0], b'-' | b'+' | b'_') && valid_token(&suffix[1..]))
 }
 
 fn valid_token(value: &str) -> bool {
     !value.is_empty()
-        && value.bytes().next().is_some_and(|byte| byte.is_ascii_alphanumeric())
-        && value.bytes().last().is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
@@ -343,7 +391,9 @@ fn valid_token(value: &str) -> bool {
 fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
     let (username, _) = effective_user(host)?;
     preflight(host, product)?;
-    let group = product.group().context("group integration requires a system group")?;
+    let group = product
+        .group()
+        .context("group integration requires a system group")?;
     if !group_exists(host, group)? {
         host.require(
             &format!("{} group creation", product.label()),
@@ -360,7 +410,8 @@ fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
 }
 
 fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
-    let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
+    let output = std::str::from_utf8(bytes)
+        .with_context(|| format!("{command} returned non-UTF-8 output"))?;
     let record = output.strip_suffix('\n').unwrap_or(output);
     if record.is_empty() || record.contains(['\n', '\r']) {
         bail!("{command} returned malformed record output");
@@ -393,8 +444,10 @@ fn read_daemon_config(host: &Host) -> Result<Value> {
         "sudo",
         ["cat", "--", DOCKER_DAEMON_CONFIG],
     )?;
-    let text = std::str::from_utf8(&output.stdout).context("Docker daemon config is not valid UTF-8")?;
-    let value: Value = serde_json::from_str(text).context("Docker daemon config is invalid JSON")?;
+    let text =
+        std::str::from_utf8(&output.stdout).context("Docker daemon config is not valid UTF-8")?;
+    let value: Value =
+        serde_json::from_str(text).context("Docker daemon config is invalid JSON")?;
     if !value.is_object() {
         bail!("Docker daemon config must be a JSON object");
     }
@@ -424,7 +477,11 @@ pub enum DesktopSetting {
     IdleDim(bool),
 }
 
-pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
+pub(crate) fn desktop_setting(
+    host: &Host,
+    target: DesktopEnvironment,
+    setting: &DesktopSetting,
+) -> Result<()> {
     let prefix = match target {
         DesktopEnvironment::Gnome => "org.gnome",
         DesktopEnvironment::Cinnamon => "org.cinnamon",
@@ -489,7 +546,11 @@ pub(crate) fn gnome_dock(host: &Host) -> Result<OperationOutcome> {
         ("click-action", "'minimize-or-previews'"),
     ];
     for (key, value) in settings {
-        ensure_dconf(host, &format!("/org/gnome/shell/extensions/dash-to-dock/{key}"), value)?;
+        ensure_dconf(
+            host,
+            &format!("/org/gnome/shell/extensions/dash-to-dock/{key}"),
+            value,
+        )?;
     }
     Ok(OperationOutcome::Completed)
 }
@@ -515,12 +576,20 @@ fn ensure_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
         install_extension(host, extension)?;
         return Ok(OperationOutcome::LoginRequired);
     }
-    host.require("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
+    host.require(
+        "GNOME extension enable",
+        "gnome-extensions",
+        ["enable", extension],
+    )?;
     Ok(OperationOutcome::Completed)
 }
 
 fn ensure_gsetting(host: &Host, schema: &str, key: &str, expected: &str) -> Result<()> {
-    host.require("desktop setting mutation", "gsettings", ["set", schema, key, expected])?;
+    host.require(
+        "desktop setting mutation",
+        "gsettings",
+        ["set", schema, key, expected],
+    )?;
     Ok(())
 }
 
@@ -531,10 +600,12 @@ fn ensure_dconf(host: &Host, key: &str, expected: &str) -> Result<()> {
 
 fn extension_state(host: &Host) -> Result<BTreeSet<String>> {
     let output = host.require("GNOME extension state query", "gnome-extensions", ["list"])?;
-    let output = std::str::from_utf8(&output.stdout).context("gnome-extensions returned non-UTF-8 state")?;
+    let output =
+        std::str::from_utf8(&output.stdout).context("gnome-extensions returned non-UTF-8 state")?;
     let mut extensions = BTreeSet::new();
     for extension in output.lines() {
-        validate_extension(extension).map_err(|_| anyhow::anyhow!("gnome-extensions returned malformed UUID state"))?;
+        validate_extension(extension)
+            .map_err(|_| anyhow::anyhow!("gnome-extensions returned malformed UUID state"))?;
         if !extensions.insert(extension.to_owned()) {
             bail!("gnome-extensions returned duplicate UUID state");
         }
@@ -545,16 +616,23 @@ fn extension_state(host: &Host) -> Result<BTreeSet<String>> {
 fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.require("GNOME extension metadata", "curl", ["-fsSL", &endpoint])?;
-    let shell = host.require("GNOME extension shell version", "gnome-shell", ["--version"])?;
-    let shell_version =
-        super::gnome_shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
+    let shell = host.require(
+        "GNOME extension shell version",
+        "gnome-shell",
+        ["--version"],
+    )?;
+    let shell_version = super::gnome_shell_version(
+        std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?,
+    )?;
     let version = super::gnome_version(
         std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
         &shell_version,
     )?;
     let archive = TempPath::new_with_suffix(host, "gnome-extension", ".zip")?;
     let name = extension.replace('@', "");
-    let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
+    let url = format!(
+        "https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip"
+    );
     host.require(
         "GNOME extension download",
         "curl",
@@ -572,8 +650,9 @@ fn command_is_executable(host: &Host, executable: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     host.value("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|directory| {
-            std::fs::metadata(directory.join(executable))
-                .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            std::fs::metadata(directory.join(executable)).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
         })
     })
 }

@@ -31,7 +31,9 @@ fn missing_config_fails_apply() {
         .arg("apply")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("active config is missing or invalid"));
+        .stderr(predicate::str::contains(
+            "active config is missing or invalid",
+        ));
 }
 
 #[test]
@@ -43,7 +45,9 @@ fn unknown_preset_rejected() {
         .args(["init", "--preset", "invalid_preset_name"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid value 'invalid_preset_name'"));
+        .stderr(predicate::str::contains(
+            "invalid value 'invalid_preset_name'",
+        ));
 }
 
 #[test]
@@ -93,8 +97,14 @@ fn init_updates_unmodified_files_and_preserves_modified_files() {
         .args(["init", "--preset", "full"])
         .assert()
         .success();
-    assert_eq!(fs::read_to_string(config_path).unwrap(), "user-owned config\n");
-    assert_eq!(fs::read_to_string(dotfile_path).unwrap(), "user-owned dotfile\n");
+    assert_eq!(
+        fs::read_to_string(config_path).unwrap(),
+        "user-owned config\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dotfile_path).unwrap(),
+        "user-owned dotfile\n"
+    );
 }
 
 #[test]
@@ -114,8 +124,14 @@ fn init_preserves_unmanaged_existing_config_and_dotfile() {
         .assert()
         .success();
 
-    assert_eq!(fs::read_to_string(config_path).unwrap(), "existing config\n");
-    assert_eq!(fs::read_to_string(dotfile_path).unwrap(), "existing dotfile\n");
+    assert_eq!(
+        fs::read_to_string(config_path).unwrap(),
+        "existing config\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dotfile_path).unwrap(),
+        "existing dotfile\n"
+    );
 }
 
 #[test]
@@ -155,7 +171,11 @@ fn standard_yaml_null_is_accepted() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\nsystem: null\n").unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\nsystem: null\n",
+    )
+    .unwrap();
 
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -181,7 +201,9 @@ fn invalid_yaml_fails_apply() {
         .arg("apply")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("active config is missing or invalid"));
+        .stderr(predicate::str::contains(
+            "active config is missing or invalid",
+        ));
 }
 
 #[test]

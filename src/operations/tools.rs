@@ -58,18 +58,27 @@ pub(crate) fn execute_rust(
     let toolchain = rust_toolchain_name(selector, target);
     let current = inspect_rust(host, &rustup, &toolchain)?;
     if refresh
-        || current
-            .as_ref()
-            .is_none_or(|state| state.host != target || !rust_release_matches(&state.release, selector))
+        || current.as_ref().is_none_or(|state| {
+            state.host != target || !rust_release_matches(&state.release, selector)
+        })
     {
-        host.require("Rust toolchain mutation", &rustup, rust_install_args(&toolchain))?;
+        host.require(
+            "Rust toolchain mutation",
+            &rustup,
+            rust_install_args(&toolchain),
+        )?;
     }
     let default = rust_default(host, &rustup)?;
     if default.as_deref() != Some(toolchain.as_str()) {
-        host.require("Rust default toolchain mutation", &rustup, ["default", &toolchain])?;
+        host.require(
+            "Rust default toolchain mutation",
+            &rustup,
+            ["default", &toolchain],
+        )?;
     }
-    let state = inspect_rust(host, &rustup, &toolchain)?
-        .with_context(|| format!("Rust toolchain mutation did not install requested toolchain {toolchain}"))?;
+    let state = inspect_rust(host, &rustup, &toolchain)?.with_context(|| {
+        format!("Rust toolchain mutation did not install requested toolchain {toolchain}")
+    })?;
     if state.host != target || !rust_release_matches(&state.release, selector) {
         bail!("Rust toolchain mutation produced mismatched release or host state");
     }
@@ -161,7 +170,12 @@ pub(crate) fn execute_go(
     let listing = host.require(
         "Go archive preflight",
         "tar",
-        ["--list", "--gzip", "--file", &archive.path().to_string_lossy()],
+        [
+            "--list",
+            "--gzip",
+            "--file",
+            &archive.path().to_string_lossy(),
+        ],
     )?;
     validate_go_archive_listing(&listing.stdout)?;
     host.require(
@@ -179,12 +193,16 @@ pub(crate) fn execute_go(
     let staged = stage.path().join("go");
     let staged_binary = staged.join("bin/go");
     let staged_program = path_program(&staged_binary, "staged Go executable")?;
-    let staged_state =
-        inspect_go(host, &staged_program)?.context("Go archive does not contain an executable Go toolchain")?;
+    let staged_state = inspect_go(host, &staged_program)?
+        .context("Go archive does not contain an executable Go toolchain")?;
     if staged_state.version != version || staged_state.architecture != expected_arch {
         bail!("Go archive toolchain does not match resolved release metadata");
     }
-    host.require("Go toolchain publication", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
+    host.require(
+        "Go toolchain publication",
+        "sudo",
+        ["rm", "-rf", "--", "/usr/local/go"],
+    )?;
     host.require(
         "Go toolchain publication",
         "sudo",
@@ -225,7 +243,11 @@ pub(crate) fn execute_node(
             if accepted {
                 let default = fnm_default(host, &fnm)?;
                 if default.as_deref() != Some(version.as_str()) {
-                    host.require("Node default toolchain mutation", &fnm, ["default", version])?;
+                    host.require(
+                        "Node default toolchain mutation",
+                        &fnm,
+                        ["default", version],
+                    )?;
                 }
                 if fnm_default(host, &fnm)?.as_deref() != Some(version.as_str()) {
                     bail!("Node default toolchain mutation did not select {}", version);
@@ -244,7 +266,11 @@ pub(crate) fn execute_node(
             ["install", &resolved_version, "--progress", "never"],
         )?;
         if current.is_some() {
-            host.require("Node toolchain alias replacement", &fnm, ["unalias", &alias])?;
+            host.require(
+                "Node toolchain alias replacement",
+                &fnm,
+                ["unalias", &alias],
+            )?;
         }
         host.require(
             "Node toolchain alias publication",
@@ -254,7 +280,11 @@ pub(crate) fn execute_node(
     }
     let default = fnm_default(host, &fnm)?;
     if default.as_deref() != Some(resolved_version.as_str()) {
-        host.require("Node default toolchain mutation", &fnm, ["default", &resolved_version])?;
+        host.require(
+            "Node default toolchain mutation",
+            &fnm,
+            ["default", &resolved_version],
+        )?;
     }
     let installed = inspect_node(host, &fnm, &alias)?
         .context("Node toolchain mutation did not publish the managed selector alias")?;
@@ -262,7 +292,10 @@ pub(crate) fn execute_node(
         bail!("Node toolchain mutation produced mismatched version state");
     }
     if fnm_default(host, &fnm)?.as_deref() != Some(resolved_version.as_str()) {
-        bail!("Node default toolchain mutation did not select {}", resolved_version);
+        bail!(
+            "Node default toolchain mutation did not select {}",
+            resolved_version
+        );
     }
     Ok(())
 }
@@ -306,7 +339,11 @@ pub(crate) fn execute_python(host: &Host, version: &str, architecture: Architect
 mod resolution {
     use super::*;
 
-    pub(super) fn resolve_go_release(host: &Host, requested: &str, architecture: Architecture) -> Result<GoRelease> {
+    pub(super) fn resolve_go_release(
+        host: &Host,
+        requested: &str,
+        architecture: Architecture,
+    ) -> Result<GoRelease> {
         let metadata = host.require(
             "Go release resolution",
             "curl",
@@ -360,9 +397,11 @@ mod resolution {
                 "--no-progress",
             ],
         )?;
-        let value: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("uv returned malformed Python release JSON")?;
-        let entries = value.as_array().context("uv Python release state must be an array")?;
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("uv returned malformed Python release JSON")?;
+        let entries = value
+            .as_array()
+            .context("uv Python release state must be an array")?;
         let expected_arch = match architecture {
             Architecture::Amd64 => "x86_64",
             Architecture::Arm64 => "aarch64",
@@ -408,7 +447,9 @@ mod resolution {
     }
 
     fn numeric_version_key(value: &str) -> (u64, u64, u64) {
-        let mut parts = value.split('.').map(|part| part.parse::<u64>().unwrap_or_default());
+        let mut parts = value
+            .split('.')
+            .map(|part| part.parse::<u64>().unwrap_or_default());
         (
             parts.next().unwrap_or_default(),
             parts.next().unwrap_or_default(),
@@ -420,8 +461,15 @@ mod resolution {
 mod state {
     use super::*;
 
-    pub(super) fn inspect_rust(host: &Host, rustup: &str, toolchain: &str) -> Result<Option<RustState>> {
-        let output = host.run(rustup, ["run", toolchain, "rustc", "--version", "--verbose"])?;
+    pub(super) fn inspect_rust(
+        host: &Host,
+        rustup: &str,
+        toolchain: &str,
+    ) -> Result<Option<RustState>> {
+        let output = host.run(
+            rustup,
+            ["run", toolchain, "rustc", "--version", "--verbose"],
+        )?;
         if !output.status.success() {
             return Ok(None);
         }
@@ -487,7 +535,8 @@ mod state {
             Ok(output) => output,
             Err(error)
                 if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
-                    error.kind() == std::io::ErrorKind::NotFound || error.kind() == std::io::ErrorKind::PermissionDenied
+                    error.kind() == std::io::ErrorKind::NotFound
+                        || error.kind() == std::io::ErrorKind::PermissionDenied
                 }) =>
             {
                 return Ok(None)
@@ -555,14 +604,21 @@ mod state {
     }
 
     pub(super) fn inspect_node(host: &Host, fnm: &str, selector: &str) -> Result<Option<String>> {
-        let output = host.run(fnm, ["exec", "--using", selector, "--", "node", "--version"])?;
+        let output = host.run(
+            fnm,
+            ["exec", "--using", selector, "--", "node", "--version"],
+        )?;
         if !output.status.success() {
             return Ok(None);
         }
         parse_node_version(&output.stdout).map(Some)
     }
 
-    pub(super) fn resolve_node_version(host: &Host, fnm: &str, selector: &NodeToolchainSelector) -> Result<String> {
+    pub(super) fn resolve_node_version(
+        host: &Host,
+        fnm: &str,
+        selector: &NodeToolchainSelector,
+    ) -> Result<String> {
         if let NodeToolchainSelector::Version(version) = selector {
             if numeric_version(version, 3, 3) {
                 return Ok(format!("v{version}"));
@@ -658,8 +714,9 @@ mod state {
     }
 
     fn executable_file(path: &Path) -> bool {
-        std::fs::symlink_metadata(path)
-            .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
+        std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+            metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0
+        })
     }
 
     pub(super) fn path_program(path: &Path, description: &str) -> Result<String> {
@@ -729,7 +786,10 @@ fn numeric_release(value: &str) -> bool {
 }
 
 fn version_matches(actual: &str, requested: &str) -> bool {
-    actual == requested || actual.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
+    actual == requested
+        || actual
+            .strip_prefix(requested)
+            .is_some_and(|rest| rest.starts_with('.'))
 }
 
 fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {
@@ -742,7 +802,12 @@ fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {
         })
 }
 
-fn validate_numeric_version(value: &str, min_parts: usize, max_parts: usize, label: &str) -> Result<()> {
+fn validate_numeric_version(
+    value: &str,
+    min_parts: usize,
+    max_parts: usize,
+    label: &str,
+) -> Result<()> {
     if !numeric_version(value, min_parts, max_parts) {
         bail!("invalid {label} version {value:?}; expected {min_parts} to {max_parts} numeric components");
     }
@@ -750,7 +815,8 @@ fn validate_numeric_version(value: &str, min_parts: usize, max_parts: usize, lab
 }
 
 fn single_line<'a>(output: &'a [u8], command: &str) -> Result<&'a str> {
-    let output = std::str::from_utf8(output).with_context(|| format!("{command} returned non-UTF-8 state"))?;
+    let output = std::str::from_utf8(output)
+        .with_context(|| format!("{command} returned non-UTF-8 state"))?;
     let output = output.strip_suffix('\n').unwrap_or(output);
     if output.is_empty() || output.contains(['\n', '\r']) {
         bail!("{command} returned malformed multiline state");
