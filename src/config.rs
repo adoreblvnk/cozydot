@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer, de};
 use std::{
     collections::{BTreeMap, HashSet},
-    fmt, fs,
+    fs,
     path::Path,
 };
 use url::{Host, Url};
@@ -17,7 +17,7 @@ impl<'de> Deserialize<'de> for ConfigVersion {
     where
         D: Deserializer<'de>,
     {
-        let value = deserialize_string(deserializer)?;
+        let value = String::deserialize(deserializer)?;
         if value == "1.0.0" {
             Ok(Self)
         } else {
@@ -66,10 +66,10 @@ impl Config {
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
         if let Some(require) = self.system.as_ref().and_then(|system| system.require.as_ref()) {
-            if require.distros.as_ref().is_some_and(|allowed| !allowed.contains(&distro)) {
+            if require.distros.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
                 map_distro_error(platform, distro)?;
             }
-            if require.desktops.as_ref().is_some_and(|allowed| !allowed.contains(&desktop)) {
+            if require.desktops.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
                 bail!("system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
             }
         }
@@ -101,7 +101,7 @@ impl Config {
                     platform.desktop
                 );
             }
-            if configured.gnome.is_some() {
+            if configured.gnome.as_ref().is_some_and(Gnome::has_intent) {
                 bail!(
                     "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
@@ -118,17 +118,20 @@ impl Config {
         if let Some(packages) = &self.packages {
             packages.validate()?;
         }
-        if let Some(tools) = &self.tools {
-            tools.validate()?;
-        }
         if let Some(fonts) = &self.fonts {
             fonts.validate()?;
         }
         if let Some(dotfiles) = &self.dotfiles {
             dotfiles.validate()?;
         }
-        if let Some(integrations) = &self.integrations {
-            integrations.validate()?;
+        if let Some(size) = self
+            .integrations
+            .as_ref()
+            .and_then(|integrations| integrations.docker.as_ref())
+            .and_then(|docker| docker.logging.as_ref())
+            .and_then(|logging| logging.max_size.as_deref())
+        {
+            validate_docker_size(size, "integrations.docker.logging.max_size")?;
         }
         if let Some(desktop) = &self.desktop {
             desktop.validate()?;
@@ -136,12 +139,12 @@ impl Config {
         if let Some(updates) = &self.updates {
             updates.validate(self)?;
         }
-        if self.packages.as_ref().and_then(|packages| packages.cargo.as_ref()).is_some()
+        if self.packages.as_ref().and_then(|packages| packages.cargo.as_ref()).is_some_and(|values| !values.is_empty())
             && self.tools.as_ref().and_then(|tools| tools.rust.as_ref()).is_none()
         {
             bail!("packages.cargo: requires tools.rust");
         }
-        if self.packages.as_ref().and_then(|packages| packages.npm.as_ref()).is_some()
+        if self.packages.as_ref().and_then(|packages| packages.npm.as_ref()).is_some_and(|values| !values.is_empty())
             && self.tools.as_ref().and_then(|tools| tools.node.as_ref()).is_none()
         {
             bail!("packages.npm: requires tools.node");
@@ -247,19 +250,8 @@ pub struct System {
 
 impl System {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.require.is_some() || self.ensure_admin.is_some() || self.apt.is_some() || self.ubuntu.is_some(),
-            "system",
-        )?;
-        if let Some(require) = &self.require {
-            require.validate()?;
-        }
-        true_only(self.ensure_admin, "system.ensure_admin")?;
         if let Some(apt) = &self.apt {
             apt.validate()?;
-        }
-        if let Some(ubuntu) = &self.ubuntu {
-            ubuntu.validate()?;
         }
         Ok(())
     }
@@ -272,14 +264,6 @@ pub struct PlatformRequirements {
     pub desktops: Option<Vec<DesktopKind>>,
 }
 
-impl PlatformRequirements {
-    fn validate(&self) -> Result<()> {
-        require_effective(self.distros.is_some() || self.desktops.is_some(), "system.require")?;
-        validate_non_empty_unique(self.distros.as_deref(), "system.require.distros")?;
-        validate_non_empty_unique(self.desktops.as_deref(), "system.require.desktops")
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemApt {
@@ -289,7 +273,6 @@ pub struct SystemApt {
 
 impl SystemApt {
     fn validate(&self) -> Result<()> {
-        require_effective(self.sources.is_some() || self.unattended_upgrades.is_some(), "system.apt")?;
         if let Some(sources) = &self.sources {
             sources.validate()?;
         }
@@ -315,12 +298,13 @@ impl OfficialSources {
     fn validate(&self) -> Result<()> {
         match (&self.mode, &self.components) {
             (SourceMode::Managed, Some(components)) => {
-                validate_non_empty_map(components, "system.apt.sources.components")?;
+                if components.is_empty() {
+                    bail!("system.apt.sources.components: required when mode is managed");
+                }
                 for (key, values) in components {
-                    validate_non_empty_unique(
-                        Some(values),
-                        &format!("system.apt.sources.components.{}", key.as_str()),
-                    )?;
+                    if values.is_empty() {
+                        bail!("system.apt.sources.components.{}: required when mode is managed", key.as_str());
+                    }
                 }
             }
             (SourceMode::Managed, None) => {
@@ -416,45 +400,22 @@ pub struct UbuntuSystem {
     pub codecs: Option<InstalledState>,
 }
 
-impl UbuntuSystem {
-    fn validate(&self) -> Result<()> {
-        require_effective(self.snap.is_some() || self.codecs.is_some(), "system.ubuntu")
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Packages {
     pub apt: Option<AptPackages>,
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub flatpak: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub cargo: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub npm: Option<Vec<String>>,
     pub binaries: Option<Vec<BinaryPackage>>,
 }
 
 impl Packages {
     pub fn validate(&self) -> Result<()> {
-        require_effective(
-            self.apt.is_some()
-                || self.flatpak.is_some()
-                || self.cargo.is_some()
-                || self.npm.is_some()
-                || self.binaries.is_some(),
-            "packages",
-        )?;
         if let Some(apt) = &self.apt {
             apt.validate()?;
         }
-        validate_string_list(self.flatpak.as_deref(), "packages.flatpak", validate_flatpak_id)?;
-        validate_string_list(self.cargo.as_deref(), "packages.cargo", validate_cargo_package)?;
-        validate_string_list(self.npm.as_deref(), "packages.npm", validate_npm_package)?;
         if let Some(binaries) = &self.binaries {
-            if binaries.is_empty() {
-                bail!("packages.binaries: must be a non-empty sequence");
-            }
             let mut names = HashSet::new();
             let mut command_owners = BTreeMap::new();
             for (index, binary) in binaries.iter().enumerate() {
@@ -477,29 +438,18 @@ impl Packages {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AptPackages {
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub remove: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub install: Option<Vec<String>>,
     pub repositories: Option<Vec<Repository>>,
 }
 
 impl AptPackages {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.remove.is_some() || self.install.is_some() || self.repositories.is_some(),
-            "packages.apt",
-        )?;
-        validate_string_list(self.remove.as_deref(), "packages.apt.remove", validate_debian_package)?;
-        validate_string_list(self.install.as_deref(), "packages.apt.install", validate_debian_package)?;
         let mut installed = HashSet::new();
         for package in self.install.iter().flatten() {
             installed.insert(package.as_str());
         }
         if let Some(repositories) = &self.repositories {
-            if repositories.is_empty() {
-                bail!("packages.apt.repositories: must be a non-empty sequence");
-            }
             let mut names = HashSet::new();
             let mut key_paths = HashSet::new();
             for (index, repository) in repositories.iter().enumerate() {
@@ -513,13 +463,7 @@ impl AptPackages {
                         repository.key_path
                     );
                 }
-                for (package_index, package) in repository.packages.iter().enumerate() {
-                    if !installed.insert(package) {
-                        bail!(
-                            "packages.apt.repositories[{index}].packages[{package_index}]: duplicate APT installation ownership for {package:?}"
-                        );
-                    }
-                }
+                installed.extend(repository.packages.iter().map(String::as_str));
             }
         }
         for (index, package) in self.remove.iter().flatten().enumerate() {
@@ -597,18 +541,13 @@ pub fn select_distro_map<T>(
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
-    #[serde(deserialize_with = "deserialize_string")]
     pub name: String,
     pub key: HttpsUrl,
-    #[serde(deserialize_with = "deserialize_string")]
     pub key_path: String,
     pub urls: BTreeMap<DistroMapKey, HttpsUrl>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub suite: Option<String>,
     pub components: Option<Vec<AptToken>>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub path: Option<String>,
-    #[serde(deserialize_with = "deserialize_strings")]
     pub packages: Vec<String>,
 }
 
@@ -617,12 +556,13 @@ impl Repository {
         let path = format!("packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
-        validate_string_values(&self.packages, &format!("{path}.packages"), validate_debian_package)?;
         validate_key_path(&self.key_path, &format!("{path}.key_path"))?;
         match (&self.suite, &self.components, &self.path) {
             (Some(suite), Some(components), None) => {
                 validate_suite(suite, &format!("{path}.suite"))?;
-                validate_non_empty_unique(Some(components), &format!("{path}.components"))?;
+                if components.is_empty() {
+                    bail!("{path}.components: required with suite");
+                }
                 for (component_index, component) in components.iter().enumerate() {
                     let component_path = format!("{path}.components[{component_index}]");
                     validate_apt_token(component.as_str(), &component_path)?;
@@ -704,7 +644,7 @@ impl<'de> Deserialize<'de> for AptToken {
     where
         D: Deserializer<'de>,
     {
-        let value = deserialize_string(deserializer)?;
+        let value = String::deserialize(deserializer)?;
         Ok(Self(value))
     }
 }
@@ -719,10 +659,8 @@ pub enum BinaryFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BinaryPackage {
-    #[serde(deserialize_with = "deserialize_string")]
     pub name: String,
     pub format: BinaryFormat,
-    #[serde(deserialize_with = "deserialize_strings")]
     pub commands: Vec<String>,
     pub source: BinarySource,
 }
@@ -739,15 +677,8 @@ impl BinaryPackage {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
-    Github {
-        #[serde(deserialize_with = "deserialize_string")]
-        repository: String,
-        assets: AssetMap,
-    },
-    Url {
-        urls: Box<ArchitectureUrls>,
-        sha256: Box<ArchitectureHashes>,
-    },
+    Github { repository: String, assets: AssetMap },
+    Url { urls: Box<ArchitectureUrls>, sha256: Box<ArchitectureHashes> },
 }
 
 impl BinarySource {
@@ -854,7 +785,7 @@ impl<'de> Deserialize<'de> for Sha256 {
     where
         D: Deserializer<'de>,
     {
-        deserialize_string(deserializer).map(Self)
+        String::deserialize(deserializer).map(Self)
     }
 }
 
@@ -933,52 +864,20 @@ fn architecture_keys(amd64: bool, arm64: bool, arm32: bool) -> Vec<Architecture>
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tools {
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub rust: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub go: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub node: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub python: Option<String>,
-}
-
-impl Tools {
-    fn validate(&self) -> Result<()> {
-        require_effective(
-            self.rust.is_some() || self.go.is_some() || self.node.is_some() || self.python.is_some(),
-            "tools",
-        )?;
-        if let Some(value) = &self.rust {
-            validate_rust_selector(value, "tools.rust")?;
-        }
-        if let Some(value) = &self.go
-            && value != "latest"
-        {
-            validate_numeric_version(value, "tools.go", 2, 3)?;
-        }
-        if let Some(value) = &self.node
-            && !matches!(value.as_str(), "lts" | "latest")
-        {
-            validate_numeric_version(value, "tools.node", 1, 3)?;
-        }
-        if let Some(value) = &self.python {
-            validate_numeric_version(value, "tools.python", 2, 3)?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fonts {
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub nerd: Option<Vec<String>>,
 }
 
 impl Fonts {
     fn validate(&self) -> Result<()> {
-        require_effective(self.nerd.is_some(), "fonts")?;
         validate_string_list(self.nerd.as_deref(), "fonts.nerd", validate_definition_name)
     }
 }
@@ -986,7 +885,6 @@ impl Fonts {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dotfiles {
-    #[serde(deserialize_with = "deserialize_strings")]
     pub packages: Vec<String>,
 }
 
@@ -1004,38 +902,11 @@ pub struct Integrations {
     pub vscode: Option<VsCodeIntegration>,
 }
 
-impl Integrations {
-    fn validate(&self) -> Result<()> {
-        require_effective(self.docker.is_some() || self.virtualbox.is_some() || self.vscode.is_some(), "integrations")?;
-        if let Some(docker) = &self.docker {
-            docker.validate()?;
-        }
-        if let Some(virtualbox) = &self.virtualbox {
-            virtualbox.validate()?;
-        }
-        if let Some(vscode) = &self.vscode {
-            vscode.validate()?;
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DockerIntegration {
     pub add_user_to_group: Option<bool>,
     pub logging: Option<DockerLogging>,
-}
-
-impl DockerIntegration {
-    fn validate(&self) -> Result<()> {
-        require_effective(self.add_user_to_group.is_some() || self.logging.is_some(), "integrations.docker")?;
-        true_only(self.add_user_to_group, "integrations.docker.add_user_to_group")?;
-        if let Some(logging) = &self.logging {
-            logging.validate()?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1048,17 +919,7 @@ pub enum DockerLoggingDriver {
 #[serde(deny_unknown_fields)]
 pub struct DockerLogging {
     pub driver: DockerLoggingDriver,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub max_size: Option<String>,
-}
-
-impl DockerLogging {
-    fn validate(&self) -> Result<()> {
-        if let Some(size) = &self.max_size {
-            validate_docker_size(size, "integrations.docker.logging.max_size")?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1067,24 +928,10 @@ pub struct VirtualBoxIntegration {
     pub add_user_to_group: Option<bool>,
 }
 
-impl VirtualBoxIntegration {
-    fn validate(&self) -> Result<()> {
-        require_effective(self.add_user_to_group.is_some(), "integrations.virtualbox")?;
-        true_only(self.add_user_to_group, "integrations.virtualbox.add_user_to_group")
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VsCodeIntegration {
-    #[serde(deserialize_with = "deserialize_strings")]
     pub extensions: Vec<String>,
-}
-
-impl VsCodeIntegration {
-    fn validate(&self) -> Result<()> {
-        validate_string_values(&self.extensions, "integrations.vscode.extensions", validate_vscode_id)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1098,7 +945,6 @@ pub enum Theme {
 #[serde(deny_unknown_fields)]
 pub struct Desktop {
     pub theme: Option<Theme>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub terminal: Option<String>,
     pub idle: Option<Idle>,
     pub gnome: Option<Gnome>,
@@ -1106,24 +952,20 @@ pub struct Desktop {
 
 impl Desktop {
     fn validate(&self) -> Result<()> {
-        require_effective(
-            self.theme.is_some() || self.terminal.is_some() || self.idle.is_some() || self.gnome.is_some(),
-            "desktop",
-        )?;
         if let Some(terminal) = &self.terminal {
             validate_executable(terminal, "desktop.terminal")?;
-        }
-        if let Some(idle) = &self.idle {
-            idle.validate()?;
-        }
-        if let Some(gnome) = &self.gnome {
-            gnome.validate()?;
         }
         Ok(())
     }
 
     pub fn has_neutral_intent(&self) -> bool {
-        self.theme.is_some() || self.terminal.is_some() || self.idle.is_some()
+        self.theme.is_some()
+            || self.terminal.is_some()
+            || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
+    }
+
+    pub fn has_intent(&self) -> bool {
+        self.has_neutral_intent() || self.gnome.as_ref().is_some_and(Gnome::has_intent)
     }
 }
 
@@ -1132,12 +974,6 @@ impl Desktop {
 pub struct Idle {
     pub timeout: Option<DesktopIdleDuration>,
     pub dim: Option<bool>,
-}
-
-impl Idle {
-    fn validate(&self) -> Result<()> {
-        require_effective(self.timeout.is_some() || self.dim.is_some(), "desktop.idle")
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1154,7 +990,7 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
     where
         D: Deserializer<'de>,
     {
-        let value = deserialize_string(deserializer)?;
+        let value = String::deserialize(deserializer)?;
         let duration = humantime::parse_duration(&value).map_err(de::Error::custom)?;
         if duration.subsec_nanos() != 0 {
             return Err(de::Error::custom("duration must resolve to a whole number of seconds"));
@@ -1168,21 +1004,16 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Gnome {
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub extensions: Option<Vec<String>>,
     pub dock: Option<bool>,
     pub rounded_corners: Option<bool>,
 }
 
 impl Gnome {
-    fn validate(&self) -> Result<()> {
-        require_effective(
-            self.extensions.is_some() || self.dock.is_some() || self.rounded_corners.is_some(),
-            "desktop.gnome",
-        )?;
-        validate_string_list(self.extensions.as_deref(), "desktop.gnome.extensions", validate_gnome_uuid)?;
-        true_only(self.dock, "desktop.gnome.dock")?;
-        true_only(self.rounded_corners, "desktop.gnome.rounded_corners")
+    fn has_intent(&self) -> bool {
+        self.extensions.as_ref().is_some_and(|extensions| !extensions.is_empty())
+            || self.dock == Some(true)
+            || self.rounded_corners == Some(true)
     }
 }
 
@@ -1198,20 +1029,18 @@ pub struct Updates {
 
 impl Updates {
     fn validate(&self, config: &Config) -> Result<()> {
-        require_effective(
-            self.apt.is_some()
-                || self.flatpak.is_some()
-                || self.tools.is_some()
-                || self.packages.is_some()
-                || self.fonts.is_some(),
-            "updates",
-        )?;
-        true_only(self.flatpak, "updates.flatpak")?;
-        true_only(self.fonts, "updates.fonts")?;
-        if self.flatpak.is_some() && config.packages.as_ref().and_then(|packages| packages.flatpak.as_ref()).is_none() {
+        if self.flatpak == Some(true)
+            && !config
+                .packages
+                .as_ref()
+                .and_then(|packages| packages.flatpak.as_ref())
+                .is_some_and(|values| !values.is_empty())
+        {
             bail!("updates.flatpak: requires configured packages.flatpak targets");
         }
-        if self.fonts.is_some() && config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()).is_none() {
+        if self.fonts == Some(true)
+            && !config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()).is_some_and(|values| !values.is_empty())
+        {
             bail!("updates.fonts: requires configured fonts.nerd targets");
         }
         if let Some(tools) = &self.tools {
@@ -1241,17 +1070,13 @@ pub struct ToolUpdates {
 
 impl ToolUpdates {
     fn validate(&self, tools: Option<&Tools>) -> Result<()> {
-        require_effective(self.rust.is_some() || self.go.is_some() || self.node.is_some(), "updates.tools")?;
-        true_only(self.rust, "updates.tools.rust")?;
-        true_only(self.go, "updates.tools.go")?;
-        true_only(self.node, "updates.tools.node")?;
-        if self.rust.is_some() && !tools.and_then(|tools| tools.rust.as_deref()).is_some_and(rust_selector_is_moving) {
-            bail!("updates.tools.rust: requires a configured moving Rust selector");
+        if self.rust == Some(true) && tools.and_then(|tools| tools.rust.as_ref()).is_none() {
+            bail!("updates.tools.rust: requires a configured Rust selector");
         }
-        if self.go.is_some() && tools.and_then(|tools| tools.go.as_deref()) != Some("latest") {
+        if self.go == Some(true) && tools.and_then(|tools| tools.go.as_deref()) != Some("latest") {
             bail!("updates.tools.go: requires tools.go: latest");
         }
-        if self.node.is_some()
+        if self.node == Some(true)
             && !tools.and_then(|tools| tools.node.as_deref()).is_some_and(|value| matches!(value, "lts" | "latest"))
         {
             bail!("updates.tools.node: requires a configured moving Node selector");
@@ -1270,17 +1095,17 @@ pub struct PackageUpdates {
 
 impl PackageUpdates {
     fn validate(&self, packages: Option<&Packages>) -> Result<()> {
-        require_effective(self.cargo.is_some() || self.npm.is_some() || self.binaries.is_some(), "updates.packages")?;
-        true_only(self.cargo, "updates.packages.cargo")?;
-        true_only(self.npm, "updates.packages.npm")?;
-        true_only(self.binaries, "updates.packages.binaries")?;
-        if self.cargo.is_some() && packages.and_then(|packages| packages.cargo.as_ref()).is_none() {
+        if self.cargo == Some(true)
+            && !packages.and_then(|packages| packages.cargo.as_ref()).is_some_and(|values| !values.is_empty())
+        {
             bail!("updates.packages.cargo: requires configured packages.cargo targets");
         }
-        if self.npm.is_some() && packages.and_then(|packages| packages.npm.as_ref()).is_none() {
+        if self.npm == Some(true)
+            && !packages.and_then(|packages| packages.npm.as_ref()).is_some_and(|values| !values.is_empty())
+        {
             bail!("updates.packages.npm: requires configured packages.npm targets");
         }
-        if self.binaries.is_some()
+        if self.binaries == Some(true)
             && !packages
                 .and_then(|packages| packages.binaries.as_ref())
                 .is_some_and(|binaries| binaries.iter().any(|binary| binary.source.is_github()))
@@ -1291,108 +1116,9 @@ impl PackageUpdates {
     }
 }
 
-fn deserialize_string<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserializer.deserialize_any(StrictStringVisitor)
-}
-
-fn deserialize_optional_string<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_string(deserializer).map(Some)
-}
-
-fn deserialize_strings<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct Visitor;
-    impl<'de> de::Visitor<'de> for Visitor {
-        type Value = Vec<String>;
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a sequence of YAML strings")
-        }
-        fn visit_seq<A>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error>
-        where
-            A: de::SeqAccess<'de>,
-        {
-            let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
-            while let Some(value) = sequence.next_element_seed(StrictStringSeed)? {
-                values.push(value);
-            }
-            Ok(values)
-        }
-    }
-    deserializer.deserialize_seq(Visitor)
-}
-
-fn deserialize_optional_strings<'de, D>(deserializer: D) -> std::result::Result<Option<Vec<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_strings(deserializer).map(Some)
-}
-
-struct StrictStringVisitor;
-impl de::Visitor<'_> for StrictStringVisitor {
-    type Value = String;
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a YAML string")
-    }
-    fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
-        Ok(value.to_owned())
-    }
-    fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E> {
-        Ok(value)
-    }
-}
-struct StrictStringSeed;
-impl<'de> de::DeserializeSeed<'de> for StrictStringSeed {
-    type Value = String;
-    fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserialize_string(deserializer)
-    }
-}
-
-fn require_effective(effective: bool, path: &str) -> Result<()> {
-    if !effective {
-        bail!("{path}: must contain at least one effective child; omit the mapping instead");
-    }
-    Ok(())
-}
-
-fn true_only(value: Option<bool>, path: &str) -> Result<()> {
-    if value == Some(false) {
-        bail!("{path}: false is redundant and invalid; omit the field instead");
-    }
-    Ok(())
-}
-
 fn validate_non_empty_map<K, V>(map: &BTreeMap<K, V>, path: &str) -> Result<()> {
     if map.is_empty() {
         bail!("{path}: must be a non-empty mapping");
-    }
-    Ok(())
-}
-
-fn validate_non_empty_unique<T: Eq + std::hash::Hash + fmt::Debug>(values: Option<&[T]>, path: &str) -> Result<()> {
-    let Some(values) = values else {
-        return Ok(());
-    };
-    if values.is_empty() {
-        bail!("{path}: must be a non-empty sequence");
-    }
-    let mut seen = HashSet::new();
-    for (index, value) in values.iter().enumerate() {
-        if !seen.insert(value) {
-            bail!("{path}[{index}]: duplicate value {value:?}");
-        }
     }
     Ok(())
 }
@@ -1405,16 +1131,9 @@ fn validate_string_list(values: Option<&[String]>, path: &str, validator: fn(&st
 }
 
 fn validate_string_values(values: &[String], path: &str, validator: fn(&str, &str) -> Result<()>) -> Result<()> {
-    if values.is_empty() {
-        bail!("{path}: must be a non-empty sequence");
-    }
-    let mut seen = HashSet::new();
     for (index, value) in values.iter().enumerate() {
         let item_path = format!("{path}[{index}]");
         validator(value, &item_path)?;
-        if !seen.insert(value.as_str()) {
-            bail!("{item_path}: duplicate value {value:?}");
-        }
     }
     Ok(())
 }
@@ -1472,56 +1191,6 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_debian_package(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-z0-9][a-z0-9+.-]*$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid Debian package name {value:?}; must be unversioned");
-    }
-    Ok(())
-}
-
-fn validate_cargo_package(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid Cargo package name {value:?}; must be unversioned");
-    }
-    Ok(())
-}
-
-fn validate_npm_package(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^(?:@[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid npm package name {value:?}; must be an unversioned lowercase name or @scope/name");
-    }
-    Ok(())
-}
-
-fn validate_flatpak_id(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*){2,}$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid Flatpak application ID {value:?}; must be canonical");
-    }
-    Ok(())
-}
-
-fn validate_vscode_id(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-z0-9-]+\.[a-z0-9-]+$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid VS Code extension identifier {value:?}; must be lowercase publisher.extension");
-    }
-    Ok(())
-}
-
-fn validate_gnome_uuid(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$").unwrap();
-    if !re.is_match(value) {
-        bail!(
-            "{path}: invalid GNOME extension UUID {value:?}; must contain exactly one '@' and use only ASCII alphanumerics, '.', '_', or '-' in each part"
-        );
-    }
-    Ok(())
-}
-
 fn validate_suite(value: &str, path: &str) -> Result<()> {
     if value == "system" || value == "*" {
         return Ok(());
@@ -1560,30 +1229,6 @@ fn validate_github_repository(value: &str, path: &str) -> Result<()> {
     let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
     if !re.is_match(value) {
         bail!("{path}: invalid GitHub repository {value:?}; must be an owner/repository coordinate");
-    }
-    Ok(())
-}
-
-fn validate_rust_selector(value: &str, path: &str) -> Result<()> {
-    if value == "stable" {
-        return Ok(());
-    }
-    validate_numeric_version(value, path, 2, 3)
-}
-
-fn rust_selector_is_moving(value: &str) -> bool {
-    value == "stable" || value.split('.').count() == 2 && validate_numeric_version(value, "tools.rust", 2, 2).is_ok()
-}
-
-fn validate_numeric_version(value: &str, path: &str, min: usize, max: usize) -> Result<()> {
-    let parts = value.split('.').collect::<Vec<_>>();
-    if !(min..=max).contains(&parts.len())
-        || parts.iter().any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        bail!("{path}: invalid selector {value:?}; expected {min} to {max} numeric components");
-    }
-    if parts.iter().any(|part| *part != "0" && part.starts_with('0')) {
-        bail!("{path}: invalid selector {value:?}; numeric components cannot have leading zeroes");
     }
     Ok(())
 }
@@ -1655,25 +1300,7 @@ impl<'de> Deserialize<'de> for HttpsUrl {
     where
         D: Deserializer<'de>,
     {
-        struct StrictStringVisitor;
-
-        impl de::Visitor<'_> for StrictStringVisitor {
-            type Value = String;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a YAML string")
-            }
-
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
-                Ok(value.to_owned())
-            }
-
-            fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E> {
-                Ok(value)
-            }
-        }
-
-        let value = deserializer.deserialize_any(StrictStringVisitor)?;
+        let value = String::deserialize(deserializer)?;
         Self::parse(&value).map_err(de::Error::custom)
     }
 }

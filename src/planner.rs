@@ -96,34 +96,38 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(&mut phases, PlannerPhase::OfficialAptSources, Operation::ManagedAptSources(managed));
     }
 
-    if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
+    if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()).filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         prerequisites.insert("gnupg");
         for repository in repositories {
             let operation = plan_repository(repository, platform, identity)?;
             push_operation(&mut phases, PlannerPhase::ThirdPartyRepositories, Operation::AptRepository(operation));
-            push_operation(
-                &mut phases,
-                PlannerPhase::RepositoryPackages,
-                Operation::AptPackages { packages: repository.packages.clone() },
-            );
+            if !repository.packages.is_empty() {
+                push_operation(
+                    &mut phases,
+                    PlannerPhase::RepositoryPackages,
+                    Operation::AptPackages { packages: repository.packages.clone() },
+                );
+            }
             needs_apt_refresh = true;
         }
     }
 
     plan_system_states(config, platform, &mut phases, &mut needs_apt_refresh);
 
-    if let Some(remove) = apt.and_then(|apt| apt.remove.as_ref()) {
+    if let Some(remove) = apt.and_then(|apt| apt.remove.as_ref()).filter(|values| !values.is_empty()) {
         push_operation(&mut phases, PlannerPhase::AptPurge, Operation::AptPurge { packages: remove.clone() });
         needs_apt_refresh = true;
     }
-    if let Some(install) = apt.and_then(|apt| apt.install.as_ref()) {
+    if let Some(install) = apt.and_then(|apt| apt.install.as_ref()).filter(|values| !values.is_empty()) {
         push_operation(&mut phases, PlannerPhase::AptPackages, Operation::AptPackages { packages: install.clone() });
         needs_apt_refresh = true;
     }
 
-    if let Some(applications) = packages.and_then(|packages| packages.flatpak.as_ref()) {
+    if let Some(applications) =
+        packages.and_then(|packages| packages.flatpak.as_ref()).filter(|values| !values.is_empty())
+    {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Flatpak);
@@ -136,7 +140,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
 
     plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers);
 
-    if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()) {
+    if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()).filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Rustup);
@@ -147,7 +151,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             Operation::CargoPackageSet { packages: cargo.clone(), mode: CargoPackageMode::EnsurePresent },
         );
     }
-    if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()) {
+    if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()).filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Fnm);
@@ -158,7 +162,8 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         );
     }
 
-    if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
+    if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()).filter(|values| !values.is_empty())
+    {
         for binary in binaries {
             let Some(planned) = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)? else {
                 continue;
@@ -173,7 +178,8 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         }
     }
 
-    if let Some(fonts) = config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()) {
+    if let Some(fonts) = config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()).filter(|values| !values.is_empty())
+    {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         prerequisites.insert("tar");
@@ -186,7 +192,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         );
     }
 
-    if let Some(dotfiles) = &config.dotfiles {
+    if let Some(dotfiles) = config.dotfiles.as_ref().filter(|dotfiles| !dotfiles.packages.is_empty()) {
         if dotfiles_root.as_os_str().is_empty() {
             anyhow::bail!("dotfiles root must not be empty");
         }
@@ -416,7 +422,9 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
     if integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true)) {
         push_operation(phases, PlannerPhase::Integrations, Operation::VirtualBoxGroup);
     }
-    if let Some(extensions) = integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()) {
+    if let Some(extensions) =
+        integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()).filter(|values| !values.is_empty())
+    {
         push_operation(phases, PlannerPhase::Integrations, Operation::VsCodeExtensionSet { extensions });
     }
 }
@@ -427,7 +435,7 @@ fn plan_desktop(
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
 ) {
-    let Some(desktop) = &config.desktop else { return };
+    let Some(desktop) = config.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
     let target = match platform.desktop.as_str() {
         "gnome" => DesktopEnvironment::Gnome,
         "cinnamon" => DesktopEnvironment::Cinnamon,
@@ -473,7 +481,7 @@ fn plan_desktop(
     if target == DesktopEnvironment::Gnome
         && let Some(gnome) = &desktop.gnome
     {
-        if let Some(extensions) = &gnome.extensions {
+        if let Some(extensions) = gnome.extensions.as_ref().filter(|values| !values.is_empty()) {
             prerequisites.insert("gnome-shell");
             push_operation(
                 phases,
@@ -516,14 +524,10 @@ fn plan_updates(
             },
         );
     }
-    if updates.flatpak == Some(true) {
-        push_operation(
-            phases,
-            PlannerPhase::Updates,
-            Operation::FlatpakUpdateApps {
-                refs: packages.and_then(|packages| packages.flatpak.clone()).expect("validated update target"),
-            },
-        );
+    if updates.flatpak == Some(true)
+        && let Some(refs) = packages.and_then(|packages| packages.flatpak.clone()).filter(|values| !values.is_empty())
+    {
+        push_operation(phases, PlannerPhase::Updates, Operation::FlatpakUpdateApps { refs });
     }
     if let Some(tool_updates) = &updates.tools {
         if tool_updates.rust == Some(true) {
@@ -567,24 +571,24 @@ fn plan_updates(
         }
     }
     if let Some(package_updates) = &updates.packages {
-        if package_updates.cargo == Some(true) {
+        if package_updates.cargo == Some(true)
+            && let Some(configured) =
+                packages.and_then(|packages| packages.cargo.clone()).filter(|values| !values.is_empty())
+        {
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::CargoPackageSet {
-                    packages: packages.and_then(|packages| packages.cargo.clone()).expect("validated update target"),
-                    mode: CargoPackageMode::UpdateCurrent,
-                },
+                Operation::CargoPackageSet { packages: configured, mode: CargoPackageMode::UpdateCurrent },
             );
         }
-        if package_updates.npm == Some(true) {
+        if package_updates.npm == Some(true)
+            && let Some(configured) =
+                packages.and_then(|packages| packages.npm.clone()).filter(|values| !values.is_empty())
+        {
             push_operation(
                 phases,
                 PlannerPhase::Updates,
-                Operation::NpmPackageSet {
-                    packages: packages.and_then(|packages| packages.npm.clone()).expect("validated update target"),
-                    mode: NpmPackageMode::UpdateCurrent,
-                },
+                Operation::NpmPackageSet { packages: configured, mode: NpmPackageMode::UpdateCurrent },
             );
         }
         if package_updates.binaries == Some(true)
@@ -602,15 +606,11 @@ fn plan_updates(
             }
         }
     }
-    if updates.fonts == Some(true) {
-        push_operation(
-            phases,
-            PlannerPhase::Updates,
-            Operation::NerdFonts {
-                families: config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).expect("validated update target"),
-                mode: NerdFontsMode::Update,
-            },
-        );
+    if updates.fonts == Some(true)
+        && let Some(families) =
+            config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).filter(|values| !values.is_empty())
+    {
+        push_operation(phases, PlannerPhase::Updates, Operation::NerdFonts { families, mode: NerdFontsMode::Update });
     }
     Ok(())
 }
