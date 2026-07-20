@@ -27,8 +27,7 @@ enum CliCommand {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let Some(command) = cli.command else {
+    let Some(command) = Cli::parse().command else {
         Cli::command().print_help()?;
         println!();
         return Ok(());
@@ -52,11 +51,11 @@ fn apply() -> Result<()> {
     for operation in operations {
         let display = operation.display_args().join(" ");
         println!("Applying {display}");
-        match operations::execute(&operation).with_context(|| format!("apply {display}"))? {
-            operations::OperationOutcome::Completed => {}
-            operations::OperationOutcome::LoginRequired => {
-                println!("Login required to finish {display}");
-            }
+        if matches!(
+            operations::execute(&operation).with_context(|| format!("apply {display}"))?,
+            operations::OperationOutcome::LoginRequired
+        ) {
+            println!("Login required to finish {display}");
         }
     }
     Ok(())

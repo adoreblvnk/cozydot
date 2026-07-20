@@ -2,7 +2,7 @@ mod binary;
 
 pub(crate) mod privileged_file {
     use super::{Host, TempPath};
-    use anyhow::{bail, Context, Result};
+    use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, fs, io::Write, path::Path};
 
     pub(crate) fn publish_bytes(host: &Host, destination: &Path, contents: &[u8], operation: &str) -> Result<()> {
@@ -15,27 +15,6 @@ pub(crate) mod privileged_file {
         contents: &[u8],
         operation: &str,
         mode: &str,
-    ) -> Result<()> {
-        publish_bytes_with_mode_and_policy(host, destination, contents, operation, mode, false)
-    }
-
-    pub(super) fn publish_bytes_with_policy(
-        host: &Host,
-        destination: &Path,
-        contents: &[u8],
-        operation: &str,
-        no_replace: bool,
-    ) -> Result<()> {
-        publish_bytes_with_mode_and_policy(host, destination, contents, operation, "0644", no_replace)
-    }
-
-    fn publish_bytes_with_mode_and_policy(
-        host: &Host,
-        destination: &Path,
-        contents: &[u8],
-        operation: &str,
-        mode: &str,
-        no_replace: bool,
     ) -> Result<()> {
         if !matches!(mode, "0600" | "0644") {
             bail!("unsupported privileged publication mode");
@@ -91,25 +70,12 @@ pub(crate) mod privileged_file {
                 ],
             )?;
             host.require(operation, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
-            if no_replace {
-                // `link(2)` is an atomic no-replace publication here: both names are in the
-                // destination directory, and an existing destination makes `ln` fail rather
-                // than report a skipped move as success. The staging name is removed only
-                // after the destination link exists.
-                host.require(operation, "sudo", [OsStr::new("ln"), OsStr::new("--"), staged_arg, destination_arg])?;
-                host.require(operation, "sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg])?;
-            } else {
-                host.require(
-                    operation,
-                    "sudo",
-                    [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg],
-                )?;
-                host.require(
-                    operation,
-                    "sudo",
-                    [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg],
-                )?;
-            }
+            host.require(operation, "sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg])?;
+            host.require(
+                operation,
+                "sudo",
+                [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg],
+            )?;
             sync_parent(host, destination, operation)?;
             Ok(())
         })();
@@ -143,7 +109,7 @@ pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
 pub use tools::{GoToolchainSelector, NodeToolchainSelector, RustToolchainSelector, ToolMutationMode};
 
 use crate::platform::{Architecture, ManagedAptSources};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{
     ffi::{OsStr, OsString},
     io::Write,
@@ -259,11 +225,7 @@ impl Operation {
             Self::GnomeRoundedCorners => vec!["gnome-rounded-corners".into()],
             Self::GoToolchain { selector, architecture, mode } => vec![
                 "go-toolchain".into(),
-                match mode {
-                    ToolMutationMode::EnsurePresent => "ensure-present",
-                    ToolMutationMode::UpdateMoving => "update-moving",
-                }
-                .into(),
+                mode.as_str().into(),
                 match selector {
                     GoToolchainSelector::Latest => "latest",
                     GoToolchainSelector::Version(v) => v,
@@ -285,16 +247,8 @@ impl Operation {
             Self::CargoBinstallBootstrap => vec!["cargo-binstall-bootstrap".into()],
             Self::RustToolchain { selector, architecture, mode } => vec![
                 "rust-toolchain".into(),
-                match mode {
-                    ToolMutationMode::EnsurePresent => "ensure-present",
-                    ToolMutationMode::UpdateMoving => "update-moving",
-                }
-                .into(),
-                match selector {
-                    RustToolchainSelector::Stable => "stable",
-                    RustToolchainSelector::Version(v) => v,
-                }
-                .into(),
+                mode.as_str().into(),
+                selector.as_str().into(),
                 architecture.rust_target().into(),
             ],
             Self::CargoPackageSet { packages, mode } => std::iter::once("cargo-package-set".into())
@@ -309,11 +263,7 @@ impl Operation {
                 .collect(),
             Self::NodeToolchain { selector, architecture, mode } => vec![
                 "node-toolchain".into(),
-                match mode {
-                    ToolMutationMode::EnsurePresent => "ensure-present",
-                    ToolMutationMode::UpdateMoving => "update-moving",
-                }
-                .into(),
+                mode.as_str().into(),
                 match selector {
                     NodeToolchainSelector::Lts => "lts",
                     NodeToolchainSelector::Latest => "latest",
@@ -607,10 +557,10 @@ pub(crate) mod apt {
 }
 
 pub(crate) mod languages {
-    use anyhow::{bail, Context, Result};
+    use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, os::unix::fs::PermissionsExt, path::PathBuf};
 
-    use crate::operations::{Host, TempPath, RUSTUP_BOOTSTRAP_FLAGS};
+    use crate::operations::{Host, RUSTUP_BOOTSTRAP_FLAGS, TempPath};
 
     pub fn fnm_bootstrap(host: &Host) -> Result<()> {
         let data_home =
@@ -709,7 +659,7 @@ pub(crate) mod languages {
 pub(crate) mod packages {
 
     pub(crate) mod cargo {
-        use anyhow::{bail, Context, Result};
+        use anyhow::{Context, Result, bail};
         use std::{
             os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
@@ -758,7 +708,7 @@ pub(crate) mod packages {
     }
 
     pub(crate) mod npm {
-        use anyhow::{bail, Context, Result};
+        use anyhow::{Context, Result, bail};
         use std::{
             os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
@@ -908,7 +858,7 @@ pub(crate) mod packages {
     }
 
     pub(crate) mod fonts {
-        use anyhow::{bail, Context, Result};
+        use anyhow::{Context, Result, bail};
         use std::{ffi::OsStr, fs, path::Path};
         use url::Url;
 
@@ -943,7 +893,7 @@ pub(crate) mod packages {
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                     Err(error) => {
-                        return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()))
+                        return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()));
                     }
                 };
                 if mode == NerdFontsMode::Update || !is_present {
@@ -1090,7 +1040,7 @@ pub(crate) mod packages {
     }
 
     pub(crate) mod dotfiles {
-        use anyhow::{bail, Context, Result};
+        use anyhow::{Context, Result, bail};
         use std::{
             fs,
             path::{Path, PathBuf},
@@ -1146,7 +1096,7 @@ pub(crate) mod packages {
                 match fs::symlink_metadata(&target) {
                     Ok(metadata) if metadata.file_type().is_dir() => {
                         let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
-                        entries.sort_by_key(|entry| entry.file_name());
+                        entries.sort_by_key(std::fs::DirEntry::file_name);
                         for entry in entries {
                             collect_conflicts(&entry.path(), target.join(entry.file_name()), conflicts)?;
                         }
@@ -1203,7 +1153,7 @@ pub(crate) mod packages {
             let source_metadata = fs::symlink_metadata(source)?;
             if source_metadata.file_type().is_dir() {
                 let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
-                entries.sort_by_key(|entry| entry.file_name());
+                entries.sort_by_key(std::fs::DirEntry::file_name);
                 for entry in entries {
                     verify_tree(&entry.path(), target.join(entry.file_name()))?;
                 }
@@ -1248,7 +1198,7 @@ pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Res
 }
 
 pub(super) fn gnome_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {
-    use anyhow::{bail, Context};
+    use anyhow::{Context, bail};
     let value: serde_json::Value = serde_json::from_str(input).context("parse GNOME extension JSON")?;
     let versions = value["shell_version_map"].as_object().context("GNOME response has no shell_version_map")?;
     let mut candidate = shell_version;

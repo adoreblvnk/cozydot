@@ -1,5 +1,5 @@
 use crate::{config::HttpsUrl, platform::Architecture};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -13,10 +13,28 @@ pub enum ToolMutationMode {
     UpdateMoving,
 }
 
+impl ToolMutationMode {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::EnsurePresent => "ensure-present",
+            Self::UpdateMoving => "update-moving",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RustToolchainSelector {
     Stable,
     Version(String),
+}
+
+impl RustToolchainSelector {
+    pub(super) fn as_str(&self) -> &str {
+        match self {
+            Self::Stable => "stable",
+            Self::Version(value) => value,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,14 +51,8 @@ pub enum NodeToolchainSelector {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ToolResolution {
-    resolved: String,
-    release: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 struct GoRelease {
-    resolution: ToolResolution,
+    version: String,
     filename: String,
     checksum: String,
 }
@@ -55,7 +67,7 @@ pub(crate) fn execute_rust(
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
     let target = architecture.rust_target();
     let refresh = mode == ToolMutationMode::UpdateMoving && rust_selector_is_moving(selector);
-    let toolchain = rust_toolchain_name(selector, target);
+    let toolchain = format!("{}-{target}", selector.as_str());
     let current = inspect_rust(host, &rustup, &toolchain)?;
     if refresh
         || current.as_ref().is_none_or(|state| state.host != target || !rust_release_matches(&state.release, selector))
@@ -86,20 +98,14 @@ pub(crate) fn execute_go(
     let expected_arch = architecture.go();
 
     let current = inspect_go(host, "/usr/local/go/bin/go")?;
-    if mode == ToolMutationMode::EnsurePresent {
-        if let Some(state) = &current {
-            if state.architecture == expected_arch {
-                match selector {
-                    GoToolchainSelector::Latest => {
-                        return Ok(());
-                    }
-                    GoToolchainSelector::Version(requested) => {
-                        if version_matches(&state.version, requested) {
-                            return Ok(());
-                        }
-                    }
-                }
-            }
+    if mode == ToolMutationMode::EnsurePresent
+        && let Some(state) = &current
+        && state.architecture == expected_arch
+    {
+        match selector {
+            GoToolchainSelector::Latest => return Ok(()),
+            GoToolchainSelector::Version(requested) if version_matches(&state.version, requested) => return Ok(()),
+            GoToolchainSelector::Version(_) => {}
         }
     }
 
@@ -108,15 +114,12 @@ pub(crate) fn execute_go(
         GoToolchainSelector::Version(version) => version,
     };
 
-    let release = resolve_go_release(host, requested, architecture)?;
-    let version = release.resolution.release.clone();
+    let GoRelease { version, filename, checksum } = resolve_go_release(host, requested, architecture)?;
 
     if current.as_ref().is_some_and(|state| state.version == version && state.architecture == expected_arch) {
         return Ok(());
     }
 
-    let filename = release.filename;
-    let checksum = release.checksum;
     if checksum.len() != 64 || !checksum.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
         bail!("Go release metadata contains an invalid SHA-256 checksum");
     }
@@ -192,24 +195,22 @@ pub(crate) fn execute_node(
     let alias = node_alias(selector);
     let current = inspect_node(host, &fnm, &alias)?;
 
-    if mode == ToolMutationMode::EnsurePresent {
-        if let Some(version) = &current {
-            let accepted = match selector {
-                NodeToolchainSelector::Latest | NodeToolchainSelector::Lts => true,
-                NodeToolchainSelector::Version(requested) => {
-                    version_matches(version.trim_start_matches('v'), requested)
-                }
-            };
-            if accepted {
-                let default = fnm_default(host, &fnm)?;
-                if default.as_deref() != Some(version.as_str()) {
-                    host.require("Node default toolchain mutation", &fnm, ["default", version])?;
-                }
-                if fnm_default(host, &fnm)?.as_deref() != Some(version.as_str()) {
-                    bail!("Node default toolchain mutation did not select {}", version);
-                }
-                return Ok(());
+    if mode == ToolMutationMode::EnsurePresent
+        && let Some(version) = &current
+    {
+        let accepted = match selector {
+            NodeToolchainSelector::Latest | NodeToolchainSelector::Lts => true,
+            NodeToolchainSelector::Version(requested) => version_matches(version.trim_start_matches('v'), requested),
+        };
+        if accepted {
+            let default = fnm_default(host, &fnm)?;
+            if default.as_deref() != Some(version.as_str()) {
+                host.require("Node default toolchain mutation", &fnm, ["default", version])?;
             }
+            if fnm_default(host, &fnm)?.as_deref() != Some(version.as_str()) {
+                bail!("Node default toolchain mutation did not select {}", version);
+            }
+            return Ok(());
         }
     }
 
@@ -241,33 +242,25 @@ pub(crate) fn execute_python(host: &Host, version: &str, architecture: Architect
     let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
         .context("Python toolchain operation: uv is unavailable after bootstrap")?;
 
-    if let Some(current_version) = inspect_python(host, &uv, version)? {
-        if version_matches(&current_version, version) {
-            return Ok(());
-        }
+    if let Some(current_version) = inspect_python(host, &uv, version)?
+        && version_matches(&current_version, version)
+    {
+        return Ok(());
     }
 
-    let resolution = resolve_python_version(host, &uv, version, architecture)?;
+    let resolved = resolve_python_version(host, &uv, version, architecture)?;
 
-    let current = inspect_python(host, &uv, &resolution.resolved)?;
-    if current.as_deref() != Some(resolution.release.as_str()) {
+    let current = inspect_python(host, &uv, &resolved)?;
+    if current.as_deref() != Some(resolved.as_str()) {
         host.require(
             "Python toolchain mutation",
             &uv,
-            [
-                "python",
-                "install",
-                "--no-config",
-                "--managed-python",
-                "--no-progress",
-                "--default",
-                &resolution.resolved,
-            ],
+            ["python", "install", "--no-config", "--managed-python", "--no-progress", "--default", &resolved],
         )?;
     }
-    let installed = inspect_python(host, &uv, &resolution.resolved)?
+    let installed = inspect_python(host, &uv, &resolved)?
         .context("Python toolchain mutation did not install a managed interpreter")?;
-    if installed != resolution.release {
+    if installed != resolved {
         bail!("Python toolchain mutation installed mismatched version {installed}");
     }
     Ok(())
@@ -299,7 +292,7 @@ mod resolution {
             requested,
             architecture.go_archive(),
         )?;
-        Ok(GoRelease { resolution: ToolResolution { resolved: version.clone(), release: version }, filename, checksum })
+        Ok(GoRelease { version, filename, checksum })
     }
 
     pub(super) fn resolve_python_version(
@@ -307,7 +300,7 @@ mod resolution {
         uv: &str,
         requested: &str,
         architecture: Architecture,
-    ) -> Result<ToolResolution> {
+    ) -> Result<String> {
         let output = host.require(
             "Python release availability",
             uv,
@@ -359,9 +352,7 @@ mod resolution {
         }
         matches.sort_by_key(|version| numeric_version_key(version));
         matches.dedup();
-        let resolved =
-            matches.pop().with_context(|| format!("uv has no managed Python release matching {requested:?}"))?;
-        Ok(ToolResolution { release: resolved.clone(), resolved })
+        matches.pop().with_context(|| format!("uv has no managed Python release matching {requested:?}"))
     }
 
     fn numeric_version_key(value: &str) -> (u64, u64, u64) {
@@ -392,14 +383,14 @@ mod state {
         let mut release = None;
         let mut host = None;
         for line in output.lines() {
-            if let Some(value) = line.strip_prefix("release: ") {
-                if release.replace(value.to_owned()).is_some() || !numeric_release(value) {
-                    bail!("rustc returned malformed release state");
-                }
-            } else if let Some(value) = line.strip_prefix("host: ") {
-                if host.replace(value.to_owned()).is_some() || !valid_rust_host(value) {
-                    bail!("rustc returned malformed host state");
-                }
+            if let Some(value) = line.strip_prefix("release: ")
+                && (release.replace(value.to_owned()).is_some() || !numeric_release(value))
+            {
+                bail!("rustc returned malformed release state");
+            } else if let Some(value) = line.strip_prefix("host: ")
+                && (host.replace(value.to_owned()).is_some() || !valid_rust_host(value))
+            {
+                bail!("rustc returned malformed host state");
             }
         }
         Ok(RustState {
@@ -443,7 +434,7 @@ mod state {
                     error.kind() == std::io::ErrorKind::NotFound || error.kind() == std::io::ErrorKind::PermissionDenied
                 }) =>
             {
-                return Ok(None)
+                return Ok(None);
             }
             Err(error) => return Err(error),
         };
@@ -511,10 +502,10 @@ mod state {
     }
 
     pub(super) fn resolve_node_version(host: &Host, fnm: &str, selector: &NodeToolchainSelector) -> Result<String> {
-        if let NodeToolchainSelector::Version(version) = selector {
-            if numeric_version(version, 3, 3) {
-                return Ok(format!("v{version}"));
-            }
+        if let NodeToolchainSelector::Version(version) = selector
+            && numeric_version(version, 3, 3)
+        {
+            return Ok(format!("v{version}"));
         }
         let mut args = vec!["list-remote", "--latest"];
         match selector {
@@ -599,17 +590,6 @@ mod state {
 
 use resolution::*;
 use state::*;
-
-fn rust_selector_name(selector: &RustToolchainSelector) -> &str {
-    match selector {
-        RustToolchainSelector::Stable => "stable",
-        RustToolchainSelector::Version(value) => value,
-    }
-}
-
-fn rust_toolchain_name(selector: &RustToolchainSelector, target: &str) -> String {
-    format!("{}-{target}", rust_selector_name(selector))
-}
 
 fn rust_install_args(toolchain: &str) -> [&str; 6] {
     ["toolchain", "install", toolchain, "--profile", "minimal", "--no-self-update"]

@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use etc_os_release::OsRelease;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +111,7 @@ impl Platform {
         let os = OsRelease::open().context("read os-release")?;
         let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
         let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-        let desktop = desktop(std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().as_str());
+        let desktop = normalize_desktop(std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().as_str());
         Self::from_os_release(&os, desktop, &arch)
     }
 
@@ -258,13 +258,9 @@ fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
         "ubuntu" | "pop" | "zorin" => Ok("ubuntu"),
         "debian" | "kali" | "tails" | "deepin" => Ok("debian"),
         "linuxmint" => {
-            let families = id_like.unwrap_or_default().split_ascii_whitespace();
-            let mut ubuntu = false;
-            let mut debian = false;
-            for family in families {
-                ubuntu |= family == "ubuntu";
-                debian |= family == "debian";
-            }
+            let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
+            let ubuntu = families.clone().any(|family| family == "ubuntu");
+            let debian = families.any(|family| family == "debian");
             match (ubuntu, debian) {
                 (true, _) => Ok("ubuntu"),
                 (false, true) => Ok("debian"),
@@ -285,8 +281,7 @@ fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<St
     let supported: &[&str] = match platform.distro.as_str() {
         "ubuntu" => &["main", "restricted", "universe", "multiverse"],
         "debian" if platform.distro_codename == "bullseye" => &["main", "contrib", "non-free"],
-        "debian" => &["main", "contrib", "non-free", "non-free-firmware"],
-        "kali" => &["main", "contrib", "non-free", "non-free-firmware"],
+        "debian" | "kali" => &["main", "contrib", "non-free", "non-free-firmware"],
         _ => &[],
     };
     let mut result = Vec::new();
@@ -304,10 +299,6 @@ fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<St
         result.push((*component).to_owned());
     }
     Ok(result)
-}
-
-fn desktop(s: &str) -> String {
-    normalize_desktop(s)
 }
 
 fn normalize_desktop(value: &str) -> String {
