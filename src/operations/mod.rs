@@ -1,3 +1,4 @@
+mod appimaged;
 mod binary;
 
 pub(crate) mod privileged_file {
@@ -128,6 +129,7 @@ pub enum Operation {
     AptPackages { packages: Vec<String> },
     AptPurge { packages: Vec<String> },
     AptUpgrade { policy: AptUpgradePolicy },
+    Appimaged { architecture: Architecture },
     DockerGroup,
     DockerLocalLog { max_size: Option<String> },
     DesktopSetting { target: DesktopEnvironment, setting: DesktopSetting },
@@ -173,6 +175,7 @@ impl Operation {
             Self::AptPackages { .. } => "APT packages",
             Self::AptPurge { .. } => "APT package removal",
             Self::AptUpgrade { .. } => "APT upgrade",
+            Self::Appimaged { .. } => "appimaged",
             Self::DockerGroup => "Docker group membership",
             Self::DockerLocalLog { .. } => "Docker logging",
             Self::DesktopSetting { .. } => "desktop setting",
@@ -217,6 +220,7 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptPurge { packages } => completed(apt::purge(&host, packages)),
         Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
+        Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
         Operation::DockerGroup => completed(system::docker_group(&host)),
         Operation::DockerLocalLog { max_size } => completed(system::docker_local_log(&host, max_size.as_deref())),
         Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
@@ -348,10 +352,14 @@ impl TempPath {
     }
 
     pub fn new_with_suffix(host: &Host, stem: &str, suffix: &str) -> Result<Self> {
+        Self::new_in_with_suffix(&host.temp_dir(), stem, suffix)
+    }
+
+    pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
         tempfile::Builder::new()
             .prefix(stem)
             .suffix(suffix)
-            .tempfile_in(host.temp_dir())
+            .tempfile_in(parent)
             .map(|file| Self(file.into_temp_path()))
             .context("create operation temporary file")
     }

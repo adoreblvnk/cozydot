@@ -196,12 +196,13 @@ packages:
   binaries:
     - name: unsupported
       format: appimage
-      commands: [unsupported]
       source:
         provider: github
         repository: example/unsupported
         assets:
           riscv64: ^unsupported$
+integrations:
+  appimaged: true
 "#,
     )
     .unwrap();
@@ -246,6 +247,7 @@ fonts:
 dotfiles:
   packages: []
 integrations:
+  appimaged: false
   docker:
     add_user_to_group: false
   virtualbox:
@@ -305,6 +307,14 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
         (
             "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      driver: local\n      max_size: invalid\n",
             "invalid Docker size",
+        ),
+        (
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n",
+            "AppImages require integrations.appimaged: true",
+        ),
+        (
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\nintegrations:\n  appimaged: true\n",
+            "commands: not supported for AppImages managed by appimaged",
         ),
     ] {
         let temp = tempfile::tempdir().unwrap();
@@ -411,4 +421,123 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .assert()
         .success();
     assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never -- 20\nfnm default -- 20\n");
+}
+
+#[test]
+fn appimaged_is_ensured_once_before_appimages_are_published() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let systemctl_log = temp.path().join("systemctl.log");
+    let systemctl_count = temp.path().join("systemctl.count");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  binaries:
+    - name: obsidian
+      format: appimage
+      source:
+        provider: github
+        repository: example/obsidian
+        assets:
+          amd64: ^Obsidian\.AppImage$
+          arm64: ^Obsidian\.AppImage$
+          arm32: ^Obsidian\.AppImage$
+    - name: zen-browser
+      format: appimage
+      source:
+        provider: github
+        repository: example/zen
+        assets:
+          amd64: ^Zen\.AppImage$
+          arm64: ^Zen\.AppImage$
+          arm32: ^Zen\.AppImage$
+integrations:
+  appimaged: true
+"#,
+    )
+    .unwrap();
+
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fake_bin.join("apt-cache"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &fake_bin.join("dpkg"),
+        "#!/bin/sh\ncase \"$*\" in *appimagelauncher*) exit 1;; *) exit 0;; esac\n",
+    );
+    write_executable(
+        &fake_bin.join("systemctl"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$COZYDOT_SYSTEMCTL_LOG"
+case "$*" in
+  *is-active*)
+    count=0
+    [ ! -f "$COZYDOT_SYSTEMCTL_COUNT" ] || count=$(cat "$COZYDOT_SYSTEMCTL_COUNT")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$COZYDOT_SYSTEMCTL_COUNT"
+    [ "$count" -gt 1 ]
+    ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+args="$*"
+output=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    output="$1"
+  fi
+  shift
+done
+if [ -n "$output" ]; then
+  cp /bin/true "$output"
+  exit 0
+fi
+case "$args" in
+  *go-appimage/releases/tags/continuous*)
+    printf '%s' '{"assets":[{"name":"appimaged-1-x86_64.AppImage","browser_download_url":"https://example.com/appimaged-amd64.AppImage"},{"name":"appimaged-1-aarch64.AppImage","browser_download_url":"https://example.com/appimaged-arm64.AppImage"},{"name":"appimaged-1-armhf.AppImage","browser_download_url":"https://example.com/appimaged-arm32.AppImage"}]}'
+    ;;
+  *example/obsidian/releases/latest*)
+    printf '%s' '{"draft":false,"prerelease":false,"tag_name":"1","assets":[{"name":"Obsidian.AppImage","browser_download_url":"https://example.com/Obsidian.AppImage","digest":null}]}'
+    ;;
+  *example/zen/releases/latest*)
+    printf '%s' '{"draft":false,"prerelease":false,"tag_name":"1","assets":[{"name":"Zen.AppImage","browser_download_url":"https://example.com/Zen.AppImage","digest":null}]}'
+    ;;
+  *) exit 1 ;;
+esac
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
+        .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success()
+        .stdout(concat!(
+            "Applying APT bootstrap packages\n",
+            "Applying appimaged\n",
+            "Applying binary package\n",
+            "Applying binary package\n",
+        ));
+
+    for name in ["obsidian.AppImage", "zen-browser.AppImage"] {
+        let appimage = home.join("Applications").join(name);
+        assert!(fs::metadata(appimage).unwrap().permissions().mode() & 0o111 != 0);
+    }
+    assert!(!home.join(".local/bin").exists());
+    let systemctl_calls = fs::read_to_string(systemctl_log).unwrap();
+    assert_eq!(systemctl_calls.matches("is-active").count(), 2);
 }
