@@ -1,6 +1,6 @@
 use super::{Host, TempPath};
 use crate::{config::HttpsUrl, platform::Architecture};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,7 +9,7 @@ use std::{
     collections::HashSet,
     fs,
     io::Read,
-    os::unix::fs::{symlink, MetadataExt, PermissionsExt},
+    os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
 };
 
@@ -161,14 +161,13 @@ pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result
         let expectation = capture_publication_expectation(&artifact)?;
         preflight_appimage(host, operation)?;
         if is_acceptable_live_state(host, operation)? {
-            if expectation.verify_identity(&artifact)? {
-                return Ok(());
-            } else {
+            if !expectation.verify_identity(&artifact)? {
                 bail!(
                     "TOCTOU conflict detected: live-state inspection passed but destination identity changed for {}",
                     artifact.display()
                 );
             }
+            return Ok(());
         }
         Some(expectation)
     } else {
@@ -267,13 +266,11 @@ impl PublicationExpectation {
 }
 
 pub(crate) fn capture_publication_expectation(destination: &Path) -> Result<PublicationExpectation> {
-    let open_result = rustix::fs::open(
+    match rustix::fs::open(
         destination,
         rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
-    );
-
-    match open_result {
+    ) {
         Ok(fd) => {
             let file = std::fs::File::from(fd);
             let metadata = file.metadata().context("inspect existing destination descriptor")?;
@@ -853,7 +850,7 @@ fn valid_asset_name(value: &str) -> bool {
 pub(crate) mod cargo_binstall {
 
     use super::super::Host;
-    use anyhow::{bail, Context, Result};
+    use anyhow::{Context, Result, bail};
     use std::path::PathBuf;
 
     pub(crate) fn execute(host: &Host) -> Result<()> {

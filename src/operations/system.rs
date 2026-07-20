@@ -1,11 +1,10 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::{collections::BTreeSet, path::Path};
 
 use super::{
-    apt,
+    Host, OperationOutcome, TempPath, apt,
     privileged_file::{publish_bytes, sync_parent},
-    Host, OperationOutcome, TempPath,
 };
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
@@ -48,8 +47,7 @@ pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
 }
 
 fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
-    let output = host.run("systemctl", [query, unit])?;
-    Ok(output.status.success())
+    Ok(host.run("systemctl", [query, unit])?.status.success())
 }
 
 pub(crate) fn ubuntu_snap(host: &Host, enabled: bool) -> Result<()> {
@@ -95,10 +93,7 @@ fn remove_snaps(host: &Host) -> Result<()> {
     }
     let output = std::str::from_utf8(&output.stdout).context("snap list returned non-UTF-8 state")?;
     let mut names = Vec::new();
-    for (index, line) in output.lines().enumerate() {
-        if index == 0 {
-            continue;
-        }
+    for line in output.lines().skip(1) {
         let name = line.split_ascii_whitespace().next().unwrap_or_default();
         if !valid_snap_name(name) {
             bail!("snap list returned malformed package state");
@@ -302,15 +297,6 @@ fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
     Ok(())
 }
 
-fn one_utf8_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
-    let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
-    let record = output.strip_suffix('\n').unwrap_or(output);
-    if record.is_empty() || record.contains(['\n', '\r']) {
-        bail!("{command} returned malformed record output");
-    }
-    Ok(record)
-}
-
 fn read_daemon_config(host: &Host) -> Result<Value> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
@@ -318,7 +304,7 @@ fn read_daemon_config(host: &Host) -> Result<Value> {
         host.require("Docker daemon config symlink absence check", "sudo", ["test", "!", "-L", DOCKER_DAEMON_CONFIG])?;
         return Ok(Value::Object(Map::new()));
     }
-    let mode = one_utf8_record(&kind.stdout, "sudo stat")?;
+    let mode = one_record(&kind.stdout, "sudo stat")?;
     let mode = u32::from_str_radix(mode, 16).context("sudo stat returned malformed mode output")?;
     if mode & 0o170000 != 0o100000 {
         bail!("Docker daemon config destination is not a regular file");
@@ -401,9 +387,8 @@ pub(crate) fn gnome_extensions(host: &Host, extensions: &[String]) -> Result<Ope
 }
 
 pub(crate) fn gnome_dock(host: &Host) -> Result<OperationOutcome> {
-    let outcome = ensure_extension(host, DASH_TO_DOCK_UUID)?;
-    if outcome == OperationOutcome::LoginRequired {
-        return Ok(outcome);
+    if ensure_extension(host, DASH_TO_DOCK_UUID)? == OperationOutcome::LoginRequired {
+        return Ok(OperationOutcome::LoginRequired);
     }
     let settings = [
         ("dock-position", "'BOTTOM'"),
@@ -423,9 +408,8 @@ pub(crate) fn gnome_dock(host: &Host) -> Result<OperationOutcome> {
 }
 
 pub(crate) fn gnome_rounded_corners(host: &Host) -> Result<OperationOutcome> {
-    let outcome = ensure_extension(host, ROUNDED_CORNERS_UUID)?;
-    if outcome == OperationOutcome::LoginRequired {
-        return Ok(outcome);
+    if ensure_extension(host, ROUNDED_CORNERS_UUID)? == OperationOutcome::LoginRequired {
+        return Ok(OperationOutcome::LoginRequired);
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
     ensure_dconf(
@@ -437,9 +421,7 @@ pub(crate) fn gnome_rounded_corners(host: &Host) -> Result<OperationOutcome> {
 }
 
 fn ensure_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
-    let installed = extension_state(host)?;
-    let newly_installed = !installed.contains(extension);
-    if newly_installed {
+    if !extension_state(host)?.contains(extension) {
         install_extension(host, extension)?;
         return Ok(OperationOutcome::LoginRequired);
     }

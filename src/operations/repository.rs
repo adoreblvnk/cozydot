@@ -1,6 +1,6 @@
 use super::{Host, TempPath};
 use crate::{config::HttpsUrl, platform::Architecture};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{
     collections::BTreeSet,
     ffi::OsStr,
@@ -292,7 +292,7 @@ fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
 }
 
 fn converge_owned_bytes(host: &Host, path: &Path, expected: &[u8], label: &str) -> Result<()> {
-    super::privileged_file::publish_bytes_with_policy(host, path, expected, &format!("{label} publication"), false)?;
+    super::privileged_file::publish_bytes(host, path, expected, &format!("{label} publication"))?;
     let final_bytes =
         inspect_owned_file(host, path, label)?.with_context(|| format!("{label} postcondition is missing"))?;
     if final_bytes != expected {
@@ -387,14 +387,13 @@ fn validate_source_list_destination(destination: &Path, filename_stem: &str) -> 
 
 pub(crate) mod managed_apt {
 
-    use super::super::{privileged_file, Host};
+    use super::super::{Host, privileged_file};
     use crate::platform::{Architecture, ManagedAptSources};
-    use anyhow::{bail, Context, Result};
+    use anyhow::{Context, Result, bail};
     use sha2::{Digest, Sha256};
     use std::{
         collections::{BTreeMap, BTreeSet},
         ffi::OsStr,
-        fmt::Write as _,
         path::{Path, PathBuf},
     };
     use url::Url;
@@ -495,19 +494,17 @@ pub(crate) mod managed_apt {
                 "-print0",
             ],
         )?;
-        let mut paths = Vec::new();
+        let mut paths = BTreeSet::new();
         for raw in output.stdout.split(|byte| *byte == 0) {
             if raw.is_empty() {
                 continue;
             }
             let path = std::str::from_utf8(raw).context("managed APT source discovery returned a non-UTF-8 path")?;
             let path = validate_source_path(path)?;
-            if paths.iter().any(|existing| existing == &path) {
+            if !paths.insert(path) {
                 bail!("managed APT source discovery returned a duplicate path");
             }
-            paths.push(path);
         }
-        paths.sort();
 
         let mut files = Vec::new();
         for path in paths {
@@ -610,7 +607,9 @@ pub(crate) mod managed_apt {
             }
             let entry = parse_list_entry(active).context("parse active one-line APT source")?;
             if official_uri(policy, &entry.uri) && entry.architecture_modifiers {
-                bail!("managed APT cannot safely migrate an official one-line source with architecture add/remove modifiers");
+                bail!(
+                    "managed APT cannot safely migrate an official one-line source with architecture add/remove modifiers"
+                );
             }
             if entry.applies_to(policy.architecture) && official_uri(policy, &entry.uri) {
                 validate_official_suites(policy, &entry.suites)?;
@@ -661,9 +660,7 @@ pub(crate) mod managed_apt {
 
     fn parse_architectures(value: &str) -> Result<Vec<String>> {
         let values = value.split(',').map(str::to_owned).collect::<Vec<_>>();
-        if values.is_empty()
-            || values.iter().any(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_alphanumeric()))
-        {
+        if values.iter().any(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_alphanumeric())) {
             bail!("APT source has malformed architectures");
         }
         Ok(values)
@@ -711,7 +708,9 @@ pub(crate) mod managed_apt {
             let official = uris.iter().filter(|uri| official_uri(policy, uri)).count();
             if applies && official != 0 {
                 if fields.contains_key("architectures-add") || fields.contains_key("architectures-remove") {
-                    bail!("managed APT cannot safely migrate an official deb822 source with architecture add/remove fields");
+                    bail!(
+                        "managed APT cannot safely migrate an official deb822 source with architecture add/remove fields"
+                    );
                 }
                 if official != uris.len() {
                     bail!("managed APT cannot safely split a deb822 stanza mixing official and unrelated URIs");
@@ -767,16 +766,16 @@ pub(crate) mod managed_apt {
                 continue;
             }
             replacing = false;
-            if let Some((name, _)) = line.split_once(':') {
-                if name.eq_ignore_ascii_case("Types") {
-                    if found {
-                        bail!("deb822 source has duplicate Types fields");
-                    }
-                    result.push(format!("{name}: {replacement}"));
-                    found = true;
-                    replacing = true;
-                    continue;
+            if let Some((name, _)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("Types")
+            {
+                if found {
+                    bail!("deb822 source has duplicate Types fields");
                 }
+                result.push(format!("{name}: {replacement}"));
+                found = true;
+                replacing = true;
+                continue;
             }
             result.push(line.to_owned());
         }
@@ -841,11 +840,7 @@ pub(crate) mod managed_apt {
         if !change.existed {
             return Ok(());
         }
-        let digest = Sha256::digest(&change.original);
-        let mut digest_hex = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            write!(digest_hex, "{byte:02x}").expect("writing to a String cannot fail");
-        }
+        let digest_hex = format!("{:x}", Sha256::digest(&change.original));
         let relative = change.path.strip_prefix("/").context("managed APT source path is not absolute")?;
         let destination = Path::new(BACKUP_ROOT).join(digest_hex).join(relative);
         privileged_file::publish_bytes_with_mode(

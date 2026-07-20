@@ -1,7 +1,7 @@
 use crate::platform::{Architecture, Platform};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de};
 use std::{
     collections::{BTreeMap, HashSet},
     fmt, fs,
@@ -92,14 +92,16 @@ impl Config {
             repository.validate_for_platform(index, platform, distro, upstream)?;
         }
 
-        if let Some(configured) = &self.desktop {
-            if configured.has_neutral_intent() && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon) {
+        if let Some(configured) = &self.desktop
+            && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
+        {
+            if configured.has_neutral_intent() {
                 bail!(
                     "desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
                     platform.desktop
                 );
             }
-            if configured.gnome.is_some() && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon) {
+            if configured.gnome.is_some() {
                 bail!(
                     "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
@@ -513,7 +515,9 @@ impl AptPackages {
                 }
                 for (package_index, package) in repository.packages.iter().enumerate() {
                     if !installed.insert(package) {
-                        bail!("packages.apt.repositories[{index}].packages[{package_index}]: duplicate APT installation ownership for {package:?}");
+                        bail!(
+                            "packages.apt.repositories[{index}].packages[{package_index}]: duplicate APT installation ownership for {package:?}"
+                        );
                     }
                 }
             }
@@ -665,11 +669,7 @@ impl Repository {
             )
         })?;
         let suite = match self.suite.as_deref() {
-            Some("system") => {
-                let codename = selected_repository_codename(key, platform, identity.distro)
-                    .ok_or_else(|| anyhow::anyhow!("packages.apt.repositories[{index}].suite: system cannot use a default URL because it has no repository-family codename"))?;
-                Some(AptToken(codename.to_owned()))
-            }
+            Some("system") => Some(AptToken(selected_repository_codename(key, platform, identity.distro).to_owned())),
             Some(value) => Some(AptToken(value.to_owned())),
             None => None,
         };
@@ -682,11 +682,11 @@ pub struct ResolvedRepository<'a> {
     pub suite: Option<AptToken>,
 }
 
-fn selected_repository_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> Option<&str> {
+fn selected_repository_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
     if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
-        Some(&platform.distro_codename)
+        &platform.distro_codename
     } else {
-        Some(&platform.base_codename)
+        &platform.base_codename
     }
 }
 
@@ -952,15 +952,15 @@ impl Tools {
         if let Some(value) = &self.rust {
             validate_rust_selector(value, "tools.rust")?;
         }
-        if let Some(value) = &self.go {
-            if value != "latest" {
-                validate_numeric_version(value, "tools.go", 2, 3)?;
-            }
+        if let Some(value) = &self.go
+            && value != "latest"
+        {
+            validate_numeric_version(value, "tools.go", 2, 3)?;
         }
-        if let Some(value) = &self.node {
-            if !matches!(value.as_str(), "lts" | "latest") {
-                validate_numeric_version(value, "tools.node", 1, 3)?;
-            }
+        if let Some(value) = &self.node
+            && !matches!(value.as_str(), "lts" | "latest")
+        {
+            validate_numeric_version(value, "tools.node", 1, 3)?;
         }
         if let Some(value) = &self.python {
             validate_numeric_version(value, "tools.python", 2, 3)?;
@@ -1422,7 +1422,9 @@ fn validate_string_values(values: &[String], path: &str, validator: fn(&str, &st
 fn validate_definition_name(value: &str, path: &str) -> Result<()> {
     let re = Regex::new(r"^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$").unwrap();
     if !re.is_match(value) {
-        bail!("{path}: invalid value {value:?}; must start and end with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', or '-'");
+        bail!(
+            "{path}: invalid value {value:?}; must start and end with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', or '-'"
+        );
     }
     Ok(())
 }
@@ -1463,7 +1465,9 @@ fn validate_dotfile_package(value: &str, path: &str) -> Result<()> {
 fn validate_executable(value: &str, path: &str) -> Result<()> {
     let re = Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._+-]*$").unwrap();
     if !re.is_match(value) {
-        bail!("{path}: invalid executable basename {value:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'");
+        bail!(
+            "{path}: invalid executable basename {value:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'"
+        );
     }
     Ok(())
 }
@@ -1511,7 +1515,9 @@ fn validate_vscode_id(value: &str, path: &str) -> Result<()> {
 fn validate_gnome_uuid(value: &str, path: &str) -> Result<()> {
     let re = Regex::new(r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$").unwrap();
     if !re.is_match(value) {
-        bail!("{path}: invalid GNOME extension UUID {value:?}; must contain exactly one '@' and use only ASCII alphanumerics, '.', '_', or '-' in each part");
+        bail!(
+            "{path}: invalid GNOME extension UUID {value:?}; must contain exactly one '@' and use only ASCII alphanumerics, '.', '_', or '-' in each part"
+        );
     }
     Ok(())
 }

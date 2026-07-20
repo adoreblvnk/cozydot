@@ -1,7 +1,7 @@
 use crate::{
     config::{
-        resolve_platform_identity, AptUpdate, BinaryFormat, Config, EnabledDisabled, InstalledState,
-        ResolvedNativeBinary, SourceMode, Theme,
+        AptUpdate, BinaryFormat, Config, EnabledDisabled, InstalledState, ResolvedNativeBinary, SourceMode, Theme,
+        resolve_platform_identity,
     },
     operations::{
         AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
@@ -89,12 +89,11 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
 
     if let Some(sources) =
         config.system.as_ref().and_then(|system| system.apt.as_ref()).and_then(|apt| apt.sources.as_ref())
+        && sources.mode == SourceMode::Managed
     {
-        if sources.mode == SourceMode::Managed {
-            let managed =
-                sources.resolve_managed(platform, identity)?.expect("managed source resolution returns an intent");
-            push_operation(&mut phases, PlannerPhase::OfficialAptSources, Operation::ManagedAptSources(managed));
-        }
+        let managed =
+            sources.resolve_managed(platform, identity)?.expect("managed source resolution returns an intent");
+        push_operation(&mut phases, PlannerPhase::OfficialAptSources, Operation::ManagedAptSources(managed));
     }
 
     if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
@@ -135,7 +134,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         );
     }
 
-    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers)?;
+    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers);
 
     if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()) {
         prerequisites.insert("ca-certificates");
@@ -166,12 +165,9 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             };
             prerequisites.insert("ca-certificates");
             prerequisites.insert("curl");
-            match binary.format {
-                BinaryFormat::Deb => {
-                    prerequisites.insert("dpkg");
-                    needs_apt_refresh = true;
-                }
-                BinaryFormat::Appimage => {}
+            if binary.format == BinaryFormat::Deb {
+                prerequisites.insert("dpkg");
+                needs_apt_refresh = true;
             }
             push_operation(&mut phases, PlannerPhase::BinaryPackages, Operation::BinaryPackage(planned));
         }
@@ -202,8 +198,8 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         );
     }
 
-    plan_integrations(config, &mut phases)?;
-    plan_desktop(config, platform, &mut phases, &mut prerequisites)?;
+    plan_integrations(config, &mut phases);
+    plan_desktop(config, platform, &mut phases, &mut prerequisites);
     plan_updates(config, platform, &mut phases, &mut needs_apt_refresh)?;
 
     if needs_apt_refresh {
@@ -238,12 +234,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         push_operation(&mut phases, phase, operation);
     }
 
-    let mut final_operations = Vec::new();
-    for (_phase, ops) in phases {
-        final_operations.extend(ops);
-    }
-
-    Ok(final_operations)
+    Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
 }
 
 fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerPhase, op: Operation) {
@@ -330,26 +321,22 @@ fn plan_system_states(
     }
     let Some(ubuntu) = &system.ubuntu else { return };
     let ubuntu_family = platform.upstream == "ubuntu";
-    if let Some(state) = ubuntu.snap {
-        if ubuntu_family {
-            *needs_apt_refresh = true;
+    if let Some(state) = ubuntu.snap
+        && ubuntu_family
+    {
+        *needs_apt_refresh = true;
+        push_operation(phases, PlannerPhase::SystemPackageStates, Operation::UbuntuSnap { enabled: enabled(state) });
+    }
+    if let Some(state) = ubuntu.codecs
+        && ubuntu_family
+    {
+        *needs_apt_refresh = true;
+        if state == InstalledState::Installed {
             push_operation(
                 phases,
                 PlannerPhase::SystemPackageStates,
-                Operation::UbuntuSnap { enabled: enabled(state) },
+                Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
             );
-        }
-    }
-    if let Some(state) = ubuntu.codecs {
-        if ubuntu_family {
-            *needs_apt_refresh = true;
-            if state == InstalledState::Installed {
-                push_operation(
-                    phases,
-                    PlannerPhase::SystemPackageStates,
-                    Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
-                );
-            }
         }
     }
 }
@@ -360,10 +347,8 @@ fn plan_tools(
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
     managers: &mut BTreeSet<ManagerBootstrap>,
-) -> Result<()> {
-    let Some(tools) = &config.tools else {
-        return Ok(());
-    };
+) {
+    let Some(tools) = &config.tools else { return };
     if let Some(selector) = tools.rust.as_deref() {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
@@ -412,13 +397,10 @@ fn plan_tools(
             Operation::PythonToolchain { version: selector.clone(), architecture: platform.architecture },
         );
     }
-    Ok(())
 }
 
-fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation>)]) -> Result<()> {
-    let Some(integrations) = &config.integrations else {
-        return Ok(());
-    };
+fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation>)]) {
+    let Some(integrations) = &config.integrations else { return };
     if let Some(docker) = &integrations.docker {
         if docker.add_user_to_group == Some(true) {
             push_operation(phases, PlannerPhase::Integrations, Operation::DockerGroup);
@@ -437,7 +419,6 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
     if let Some(extensions) = integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()) {
         push_operation(phases, PlannerPhase::Integrations, Operation::VsCodeExtensionSet { extensions });
     }
-    Ok(())
 }
 
 fn plan_desktop(
@@ -445,10 +426,8 @@ fn plan_desktop(
     platform: &Platform,
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
-) -> Result<()> {
-    let Some(desktop) = &config.desktop else {
-        return Ok(());
-    };
+) {
+    let Some(desktop) = &config.desktop else { return };
     let target = match platform.desktop.as_str() {
         "gnome" => DesktopEnvironment::Gnome,
         "cinnamon" => DesktopEnvironment::Cinnamon,
@@ -491,27 +470,26 @@ fn plan_desktop(
             );
         }
     }
-    if target == DesktopEnvironment::Gnome {
-        if let Some(gnome) = &desktop.gnome {
-            if let Some(extensions) = &gnome.extensions {
-                prerequisites.insert("gnome-shell");
-                push_operation(
-                    phases,
-                    PlannerPhase::Desktop,
-                    Operation::GnomeExtensions { extensions: extensions.clone() },
-                );
-            }
-            if gnome.dock == Some(true) {
-                prerequisites.insert("gnome-shell");
-                push_operation(phases, PlannerPhase::Desktop, Operation::GnomeDock);
-            }
-            if gnome.rounded_corners == Some(true) {
-                prerequisites.insert("gnome-shell");
-                push_operation(phases, PlannerPhase::Desktop, Operation::GnomeRoundedCorners);
-            }
+    if target == DesktopEnvironment::Gnome
+        && let Some(gnome) = &desktop.gnome
+    {
+        if let Some(extensions) = &gnome.extensions {
+            prerequisites.insert("gnome-shell");
+            push_operation(
+                phases,
+                PlannerPhase::Desktop,
+                Operation::GnomeExtensions { extensions: extensions.clone() },
+            );
+        }
+        if gnome.dock == Some(true) {
+            prerequisites.insert("gnome-shell");
+            push_operation(phases, PlannerPhase::Desktop, Operation::GnomeDock);
+        }
+        if gnome.rounded_corners == Some(true) {
+            prerequisites.insert("gnome-shell");
+            push_operation(phases, PlannerPhase::Desktop, Operation::GnomeRoundedCorners);
         }
     }
-    Ok(())
 }
 
 fn plan_updates(
@@ -609,18 +587,17 @@ fn plan_updates(
                 },
             );
         }
-        if package_updates.binaries == Some(true) {
-            if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
-                for binary in binaries {
-                    let is_github = matches!(
-                        binary.source.resolve_native(platform.architecture),
-                        Some(ResolvedNativeBinary::Github { .. })
-                    );
-                    if is_github {
-                        let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
-                            .expect("native GitHub source was resolved");
-                        push_operation(phases, PlannerPhase::Updates, Operation::BinaryPackage(planned));
-                    }
+        if package_updates.binaries == Some(true)
+            && let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref())
+        {
+            for binary in binaries {
+                if matches!(
+                    binary.source.resolve_native(platform.architecture),
+                    Some(ResolvedNativeBinary::Github { .. })
+                ) {
+                    let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
+                        .expect("native GitHub source was resolved");
+                    push_operation(phases, PlannerPhase::Updates, Operation::BinaryPackage(planned));
                 }
             }
         }
@@ -639,19 +616,11 @@ fn plan_updates(
 }
 
 fn rust_selector_main(value: &str) -> RustToolchainSelector {
-    if value == "stable" {
-        RustToolchainSelector::Stable
-    } else {
-        RustToolchainSelector::Version(value.to_owned())
-    }
+    if value == "stable" { RustToolchainSelector::Stable } else { RustToolchainSelector::Version(value.to_owned()) }
 }
 
 fn go_selector_main(value: &str) -> GoToolchainSelector {
-    if value == "latest" {
-        GoToolchainSelector::Latest
-    } else {
-        GoToolchainSelector::Version(value.to_owned())
-    }
+    if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
 }
 
 fn node_selector_main(value: &str) -> NodeToolchainSelector {
@@ -663,8 +632,5 @@ fn node_selector_main(value: &str) -> NodeToolchainSelector {
 }
 
 fn enabled(state: EnabledDisabled) -> bool {
-    match state {
-        EnabledDisabled::Enabled => true,
-        EnabledDisabled::Disabled => false,
-    }
+    state == EnabledDisabled::Enabled
 }

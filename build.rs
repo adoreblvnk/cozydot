@@ -51,7 +51,7 @@ fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathB
         return Err(invalid(source, "asset root is not a directory"));
     }
     let mut entries = fs::read_dir(source)?.collect::<io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
         let file_name = entry.file_name();
         let name = valid_name(&file_name, &entry.path())?;
