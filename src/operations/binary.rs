@@ -104,17 +104,6 @@ impl BinaryPackageOperation {
         value.validate()?;
         Ok(value)
     }
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        vec![
-            "binary-package".into(),
-            self.name.clone(),
-            match self.mode {
-                BinaryPackageMode::EnsurePresent => "ensure-present",
-                BinaryPackageMode::Update => "update",
-            }
-            .into(),
-        ]
-    }
 
     fn validate(&self) -> Result<()> {
         validate_definition_name(&self.name)?;

@@ -116,15 +116,6 @@ impl AptRepositoryOperation {
             }
         }
     }
-
-    pub(crate) fn display_args(&self) -> Vec<String> {
-        vec![
-            "apt-repository".into(),
-            self.name.clone(),
-            self.keyring_path.display().to_string(),
-            self.source_list_path.display().to_string(),
-        ]
-    }
 }
 
 pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result<()> {
