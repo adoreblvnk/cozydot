@@ -8,11 +8,6 @@ use std::{
     path::Path,
 };
 use url::{Host, Url};
-use yaml_rust2::{
-    parser::{Event, MarkedEventReceiver, Parser},
-    scanner::{Marker, Scanner, TokenType},
-};
-use yaml_serde::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigVersion;
@@ -49,8 +44,6 @@ pub struct Config {
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self> {
-        reject_yaml_extensions(text)?;
-        preflight_document(text)?;
         let deserializer = yaml_serde::Deserializer::from_str(text);
         let config: Self = serde_path_to_error::deserialize(deserializer).map_err(|error| {
             let path = error.path().to_string();
@@ -1385,117 +1378,6 @@ impl PackageUpdates {
         }
         Ok(())
     }
-}
-
-fn preflight_document(text: &str) -> Result<()> {
-    let value: Value = yaml_serde::from_str(text).context("parse YAML preflight")?;
-    let root = value
-        .as_mapping()
-        .ok_or_else(|| anyhow::anyhow!("config: expected a YAML mapping"))?;
-    let version_key = Value::String("version".into());
-    let version = root.get(&version_key).ok_or_else(|| {
-        anyhow::anyhow!("version: missing required configuration version; only version \"1.0.0\" is supported")
-    })?;
-    match version {
-        Value::String(value) if value == "1.0.0" => {}
-        Value::String(value) => {
-            bail!("version: unsupported configuration version {value:?}; only version \"1.0.0\" is supported")
-        }
-        other => {
-            bail!("version: unsupported configuration version value {other:?}; expected YAML string \"1.0.0\"")
-        }
-    }
-    reject_nulls(&value, "config")
-}
-
-fn reject_nulls(value: &Value, path: &str) -> Result<()> {
-    match value {
-        Value::Null => bail!("{path}: explicit null is invalid; omit the field instead"),
-        Value::Sequence(values) => {
-            for (index, value) in values.iter().enumerate() {
-                reject_nulls(value, &format!("{path}[{index}]"))?;
-            }
-        }
-        Value::Mapping(values) => {
-            for (key, value) in values {
-                let key = key.as_str().unwrap_or("<non-string-key>");
-                let child = if path == "config" {
-                    key.to_owned()
-                } else {
-                    format!("{path}.{key}")
-                };
-                reject_nulls(value, &child)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn reject_yaml_extensions(text: &str) -> Result<()> {
-    for token in Scanner::new(text.chars()) {
-        let extension = match token.1 {
-            TokenType::VersionDirective(..) | TokenType::TagDirective(..) => Some("YAML directives"),
-            TokenType::Tag(..) => Some("YAML tags"),
-            TokenType::Anchor(..) => Some("YAML anchors"),
-            TokenType::Alias(..) => Some("YAML aliases"),
-            _ => None,
-        };
-        if let Some(extension) = extension {
-            bail!(
-                "line {}, column {}: {extension} are not supported by configuration version 1.0.0",
-                token.0.line() + 1,
-                token.0.col() + 1
-            );
-        }
-    }
-
-    #[derive(Default)]
-    struct Receiver {
-        documents: usize,
-        error: Option<anyhow::Error>,
-    }
-    impl MarkedEventReceiver for Receiver {
-        fn on_event(&mut self, event: Event, marker: Marker) {
-            if self.error.is_some() {
-                return;
-            }
-            let extension = match event {
-                Event::DocumentStart => {
-                    self.documents += 1;
-                    (self.documents > 1).then_some("multiple YAML documents")
-                }
-                Event::Alias(_) => Some("YAML aliases"),
-                Event::Scalar(_, _, anchor, tag)
-                | Event::SequenceStart(anchor, tag)
-                | Event::MappingStart(anchor, tag) => {
-                    if anchor != 0 {
-                        Some("YAML anchors")
-                    } else if tag.is_some() {
-                        Some("YAML tags")
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-            if let Some(extension) = extension {
-                self.error = Some(anyhow::anyhow!(
-                    "line {}, column {}: {extension} are not supported by configuration version 1.0.0",
-                    marker.line() + 1,
-                    marker.col() + 1
-                ));
-            }
-        }
-    }
-    let mut receiver = Receiver::default();
-    Parser::new_from_str(text)
-        .load(&mut receiver, true)
-        .context("parse YAML extension preflight")?;
-    if let Some(error) = receiver.error {
-        return Err(error);
-    }
-    Ok(())
 }
 
 fn deserialize_string<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
