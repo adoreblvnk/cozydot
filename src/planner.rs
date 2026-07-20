@@ -1,13 +1,14 @@
 use crate::{
     config::{
-        resolve_platform_identity, AptUpdate, BinaryFormat, Config, EnabledDisabled, InstalledState,
-        ResolvedNativeBinary, SourceMode, Theme,
+        resolve_platform_identity, AptUpdate, BinaryFormat, Config, EnabledDisabled,
+        InstalledState, ResolvedNativeBinary, SourceMode, Theme,
     },
     operations::{
-        AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
-        BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
-        BinarySourceOperation, CargoPackageMode, DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository,
-        GoToolchainSelector, NerdFontsMode, NodeToolchainSelector, NpmPackageMode, Operation, RustToolchainSelector,
+        AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken,
+        AptUpgradePolicy, BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation,
+        BinaryPackageSelector, BinarySha256, BinarySourceOperation, CargoPackageMode,
+        DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository, GoToolchainSelector,
+        NerdFontsMode, NodeToolchainSelector, NpmPackageMode, Operation, RustToolchainSelector,
         ToolMutationMode,
     },
     platform::{Architecture, Platform},
@@ -171,7 +172,13 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         );
     }
 
-    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers)?;
+    plan_tools(
+        config,
+        platform,
+        &mut phases,
+        &mut prerequisites,
+        &mut managers,
+    )?;
 
     if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()) {
         prerequisites.insert("ca-certificates");
@@ -203,7 +210,12 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
 
     if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()) {
         for binary in binaries {
-            let Some(planned) = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)? else {
+            let Some(planned) = plan_binary(
+                binary,
+                platform.architecture,
+                BinaryPackageMode::EnsurePresent,
+            )?
+            else {
                 continue;
             };
             prerequisites.insert("ca-certificates");
@@ -285,11 +297,17 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
 
     for manager in &managers {
         let (phase, operation) = match manager {
-            ManagerBootstrap::Flatpak => (PlannerPhase::ManagerBootstraps, Operation::FlatpakEnsureFlathub),
-            ManagerBootstrap::Rustup => (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap),
-            ManagerBootstrap::CargoBinstall => {
-                (PlannerPhase::CargoBinstallBootstrap, Operation::CargoBinstallBootstrap)
+            ManagerBootstrap::Flatpak => (
+                PlannerPhase::ManagerBootstraps,
+                Operation::FlatpakEnsureFlathub,
+            ),
+            ManagerBootstrap::Rustup => {
+                (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap)
             }
+            ManagerBootstrap::CargoBinstall => (
+                PlannerPhase::CargoBinstallBootstrap,
+                Operation::CargoBinstallBootstrap,
+            ),
             ManagerBootstrap::Fnm => (PlannerPhase::ManagerBootstraps, Operation::FnmBootstrap),
             ManagerBootstrap::Uv => (PlannerPhase::ManagerBootstraps, Operation::UvBootstrap),
         };
@@ -304,7 +322,11 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     Ok(final_operations)
 }
 
-fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerPhase, op: Operation) {
+fn push_operation(
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
+    phase: PlannerPhase,
+    op: Operation,
+) {
     phases
         .iter_mut()
         .find(|(p, _)| *p == phase)
@@ -322,7 +344,10 @@ fn plan_repository(
     let layout = if let Some(path) = &repository.path {
         AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?)
     } else {
-        let suite_token = resolved.suite.as_ref().expect("validated suite/components repository");
+        let suite_token = resolved
+            .suite
+            .as_ref()
+            .expect("validated suite/components repository");
         AptRepositorySourceLayout::SuiteComponents {
             suite: AptRepositoryToken::parse(suite_token.as_str())?,
             components: repository
@@ -353,7 +378,10 @@ fn plan_binary(
         return Ok(None);
     };
     let source = match native {
-        ResolvedNativeBinary::Github { repository, selector } => BinarySourceOperation::GithubLatest {
+        ResolvedNativeBinary::Github {
+            repository,
+            selector,
+        } => BinarySourceOperation::GithubLatest {
             repository: GithubRepository::parse(repository.to_owned())?,
             selector: BinaryPackageSelector::new(selector.to_owned())?,
             sha256: None,
@@ -431,7 +459,9 @@ fn plan_tools(
     prerequisites: &mut BTreeSet<&'static str>,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) -> Result<()> {
-    let Some(tools) = &config.tools else { return Ok(()) };
+    let Some(tools) = &config.tools else {
+        return Ok(());
+    };
     if let Some(selector) = tools.rust.as_deref() {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
@@ -509,9 +539,17 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
         .as_ref()
         .is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true))
     {
-        push_operation(phases, PlannerPhase::Integrations, Operation::VirtualBoxGroup);
+        push_operation(
+            phases,
+            PlannerPhase::Integrations,
+            Operation::VirtualBoxGroup,
+        );
     }
-    if let Some(extensions) = integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()) {
+    if let Some(extensions) = integrations
+        .vscode
+        .as_ref()
+        .map(|vscode| vscode.extensions.clone())
+    {
         push_operation(
             phases,
             PlannerPhase::Integrations,
@@ -599,7 +637,11 @@ fn plan_desktop(
             }
             if gnome.rounded_corners == Some(true) {
                 prerequisites.insert("gnome-shell");
-                push_operation(phases, PlannerPhase::Desktop, Operation::GnomeRoundedCorners);
+                push_operation(
+                    phases,
+                    PlannerPhase::Desktop,
+                    Operation::GnomeRoundedCorners,
+                );
             }
         }
     }
@@ -721,9 +763,14 @@ fn plan_updates(
                         Some(ResolvedNativeBinary::Github { .. })
                     );
                     if is_github {
-                        let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
-                            .expect("native GitHub source was resolved");
-                        push_operation(phases, PlannerPhase::Updates, Operation::BinaryPackage(planned));
+                        let planned =
+                            plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
+                                .expect("native GitHub source was resolved");
+                        push_operation(
+                            phases,
+                            PlannerPhase::Updates,
+                            Operation::BinaryPackage(planned),
+                        );
                     }
                 }
             }

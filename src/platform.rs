@@ -1,125 +1,7 @@
-use std::{fs, io::ErrorKind, path::Path, process::Command};
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-
-use self::os_release::OsRelease;
-
-pub(crate) mod os_release {
-    use anyhow::{bail, Context, Result};
-    use std::collections::BTreeMap;
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub(crate) struct OsRelease {
-        fields: BTreeMap<String, String>,
-    }
-
-    impl OsRelease {
-        pub(crate) fn parse(input: &str) -> Result<Self> {
-            let mut fields = BTreeMap::new();
-            for (index, line) in input.lines().enumerate() {
-                let line_number = index + 1;
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                let (key, value) = line
-                    .split_once('=')
-                    .with_context(|| format!("os-release line {line_number} is not KEY=VALUE"))?;
-                validate_key(key).with_context(|| format!("invalid os-release key on line {line_number}"))?;
-                let value =
-                    parse_value(value).with_context(|| format!("invalid os-release value on line {line_number}"))?;
-                // os-release(5) specifies that readers use the later assignment.
-                fields.insert(key.to_owned(), value);
-            }
-            Ok(Self { fields })
-        }
-
-        pub(crate) fn get(&self, key: &str) -> Option<&str> {
-            self.fields.get(key).map(String::as_str)
-        }
-    }
-
-    fn validate_key(key: &str) -> Result<()> {
-        let mut bytes = key.bytes();
-        if !bytes.next().is_some_and(|byte| byte.is_ascii_uppercase())
-            || !bytes.all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
-        {
-            bail!("keys must match [A-Z][A-Z0-9_]*");
-        }
-        Ok(())
-    }
-
-    fn parse_value(value: &str) -> Result<String> {
-        if value.bytes().any(|byte| byte.is_ascii_control()) {
-            bail!("control characters are not allowed");
-        }
-        match value.as_bytes().first().copied() {
-            Some(b'\'') => parse_single_quoted(value),
-            Some(b'"') => parse_double_quoted(value),
-            _ => parse_unquoted(value),
-        }
-    }
-
-    fn parse_single_quoted(value: &str) -> Result<String> {
-        let body = value
-            .strip_prefix('\'')
-            .and_then(|value| value.strip_suffix('\''))
-            .context("unmatched single quote")?;
-        if body.contains('\'') {
-            bail!("single-quoted values cannot contain a single quote");
-        }
-        Ok(body.to_owned())
-    }
-
-    fn parse_double_quoted(value: &str) -> Result<String> {
-        let body = value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .context("unmatched double quote")?;
-        let mut output = String::with_capacity(body.len());
-        let mut chars = body.chars();
-        while let Some(character) = chars.next() {
-            match character {
-                '\\' => {
-                    let escaped = chars.next().context("dangling escape")?;
-                    if matches!(escaped, '$' | '"' | '\\' | '`') {
-                        output.push(escaped);
-                    } else {
-                        // POSIX double quotes preserve a backslash before other characters.
-                        output.push('\\');
-                        output.push(escaped);
-                    }
-                }
-                '"' => bail!("unescaped double quote"),
-                '$' | '`' => bail!("variable and command expansion are not supported"),
-                _ => output.push(character),
-            }
-        }
-        Ok(output)
-    }
-
-    fn parse_unquoted(value: &str) -> Result<String> {
-        let mut output = String::with_capacity(value.len());
-        let mut chars = value.chars();
-        while let Some(character) = chars.next() {
-            match character {
-                '\\' => output.push(chars.next().context("dangling escape")?),
-                '\'' | '"' => bail!("quoted and unquoted fragments cannot be concatenated"),
-                '$' | '`' => bail!("variable and command expansion are not supported"),
-                character
-                    if character.is_ascii_whitespace()
-                        || matches!(
-                            character,
-                            '|' | '&' | ';' | '(' | ')' | '<' | '>' | '*' | '?' | '[' | ']' | '{' | '}' | '~' | '#'
-                        ) =>
-                {
-                    bail!("shell-special characters must be quoted or escaped")
-                }
-                _ => output.push(character),
-            }
-        }
-        Ok(output)
-    }
-}
+use etc_os_release::OsRelease;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
@@ -134,7 +16,9 @@ impl Architecture {
             "x86_64" | "amd64" => Ok(Self::Amd64),
             "aarch64" | "arm64" => Ok(Self::Arm64),
             "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
-            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"),
+            _ => bail!(
+                "unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"
+            ),
         }
     }
 
@@ -226,10 +110,17 @@ impl ManagedAptSources {
 
 impl Platform {
     pub fn detect() -> Result<Self> {
-        let os = read_system_os_release()?;
-        let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
+        let os = OsRelease::open().context("read os-release")?;
+        let uname = Command::new("uname")
+            .arg("-m")
+            .output()
+            .context("run uname -m")?;
         let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-        let desktop = desktop(std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().as_str());
+        let desktop = desktop(
+            std::env::var("XDG_CURRENT_DESKTOP")
+                .unwrap_or_default()
+                .as_str(),
+        );
         Self::from_os_release(&os, desktop, &arch)
     }
 
@@ -253,15 +144,24 @@ impl Platform {
     }
 
     fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
-        let distro = os.get("ID").unwrap_or_default().to_owned();
-        let upstream: String = upstream(&distro, os.get("ID_LIKE"))?.into();
-        let distro_codename = os.get("VERSION_CODENAME").unwrap_or_default().to_owned();
+        let distro = os.id().to_owned();
+        let upstream: String = upstream(&distro, os.get_value("ID_LIKE"))?.into();
+        let distro_codename = os.version_codename().unwrap_or_default().to_owned();
         let base_codename = match upstream.as_str() {
-            "ubuntu" => extra_codename(os, "UBUNTU_CODENAME").unwrap_or_else(|| distro_codename.clone()),
-            "debian" => extra_codename(os, "DEBIAN_CODENAME").unwrap_or_else(|| distro_codename.clone()),
+            "ubuntu" => os.get_value("UBUNTU_CODENAME"),
+            "debian" => os.get_value("DEBIAN_CODENAME"),
             _ => unreachable!(),
-        };
-        Self::from_release_parts(distro, upstream, distro_codename, base_codename, desktop, arch)
+        }
+        .unwrap_or(&distro_codename)
+        .to_owned();
+        Self::from_release_parts(
+            distro,
+            upstream,
+            distro_codename,
+            base_codename,
+            desktop,
+            arch,
+        )
     }
 
     pub fn managed_apt_sources(&self, configured_components: &[&str]) -> Result<ManagedAptSources> {
@@ -275,11 +175,15 @@ impl Platform {
         let architecture = self.architecture;
         if matches!(self.distro.as_str(), "ubuntu" | "debian")
             && (self.distro_codename.is_empty()
-                || !self.distro_codename.bytes().enumerate().all(|(index, byte)| {
-                    byte.is_ascii_lowercase()
-                        || byte.is_ascii_digit()
-                        || index != 0 && matches!(byte, b'.' | b'_' | b'+' | b'-')
-                }))
+                || !self
+                    .distro_codename
+                    .bytes()
+                    .enumerate()
+                    .all(|(index, byte)| {
+                        byte.is_ascii_lowercase()
+                            || byte.is_ascii_digit()
+                            || index != 0 && matches!(byte, b'.' | b'_' | b'+' | b'-')
+                    }))
         {
             bail!("system.apt.sources: managed requires a valid platform codename");
         }
@@ -292,8 +196,8 @@ impl Platform {
                         release
                     );
                 }
-                let main_archive =
-                    architecture == Architecture::Amd64 || architecture == Architecture::Arm64 && release == "resolute";
+                let main_archive = architecture == Architecture::Amd64
+                    || architecture == Architecture::Arm64 && release == "resolute";
                 let keyring = "/usr/share/keyrings/ubuntu-archive-keyring.gpg";
                 let stanzas = if main_archive {
                     vec![
@@ -415,7 +319,11 @@ fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<St
     } else {
         &["main"]
     };
-    let components = if configured.is_empty() { defaults } else { configured };
+    let components = if configured.is_empty() {
+        defaults
+    } else {
+        configured
+    };
     let supported: &[&str] = match platform.distro.as_str() {
         "ubuntu" => &["main", "restricted", "universe", "multiverse"],
         "debian" if platform.distro_codename == "bullseye" => &["main", "contrib", "non-free"],
@@ -459,29 +367,4 @@ fn normalize_desktop(value: &str) -> String {
         })
         .unwrap_or("none")
         .into()
-}
-
-fn read_os_release(path: &Path) -> Result<OsRelease> {
-    let text = fs::read_to_string(path).with_context(|| format!("read os-release at {}", path.display()))?;
-    parse_os_release(path, &text)
-}
-
-fn parse_os_release(path: &Path, text: &str) -> Result<OsRelease> {
-    OsRelease::parse(text).with_context(|| format!("parse os-release at {}", path.display()))
-}
-
-fn read_system_os_release() -> Result<OsRelease> {
-    read_system_os_release_from(Path::new("/etc/os-release"), Path::new("/usr/lib/os-release"))
-}
-
-pub fn read_system_os_release_from(etc_path: &Path, usr_path: &Path) -> Result<OsRelease> {
-    match fs::read_to_string(etc_path) {
-        Ok(text) => parse_os_release(etc_path, &text),
-        Err(error) if error.kind() == ErrorKind::NotFound => read_os_release(usr_path),
-        Err(error) => Err(error).with_context(|| format!("read os-release at {}", etc_path.display())),
-    }
-}
-
-fn extra_codename(os: &OsRelease, key: &str) -> Option<String> {
-    os.get(key).map(str::to_owned)
 }

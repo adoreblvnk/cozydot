@@ -49,8 +49,8 @@ fn main() -> Result<()> {
 fn apply() -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
-    let config =
-        config::Config::load(&path).with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
+    let config = config::Config::load(&path)
+        .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
     let operations = planner::plan(&config, &platform, &root.join("dotfiles"))?;
     for operation in operations {

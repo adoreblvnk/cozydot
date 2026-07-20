@@ -77,7 +77,7 @@ generated repository file. Edit that active file before running `apply`.
 
 ## Development
 
-The repository pins Rust 1.85.0. The config generator also requires `yq` v4.
+Development requires the latest stable Rust toolchain with Rustfmt and Clippy. The config generator also requires `yq` v4.
 
 ```bash
 scripts/generate-configs.sh --check

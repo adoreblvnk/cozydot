@@ -155,7 +155,9 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
         Err(e) => return Err(e.into()),
     };
     for line in text.lines() {
-        let (hash, relative) = line.split_once('\t').context("malformed managed-files record")?;
+        let (hash, relative) = line
+            .split_once('\t')
+            .context("malformed managed-files record")?;
         let relative = PathBuf::from(relative);
         validate_hash(hash)?;
         validate_relative(&relative)?;
@@ -168,7 +170,9 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
 
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
     let parent = required_parent(path)?;
-    let mut temporary = tempfile::Builder::new().prefix(".managed-files.").tempfile_in(parent)?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".managed-files.")
+        .tempfile_in(parent)?;
     for (relative, hash) in managed {
         writeln!(temporary, "{}\t{}", hash, relative.display())?;
     }
@@ -202,7 +206,9 @@ fn hash_file(path: &Path) -> Result<String> {
 }
 fn validate_relative(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty()
-        || path.components().any(|c| !matches!(c, Component::Normal(_)))
+        || path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
         || path.to_string_lossy().contains(['\t', '\n'])
     {
         bail!("unsafe managed path: {}", path.display());
