@@ -684,6 +684,7 @@ pub(crate) mod packages {
             if mode == CargoPackageMode::UpdateCurrent {
                 args.push("--force".into());
             }
+            args.push("--".into());
             args.extend(packages.to_vec());
             host.require("Cargo package mutation", &binstall, args)?;
             Ok(())

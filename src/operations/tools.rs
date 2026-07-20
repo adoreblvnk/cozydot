@@ -66,7 +66,7 @@ pub(crate) fn execute_rust(
     let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
     let target = architecture.rust_target();
-    let refresh = mode == ToolMutationMode::UpdateMoving && rust_selector_is_moving(selector);
+    let refresh = mode == ToolMutationMode::UpdateMoving;
     let toolchain = format!("{}-{target}", selector.as_str());
     let current = inspect_rust(host, &rustup, &toolchain)?;
     if refresh
@@ -76,7 +76,7 @@ pub(crate) fn execute_rust(
     }
     let default = rust_default(host, &rustup)?;
     if default.as_deref() != Some(toolchain.as_str()) {
-        host.require("Rust default toolchain mutation", &rustup, ["default", &toolchain])?;
+        host.require("Rust default toolchain mutation", &rustup, ["default", "--", &toolchain])?;
     }
     let state = inspect_rust(host, &rustup, &toolchain)?
         .with_context(|| format!("Rust toolchain mutation did not install requested toolchain {toolchain}"))?;
@@ -365,7 +365,7 @@ mod state {
     use super::*;
 
     pub(super) fn inspect_rust(host: &Host, rustup: &str, toolchain: &str) -> Result<Option<RustState>> {
-        let output = host.run(rustup, ["run", toolchain, "rustc", "--version", "--verbose"])?;
+        let output = host.run(rustup, ["run", "--", toolchain, "rustc", "--version", "--verbose"])?;
         if !output.status.success() {
             return Ok(None);
         }
@@ -384,7 +384,7 @@ mod state {
         let mut host = None;
         for line in output.lines() {
             if let Some(value) = line.strip_prefix("release: ")
-                && (release.replace(value.to_owned()).is_some() || !numeric_release(value))
+                && (release.replace(value.to_owned()).is_some() || !valid_rust_release(value))
             {
                 bail!("rustc returned malformed release state");
             } else if let Some(value) = line.strip_prefix("host: ")
@@ -591,21 +591,18 @@ mod state {
 use resolution::*;
 use state::*;
 
-fn rust_install_args(toolchain: &str) -> [&str; 6] {
-    ["toolchain", "install", toolchain, "--profile", "minimal", "--no-self-update"]
-}
-
-fn rust_selector_is_moving(selector: &RustToolchainSelector) -> bool {
-    matches!(selector, RustToolchainSelector::Stable)
-        || matches!(selector, RustToolchainSelector::Version(value) if value.split('.').count() == 2)
+fn rust_install_args(toolchain: &str) -> [&str; 7] {
+    ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
 }
 
 fn rust_release_matches(release: &str, selector: &RustToolchainSelector) -> bool {
-    numeric_release(release)
-        && match selector {
-            RustToolchainSelector::Stable => true,
-            RustToolchainSelector::Version(requested) => version_matches(release, requested),
+    match selector {
+        RustToolchainSelector::Stable => numeric_release(release),
+        RustToolchainSelector::Version(requested) if numeric_version(requested, 2, 3) => {
+            numeric_release(release) && version_matches(release, requested)
         }
+        RustToolchainSelector::Version(_) => valid_rust_release(release),
+    }
 }
 
 fn node_alias(selector: &NodeToolchainSelector) -> String {
@@ -620,6 +617,10 @@ fn node_alias(selector: &NodeToolchainSelector) -> String {
 
 fn valid_rust_host(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn valid_rust_release(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(char::is_whitespace)
 }
 
 fn numeric_release(value: &str) -> bool {

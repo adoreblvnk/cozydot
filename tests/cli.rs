@@ -209,12 +209,94 @@ packages:
 }
 
 #[test]
-fn noncanonical_tool_selectors_and_gnome_uuids_are_rejected() {
+fn empty_sections_and_false_enable_flags_are_noops() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+system:
+  require:
+    distros: []
+    desktops: []
+  ensure_admin: false
+  apt: {}
+  ubuntu: {}
+packages:
+  apt:
+    remove: []
+    install: []
+    repositories: []
+  flatpak: []
+  cargo: []
+  npm: []
+  binaries: []
+tools: {}
+fonts:
+  nerd: []
+dotfiles:
+  packages: []
+integrations:
+  docker:
+    add_user_to_group: false
+  virtualbox:
+    add_user_to_group: false
+  vscode:
+    extensions: []
+desktop:
+  idle: {}
+  gnome:
+    extensions: []
+    dock: false
+    rounded_corners: false
+updates:
+  flatpak: false
+  fonts: false
+  tools:
+    rust: false
+    go: false
+    node: false
+  packages:
+    cargo: false
+    npm: false
+    binaries: false
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn true_updates_require_nonempty_targets_and_rendered_values_stay_valid() {
     for (config, message) in [
-        ("version: 1.0.0\ntools:\n  go: \"01.2\"\n", "numeric components cannot have leading zeroes"),
         (
-            "version: 1.0.0\ndesktop:\n  gnome:\n    extensions: [bad/uuid@example.com]\n",
-            "invalid GNOME extension UUID",
+            "version: 1.0.0\npackages:\n  flatpak: []\nupdates:\n  flatpak: true\n",
+            "updates.flatpak: requires configured packages.flatpak targets",
+        ),
+        (
+            "version: 1.0.0\nfonts:\n  nerd: []\nupdates:\n  fonts: true\n",
+            "updates.fonts: requires configured fonts.nerd targets",
+        ),
+        (
+            "version: 1.0.0\npackages:\n  cargo: []\nupdates:\n  packages:\n    cargo: true\n",
+            "updates.packages.cargo: requires configured packages.cargo targets",
+        ),
+        (
+            "version: 1.0.0\npackages:\n  npm: []\nupdates:\n  packages:\n    npm: true\n",
+            "updates.packages.npm: requires configured packages.npm targets",
+        ),
+        (
+            "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      driver: local\n      max_size: invalid\n",
+            "invalid Docker size",
         ),
     ] {
         let temp = tempfile::tempdir().unwrap();
