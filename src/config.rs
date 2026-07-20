@@ -1076,10 +1076,8 @@ impl ToolUpdates {
         if self.go == Some(true) && tools.and_then(|tools| tools.go.as_deref()) != Some("latest") {
             bail!("updates.tools.go: requires tools.go: latest");
         }
-        if self.node == Some(true)
-            && !tools.and_then(|tools| tools.node.as_deref()).is_some_and(|value| matches!(value, "lts" | "latest"))
-        {
-            bail!("updates.tools.node: requires a configured moving Node selector");
+        if self.node == Some(true) && tools.and_then(|tools| tools.node.as_ref()).is_none() {
+            bail!("updates.tools.node: requires a configured Node selector");
         }
         Ok(())
     }

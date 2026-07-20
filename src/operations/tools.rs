@@ -1,4 +1,4 @@
-use crate::{config::HttpsUrl, platform::Architecture};
+use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{
     os::unix::fs::PermissionsExt,
@@ -23,29 +23,7 @@ impl ToolMutationMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RustToolchainSelector {
-    Stable,
-    Version(String),
-}
-
-impl RustToolchainSelector {
-    pub(super) fn as_str(&self) -> &str {
-        match self {
-            Self::Stable => "stable",
-            Self::Version(value) => value,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
-    Latest,
-    Version(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NodeToolchainSelector {
-    Lts,
     Latest,
     Version(String),
 }
@@ -57,35 +35,11 @@ struct GoRelease {
     checksum: String,
 }
 
-pub(crate) fn execute_rust(
-    host: &Host,
-    selector: &RustToolchainSelector,
-    architecture: Architecture,
-    mode: ToolMutationMode,
-) -> Result<()> {
+pub(crate) fn execute_rust(host: &Host, selector: &str) -> Result<()> {
     let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
-    let target = architecture.rust_target();
-    let refresh = mode == ToolMutationMode::UpdateMoving;
-    let toolchain = format!("{}-{target}", selector.as_str());
-    let current = inspect_rust(host, &rustup, &toolchain)?;
-    if refresh
-        || current.as_ref().is_none_or(|state| state.host != target || !rust_release_matches(&state.release, selector))
-    {
-        host.require("Rust toolchain mutation", &rustup, rust_install_args(&toolchain))?;
-    }
-    let default = rust_default(host, &rustup)?;
-    if default.as_deref() != Some(toolchain.as_str()) {
-        host.require("Rust default toolchain mutation", &rustup, ["default", "--", &toolchain])?;
-    }
-    let state = inspect_rust(host, &rustup, &toolchain)?
-        .with_context(|| format!("Rust toolchain mutation did not install requested toolchain {toolchain}"))?;
-    if state.host != target || !rust_release_matches(&state.release, selector) {
-        bail!("Rust toolchain mutation produced mismatched release or host state");
-    }
-    if rust_default(host, &rustup)?.as_deref() != Some(toolchain.as_str()) {
-        bail!("Rust default toolchain mutation did not select {toolchain}");
-    }
+    host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
+    host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
     Ok(())
 }
 
@@ -184,85 +138,28 @@ pub(crate) fn execute_go(
     Ok(())
 }
 
-pub(crate) fn execute_node(
-    host: &Host,
-    selector: &NodeToolchainSelector,
-    _architecture: Architecture,
-    mode: ToolMutationMode,
-) -> Result<()> {
+pub(crate) fn execute_node(host: &Host, selector: &str) -> Result<()> {
     let fnm = resolve_fnm(host)?;
-
-    let alias = node_alias(selector);
-    let current = inspect_node(host, &fnm, &alias)?;
-
-    if mode == ToolMutationMode::EnsurePresent
-        && let Some(version) = &current
-    {
-        let accepted = match selector {
-            NodeToolchainSelector::Latest | NodeToolchainSelector::Lts => true,
-            NodeToolchainSelector::Version(requested) => version_matches(version.trim_start_matches('v'), requested),
-        };
-        if accepted {
-            let default = fnm_default(host, &fnm)?;
-            if default.as_deref() != Some(version.as_str()) {
-                host.require("Node default toolchain mutation", &fnm, ["default", version])?;
-            }
-            if fnm_default(host, &fnm)?.as_deref() != Some(version.as_str()) {
-                bail!("Node default toolchain mutation did not select {}", version);
-            }
-            return Ok(());
-        }
-    }
-
-    let resolved_version = resolve_node_version(host, &fnm, selector)?;
-
-    if current.as_deref() != Some(resolved_version.as_str()) {
-        host.require("Node toolchain mutation", &fnm, ["install", &resolved_version, "--progress", "never"])?;
-        if current.is_some() {
-            host.require("Node toolchain alias replacement", &fnm, ["unalias", &alias])?;
-        }
-        host.require("Node toolchain alias publication", &fnm, ["alias", &resolved_version, &alias])?;
-    }
-    let default = fnm_default(host, &fnm)?;
-    if default.as_deref() != Some(resolved_version.as_str()) {
-        host.require("Node default toolchain mutation", &fnm, ["default", &resolved_version])?;
-    }
-    let installed = inspect_node(host, &fnm, &alias)?
-        .context("Node toolchain mutation did not publish the managed selector alias")?;
-    if installed != resolved_version {
-        bail!("Node toolchain mutation produced mismatched version state");
-    }
-    if fnm_default(host, &fnm)?.as_deref() != Some(resolved_version.as_str()) {
-        bail!("Node default toolchain mutation did not select {}", resolved_version);
-    }
+    let default = if selector == "lts" {
+        host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--lts"])?;
+        "lts-latest"
+    } else {
+        host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--", selector])?;
+        selector
+    };
+    host.require("Node default toolchain mutation", &fnm, ["default", "--", default])?;
     Ok(())
 }
 
-pub(crate) fn execute_python(host: &Host, version: &str, architecture: Architecture) -> Result<()> {
+pub(crate) fn execute_python(host: &Host, version: &str) -> Result<()> {
     let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
         .context("Python toolchain operation: uv is unavailable after bootstrap")?;
 
-    if let Some(current_version) = inspect_python(host, &uv, version)?
-        && version_matches(&current_version, version)
-    {
-        return Ok(());
-    }
-
-    let resolved = resolve_python_version(host, &uv, version, architecture)?;
-
-    let current = inspect_python(host, &uv, &resolved)?;
-    if current.as_deref() != Some(resolved.as_str()) {
-        host.require(
-            "Python toolchain mutation",
-            &uv,
-            ["python", "install", "--no-config", "--managed-python", "--no-progress", "--default", &resolved],
-        )?;
-    }
-    let installed = inspect_python(host, &uv, &resolved)?
-        .context("Python toolchain mutation did not install a managed interpreter")?;
-    if installed != resolved {
-        bail!("Python toolchain mutation installed mismatched version {installed}");
-    }
+    host.require(
+        "Python toolchain mutation",
+        &uv,
+        ["python", "install", "--no-config", "--managed-python", "--no-progress", "--default", "--", version],
+    )?;
     Ok(())
 }
 
@@ -294,128 +191,10 @@ mod resolution {
         )?;
         Ok(GoRelease { version, filename, checksum })
     }
-
-    pub(super) fn resolve_python_version(
-        host: &Host,
-        uv: &str,
-        requested: &str,
-        architecture: Architecture,
-    ) -> Result<String> {
-        let output = host.require(
-            "Python release availability",
-            uv,
-            [
-                "python",
-                "list",
-                requested,
-                "--all-versions",
-                "--only-downloads",
-                "--output-format",
-                "json",
-                "--no-config",
-                "--no-progress",
-            ],
-        )?;
-        let value: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("uv returned malformed Python release JSON")?;
-        let entries = value.as_array().context("uv Python release state must be an array")?;
-        let expected_arch = match architecture {
-            Architecture::Amd64 => "x86_64",
-            Architecture::Arm64 => "aarch64",
-            Architecture::Arm32 => "armv7",
-        };
-        let mut matches = Vec::new();
-        for (index, value) in entries.iter().enumerate() {
-            let entry = value.as_object().with_context(|| format!("uv Python release {index} must be an object"))?;
-            let string = |field: &str| -> Result<&str> {
-                entry
-                    .get(field)
-                    .with_context(|| format!("uv Python release {index} is missing {field}"))?
-                    .as_str()
-                    .with_context(|| format!("uv Python release {index} {field} must be a string"))
-            };
-            let version = string("version")?;
-            validate_numeric_version(version, 3, 3, "uv Python release")?;
-            let url = HttpsUrl::parse(string("url")?)?;
-            if url.as_str() != string("url")? {
-                bail!("uv Python release URL is not canonical");
-            }
-            if string("implementation")? == "cpython"
-                && string("os")? == "linux"
-                && string("variant")? == "default"
-                && string("arch")? == expected_arch
-                && string("libc")? == "gnu"
-                && version_matches(version, requested)
-            {
-                matches.push(version.to_owned());
-            }
-        }
-        matches.sort_by_key(|version| numeric_version_key(version));
-        matches.dedup();
-        matches.pop().with_context(|| format!("uv has no managed Python release matching {requested:?}"))
-    }
-
-    fn numeric_version_key(value: &str) -> (u64, u64, u64) {
-        let mut parts = value.split('.').map(|part| part.parse::<u64>().unwrap_or_default());
-        (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next().unwrap_or_default())
-    }
 }
 
 mod state {
     use super::*;
-
-    pub(super) fn inspect_rust(host: &Host, rustup: &str, toolchain: &str) -> Result<Option<RustState>> {
-        let output = host.run(rustup, ["run", "--", toolchain, "rustc", "--version", "--verbose"])?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        parse_rust_state(&output.stdout).map(Some)
-    }
-
-    #[derive(Debug, PartialEq, Eq)]
-    pub(super) struct RustState {
-        pub(super) release: String,
-        pub(super) host: String,
-    }
-
-    pub(super) fn parse_rust_state(output: &[u8]) -> Result<RustState> {
-        let output = std::str::from_utf8(output).context("rustc returned non-UTF-8 state")?;
-        let mut release = None;
-        let mut host = None;
-        for line in output.lines() {
-            if let Some(value) = line.strip_prefix("release: ")
-                && (release.replace(value.to_owned()).is_some() || !valid_rust_release(value))
-            {
-                bail!("rustc returned malformed release state");
-            } else if let Some(value) = line.strip_prefix("host: ")
-                && (host.replace(value.to_owned()).is_some() || !valid_rust_host(value))
-            {
-                bail!("rustc returned malformed host state");
-            }
-        }
-        Ok(RustState {
-            release: release.context("rustc state is missing release")?,
-            host: host.context("rustc state is missing host")?,
-        })
-    }
-
-    pub(super) fn rust_default(host: &Host, rustup: &str) -> Result<Option<String>> {
-        let output = host.run(rustup, ["default"])?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let output = single_line(&output.stdout, "rustup default")?;
-        if output == "no default toolchain configured" {
-            return Ok(None);
-        }
-        let Some(toolchain) = output.strip_suffix(" (default)") else {
-            bail!("rustup returned malformed default toolchain state");
-        };
-        if toolchain.is_empty() || toolchain.chars().any(char::is_whitespace) {
-            bail!("rustup returned malformed default toolchain state");
-        }
-        Ok(Some(toolchain.to_owned()))
-    }
 
     #[derive(Debug, PartialEq, Eq)]
     pub(super) struct GoState {
@@ -493,73 +272,6 @@ mod state {
         bail!("Node toolchain operation: fnm is unavailable after bootstrap")
     }
 
-    pub(super) fn inspect_node(host: &Host, fnm: &str, selector: &str) -> Result<Option<String>> {
-        let output = host.run(fnm, ["exec", "--using", selector, "--", "node", "--version"])?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        parse_node_version(&output.stdout).map(Some)
-    }
-
-    pub(super) fn resolve_node_version(host: &Host, fnm: &str, selector: &NodeToolchainSelector) -> Result<String> {
-        if let NodeToolchainSelector::Version(version) = selector
-            && numeric_version(version, 3, 3)
-        {
-            return Ok(format!("v{version}"));
-        }
-        let mut args = vec!["list-remote", "--latest"];
-        match selector {
-            NodeToolchainSelector::Lts => args.push("--lts"),
-            NodeToolchainSelector::Latest => {}
-            NodeToolchainSelector::Version(version) => {
-                args.extend(["--filter", version]);
-            }
-        }
-        let output = host.require("Node release resolution", fnm, args)?;
-        parse_remote_node_version(&output.stdout)
-    }
-
-    pub(super) fn parse_remote_node_version(output: &[u8]) -> Result<String> {
-        let output = single_line(output, "fnm list-remote")?;
-        let version = output.split_whitespace().next().context("fnm list-remote returned empty state")?;
-        if !output.chars().all(|character| !character.is_control() || character == '\t') {
-            bail!("fnm list-remote returned malformed state");
-        }
-        parse_node_version(format!("{version}\n").as_bytes())
-    }
-
-    pub(super) fn parse_node_version(output: &[u8]) -> Result<String> {
-        let version = single_line(output, "node --version")?;
-        let numeric = version
-            .strip_prefix('v')
-            .filter(|version| numeric_version(version, 3, 3))
-            .context("node returned malformed version state")?;
-        Ok(format!("v{numeric}"))
-    }
-
-    pub(super) fn fnm_default(host: &Host, fnm: &str) -> Result<Option<String>> {
-        let output = host.run(fnm, ["default"])?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        if output.stdout.is_empty() || output.stdout == b"none\n" || output.stdout == b"none" {
-            return Ok(None);
-        }
-        parse_node_version(&output.stdout).map(Some)
-    }
-
-    pub(super) fn inspect_python(host: &Host, uv: &str, request: &str) -> Result<Option<String>> {
-        let output = host.run(uv, ["python", "find", "--no-project", "--managed-python", "--show-version", request])?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let version = single_line(&output.stdout, "uv python find")?;
-        if !numeric_version(version, 3, 3) {
-            bail!("uv returned malformed managed Python version state");
-        }
-        Ok(Some(version.to_owned()))
-    }
-
     pub(super) fn resolve_managed(
         host: &Host,
         directory_variable: &str,
@@ -595,38 +307,6 @@ fn rust_install_args(toolchain: &str) -> [&str; 7] {
     ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
 }
 
-fn rust_release_matches(release: &str, selector: &RustToolchainSelector) -> bool {
-    match selector {
-        RustToolchainSelector::Stable => numeric_release(release),
-        RustToolchainSelector::Version(requested) if numeric_version(requested, 2, 3) => {
-            numeric_release(release) && version_matches(release, requested)
-        }
-        RustToolchainSelector::Version(_) => valid_rust_release(release),
-    }
-}
-
-fn node_alias(selector: &NodeToolchainSelector) -> String {
-    match selector {
-        NodeToolchainSelector::Lts => "cozydot-lts".into(),
-        NodeToolchainSelector::Latest => "cozydot-latest".into(),
-        NodeToolchainSelector::Version(version) => {
-            format!("cozydot-v{}", version.replace('.', "_"))
-        }
-    }
-}
-
-fn valid_rust_host(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-}
-
-fn valid_rust_release(value: &str) -> bool {
-    !value.is_empty() && !value.chars().any(char::is_whitespace)
-}
-
-fn numeric_release(value: &str) -> bool {
-    numeric_version(value, 3, 3)
-}
-
 fn version_matches(actual: &str, requested: &str) -> bool {
     actual == requested || actual.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
 }
@@ -639,13 +319,6 @@ fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {
                 && part.bytes().all(|byte| byte.is_ascii_digit())
                 && (*part == "0" || !part.starts_with('0'))
         })
-}
-
-fn validate_numeric_version(value: &str, min_parts: usize, max_parts: usize, label: &str) -> Result<()> {
-    if !numeric_version(value, min_parts, max_parts) {
-        bail!("invalid {label} version {value:?}; expected {min_parts} to {max_parts} numeric components");
-    }
-    Ok(())
 }
 
 fn single_line<'a>(output: &'a [u8], command: &str) -> Result<&'a str> {

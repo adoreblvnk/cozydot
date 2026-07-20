@@ -106,7 +106,7 @@ pub use packages::fonts::NerdFontsMode;
 pub use packages::npm::NpmPackageMode;
 pub use repository::{AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken};
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
-pub use tools::{GoToolchainSelector, NodeToolchainSelector, RustToolchainSelector, ToolMutationMode};
+pub use tools::{GoToolchainSelector, ToolMutationMode};
 
 use crate::platform::{Architecture, ManagedAptSources};
 use anyhow::{Context, Result, bail};
@@ -145,14 +145,14 @@ pub enum Operation {
     NerdFonts { families: Vec<String>, mode: NerdFontsMode },
     RustupBootstrap,
     CargoBinstallBootstrap,
-    RustToolchain { selector: RustToolchainSelector, architecture: Architecture, mode: ToolMutationMode },
+    RustToolchain { selector: String },
     CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
-    NodeToolchain { selector: NodeToolchainSelector, architecture: Architecture, mode: ToolMutationMode },
+    NodeToolchain { selector: String },
     NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
     UbuntuSnap { enabled: bool },
     UnattendedUpgrades { enabled: bool },
     UvBootstrap,
-    PythonToolchain { version: String, architecture: Architecture },
+    PythonToolchain { version: String },
     VirtualBoxGroup,
     VsCodeExtensionSet { extensions: Vec<String> },
 }
@@ -245,12 +245,7 @@ impl Operation {
             .collect(),
             Self::RustupBootstrap => vec!["rustup-bootstrap".into()],
             Self::CargoBinstallBootstrap => vec!["cargo-binstall-bootstrap".into()],
-            Self::RustToolchain { selector, architecture, mode } => vec![
-                "rust-toolchain".into(),
-                mode.as_str().into(),
-                selector.as_str().into(),
-                architecture.rust_target().into(),
-            ],
+            Self::RustToolchain { selector } => vec!["rust-toolchain".into(), selector.clone()],
             Self::CargoPackageSet { packages, mode } => std::iter::once("cargo-package-set".into())
                 .chain(std::iter::once(
                     match mode {
@@ -261,17 +256,7 @@ impl Operation {
                 ))
                 .chain(packages.iter().cloned())
                 .collect(),
-            Self::NodeToolchain { selector, architecture, mode } => vec![
-                "node-toolchain".into(),
-                mode.as_str().into(),
-                match selector {
-                    NodeToolchainSelector::Lts => "lts",
-                    NodeToolchainSelector::Latest => "latest",
-                    NodeToolchainSelector::Version(v) => v,
-                }
-                .into(),
-                architecture.canonical().into(),
-            ],
+            Self::NodeToolchain { selector } => vec!["node-toolchain".into(), selector.clone()],
             Self::NpmPackageSet { packages, mode } => std::iter::once("npm-package-set".into())
                 .chain(std::iter::once(
                     match mode {
@@ -287,9 +272,7 @@ impl Operation {
                 vec!["unattended-upgrades".into(), enabled.to_string()]
             }
             Self::UvBootstrap => vec!["uv-bootstrap".into()],
-            Self::PythonToolchain { version, architecture } => {
-                vec!["python-toolchain".into(), version.clone(), architecture.canonical().into()]
-            }
+            Self::PythonToolchain { version } => vec!["python-toolchain".into(), version.clone()],
             Self::VirtualBoxGroup => vec!["virtualbox-group".into()],
             Self::VsCodeExtensionSet { extensions } => {
                 std::iter::once("vscode-extension-set".into()).chain(extensions.iter().cloned()).collect()
@@ -330,20 +313,14 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
         Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::RustToolchain { selector, architecture, mode } => {
-            completed(tools::execute_rust(&host, selector, *architecture, *mode))
-        }
+        Operation::RustToolchain { selector } => completed(tools::execute_rust(&host, selector)),
         Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
-        Operation::NodeToolchain { selector, architecture, mode } => {
-            completed(tools::execute_node(&host, selector, *architecture, *mode))
-        }
+        Operation::NodeToolchain { selector } => completed(tools::execute_node(&host, selector)),
         Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
         Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
         Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
         Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::PythonToolchain { version, architecture } => {
-            completed(tools::execute_python(&host, version, *architecture))
-        }
+        Operation::PythonToolchain { version } => completed(tools::execute_python(&host, version)),
         Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
         Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
     }

@@ -1,6 +1,14 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::fs;
+use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+
+fn write_executable(path: &Path, body: &str) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, body).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
+}
 
 #[test]
 fn help_and_version() {
@@ -313,4 +321,85 @@ fn true_updates_require_nonempty_targets_and_rendered_values_stay_valid() {
             .failure()
             .stderr(predicate::str::contains(message));
     }
+}
+
+#[test]
+fn toolchains_delegate_convergence_to_native_managers() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let log = temp.path().join("manager.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\ntools:\n  rust: stable\n  node: latest\n  python: \"3.13\"\nupdates:\n  tools:\n    rust: true\n    node: true\n",
+    )
+    .unwrap();
+
+    let recorder = "#!/bin/sh\nprintf '%s %s\\n' \"${0##*/}\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\n";
+    write_executable(&home.join(".cargo/bin/rustup"), recorder);
+    write_executable(&home.join(".local/share/fnm/fnm"), recorder);
+    write_executable(&home.join(".local/bin/uv"), recorder);
+    let fake_bin = temp.path().join("bin");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nexit 0\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("CARGO_HOME", home.join(".cargo"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("UV_INSTALL_DIR", home.join(".local/bin"))
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        concat!(
+            "rustup toolchain install --profile minimal --no-self-update -- stable\n",
+            "rustup default -- stable\n",
+            "fnm install --progress never -- latest\n",
+            "fnm default -- latest\n",
+            "uv python install --no-config --managed-python --no-progress --default -- 3.13\n",
+        )
+    );
+
+    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\ntools:\n  node: lts\n").unwrap();
+    fs::write(&log, "").unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never --lts\nfnm default -- lts-latest\n");
+
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\ntools:\n  node: \"20\"\nupdates:\n  tools:\n    node: true\n",
+    )
+    .unwrap();
+    fs::write(&log, "").unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never -- 20\nfnm default -- 20\n");
 }
