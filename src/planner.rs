@@ -42,6 +42,7 @@ enum PlannerPhase {
     LanguageToolchains,
     CargoBinstallBootstrap,
     LanguagePackages,
+    AppImageManager,
     BinaryPackages,
     Fonts,
     Dotfiles,
@@ -68,6 +69,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         (PlannerPhase::LanguageToolchains, Vec::new()),
         (PlannerPhase::CargoBinstallBootstrap, Vec::new()),
         (PlannerPhase::LanguagePackages, Vec::new()),
+        (PlannerPhase::AppImageManager, Vec::new()),
         (PlannerPhase::BinaryPackages, Vec::new()),
         (PlannerPhase::Fonts, Vec::new()),
         (PlannerPhase::Dotfiles, Vec::new()),
@@ -203,7 +205,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         );
     }
 
-    plan_integrations(config, &mut phases);
+    plan_integrations(config, platform, &mut phases, &mut prerequisites);
     plan_desktop(config, platform, &mut phases, &mut prerequisites);
     plan_updates(config, platform, &mut phases, &mut needs_apt_refresh)?;
 
@@ -301,7 +303,7 @@ fn plan_binary(
             BinaryFormat::Deb => BinaryPackageFormat::Deb,
             BinaryFormat::Appimage => BinaryPackageFormat::AppImage,
         },
-        binary.commands.clone(),
+        binary.commands.clone().unwrap_or_default(),
         architecture,
         source,
         mode,
@@ -396,8 +398,21 @@ fn plan_tools(
     }
 }
 
-fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation>)]) {
+fn plan_integrations(
+    config: &Config,
+    platform: &Platform,
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
+    prerequisites: &mut BTreeSet<&'static str>,
+) {
     let Some(integrations) = &config.integrations else { return };
+    if integrations.appimaged == Some(true) {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        push_operation(
+            phases,
+            PlannerPhase::AppImageManager,
+            Operation::Appimaged { architecture: platform.architecture },
+        );
+    }
     if let Some(docker) = &integrations.docker {
         if docker.add_user_to_group == Some(true) {
             push_operation(phases, PlannerPhase::Integrations, Operation::DockerGroup);

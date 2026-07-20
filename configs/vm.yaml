@@ -118,6 +118,7 @@ dotfiles:
     - wezterm
     - yazi
 integrations:
+  appimaged: false
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc

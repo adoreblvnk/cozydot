@@ -9,7 +9,7 @@ use std::{
     collections::HashSet,
     fs,
     io::Read,
-    os::unix::fs::{MetadataExt, PermissionsExt, symlink},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
@@ -65,15 +65,6 @@ impl BinarySha256 {
     pub fn parse(value: impl AsRef<str>) -> Result<Self> {
         Ok(Self(parse_hex(value.as_ref())?))
     }
-    pub fn as_hex(self) -> String {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        let mut value = String::with_capacity(64);
-        for byte in self.0 {
-            value.push(HEX[(byte >> 4) as usize] as char);
-            value.push(HEX[(byte & 0x0f) as usize] as char);
-        }
-        value
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,8 +98,14 @@ impl BinaryPackageOperation {
 
     fn validate(&self) -> Result<()> {
         validate_definition_name(&self.name)?;
-        if self.commands.is_empty() {
-            bail!("binary package {:?} must declare at least one command", self.name);
+        match self.format {
+            BinaryPackageFormat::Deb if self.commands.is_empty() => {
+                bail!("binary Debian package {:?} must declare at least one command", self.name)
+            }
+            BinaryPackageFormat::AppImage if !self.commands.is_empty() => {
+                bail!("binary AppImage {:?} must not declare commands", self.name)
+            }
+            _ => {}
         }
         let mut seen = HashSet::new();
         for command in &self.commands {
@@ -141,54 +138,21 @@ struct Candidate {
 }
 struct Downloaded {
     temporary: TempPath,
-    actual_sha256: String,
 }
 
 pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
-    let appimage_expectation = if operation.format == BinaryPackageFormat::AppImage {
-        let artifact = appimage::data_artifact(host, operation);
-        let expectation = capture_publication_expectation(&artifact)?;
-        preflight_appimage(host, operation)?;
-        if is_acceptable_live_state(host, operation)? {
-            if !expectation.verify_identity(&artifact)? {
-                bail!(
-                    "TOCTOU conflict detected: live-state inspection passed but destination identity changed for {}",
-                    artifact.display()
-                );
-            }
-            return Ok(());
-        }
-        Some(expectation)
-    } else {
-        None
-    };
-
-    if operation.format == BinaryPackageFormat::Deb && is_acceptable_live_state(host, operation)? {
+    if is_acceptable_live_state(host, operation)? {
         return Ok(());
     }
 
     let candidate = resolve(host, operation)?;
-
     let downloaded = download_candidate(host, operation, candidate)?;
-
-    if operation.format == BinaryPackageFormat::Deb {
-        preflight_deb(host, operation, &downloaded)?;
-        install_deb(host, operation, &downloaded)?;
-    } else {
-        require_elf(downloaded.temporary.path(), &operation.name)?;
-        install_appimage(host, operation, &downloaded.actual_sha256, &downloaded, appimage_expectation.unwrap())?;
-    }
-
-    if !postconditions(host, operation, &downloaded.actual_sha256)? {
-        bail!("binary package postconditions failed");
-    }
-    Ok(())
-}
-
-fn configured_checksum(source: &BinarySourceOperation) -> Option<String> {
-    match source {
-        BinarySourceOperation::GithubLatest { sha256, .. } => sha256.as_ref().map(|s| s.as_hex()),
-        BinarySourceOperation::ChecksummedUrl { sha256, .. } => Some(sha256.as_hex()),
+    match operation.format {
+        BinaryPackageFormat::Deb => {
+            preflight_deb(host, operation, &downloaded)?;
+            install_deb(host, operation, &downloaded)
+        }
+        BinaryPackageFormat::AppImage => install_appimage(host, operation, &downloaded),
     }
 }
 
@@ -198,353 +162,59 @@ fn is_acceptable_live_state(host: &Host, operation: &BinaryPackageOperation) -> 
     }
     match operation.format {
         BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
-        BinaryPackageFormat::AppImage => {
-            let artifact = data_artifact(host, operation);
-            let has_valid_artifact = if let Some(digest) = configured_checksum(&operation.source) {
-                valid_artifact(&artifact, &digest)?
-            } else {
-                valid_artifact_unchecksummed(&artifact)?
-            };
-            if !has_valid_artifact {
-                return Ok(false);
-            }
-            Ok(command_links(host, operation).iter().all(|link| managed_link(link, &artifact)))
-        }
+        BinaryPackageFormat::AppImage => Ok(valid_appimage(&appimage_destination(host, operation))),
     }
 }
 
-fn valid_artifact_unchecksummed(path: &Path) -> Result<bool> {
-    let m = match fs::symlink_metadata(path) {
-        Ok(v) => v,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e.into()),
-    };
-    Ok(m.file_type().is_file()
-        && m.uid() == rustix::process::geteuid().as_raw()
-        && m.nlink() == 1
-        && m.len() > 0
-        && m.permissions().mode() & 0o7777 == 0o755
-        && has_elf_magic(path))
+fn appimage_destination(host: &Host, operation: &BinaryPackageOperation) -> PathBuf {
+    host.home().join("Applications").join(format!("{}.AppImage", operation.name))
 }
 
-#[derive(Debug)]
-pub(crate) enum PublicationExpectation {
-    Absent,
-    Existing(fs::File),
-}
-
-impl PublicationExpectation {
-    pub(crate) fn verify_identity(&self, path: &Path) -> Result<bool> {
-        match self {
-            PublicationExpectation::Absent => match fs::symlink_metadata(path) {
-                Ok(_) => Ok(false),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
-                Err(e) => Err(e.into()),
-            },
-            PublicationExpectation::Existing(file) => match fs::symlink_metadata(path) {
-                Ok(current_metadata) => {
-                    let expected_metadata = file.metadata().context("inspect expected destination descriptor")?;
-                    Ok(current_metadata.dev() == expected_metadata.dev()
-                        && current_metadata.ino() == expected_metadata.ino())
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-                Err(e) => Err(e.into()),
-            },
-        }
-    }
-}
-
-pub(crate) fn capture_publication_expectation(destination: &Path) -> Result<PublicationExpectation> {
-    match rustix::fs::open(
-        destination,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    ) {
-        Ok(fd) => {
-            let file = std::fs::File::from(fd);
-            let metadata = file.metadata().context("inspect existing destination descriptor")?;
-            let uid = rustix::process::geteuid().as_raw();
-            if !metadata.file_type().is_file() {
-                bail!("destination is not a regular file");
-            }
-            if metadata.uid() != uid {
-                bail!("destination owner is not current user");
-            }
-            if metadata.nlink() != 1 {
-                bail!("destination has multiple hard links");
-            }
-            if (metadata.permissions().mode() & 0o7777) != 0o755 {
-                bail!("destination permissions are not exact 0755");
-            }
-            Ok(PublicationExpectation::Existing(file))
-        }
-        Err(rustix::io::Errno::NOENT) => Ok(PublicationExpectation::Absent),
-        Err(other_err) => Err(other_err).context("open existing destination file"),
-    }
-}
-
-pub(crate) fn publish_executable(source: &Path, destination: &Path, expectation: PublicationExpectation) -> Result<()> {
-    let parent = destination.parent().context("destination has no parent")?;
-    let mut source_file = fs::File::open(source)?;
-    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
-    std::io::copy(&mut source_file, staged.as_file_mut())?;
-    staged.as_file_mut().set_permissions(fs::Permissions::from_mode(0o755))?;
-    staged.as_file_mut().sync_all()?;
-    let (file, staged_path) = staged.keep().map_err(|error| error.error)?;
-    // Linux rejects execution while any process still holds the inode open for writing.
-    drop(file);
-
-    let result = (|| -> Result<()> {
-        match expectation {
-            PublicationExpectation::Existing(file) => {
-                let metadata = file.metadata().context("inspect existing destination descriptor")?;
-                let validated_dev = metadata.dev();
-                let validated_ino = metadata.ino();
-
-                rustix::fs::renameat_with(
-                    rustix::fs::CWD,
-                    &staged_path,
-                    rustix::fs::CWD,
-                    destination,
-                    rustix::fs::RenameFlags::EXCHANGE,
-                )
-                .context("atomically exchange staged executable with destination")?;
-
-                let displaced_metadata =
-                    fs::symlink_metadata(&staged_path).context("inspect displaced destination file")?;
-                let displaced_dev = displaced_metadata.dev();
-                let displaced_ino = displaced_metadata.ino();
-
-                if displaced_dev != validated_dev || displaced_ino != validated_ino {
-                    let rollback_res = rustix::fs::renameat_with(
-                        rustix::fs::CWD,
-                        &staged_path,
-                        rustix::fs::CWD,
-                        destination,
-                        rustix::fs::RenameFlags::EXCHANGE,
-                    );
-                    if let Err(rollback_err) = rollback_res {
-                        bail!(
-                            "TOCTOU conflict detected (device/inode mismatch) and rollback exchange failed: {rollback_err:#}"
-                        );
-                    }
-                    bail!("TOCTOU conflict detected (device/inode mismatch), safely rolled back");
-                }
-
-                drop(file);
-
-                fs::remove_file(&staged_path).context("remove displaced old file")?;
-                fs::File::open(parent)?.sync_all().context("sync parent directory")?;
-            }
-            PublicationExpectation::Absent => {
-                rustix::fs::renameat_with(
-                    rustix::fs::CWD,
-                    &staged_path,
-                    rustix::fs::CWD,
-                    destination,
-                    rustix::fs::RenameFlags::NOREPLACE,
-                )
-                .context("atomically publish new executable to vacant destination")?;
-
-                fs::File::open(parent)?.sync_all().context("sync parent directory")?;
-            }
-        }
-        Ok(())
-    })();
-
-    if result.is_err() {
-        let _ = fs::remove_file(&staged_path);
-    }
-    result
-}
-
-mod appimage {
-    use super::*;
-
-    pub(super) fn data_artifact(host: &Host, operation: &BinaryPackageOperation) -> PathBuf {
-        host.value("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| host.home().join(".local/share"))
-            .join("cozydot/binaries")
-            .join(format!("{}.AppImage", operation.name))
-    }
-    pub(super) fn command_links(host: &Host, operation: &BinaryPackageOperation) -> Vec<PathBuf> {
-        let root = host.value("XDG_BIN_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
-        operation.commands.iter().map(|name| root.join(name)).collect()
-    }
-    pub(super) fn preflight_appimage(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
-        let artifact = data_artifact(host, operation);
-        ensure_secure_data_parent(host, &artifact)?;
-        ensure_secure_command_root(host)?;
-        match fs::symlink_metadata(&artifact) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Ok(_) => {
-                if !valid_artifact_unchecksummed(&artifact)? {
-                    bail!("binary AppImage artifact conflict at {}", artifact.display());
-                }
-            }
-            Err(error) => return Err(error.into()),
-        }
-        for link in command_links(host, operation) {
-            preflight_link(&link, &artifact, false)?;
-        }
-        Ok(())
-    }
-    pub(super) fn install_appimage(
-        host: &Host,
-        operation: &BinaryPackageOperation,
-        actual_sha256: &str,
-        downloaded: &Downloaded,
-        expectation: PublicationExpectation,
-    ) -> Result<()> {
-        let artifact = data_artifact(host, operation);
-        ensure_secure_data_parent(host, &artifact)?;
-        if !valid_artifact(&artifact, actual_sha256)? {
-            let source = downloaded.temporary.path();
-            require_elf(source, &operation.name)?;
-            super::publish_executable(source, &artifact, expectation)?;
-        }
-        let links = command_links(host, operation);
-        for link in &links {
-            publish_link(link, &artifact)?;
-        }
-        verify_appimage(&artifact, &links, actual_sha256)?;
-        Ok(())
-    }
-    fn ensure_secure_data_parent(host: &Host, artifact: &Path) -> Result<()> {
-        let data = host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
-        if !data.is_absolute() {
-            bail!("binary data directory must be absolute");
-        }
-        let existed = fs::symlink_metadata(&data).is_ok();
-        fs::create_dir_all(&data)?;
-        if !existed {
-            fs::set_permissions(&data, fs::Permissions::from_mode(0o700))?;
-        }
-        validate_owned_directory(&data)?;
-        let cozy = data.join("cozydot");
-        create_owned_directory(&cozy)?;
-        let binaries = cozy.join("binaries");
-        create_owned_directory(&binaries)?;
-        if artifact.parent() != Some(binaries.as_path()) {
-            bail!("binary artifact path escaped managed directory");
-        }
-        Ok(())
-    }
-    fn ensure_secure_command_root(host: &Host) -> Result<()> {
-        let root = host.value("XDG_BIN_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
-        if !root.is_absolute() {
-            bail!("binary command directory must be absolute");
-        }
-        let existed = fs::symlink_metadata(&root).is_ok();
-        fs::create_dir_all(&root).context("create binary command directory")?;
-        if !existed {
-            fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
-        }
-        validate_owned_directory(&root).context("binary command directory has unsafe type, owner, or permissions")
-    }
-    fn create_owned_directory(path: &Path) -> Result<()> {
-        match fs::create_dir(path) {
-            Ok(()) => fs::set_permissions(path, fs::Permissions::from_mode(0o700))?,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e.into()),
-        }
-        validate_owned_directory(path)
-    }
-    fn validate_owned_directory(path: &Path) -> Result<()> {
-        let m = fs::symlink_metadata(path)?;
-        if !m.file_type().is_dir()
-            || m.uid() != rustix::process::geteuid().as_raw()
-            || m.permissions().mode() & 0o022 != 0
-        {
-            bail!("binary managed data directory has unsafe type, owner, or permissions");
-        }
-        Ok(())
-    }
-
-    fn preflight_link(link: &Path, artifact: &Path, require_absent: bool) -> Result<()> {
-        match fs::symlink_metadata(link) {
-            Ok(_) if require_absent => {
-                bail!("binary AppImage command conflict at {}", link.display())
-            }
-            Ok(m) if m.file_type().is_symlink() && managed_link(link, artifact) => Ok(()),
-            Ok(_) => bail!("binary AppImage command conflict at {}", link.display()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
-        }
-    }
-    fn publish_link(link: &Path, artifact: &Path) -> Result<()> {
-        if managed_link(link, artifact) {
-            return Ok(());
-        }
-        fs::create_dir_all(link.parent().context("binary command link has no parent")?)?;
-        match symlink(artifact, link) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && managed_link(link, artifact) => Ok(()),
-            Err(e) => Err(e).context("publish binary AppImage command link"),
-        }
-    }
-    pub(super) fn managed_link(link: &Path, artifact: &Path) -> bool {
-        fs::symlink_metadata(link).is_ok_and(|m| m.file_type().is_symlink())
-            && fs::read_link(link).is_ok_and(|target| target == artifact)
-    }
-    fn verify_appimage(artifact: &Path, links: &[PathBuf], actual_sha256: &str) -> Result<()> {
-        if !valid_artifact(artifact, actual_sha256)? || links.iter().any(|link| !managed_link(link, artifact)) {
-            bail!("binary AppImage verification failed");
-        }
-        Ok(())
-    }
-    pub(super) fn valid_artifact(path: &Path, digest: &str) -> Result<bool> {
-        let m = match fs::symlink_metadata(path) {
-            Ok(v) => v,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(e) => return Err(e.into()),
-        };
-        Ok(m.file_type().is_file()
-            && m.uid() == rustix::process::geteuid().as_raw()
-            && m.nlink() == 1
-            && m.len() > 0
-            && m.permissions().mode() & 0o7777 == 0o755
+fn valid_appimage(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file()
+            && metadata.len() > 0
+            && metadata.permissions().mode() & 0o111 != 0
             && has_elf_magic(path)
-            && sha256_file(path)? == BinarySha256::parse(digest)?.0)
-    }
-    pub(super) fn postconditions(host: &Host, operation: &BinaryPackageOperation, actual_sha256: &str) -> Result<bool> {
-        match operation.format {
-            BinaryPackageFormat::Deb => Ok(operation.commands.iter().all(|name| executable_on_path(host, name))),
-            BinaryPackageFormat::AppImage => {
-                let artifact = data_artifact(host, operation);
-                Ok(valid_artifact(&artifact, actual_sha256)?
-                    && command_links(host, operation).iter().all(|link| managed_link(link, &artifact)))
-            }
-        }
-    }
-    pub(super) fn verify_commands(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
-        let missing = operation.commands.iter().filter(|name| !executable_on_path(host, name)).collect::<Vec<_>>();
-        if !missing.is_empty() {
-            bail!("binary package installed but commands remain unavailable: {missing:?}");
-        }
-        Ok(())
-    }
-    pub(super) fn executable_on_path(host: &Host, name: &str) -> bool {
-        host.value("PATH")
-            .and_then(|path| {
-                std::env::split_paths(&path).find(|dir| {
-                    fs::metadata(dir.join(name)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                })
-            })
-            .is_some()
-    }
+    })
+}
 
-    pub(super) fn require_elf(path: &Path, name: &str) -> Result<()> {
-        if !has_elf_magic(path) {
-            bail!("binary package {name:?} AppImage does not have ELF magic");
-        }
-        Ok(())
+fn install_appimage(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {
+    require_elf(downloaded.temporary.path(), &operation.name)?;
+    fs::set_permissions(downloaded.temporary.path(), fs::Permissions::from_mode(0o755))?;
+    fs::rename(downloaded.temporary.path(), appimage_destination(host, operation))
+        .context("publish AppImage into Applications")?;
+    Ok(())
+}
+
+fn verify_commands(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
+    let missing = operation.commands.iter().filter(|name| !executable_on_path(host, name)).collect::<Vec<_>>();
+    if !missing.is_empty() {
+        bail!("binary package installed but commands remain unavailable: {missing:?}");
     }
-    pub(super) fn has_elf_magic(path: &Path) -> bool {
-        let mut magic = [0; 4];
-        fs::File::open(path).and_then(|mut f| f.read_exact(&mut magic)).is_ok() && magic == *b"\x7fELF"
+    Ok(())
+}
+
+fn executable_on_path(host: &Host, name: &str) -> bool {
+    host.value("PATH")
+        .and_then(|path| {
+            std::env::split_paths(&path).find(|dir| {
+                fs::metadata(dir.join(name)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            })
+        })
+        .is_some()
+}
+
+fn require_elf(path: &Path, name: &str) -> Result<()> {
+    if !has_elf_magic(path) {
+        bail!("binary package {name:?} AppImage does not have ELF magic");
     }
+    Ok(())
+}
+
+fn has_elf_magic(path: &Path) -> bool {
+    let mut magic = [0; 4];
+    fs::File::open(path).and_then(|mut file| file.read_exact(&mut magic)).is_ok() && magic == *b"\x7fELF"
 }
 
 mod source {
@@ -666,9 +336,15 @@ mod source {
     ) -> Result<Downloaded> {
         let suffix = match operation.format {
             BinaryPackageFormat::Deb => ".deb",
-            BinaryPackageFormat::AppImage => ".AppImage",
+            BinaryPackageFormat::AppImage => ".part",
         };
-        let temporary = TempPath::new_with_suffix(host, &operation.name, suffix)?;
+        let temporary = if operation.format == BinaryPackageFormat::AppImage {
+            let applications = host.home().join("Applications");
+            fs::create_dir_all(&applications).context("create Applications directory")?;
+            TempPath::new_in_with_suffix(&applications, &format!("{}-", operation.name), suffix)?
+        } else {
+            TempPath::new_with_suffix(host, &operation.name, suffix)?
+        };
         host.require(
             "download binary package",
             "curl",
@@ -692,15 +368,15 @@ mod source {
         if !metadata.file_type().is_file() || metadata.len() == 0 {
             bail!("binary package downloaded an empty or non-regular artifact");
         }
-        let actual = BinarySha256(sha256_file(temporary.path())?);
-        if candidate.effective.is_some_and(|expected| expected != actual) {
+        if let Some(expected) = candidate.effective
+            && expected != BinarySha256(sha256_file(temporary.path())?)
+        {
             bail!("binary package SHA-256 checksum mismatch");
         }
-        Ok(Downloaded { temporary, actual_sha256: actual.as_hex() })
+        Ok(Downloaded { temporary })
     }
 }
 
-use appimage::*;
 use source::*;
 
 fn install_deb(host: &Host, operation: &BinaryPackageOperation, downloaded: &Downloaded) -> Result<()> {

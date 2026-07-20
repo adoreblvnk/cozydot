@@ -96,6 +96,8 @@ dotfiles:
     - fastfetch
     - starship
     - yazi
+integrations:
+  appimaged: false
 updates:
   apt: standard
   tools:

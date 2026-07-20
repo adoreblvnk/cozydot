@@ -118,6 +118,14 @@ impl Config {
         if let Some(packages) = &self.packages {
             packages.validate()?;
         }
+        let has_appimages = self
+            .packages
+            .as_ref()
+            .and_then(|packages| packages.binaries.as_ref())
+            .is_some_and(|binaries| binaries.iter().any(|binary| binary.format == BinaryFormat::Appimage));
+        if has_appimages && self.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true) {
+            bail!("packages.binaries: AppImages require integrations.appimaged: true");
+        }
         if let Some(fonts) = &self.fonts {
             fonts.validate()?;
         }
@@ -423,7 +431,7 @@ impl Packages {
                 if !names.insert(binary.name.as_str()) {
                     bail!("packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
                 }
-                for (command_index, command) in binary.commands.iter().enumerate() {
+                for (command_index, command) in binary.commands.iter().flatten().enumerate() {
                     let command_path = format!("packages.binaries[{index}].commands[{command_index}]");
                     if let Some(owner_path) = command_owners.insert(command.as_str(), command_path.clone()) {
                         bail!("{command_path}: command {command:?} is already claimed by {owner_path}");
@@ -661,7 +669,7 @@ pub enum BinaryFormat {
 pub struct BinaryPackage {
     pub name: String,
     pub format: BinaryFormat,
-    pub commands: Vec<String>,
+    pub commands: Option<Vec<String>>,
     pub source: BinarySource,
 }
 
@@ -669,7 +677,16 @@ impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("packages.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        validate_string_values(&self.commands, &format!("{path}.commands"), validate_executable)?;
+        match (self.format, self.commands.as_deref()) {
+            (BinaryFormat::Deb, Some(commands)) => {
+                validate_string_values(commands, &format!("{path}.commands"), validate_executable)?;
+            }
+            (BinaryFormat::Deb, None) => bail!("{path}.commands: required for Debian packages"),
+            (BinaryFormat::Appimage, None) => {}
+            (BinaryFormat::Appimage, Some(_)) => {
+                bail!("{path}.commands: not supported for AppImages managed by appimaged")
+            }
+        }
         self.source.validate(&format!("{path}.source"))
     }
 }
@@ -897,6 +914,7 @@ impl Dotfiles {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Integrations {
+    pub appimaged: Option<bool>,
     pub docker: Option<DockerIntegration>,
     pub virtualbox: Option<VirtualBoxIntegration>,
     pub vscode: Option<VsCodeIntegration>,

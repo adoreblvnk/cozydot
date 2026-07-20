@@ -180,8 +180,6 @@ packages:
           arm64: ^gcm-linux-arm64-.*\.deb$
     - name: obsidian
       format: appimage
-      commands:
-        - obsidian
       source:
         provider: github
         repository: obsidianmd/obsidian-releases
@@ -190,8 +188,6 @@ packages:
           arm64: ^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$
     - name: zen-browser
       format: appimage
-      commands:
-        - zen
       source:
         provider: github
         repository: zen-browser/desktop
@@ -218,6 +214,7 @@ dotfiles:
     - wezterm
     - yazi
 integrations:
+  appimaged: true
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc
