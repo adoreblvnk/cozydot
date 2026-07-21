@@ -199,69 +199,11 @@ impl Product {
 }
 
 fn preflight(host: &Host, product: Product) -> Result<()> {
-    let output = host
-        .require(&format!("{} existing-product preflight", product.label()), product.program(), ["--version"])
+    host.require(&format!("{} existing-product preflight", product.label()), product.program(), ["--version"])
         .with_context(|| {
             format!("{} integration requires an existing usable {} CLI", product.label(), product.program())
         })?;
-    let version = std::str::from_utf8(&output.stdout)
-        .with_context(|| format!("{} version probe returned non-UTF-8 output", product.label()))?;
-    let valid = match product {
-        Product::Docker => valid_docker_version(version),
-        Product::VirtualBox => valid_virtualbox_version(version),
-        Product::VsCode => valid_vscode_version(version),
-    };
-    if !valid {
-        bail!("{} version probe returned malformed output", product.label());
-    }
     Ok(())
-}
-
-fn valid_docker_version(value: &str) -> bool {
-    let value = value.strip_suffix('\n').unwrap_or(value);
-    let Some(value) = value.strip_prefix("Docker version ") else {
-        return false;
-    };
-    let Some((version, build)) = value.split_once(", build ") else {
-        return false;
-    };
-    valid_version_token(version) && valid_token(build)
-}
-
-fn valid_virtualbox_version(value: &str) -> bool {
-    let value = value.strip_suffix('\n').unwrap_or(value);
-    !value.contains(['\n', '\r'])
-        && value.split_once('r').is_some_and(|(version, revision)| {
-            valid_version_token(version) && !revision.is_empty() && revision.bytes().all(|byte| byte.is_ascii_digit())
-        })
-}
-
-fn valid_vscode_version(value: &str) -> bool {
-    let mut lines = value.lines();
-    let valid = lines.next().is_some_and(valid_version_token)
-        && lines.next().is_some_and(|commit| commit.len() >= 7 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        && lines.next().is_some_and(|arch| matches!(arch, "x64" | "arm64" | "armhf"));
-    valid && lines.next().is_none()
-}
-
-fn valid_version_token(value: &str) -> bool {
-    let suffix = value
-        .find(|character: char| !character.is_ascii_digit() && character != '.')
-        .map_or("", |index| &value[index..]);
-    let core = &value[..value.len() - suffix.len()];
-    let components = core.split('.').collect::<Vec<_>>();
-    components.len() >= 2
-        && components
-            .iter()
-            .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
-        && (suffix.is_empty() || matches!(suffix.as_bytes()[0], b'-' | b'+' | b'_') && valid_token(&suffix[1..]))
-}
-
-fn valid_token(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().next().is_some_and(|byte| byte.is_ascii_alphanumeric())
-        && value.bytes().last().is_some_and(|byte| byte.is_ascii_alphanumeric())
-        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
 }
 
 fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
