@@ -141,7 +141,7 @@ impl Platform {
     }
 
     pub fn managed_apt_sources(&self, configured_components: &[&str]) -> Result<ManagedAptSources> {
-        if !matches!(self.distro.as_str(), "ubuntu" | "debian" | "kali") {
+        if !matches!(self.distro.as_str(), "ubuntu" | "debian") {
             bail!("system.apt.sources: managed is unsupported for distribution {:?}; use preserve", self.distro);
         }
         let components = managed_components(self, configured_components)?;
@@ -220,14 +220,6 @@ impl Platform {
                     ],
                 )
             }
-            "kali" => (
-                "kali-rolling".into(),
-                vec![ManagedAptStanza {
-                    uri: "https://http.kali.org/kali".into(),
-                    suites: vec!["kali-rolling".into()],
-                    signed_by: "/usr/share/keyrings/kali-archive-keyring.gpg".into(),
-                }],
-            ),
             _ => unreachable!(),
         };
         Ok(ManagedAptSources { distro: self.distro.clone(), release, architecture, components, stanzas })
@@ -247,8 +239,8 @@ fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
 
 fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
     match id {
-        "ubuntu" | "pop" | "zorin" => Ok("ubuntu"),
-        "debian" | "kali" | "tails" | "deepin" => Ok("debian"),
+        "ubuntu" | "pop" => Ok("ubuntu"),
+        "debian" => Ok("debian"),
         "linuxmint" => {
             let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
             let ubuntu = families.clone().any(|family| family == "ubuntu");
@@ -267,13 +259,11 @@ fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
 }
 
 fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<String>> {
-    let defaults: &[&str] =
-        if platform.distro == "kali" { &["main", "contrib", "non-free", "non-free-firmware"] } else { &["main"] };
-    let components = if configured.is_empty() { defaults } else { configured };
+    let components = if configured.is_empty() { &["main"][..] } else { configured };
     let supported: &[&str] = match platform.distro.as_str() {
         "ubuntu" => &["main", "restricted", "universe", "multiverse"],
         "debian" if platform.distro_codename == "bullseye" => &["main", "contrib", "non-free"],
-        "debian" | "kali" => &["main", "contrib", "non-free", "non-free-firmware"],
+        "debian" => &["main", "contrib", "non-free", "non-free-firmware"],
         _ => &[],
     };
     let mut result = Vec::new();
