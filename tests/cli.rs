@@ -185,6 +185,29 @@ fn invalid_yaml_fails_apply() {
 }
 
 #[test]
+fn unsupported_distros_are_rejected() {
+    for distro in ["zorin", "deepin", "kali", "tails"] {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("cozydot");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("cozydot.yaml"),
+            format!("version: \"1.0.0\"\nsystem:\n  require:\n    distros: [{distro}]\n"),
+        )
+        .unwrap();
+
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg("apply")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("unknown variant").and(predicate::str::contains(distro)));
+    }
+}
+
+#[test]
 fn unsupported_architecture_selector_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");

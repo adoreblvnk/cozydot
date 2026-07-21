@@ -813,7 +813,6 @@ pub(crate) mod managed_apt {
                 "http://security.debian.org/debian-security",
                 "https://security.debian.org/debian-security",
             ],
-            "kali" => &["http://http.kali.org/kali", "https://http.kali.org/kali"],
             _ => &[],
         };
         aliases.contains(&uri)

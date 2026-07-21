@@ -171,11 +171,7 @@ pub enum Distro {
     Ubuntu,
     Linuxmint,
     Pop,
-    Zorin,
-    Deepin,
     Debian,
-    Kali,
-    Tails,
 }
 
 impl Distro {
@@ -184,11 +180,7 @@ impl Distro {
             "ubuntu" => Ok(Self::Ubuntu),
             "linuxmint" => Ok(Self::Linuxmint),
             "pop" => Ok(Self::Pop),
-            "zorin" => Ok(Self::Zorin),
-            "deepin" => Ok(Self::Deepin),
             "debian" => Ok(Self::Debian),
-            "kali" => Ok(Self::Kali),
-            "tails" => Ok(Self::Tails),
             _ => bail!("system.require.distros: unsupported detected distribution {value:?}"),
         }
     }
@@ -214,8 +206,8 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
         value => bail!("system.require.distros: unsupported platform upstream family {value:?}"),
     };
     let valid = match distro {
-        Distro::Ubuntu | Distro::Pop | Distro::Zorin => upstream == Family::Ubuntu,
-        Distro::Debian | Distro::Kali | Distro::Tails | Distro::Deepin => upstream == Family::Debian,
+        Distro::Ubuntu | Distro::Pop => upstream == Family::Ubuntu,
+        Distro::Debian => upstream == Family::Debian,
         Distro::Linuxmint => true,
     };
     if !valid {
@@ -330,7 +322,7 @@ impl OfficialSources {
         if self.mode == SourceMode::Preserve {
             return Ok(());
         }
-        if !matches!(distro, Distro::Ubuntu | Distro::Debian | Distro::Kali) {
+        if !matches!(distro, Distro::Ubuntu | Distro::Debian) {
             bail!(
                 "system.apt.sources.mode: managed is unsupported for distribution {:?}; use preserve",
                 platform.distro
@@ -490,11 +482,7 @@ pub enum DistroMapKey {
     Ubuntu,
     Linuxmint,
     Pop,
-    Zorin,
-    Deepin,
     Debian,
-    Kali,
-    Tails,
 }
 
 impl DistroMapKey {
@@ -504,11 +492,7 @@ impl DistroMapKey {
             Self::Ubuntu => "ubuntu",
             Self::Linuxmint => "linuxmint",
             Self::Pop => "pop",
-            Self::Zorin => "zorin",
-            Self::Deepin => "deepin",
             Self::Debian => "debian",
-            Self::Kali => "kali",
-            Self::Tails => "tails",
         }
     }
 
@@ -517,11 +501,7 @@ impl DistroMapKey {
             Distro::Ubuntu => Self::Ubuntu,
             Distro::Linuxmint => Self::Linuxmint,
             Distro::Pop => Self::Pop,
-            Distro::Zorin => Self::Zorin,
-            Distro::Deepin => Self::Deepin,
             Distro::Debian => Self::Debian,
-            Distro::Kali => Self::Kali,
-            Distro::Tails => Self::Tails,
         }
     }
 
