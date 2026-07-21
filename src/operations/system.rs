@@ -121,16 +121,6 @@ fn effective_user(host: &Host) -> Result<(String, u32)> {
     Ok((fields[0].to_owned(), uid))
 }
 
-fn group_exists(host: &Host, group: &str) -> Result<bool> {
-    let output = host.run("getent", ["group", group])?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(2) => Ok(false),
-        Some(code) => bail!("getent group failed with exit code {code}"),
-        None => bail!("getent group terminated without an exit code"),
-    }
-}
-
 fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
     let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
     let record = output.strip_suffix('\n').unwrap_or(output);
@@ -143,15 +133,7 @@ fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 
 pub(crate) fn docker_group(host: &Host) -> Result<()> {
-    let (username, _) = effective_user(host)?;
-    let groups = host.require("Docker group membership query", "id", ["-nG", "--", &username])?;
-    if one_record(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|group| group == "docker") {
-        return Ok(());
-    }
-    preflight(host, Product::Docker)?;
-    host.require("Docker group creation", "sudo", ["groupadd", "-f", "docker"])?;
-    host.require("Docker group membership", "sudo", ["usermod", "-aG", "docker", "--", &username])?;
-    Ok(())
+    ensure_product_group(host, Product::Docker)
 }
 
 pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
@@ -284,11 +266,14 @@ fn valid_token(value: &str) -> bool {
 
 fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
     let (username, _) = effective_user(host)?;
-    preflight(host, product)?;
     let group = product.group().context("group integration requires a system group")?;
-    if !group_exists(host, group)? {
-        host.require(&format!("{} group creation", product.label()), "sudo", ["groupadd", "--system", group])?;
+    let groups =
+        host.require(&format!("{} group membership query", product.label()), "id", ["-nG", "--", &username])?;
+    if one_record(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|current| current == group) {
+        return Ok(());
     }
+    preflight(host, product)?;
+    host.require(&format!("{} group creation", product.label()), "sudo", ["groupadd", "-f", group])?;
     host.require(
         &format!("{} group membership", product.label()),
         "sudo",
