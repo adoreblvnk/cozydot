@@ -1082,7 +1082,6 @@ pub enum AptUpdate {
 #[serde(deny_unknown_fields)]
 pub struct ToolUpdates {
     pub rust: Option<bool>,
-    pub go: Option<bool>,
     pub node: Option<bool>,
 }
 
@@ -1090,9 +1089,6 @@ impl ToolUpdates {
     fn validate(&self, tools: Option<&Tools>) -> Result<()> {
         if self.rust == Some(true) && tools.and_then(|tools| tools.rust.as_ref()).is_none() {
             bail!("updates.tools.rust: requires a configured Rust selector");
-        }
-        if self.go == Some(true) && tools.and_then(|tools| tools.go.as_deref()) != Some("latest") {
-            bail!("updates.tools.go: requires tools.go: latest");
         }
         if self.node == Some(true) && tools.and_then(|tools| tools.node.as_ref()).is_none() {
             bail!("updates.tools.node: requires a configured Node selector");

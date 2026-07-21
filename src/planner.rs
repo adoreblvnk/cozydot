@@ -7,7 +7,7 @@ use crate::{
         AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
         BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
         BinarySourceOperation, CargoPackageMode, DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository,
-        GoToolchainSelector, NerdFontsMode, NpmPackageMode, Operation, ToolMutationMode,
+        GoToolchainSelector, NerdFontsMode, NpmPackageMode, Operation,
     },
     platform::{Architecture, Platform},
 };
@@ -367,15 +367,11 @@ fn plan_tools(
         );
     }
     if let Some(selector) = tools.go.as_deref() {
-        prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils"]);
+        prerequisites.extend(["ca-certificates", "curl", "tar"]);
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::GoToolchain {
-                selector: go_selector_main(selector),
-                architecture: platform.architecture,
-                mode: ToolMutationMode::EnsurePresent,
-            },
+            Operation::GoToolchain { selector: go_selector_main(selector), architecture: platform.architecture },
         );
     }
     if let Some(selector) = tools.node.as_deref() {
@@ -516,7 +512,6 @@ fn plan_updates(
         return Ok(());
     };
     let packages = config.packages.as_ref();
-    let tools = config.tools.as_ref();
     if let Some(policy) = updates.apt {
         *needs_apt_refresh = true;
         push_operation(
@@ -534,19 +529,6 @@ fn plan_updates(
         && let Some(refs) = packages.and_then(|packages| packages.flatpak.clone()).filter(|values| !values.is_empty())
     {
         push_operation(phases, PlannerPhase::Updates, Operation::FlatpakUpdateApps { refs });
-    }
-    if updates.tools.as_ref().is_some_and(|tools| tools.go == Some(true)) {
-        push_operation(
-            phases,
-            PlannerPhase::Updates,
-            Operation::GoToolchain {
-                selector: go_selector_main(
-                    tools.and_then(|tools| tools.go.as_deref()).expect("validated update target"),
-                ),
-                architecture: platform.architecture,
-                mode: ToolMutationMode::UpdateMoving,
-            },
-        );
     }
     if let Some(package_updates) = &updates.packages {
         if package_updates.cargo == Some(true)

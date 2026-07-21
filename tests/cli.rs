@@ -265,7 +265,6 @@ updates:
   fonts: false
   tools:
     rust: false
-    go: false
     node: false
   packages:
     cargo: false
@@ -331,6 +330,27 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
             .failure()
             .stderr(predicate::str::contains(message));
     }
+}
+
+#[test]
+fn go_updates_are_declared_by_the_tool_selector() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\ntools:\n  go: \"1.26\"\nupdates:\n  tools:\n    go: true\n",
+    )
+    .unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .arg("apply")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown field `go`"));
 }
 
 #[test]
@@ -421,6 +441,61 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .assert()
         .success();
     assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never -- 20\nfnm default -- 20\n");
+}
+
+#[test]
+fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("go.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\ntools:\n  go: \"99.88\"\n").unwrap();
+
+    let archive_arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        "arm" => "armv6l",
+        architecture => panic!("unsupported test architecture: {architecture}"),
+    };
+    let metadata = format!(
+        r#"[
+  {{"version":"go99.89.1","stable":true,"files":[{{"filename":"go99.89.1.linux-{archive_arch}.tar.gz"}}]}},
+  {{"version":"go99.88.5","stable":true,"files":[{{"filename":"go99.88.5.linux-{archive_arch}.tar.gz"}}]}},
+  {{"version":"go99.88.4","stable":true,"files":[{{"filename":"go99.88.4.linux-{archive_arch}.tar.gz"}}]}}
+]"#,
+    );
+    write_executable(
+        &fake_bin.join("curl"),
+        &format!(
+            "#!/bin/sh\nprintf 'curl %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\ncase \"$*\" in\n  *mode=json*) printf '%s' '{}' ;;\nesac\n",
+            metadata
+        ),
+    );
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+    write_executable(&fake_bin.join("tar"), "#!/bin/sh\nprintf 'tar %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let log = fs::read_to_string(log).unwrap();
+    assert!(log.contains(&format!("go99.88.5.linux-{archive_arch}.tar.gz")));
+    assert!(!log.contains(&format!("go99.89.1.linux-{archive_arch}.tar.gz\n")));
+    assert!(log.contains("sudo rm -rf -- /usr/local/go\n"));
+    assert!(log.contains("sudo tar --extract --gzip --directory /usr/local --file"));
+    assert!(!log.contains("sha256sum"));
+    assert!(!log.contains("go-stage"));
+    assert!(!log.contains("sudo mv"));
 }
 
 #[test]

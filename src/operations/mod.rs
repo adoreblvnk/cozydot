@@ -107,15 +107,14 @@ pub use packages::fonts::NerdFontsMode;
 pub use packages::npm::NpmPackageMode;
 pub use repository::{AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken};
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
-pub use tools::{GoToolchainSelector, ToolMutationMode};
+pub use tools::GoToolchainSelector;
 
 use crate::platform::{Architecture, ManagedAptSources};
 use anyhow::{Context, Result, bail};
 use std::{
     ffi::{OsStr, OsString},
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
 };
 
 const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
@@ -143,7 +142,7 @@ pub enum Operation {
     GnomeExtensions { extensions: Vec<String> },
     GnomeDock,
     GnomeRoundedCorners,
-    GoToolchain { selector: GoToolchainSelector, architecture: Architecture, mode: ToolMutationMode },
+    GoToolchain { selector: GoToolchainSelector, architecture: Architecture },
     NerdFonts { families: Vec<String>, mode: NerdFontsMode },
     RustupBootstrap,
     CargoBinstallBootstrap,
@@ -234,8 +233,8 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
         Operation::GnomeDock => system::gnome_dock(&host),
         Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
-        Operation::GoToolchain { selector, architecture, mode } => {
-            completed(tools::execute_go(&host, selector, *architecture, *mode))
+        Operation::GoToolchain { selector, architecture } => {
+            completed(tools::execute_go(&host, selector, *architecture))
         }
         Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
@@ -294,23 +293,6 @@ impl Host {
         Ok(output)
     }
 
-    pub fn require_input<I, S>(&self, operation: &str, program: &str, args: I, input: &[u8]) -> Result<()>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
-        let mut command = Command::new(program);
-        command.args(&args).stdin(Stdio::piped());
-        let mut child = command.spawn().with_context(|| format!("{operation}: start {}", display(program, &args)))?;
-        child.stdin.take().context("command stdin unavailable")?.write_all(input)?;
-        let status = child.wait()?;
-        if !status.success() {
-            bail!("{operation}: {program} failed ({status})");
-        }
-        Ok(())
-    }
-
     pub fn home(&self) -> PathBuf {
         self.home.clone()
     }
@@ -327,10 +309,6 @@ impl Host {
 pub(crate) struct TempDir(tempfile::TempDir);
 
 impl TempDir {
-    pub fn new(host: &Host, stem: &str) -> Result<Self> {
-        Self::new_in(&host.temp_dir(), stem)
-    }
-
     pub fn new_in(parent: &Path, stem: &str) -> Result<Self> {
         tempfile::Builder::new()
             .prefix(stem)
@@ -1066,7 +1044,7 @@ pub(crate) mod packages {
     }
 }
 
-pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Result<(String, String, String)> {
+pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Result<(String, String)> {
     use anyhow::Context;
     let value: serde_json::Value = serde_json::from_str(input).context("parse Go release JSON")?;
     let releases = value.as_array().context("Go metadata must be an array")?;
@@ -1082,14 +1060,13 @@ pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Res
         })
         .context("Go metadata has no matching stable release")?;
     let filename = format!("go{version}.linux-{arch}.tar.gz");
-    let checksum = releases
+    releases
         .iter()
         .find(|release| release["version"].as_str() == Some(&format!("go{version}")))
         .and_then(|release| release["files"].as_array())
         .and_then(|files| files.iter().find(|file| file["filename"].as_str() == Some(&filename)))
-        .and_then(|file| file["sha256"].as_str())
-        .context("Go metadata has no matching archive checksum")?;
-    Ok((version.to_owned(), filename, checksum.to_owned()))
+        .context("Go metadata has no matching architecture archive")?;
+    Ok((version.to_owned(), filename))
 }
 
 pub(super) fn gnome_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {

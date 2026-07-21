@@ -5,13 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{Host, TempDir, TempPath};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolMutationMode {
-    EnsurePresent,
-    UpdateMoving,
-}
+use super::{Host, TempPath};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
@@ -23,7 +17,6 @@ pub enum GoToolchainSelector {
 struct GoRelease {
     version: String,
     filename: String,
-    checksum: String,
 }
 
 pub(crate) fn execute_rust(host: &Host, selector: &str) -> Result<()> {
@@ -34,42 +27,26 @@ pub(crate) fn execute_rust(host: &Host, selector: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn execute_go(
-    host: &Host,
-    selector: &GoToolchainSelector,
-    architecture: Architecture,
-    mode: ToolMutationMode,
-) -> Result<()> {
+pub(crate) fn execute_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     let expected_arch = architecture.go();
-
     let current = inspect_go(host, "/usr/local/go/bin/go")?;
-    if mode == ToolMutationMode::EnsurePresent
-        && let Some(state) = &current
-        && state.architecture == expected_arch
-    {
-        match selector {
-            GoToolchainSelector::Latest => return Ok(()),
-            GoToolchainSelector::Version(requested) if version_matches(&state.version, requested) => return Ok(()),
-            GoToolchainSelector::Version(_) => {}
-        }
-    }
-
     let requested = match selector {
         GoToolchainSelector::Latest => "latest",
         GoToolchainSelector::Version(version) => version,
     };
+    if numeric_version(requested, 3, 3)
+        && current.as_ref().is_some_and(|state| state.version == requested && state.architecture == expected_arch)
+    {
+        return Ok(());
+    }
 
-    let GoRelease { version, filename, checksum } = resolve_go_release(host, requested, architecture)?;
+    let GoRelease { version, filename } = resolve_go_release(host, requested, architecture)?;
 
     if current.as_ref().is_some_and(|state| state.version == version && state.architecture == expected_arch) {
         return Ok(());
     }
 
-    if checksum.len() != 64 || !checksum.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
-        bail!("Go release metadata contains an invalid SHA-256 checksum");
-    }
     let archive = TempPath::new_with_suffix(host, "go", ".tar.gz")?;
-    let stage = TempDir::new(host, "go-stage")?;
     let url = format!("https://go.dev/dl/{filename}");
     host.require(
         "Go archive download",
@@ -90,42 +67,20 @@ pub(crate) fn execute_go(
             url.as_ref(),
         ],
     )?;
-    let checksum_input = format!("{checksum}  {}\n", archive.path().display());
-    host.require_input("Go archive checksum", "sha256sum", ["--check", "--status", "-"], checksum_input.as_bytes())?;
-    let listing =
-        host.require("Go archive preflight", "tar", ["--list", "--gzip", "--file", &archive.path().to_string_lossy()])?;
-    validate_go_archive_listing(&listing.stdout)?;
-    host.require(
-        "Go archive extraction",
-        "tar",
-        [
-            "--extract",
-            "--gzip",
-            "--directory",
-            &stage.path().to_string_lossy(),
-            "--file",
-            &archive.path().to_string_lossy(),
-        ],
-    )?;
-    let staged = stage.path().join("go");
-    let staged_binary = staged.join("bin/go");
-    let staged_program = path_program(&staged_binary, "staged Go executable")?;
-    let staged_state =
-        inspect_go(host, &staged_program)?.context("Go archive does not contain an executable Go toolchain")?;
-    if staged_state.version != version || staged_state.architecture != expected_arch {
-        bail!("Go archive toolchain does not match resolved release metadata");
-    }
     host.require("Go toolchain publication", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
     host.require(
         "Go toolchain publication",
         "sudo",
-        ["mv".as_ref(), "--".as_ref(), staged.as_os_str(), "/usr/local/go".as_ref()],
+        [
+            "tar".as_ref(),
+            "--extract".as_ref(),
+            "--gzip".as_ref(),
+            "--directory".as_ref(),
+            "/usr/local".as_ref(),
+            "--file".as_ref(),
+            archive.path().as_os_str(),
+        ],
     )?;
-    let installed = inspect_go(host, "/usr/local/go/bin/go")?
-        .context("Go toolchain publication did not create /usr/local/go/bin/go")?;
-    if installed.version != version || installed.architecture != expected_arch {
-        bail!("Go toolchain publication produced mismatched version or architecture");
-    }
     Ok(())
 }
 
@@ -175,12 +130,12 @@ mod resolution {
                 "https://go.dev/dl/?mode=json&include=all",
             ],
         )?;
-        let (version, filename, checksum) = super::super::latest_go(
+        let (version, filename) = super::super::latest_go(
             std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,
             requested,
             architecture.go_archive(),
         )?;
-        Ok(GoRelease { version, filename, checksum })
+        Ok(GoRelease { version, filename })
     }
 }
 
@@ -231,25 +186,6 @@ mod state {
         Ok(GoState { version: version.to_owned(), architecture: fields[3].trim_start_matches("linux/").to_owned() })
     }
 
-    pub(super) fn validate_go_archive_listing(output: &[u8]) -> Result<()> {
-        let output = std::str::from_utf8(output).context("Go archive listing is not UTF-8")?;
-        let mut saw_binary = false;
-        for entry in output.lines() {
-            if entry.is_empty()
-                || !entry.starts_with("go/")
-                || entry.split('/').any(|component| component == "..")
-                || entry.chars().any(char::is_control)
-            {
-                bail!("Go archive contains an unsafe path");
-            }
-            saw_binary |= entry == "go/bin/go";
-        }
-        if !saw_binary {
-            bail!("Go archive listing does not contain go/bin/go");
-        }
-        Ok(())
-    }
-
     pub(super) fn resolve_fnm(host: &Host) -> Result<String> {
         let data_home =
             host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
@@ -296,10 +232,6 @@ use state::*;
 
 fn rust_install_args(toolchain: &str) -> [&str; 7] {
     ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
-}
-
-fn version_matches(actual: &str, requested: &str) -> bool {
-    actual == requested || actual.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
 }
 
 fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {

@@ -102,7 +102,6 @@ updates:
   apt: standard
   tools:
     rust: true
-    go: true
     node: true
   packages:
     cargo: true
