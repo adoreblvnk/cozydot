@@ -7,7 +7,7 @@ use std::{
     fs,
     path::Path,
 };
-use url::{Host, Url};
+use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigVersion;
@@ -131,15 +131,6 @@ impl Config {
         }
         if let Some(dotfiles) = &self.dotfiles {
             dotfiles.validate()?;
-        }
-        if let Some(size) = self
-            .integrations
-            .as_ref()
-            .and_then(|integrations| integrations.docker.as_ref())
-            .and_then(|docker| docker.logging.as_ref())
-            .and_then(|logging| logging.max_size.as_deref())
-        {
-            validate_docker_size(size, "integrations.docker.logging.max_size")?;
         }
         if let Some(desktop) = &self.desktop {
             desktop.validate()?;
@@ -387,17 +378,12 @@ pub enum EnabledDisabled {
     Disabled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum InstalledState {
-    Installed,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UbuntuSystem {
     pub snap: Option<EnabledDisabled>,
-    pub codecs: Option<InstalledState>,
+    #[serde(default)]
+    pub codecs: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -438,10 +424,6 @@ pub struct AptPackages {
 
 impl AptPackages {
     fn validate(&self) -> Result<()> {
-        let mut installed = HashSet::new();
-        for package in self.install.iter().flatten() {
-            installed.insert(package.as_str());
-        }
         if let Some(repositories) = &self.repositories {
             let mut names = HashSet::new();
             let mut key_paths = HashSet::new();
@@ -456,12 +438,6 @@ impl AptPackages {
                         repository.key_path
                     );
                 }
-                installed.extend(repository.packages.iter().map(String::as_str));
-            }
-        }
-        for (index, package) in self.remove.iter().flatten().enumerate() {
-            if installed.contains(package.as_str()) {
-                bail!("packages.apt.remove[{index}]: package {package:?} is also configured for installation");
             }
         }
         Ok(())
@@ -523,9 +499,9 @@ pub fn select_distro_map<T>(
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     pub name: String,
-    pub key: HttpsUrl,
+    pub key: Url,
     pub key_path: String,
-    pub urls: BTreeMap<DistroMapKey, HttpsUrl>,
+    pub urls: BTreeMap<DistroMapKey, Url>,
     pub suite: Option<String>,
     pub components: Option<Vec<AptToken>>,
     pub path: Option<String>,
@@ -599,7 +575,7 @@ impl Repository {
 }
 
 pub struct ResolvedRepository<'a> {
-    pub source_url: &'a HttpsUrl,
+    pub source_url: &'a Url,
     pub suite: Option<AptToken>,
 }
 
@@ -683,7 +659,7 @@ impl BinarySource {
 
 pub enum ResolvedNativeBinary<'a> {
     Github { repository: &'a str, selector: &'a str },
-    Url { url: &'a HttpsUrl },
+    Url { url: &'a Url },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -721,9 +697,6 @@ impl AssetMap {
 }
 
 fn validate_asset_regex(value: &str, path: &str) -> Result<()> {
-    if value.is_empty() || !value.starts_with('^') || !value.ends_with('$') {
-        bail!("{path}: asset regex must be non-empty and anchored with '^' and '$'");
-    }
     Regex::new(value).with_context(|| format!("{path}: invalid asset regex {value:?}"))?;
     Ok(())
 }
@@ -731,9 +704,9 @@ fn validate_asset_regex(value: &str, path: &str) -> Result<()> {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArchitectureUrls {
-    pub amd64: Option<HttpsUrl>,
-    pub arm64: Option<HttpsUrl>,
-    pub arm32: Option<HttpsUrl>,
+    pub amd64: Option<Url>,
+    pub arm64: Option<Url>,
+    pub arm32: Option<Url>,
 }
 
 impl ArchitectureUrls {
@@ -748,7 +721,7 @@ impl ArchitectureUrls {
         architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
-    fn get(&self, architecture: Architecture) -> Option<&HttpsUrl> {
+    fn get(&self, architecture: Architecture) -> Option<&Url> {
         match architecture {
             Architecture::Amd64 => self.amd64.as_ref(),
             Architecture::Arm64 => self.arm64.as_ref(),
@@ -813,16 +786,9 @@ pub struct DockerIntegration {
     pub logging: Option<DockerLogging>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DockerLoggingDriver {
-    Local,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DockerLogging {
-    pub driver: DockerLoggingDriver,
     pub max_size: Option<String>,
 }
 
@@ -1121,98 +1087,4 @@ fn validate_github_repository(value: &str, path: &str) -> Result<()> {
         bail!("{path}: invalid GitHub repository {value:?}; must be an owner/repository coordinate");
     }
     Ok(())
-}
-
-fn validate_docker_size(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[1-9][0-9]*[kmg]$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid Docker size {value:?}; must be a positive decimal integer followed by k, m, or g");
-    }
-    Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HttpsUrl(Url);
-
-impl HttpsUrl {
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self> {
-        validate_non_empty_url(value)?;
-        if value.chars().any(char::is_whitespace)
-            || value.chars().any(char::is_control)
-            || value.contains('\\')
-            || has_substitution(value)
-        {
-            bail!("invalid HTTPS URL {value:?}; must be literal and contain no whitespace or substitutions");
-        }
-        let parsed =
-            Url::parse(value).with_context(|| format!("invalid HTTPS URL {value:?}; must be a valid absolute URL"))?;
-        let (raw_scheme, remainder) = value.split_once("://").unwrap_or_default();
-        let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
-        let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
-        let (raw_host, empty_port) = if let Some(rest) = host_port.strip_prefix('[') {
-            let closing = rest.find(']').map(|index| index + 1);
-            let raw_host = closing.map_or(host_port, |index| &host_port[..=index]);
-            let suffix = closing.map_or("", |index| &host_port[index + 1..]);
-            (raw_host, suffix == ":")
-        } else if let Some((host, port)) = host_port.rsplit_once(':') {
-            (host, port.is_empty())
-        } else {
-            (host_port, false)
-        };
-        let invalid_host = parsed.host().is_none_or(|host| match host {
-            Host::Ipv4(address) => raw_host != address.to_string(),
-            Host::Ipv6(_) => false,
-            Host::Domain(domain) => !valid_domain_host(domain),
-        });
-        if raw_scheme != "https"
-            || parsed.scheme() != "https"
-            || authority.is_empty()
-            || authority.contains('%')
-            || empty_port
-            || invalid_host
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || authority.contains('@')
-            || parsed.fragment().is_some()
-        {
-            bail!("invalid HTTPS URL {value:?}; must use HTTPS with a non-empty host and no credentials or fragment");
-        }
-        Ok(Self(parsed))
-    }
-}
-
-impl<'de> Deserialize<'de> for HttpsUrl {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).map_err(de::Error::custom)
-    }
-}
-
-fn validate_non_empty_url(value: &str) -> Result<()> {
-    if value.trim().is_empty() {
-        bail!("invalid HTTPS URL {value:?}; must be a non-empty string");
-    }
-    Ok(())
-}
-
-fn valid_domain_host(domain: &str) -> bool {
-    !domain.is_empty()
-        && domain.len() <= 253
-        && domain.split('.').all(|label| {
-            label.len() <= 63
-                && label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-                && label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
-                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
-}
-
-fn has_substitution(value: &str) -> bool {
-    value.contains('$') || value.contains("{{") || value.contains("{%")
 }

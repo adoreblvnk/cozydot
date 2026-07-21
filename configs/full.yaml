@@ -7,7 +7,7 @@ system:
     unattended_upgrades: disabled
   ubuntu:
     snap: disabled
-    codecs: installed
+    codecs: true
   require:
     distros:
       - ubuntu
@@ -232,7 +232,6 @@ integrations:
   docker:
     add_user_to_group: true
     logging:
-      driver: local
       max_size: 10m
   virtualbox:
     add_user_to_group: true

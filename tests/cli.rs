@@ -326,10 +326,6 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
             "updates.packages.npm: requires configured packages.npm targets",
         ),
         (
-            "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      driver: local\n      max_size: invalid\n",
-            "invalid Docker size",
-        ),
-        (
             "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n",
             "AppImages require integrations.appimaged: true",
         ),
@@ -352,6 +348,188 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
             .failure()
             .stderr(predicate::str::contains(message));
     }
+}
+
+#[test]
+fn configured_urls_accept_http_credentials_and_fragments() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("url.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  binaries:
+    - name: url-probe
+      format: deb
+      source:
+        provider: url
+        urls:
+          amd64: http://user:password@example.com/probe.deb#asset
+          arm64: http://user:password@example.com/probe.deb#asset
+          arm32: http://user:password@example.com/probe.deb#asset
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$COZYDOT_TEST_LOG"
+output=
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "--output" ] || { shift; output="$1"; }
+  shift
+done
+[ -z "$output" ] || printf 'deb' > "$output"
+"#,
+    );
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let log = fs::read_to_string(log).unwrap();
+    assert!(log.contains("http://user:password@example.com/probe.deb#asset"));
+    assert!(!log.contains("--proto =https"));
+}
+
+#[test]
+fn apt_remove_install_overlap_finishes_with_install() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("apt.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\npackages:\n  apt:\n    remove: [overlap]\n    install: [overlap]\n",
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let log = fs::read_to_string(log).unwrap();
+    let purge = log.find("apt-get purge -y -qq -- overlap").unwrap();
+    let install = log.find("apt-get install -y -qq -- overlap+").unwrap();
+    assert!(purge < install);
+}
+
+#[test]
+fn docker_logging_passes_max_size_through_to_daemon_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let captured = temp.path().join("daemon.json");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      max_size: native-tool-value\n",
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("docker"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &fake_bin.join("sudo"),
+        r#"#!/bin/sh
+[ "$1" != "stat" ] || exit 1
+if [ "$1" = "install" ] && [ "$2" = "-o" ]; then
+  previous=
+  before=
+  for argument in "$@"; do before="$previous"; previous="$argument"; done
+  cp "$before" "$COZYDOT_CAPTURE"
+fi
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_CAPTURE", &captured)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let daemon: serde_json::Value = serde_json::from_str(&fs::read_to_string(captured).unwrap()).unwrap();
+    assert_eq!(daemon["log-driver"], "local");
+    assert_eq!(daemon["log-opts"]["max-size"], "native-tool-value");
+}
+
+#[test]
+fn gnome_extension_state_uses_exact_info_query() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("gnome.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        "version: 1.0.0\ndesktop:\n  gnome:\n    extensions: [installed@example.com, absent@example.com]\n",
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &fake_bin.join("gnome-extensions"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$COZYDOT_TEST_LOG"
+[ "$*" != "info absent@example.com" ]
+"#,
+    );
+    write_executable(&fake_bin.join("gnome-shell"), "#!/bin/sh\nprintf 'GNOME Shell 48.1\\n'\n");
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+case "$*" in
+  *extension-info*) printf '%s' '{"shell_version_map":{"48":{"version":7}}}' ;;
+  *)
+    while [ "$#" -gt 0 ]; do
+      [ "$1" != "-o" ] || { shift; printf 'zip' > "$1"; }
+      shift
+    done
+    ;;
+esac
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let log = fs::read_to_string(log).unwrap();
+    assert!(log.starts_with("info installed@example.com\nenable installed@example.com\ninfo absent@example.com\n"));
+    assert!(log.contains("install --force"));
+    assert!(!log.contains("list"));
+    assert!(!log.contains("enable absent@example.com"));
 }
 
 #[test]
@@ -576,9 +754,9 @@ packages:
         provider: github
         repository: example/fastfetch
         assets:
-          amd64: ^fastfetch\.deb$
-          arm64: ^fastfetch\.deb$
-          arm32: ^fastfetch\.deb$
+          amd64: ""
+          arm64: ""
+          arm32: ""
 "#,
     )
     .unwrap();

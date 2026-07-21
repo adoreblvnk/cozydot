@@ -1,5 +1,5 @@
 use super::{Host, TempPath};
-use crate::{config::HttpsUrl, platform::Architecture};
+use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{
     collections::BTreeSet,
@@ -7,6 +7,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use url::Url;
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
@@ -65,8 +66,8 @@ pub enum AptRepositorySourceLayout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepositoryOperation {
     name: String,
-    key_url: HttpsUrl,
-    source_url: HttpsUrl,
+    key_url: Url,
+    source_url: Url,
     architecture: Architecture,
     layout: AptRepositorySourceLayout,
     keyring_path: PathBuf,
@@ -76,8 +77,8 @@ pub struct AptRepositoryOperation {
 impl AptRepositoryOperation {
     pub fn new(
         name: impl Into<String>,
-        key_url: HttpsUrl,
-        source_url: HttpsUrl,
+        key_url: Url,
+        source_url: Url,
         architecture: Architecture,
         layout: AptRepositorySourceLayout,
         keyring_path: PathBuf,
@@ -86,8 +87,6 @@ impl AptRepositoryOperation {
         if !valid_definition_name(&name) {
             bail!("invalid APT repository name {name:?}");
         }
-        validate_canonical_url(&key_url, "key")?;
-        validate_canonical_url(&source_url, "source")?;
         validate_layout(&layout)?;
 
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
@@ -165,14 +164,6 @@ fn valid_definition_name(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
-fn validate_canonical_url(url: &HttpsUrl, kind: &str) -> Result<()> {
-    let parsed = HttpsUrl::parse(url.as_str()).with_context(|| format!("APT repository {kind} URL is invalid"))?;
-    if parsed != *url {
-        bail!("APT repository {kind} URL is not canonical");
-    }
-    Ok(())
-}
-
 fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
     let downloaded = TempPath::new(host, "repository-key-download")?;
     host.require(
@@ -183,8 +174,6 @@ fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
             "--silent",
             "--show-error",
             "--location",
-            "--proto",
-            "=https",
             "--tlsv1.2",
             "--retry",
             "3",

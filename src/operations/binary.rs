@@ -1,9 +1,10 @@
 use super::{Host, TempPath};
-use crate::{config::HttpsUrl, platform::Architecture};
+use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde_json::Value;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use url::Url;
 
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
@@ -18,7 +19,7 @@ pub enum BinaryPackageFormat {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
     GithubLatest { repository: String, selector: String },
-    Url { url: HttpsUrl },
+    Url { url: Url },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,7 +75,7 @@ fn appimage_destination(host: &Host, operation: &BinaryPackageOperation) -> Path
     host.home().join("Applications").join(format!("{}.AppImage", operation.name))
 }
 
-fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<HttpsUrl> {
+fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<Url> {
     match &operation.source {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
         BinarySourceOperation::GithubLatest { repository, selector } => {
@@ -106,7 +107,7 @@ fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<HttpsUrl> 
     }
 }
 
-fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation) -> Result<HttpsUrl> {
+fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation) -> Result<Url> {
     let release: Value = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let assets = release.get("assets").and_then(Value::as_array).context("GitHub release assets must be an array")?;
     let pattern = Regex::new(selector).context("compile binary asset regex")?;
@@ -122,15 +123,16 @@ fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation
             matches.len()
         );
     }
-    HttpsUrl::parse(
+    Url::parse(
         matches[0]
             .get("browser_download_url")
             .and_then(Value::as_str)
             .context("selected GitHub release asset must have a browser_download_url")?,
     )
+    .context("selected GitHub release asset has an invalid browser_download_url")
 }
 
-fn download(host: &Host, operation: &BinaryPackageOperation, url: &HttpsUrl) -> Result<TempPath> {
+fn download(host: &Host, operation: &BinaryPackageOperation, url: &Url) -> Result<TempPath> {
     let temporary = match operation.format {
         BinaryPackageFormat::Deb => TempPath::new_with_suffix(host, &operation.name, ".deb")?,
         BinaryPackageFormat::AppImage => {
@@ -143,8 +145,6 @@ fn download(host: &Host, operation: &BinaryPackageOperation, url: &HttpsUrl) -> 
         "download binary package",
         "curl",
         [
-            "--proto".as_ref(),
-            "=https".as_ref(),
             "--location".as_ref(),
             "--fail".as_ref(),
             "--silent".as_ref(),
