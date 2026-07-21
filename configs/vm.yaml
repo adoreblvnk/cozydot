@@ -139,7 +139,6 @@ updates:
   flatpak: true
   tools:
     rust: true
-    go: true
     node: true
   packages:
     cargo: true
