@@ -303,22 +303,6 @@ impl Host {
     }
 }
 
-pub(crate) struct TempDir(tempfile::TempDir);
-
-impl TempDir {
-    pub fn new_in(parent: &Path, stem: &str) -> Result<Self> {
-        tempfile::Builder::new()
-            .prefix(stem)
-            .tempdir_in(parent)
-            .map(Self)
-            .context("create operation temporary directory")
-    }
-
-    pub fn path(&self) -> &Path {
-        self.0.path()
-    }
-}
-
 pub(crate) struct TempPath(tempfile::TempPath);
 
 impl TempPath {
@@ -746,7 +730,9 @@ pub(crate) mod packages {
         use std::{ffi::OsStr, fs, path::Path};
         use url::Url;
 
-        use super::super::{Host, TempDir, TempPath};
+        use super::super::{Host, TempPath};
+
+        const FONT_ROOT: &str = "/usr/share/fonts";
 
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum NerdFontsMode {
@@ -755,47 +741,30 @@ pub(crate) mod packages {
         }
 
         pub(crate) fn execute(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
-            let data_home = host
-                .value("XDG_DATA_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| host.home().join(".local/share"));
-            if !data_home.is_absolute() {
-                bail!("Nerd Fonts XDG data directory must be absolute");
-            }
-            let parent = data_home.join("fonts/cozydot");
+            let parent = Path::new(FONT_ROOT);
             for family in families {
                 let destination = parent.join(family);
                 let is_present = match fs::symlink_metadata(&destination) {
-                    Ok(metadata) => {
-                        if metadata.is_dir() {
-                            validate_extracted_tree(&destination)
-                                .with_context(|| format!("validate installed Nerd Font family {family:?}"))?;
-                            true
-                        } else {
-                            bail!("Nerd Font destination conflict at {}", destination.display());
-                        }
-                    }
+                    Ok(metadata) if metadata.is_dir() => true,
+                    Ok(_) => bail!("Nerd Font destination conflict at {}", destination.display()),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                     Err(error) => {
                         return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()));
                     }
                 };
                 if mode == NerdFontsMode::Update || !is_present {
-                    install_family_with_destination(host, family, &destination, &parent, &data_home)?;
+                    install_family(host, family, &destination)?;
                 }
             }
-            refresh_cache(host, "Nerd Font cache refresh", &parent)?;
+            host.require(
+                "Nerd Font cache refresh",
+                "sudo",
+                [OsStr::new("fc-cache"), OsStr::new("--force"), parent.as_os_str()],
+            )?;
             Ok(())
         }
 
-        fn install_family_with_destination(
-            host: &Host,
-            family: &str,
-            destination: &Path,
-            parent: &Path,
-            data_home: &Path,
-        ) -> Result<()> {
-            fs::create_dir_all(parent).context("create Nerd Fonts destination directory")?;
+        fn install_family(host: &Host, family: &str, destination: &Path) -> Result<()> {
             let archive = TempPath::new_with_suffix(host, "nerd-font", ".tar.xz")?;
             let mut url =
                 Url::parse("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/placeholder.tar.xz")?;
@@ -822,103 +791,35 @@ pub(crate) mod packages {
                     url.as_str().as_ref(),
                 ],
             )?;
-            let listing = host.require(
-                "Nerd Font archive preflight",
-                "tar",
-                ["--list", "--xz", "--file", &archive.path().to_string_lossy()],
-            )?;
-            validate_archive_listing(&listing.stdout)?;
-            let stage = TempDir::new_in(data_home, ".cozydot-font-stage")?;
             host.require(
-                "Nerd Font archive extraction",
-                "tar",
+                "Nerd Font destination replacement",
+                "sudo",
                 [
-                    "--extract",
-                    "--xz",
-                    "--directory",
-                    &stage.path().to_string_lossy(),
-                    "--file",
-                    &archive.path().to_string_lossy(),
+                    OsStr::new("rm"),
+                    OsStr::new("--recursive"),
+                    OsStr::new("--force"),
+                    OsStr::new("--"),
+                    destination.as_os_str(),
                 ],
             )?;
-            validate_extracted_tree(stage.path())?;
-            let replacing = match fs::symlink_metadata(destination) {
-                Ok(metadata) if metadata.is_dir() => true,
-                Ok(_) => bail!("Nerd Font destination conflict at {}", destination.display()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-                Err(error) => return Err(error).context("inspect Nerd Font destination"),
-            };
-            publish_family(stage.path(), destination, replacing)?;
-            sync_publication_directories(stage.path(), destination)?;
-            Ok(())
-        }
-
-        fn publish_family(stage: &Path, destination: &Path, replacing: bool) -> Result<()> {
-            let flags = if replacing { rustix::fs::RenameFlags::EXCHANGE } else { rustix::fs::RenameFlags::NOREPLACE };
-            rustix::fs::renameat_with(rustix::fs::CWD, stage, rustix::fs::CWD, destination, flags)
-                .context("atomically publish Nerd Font family")
-        }
-
-        fn refresh_cache(host: &Host, operation: &str, directory: &Path) -> Result<()> {
-            host.require(operation, "fc-cache", [OsStr::new("--force"), directory.as_os_str()])?;
-            Ok(())
-        }
-
-        fn sync_publication_directories(stage: &Path, destination: &Path) -> Result<()> {
-            let stage_parent = stage.parent().context("Nerd Font stage has no parent")?;
-            let destination_parent = destination.parent().context("Nerd Font destination has no parent")?;
-            fs::File::open(stage_parent)?.sync_all().context("sync Nerd Font staging directory")?;
-            fs::File::open(destination_parent)?.sync_all().context("sync Nerd Font destination directory")
-        }
-
-        fn validate_archive_listing(output: &[u8]) -> Result<()> {
-            let output = std::str::from_utf8(output).context("Nerd Font archive listing is not UTF-8")?;
-            if output.is_empty() {
-                bail!("Nerd Font archive is empty");
-            }
-            for entry in output.lines() {
-                let path = Path::new(entry);
-                if entry.is_empty()
-                    || path.is_absolute()
-                    || path.components().any(|component| {
-                        matches!(
-                            component,
-                            std::path::Component::ParentDir
-                                | std::path::Component::RootDir
-                                | std::path::Component::Prefix(_)
-                        )
-                    })
-                    || entry.chars().any(char::is_control)
-                {
-                    bail!("Nerd Font archive contains an unsafe path");
-                }
-            }
-            Ok(())
-        }
-
-        fn validate_extracted_tree(root: &Path) -> Result<()> {
-            let mut directories = vec![root.to_path_buf()];
-            let mut fonts = 0_u32;
-            while let Some(directory) = directories.pop() {
-                for entry in fs::read_dir(directory)? {
-                    let entry = entry?;
-                    let path = entry.path();
-                    let metadata = fs::symlink_metadata(&path)?;
-                    if metadata.file_type().is_dir() {
-                        directories.push(path);
-                    } else if metadata.file_type().is_file() {
-                        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default();
-                        if matches!(extension, "ttf" | "otf") && metadata.len() > 0 {
-                            fonts += 1;
-                        }
-                    } else {
-                        bail!("Nerd Font archive contains an unsupported file type at {}", path.display());
-                    }
-                }
-            }
-            if fonts == 0 {
-                bail!("Nerd Font archive contains no non-empty TTF or OTF files");
-            }
+            host.require(
+                "Nerd Font destination creation",
+                "sudo",
+                [OsStr::new("mkdir"), OsStr::new("--parents"), OsStr::new("--"), destination.as_os_str()],
+            )?;
+            host.require(
+                "Nerd Font archive extraction",
+                "sudo",
+                [
+                    OsStr::new("tar"),
+                    OsStr::new("--extract"),
+                    OsStr::new("--xz"),
+                    OsStr::new("--directory"),
+                    destination.as_os_str(),
+                    OsStr::new("--file"),
+                    archive.path().as_os_str(),
+                ],
+            )?;
             Ok(())
         }
     }

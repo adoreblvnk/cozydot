@@ -466,6 +466,42 @@ fn toolchains_delegate_convergence_to_native_managers() {
 }
 
 #[test]
+fn nerd_fonts_install_system_wide_after_download() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("fonts.log");
+    let family = format!("CozydotTestFont{}", std::process::id());
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), format!("version: 1.0.0\nfonts:\n  nerd: [{family}]\n")).unwrap();
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nprintf 'curl %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let log = fs::read_to_string(log).unwrap();
+    let download = log.find(&format!("{family}.tar.xz")).unwrap();
+    let replace = log.find(&format!("sudo rm --recursive --force -- /usr/share/fonts/{family}\n")).unwrap();
+    let create = log.find(&format!("sudo mkdir --parents -- /usr/share/fonts/{family}\n")).unwrap();
+    let extract = log.find(&format!("sudo tar --extract --xz --directory /usr/share/fonts/{family} --file ")).unwrap();
+    let cache = log.find("sudo fc-cache --force /usr/share/fonts\n").unwrap();
+    assert!(download < replace && replace < create && create < extract && extract < cache);
+    assert!(!log.contains("--list"));
+    assert!(!log.contains("font-stage"));
+}
+
+#[test]
 fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
