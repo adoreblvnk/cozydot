@@ -2,10 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::{collections::BTreeSet, path::Path};
 
-use super::{
-    Host, OperationOutcome, TempPath, apt,
-    privileged_file::{publish_bytes, sync_parent},
-};
+use super::{Host, OperationOutcome, TempPath, apt, privileged_file::publish_bytes};
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
@@ -146,7 +143,15 @@ fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 
 pub(crate) fn docker_group(host: &Host) -> Result<()> {
-    ensure_product_group(host, Product::Docker)
+    let (username, _) = effective_user(host)?;
+    let groups = host.require("Docker group membership query", "id", ["-nG", "--", &username])?;
+    if one_record(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|group| group == "docker") {
+        return Ok(());
+    }
+    preflight(host, Product::Docker)?;
+    host.require("Docker group creation", "sudo", ["groupadd", "-f", "docker"])?;
+    host.require("Docker group membership", "sudo", ["usermod", "-aG", "docker", "--", &username])?;
+    Ok(())
 }
 
 pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
@@ -155,8 +160,7 @@ pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
 
 pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()> {
     preflight(host, Product::Docker)?;
-    let current = read_daemon_config(host)?;
-    let mut requested = current.clone();
+    let mut requested = read_daemon_config(host)?;
     let object = requested.as_object_mut().context("Docker daemon config must be a JSON object")?;
     object.insert("log-driver".into(), Value::String("local".into()));
     if let Some(max_size) = max_size {
@@ -166,10 +170,6 @@ pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()
             .as_object_mut()
             .context("Docker daemon config log-opts must be a JSON object")?;
         log_options.insert("max-size".into(), Value::String(max_size.to_owned()));
-    }
-    if requested == current {
-        sync_parent(host, Path::new(DOCKER_DAEMON_CONFIG), "Docker daemon config publication")?;
-        return Ok(());
     }
     let mut bytes = serde_json::to_vec_pretty(&requested).context("serialize Docker daemon configuration")?;
     bytes.push(b'\n');
