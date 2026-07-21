@@ -1,8 +1,9 @@
 use super::{Host, TempPath};
-use crate::{config::HttpsUrl, platform::Architecture};
+use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::{fs, io::Read, os::unix::fs::PermissionsExt, path::Path, thread, time::Duration};
+use url::Url;
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
@@ -91,7 +92,7 @@ fn wait_until_active(host: &Host) -> Result<()> {
     bail!("appimaged did not become active after launch")
 }
 
-fn resolve_asset(host: &Host, architecture: Architecture) -> Result<HttpsUrl> {
+fn resolve_asset(host: &Host, architecture: Architecture) -> Result<Url> {
     let output = host.require(
         "resolve appimaged release",
         "curl",
@@ -138,7 +139,7 @@ fn resolve_asset(host: &Host, architecture: Architecture) -> Result<HttpsUrl> {
     if matches.len() != 1 {
         bail!("appimaged release selector matched {} assets for {}", matches.len(), architecture.canonical());
     }
-    HttpsUrl::parse(matches[0])
+    Url::parse(matches[0]).context("selected appimaged release asset has an invalid browser_download_url")
 }
 
 fn clear_integration_cache(applications: &Path) -> Result<()> {

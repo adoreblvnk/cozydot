@@ -1,6 +1,6 @@
 use crate::{
     config::{
-        AptUpdate, BinaryFormat, Config, EnabledDisabled, InstalledState, ResolvedNativeBinary, SourceMode, Theme,
+        AptUpdate, BinaryFormat, Config, EnabledDisabled, ResolvedNativeBinary, SourceMode, Theme,
         resolve_platform_identity,
     },
     operations::{
@@ -319,17 +319,13 @@ fn plan_system_states(
         *needs_apt_refresh = true;
         push_operation(phases, PlannerPhase::SystemPackageStates, Operation::UbuntuSnap { enabled: enabled(state) });
     }
-    if let Some(state) = ubuntu.codecs
-        && ubuntu_family
-    {
+    if ubuntu.codecs && ubuntu_family {
         *needs_apt_refresh = true;
-        if state == InstalledState::Installed {
-            push_operation(
-                phases,
-                PlannerPhase::SystemPackageStates,
-                Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
-            );
-        }
+        push_operation(
+            phases,
+            PlannerPhase::SystemPackageStates,
+            Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
+        );
     }
 }
 

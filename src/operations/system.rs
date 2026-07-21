@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
-use std::{collections::BTreeSet, path::Path};
+use std::path::Path;
 
 use super::{Host, OperationOutcome, TempPath, apt, privileged_file::publish_bytes};
 
@@ -348,7 +348,8 @@ pub(crate) fn gnome_rounded_corners(host: &Host) -> Result<OperationOutcome> {
 }
 
 fn ensure_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
-    if !extension_state(host)?.contains(extension) {
+    validate_extension(extension)?;
+    if !host.run("gnome-extensions", ["info", extension])?.status.success() {
         install_extension(host, extension)?;
         return Ok(OperationOutcome::LoginRequired);
     }
@@ -364,19 +365,6 @@ fn ensure_gsetting(host: &Host, schema: &str, key: &str, expected: &str) -> Resu
 fn ensure_dconf(host: &Host, key: &str, expected: &str) -> Result<()> {
     host.require("GNOME dconf mutation", "dconf", ["write", key, expected])?;
     Ok(())
-}
-
-fn extension_state(host: &Host) -> Result<BTreeSet<String>> {
-    let output = host.require("GNOME extension state query", "gnome-extensions", ["list"])?;
-    let output = std::str::from_utf8(&output.stdout).context("gnome-extensions returned non-UTF-8 state")?;
-    let mut extensions = BTreeSet::new();
-    for extension in output.lines() {
-        validate_extension(extension).map_err(|_| anyhow::anyhow!("gnome-extensions returned malformed UUID state"))?;
-        if !extensions.insert(extension.to_owned()) {
-            bail!("gnome-extensions returned duplicate UUID state");
-        }
-    }
-    Ok(extensions)
 }
 
 fn install_extension(host: &Host, extension: &str) -> Result<()> {

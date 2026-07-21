@@ -18,7 +18,7 @@ system:
     unattended_upgrades: disabled
   ubuntu:
     snap: disabled
-    codecs: installed
+    codecs: true
   require:
     distros:
       - ubuntu
