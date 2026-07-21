@@ -95,7 +95,6 @@ generate_full() {
       {
         "name": "obsidian",
         "format": "appimage",
-        "commands": ["obsidian"],
         "source": {
           "provider": "github",
           "repository": "obsidianmd/obsidian-releases",
@@ -108,7 +107,6 @@ generate_full() {
       {
         "name": "zen-browser",
         "format": "appimage",
-        "commands": ["zen"],
         "source": {
           "provider": "github",
           "repository": "zen-browser/desktop",
@@ -157,10 +155,10 @@ generate_cli() {
       .system.ubuntu.codecs,
       .packages.apt.remove,
       .packages.flatpak,
-      .integrations,
       .desktop,
       .updates.flatpak
     ) |
+    .integrations = {"appimaged": false} |
     .packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
     .packages.apt.repositories |= map(select(.name == "github-cli")) |
     .packages.npm = ["opencode-ai"] |
@@ -192,6 +190,7 @@ generate_vm() {
       .integrations.docker,
       .integrations.virtualbox
     ) |
+    .integrations.appimaged = false |
     .packages.apt.repositories = ((.packages.apt.repositories | map(select(.name == "vscode"))) + [
       {
         "name": "wezterm",
