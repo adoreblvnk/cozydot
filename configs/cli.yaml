@@ -61,8 +61,6 @@ packages:
   binaries:
     - name: fastfetch
       format: deb
-      commands:
-        - fastfetch
       source:
         provider: github
         repository: fastfetch-cli/fastfetch
@@ -72,8 +70,6 @@ packages:
           arm32: ^fastfetch-linux-armv7l.*\.deb$
     - name: git-credential-manager
       format: deb
-      commands:
-        - git-credential-manager
       source:
         provider: github
         repository: git-ecosystem/git-credential-manager
@@ -106,5 +102,4 @@ updates:
   packages:
     cargo: true
     npm: true
-    binaries: true
   fonts: true

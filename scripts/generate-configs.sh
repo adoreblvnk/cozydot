@@ -55,7 +55,6 @@ generate_full() {
       {
         "name": "drawio",
         "format": "deb",
-        "commands": ["drawio"],
         "source": {
           "provider": "github",
           "repository": "jgraph/drawio-desktop",
@@ -68,7 +67,6 @@ generate_full() {
       {
         "name": "fastfetch",
         "format": "deb",
-        "commands": ["fastfetch"],
         "source": {
           "provider": "github",
           "repository": "fastfetch-cli/fastfetch",
@@ -82,7 +80,6 @@ generate_full() {
       {
         "name": "git-credential-manager",
         "format": "deb",
-        "commands": ["git-credential-manager"],
         "source": {
           "provider": "github",
           "repository": "git-ecosystem/git-credential-manager",
@@ -138,7 +135,6 @@ generate_full() {
     ] | sort) |
     .desktop.terminal = "wezterm" |
     .updates.apt = "full" |
-    .updates.packages.binaries = true |
     .updates.fonts = true |
     .packages.apt as $apt |
     .packages.apt = {
@@ -209,7 +205,6 @@ generate_vm() {
       {
         "name": "fastfetch",
         "format": "deb",
-        "commands": ["fastfetch"],
         "source": {
           "provider": "github",
           "repository": "fastfetch-cli/fastfetch",
@@ -223,7 +218,6 @@ generate_vm() {
       {
         "name": "git-credential-manager",
         "format": "deb",
-        "commands": ["git-credential-manager"],
         "source": {
           "provider": "github",
           "repository": "git-ecosystem/git-credential-manager",
@@ -239,7 +233,6 @@ generate_vm() {
     .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
     .desktop.terminal = "wezterm" |
     .updates.apt = "full" |
-    .updates.packages.binaries = true |
     .updates.fonts = true
   ' "$base"
 }

@@ -292,7 +292,6 @@ updates:
   packages:
     cargo: false
     npm: false
-    binaries: false
 "#,
     )
     .unwrap();
@@ -336,7 +335,7 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
         ),
         (
             "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\nintegrations:\n  appimaged: true\n",
-            "commands: not supported for AppImages managed by appimaged",
+            "unknown field `commands`",
         ),
     ] {
         let temp = tempfile::tempdir().unwrap();
@@ -522,6 +521,77 @@ fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
 }
 
 #[test]
+fn deb_binary_uses_name_as_command_and_installs_only_when_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("binary.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  binaries:
+    - name: fastfetch
+      format: deb
+      source:
+        provider: github
+        repository: example/fastfetch
+        assets:
+          amd64: ^fastfetch\.deb$
+          arm64: ^fastfetch\.deb$
+          arm32: ^fastfetch\.deb$
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\n/usr/bin/uname \"$@\"\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+printf 'curl %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+output=
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "--output" ] || { shift; output="$1"; }
+  shift
+done
+if [ -n "$output" ]; then
+  printf 'deb' > "$output"
+else
+  printf '%s' '{"assets":[{"name":"fastfetch.deb","browser_download_url":"https://example.com/fastfetch.deb"}]}'
+fi
+"#,
+    );
+
+    let apply = || {
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .env("COZYDOT_TEST_LOG", &log)
+            .env("PATH", &fake_bin)
+            .arg("apply")
+            .assert()
+            .success();
+    };
+    apply();
+    let first = fs::read_to_string(&log).unwrap();
+    assert!(first.contains("example/fastfetch/releases/latest"));
+    assert!(first.contains("apt-get install -y -qq --"));
+    assert!(!first.contains("dpkg-deb"));
+    assert!(!first.contains("sha256"));
+
+    fs::write(&log, "").unwrap();
+    write_executable(&fake_bin.join("fastfetch"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 1\n");
+    apply();
+    assert!(!fs::read_to_string(log).unwrap().contains("fastfetch/releases/latest"));
+}
+
+#[test]
 fn appimaged_is_ensured_once_before_appimages_are_published() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
@@ -563,10 +633,6 @@ packages:
           amd64: https://example.com/fixed.AppImage
           arm64: https://example.com/fixed.AppImage
           arm32: https://example.com/fixed.AppImage
-        sha256:
-          amd64: 13ecaa8c8c200cefa4b472684d16c033d6d4b0e45be25cf6402ecfb19b9bf6cb
-          arm64: 13ecaa8c8c200cefa4b472684d16c033d6d4b0e45be25cf6402ecfb19b9bf6cb
-          arm32: 13ecaa8c8c200cefa4b472684d16c033d6d4b0e45be25cf6402ecfb19b9bf6cb
 integrations:
   appimaged: true
 "#,
@@ -659,7 +725,7 @@ esac
         let appimage = home.join("Applications").join(name);
         assert!(fs::metadata(appimage).unwrap().permissions().mode() & 0o111 != 0);
     }
-    assert_eq!(fs::read(home.join("Applications/fixed.AppImage")).unwrap(), b"\x7fELFcozydot-test-appimage\n");
+    assert_eq!(fs::read(home.join("Applications/fixed.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
     assert!(user_cache_directory.is_dir());
     assert!(fs::read_to_string(&sudo_log).unwrap().contains("apt-get install -y -qq -- libfuse2t64"));
     assert!(!home.join(".local/bin").exists());
