@@ -98,10 +98,7 @@ mod system;
 mod tools;
 
 pub use apt::AptUpgradePolicy;
-pub use binary::{
-    BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
-    BinarySourceOperation, GithubRepository,
-};
+pub use binary::{BinaryPackageFormat, BinaryPackageOperation, BinarySourceOperation};
 pub use packages::cargo::CargoPackageMode;
 pub use packages::fonts::NerdFontsMode;
 pub use packages::npm::NpmPackageMode;

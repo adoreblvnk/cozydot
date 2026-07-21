@@ -5,9 +5,8 @@ use crate::{
     },
     operations::{
         AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
-        BinaryPackageFormat, BinaryPackageMode, BinaryPackageOperation, BinaryPackageSelector, BinarySha256,
-        BinarySourceOperation, CargoPackageMode, DesktopEnvironment, DesktopSetting, DesktopTheme, GithubRepository,
-        GoToolchainSelector, NerdFontsMode, NpmPackageMode, Operation,
+        BinaryPackageFormat, BinaryPackageOperation, BinarySourceOperation, CargoPackageMode, DesktopEnvironment,
+        DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, NpmPackageMode, Operation,
     },
     platform::{Architecture, Platform},
 };
@@ -166,13 +165,12 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()).filter(|values| !values.is_empty())
     {
         for binary in binaries {
-            let Some(planned) = plan_binary(binary, platform.architecture, BinaryPackageMode::EnsurePresent)? else {
+            let Some(planned) = plan_binary(binary, platform.architecture) else {
                 continue;
             };
             prerequisites.insert("ca-certificates");
             prerequisites.insert("curl");
             if binary.format == BinaryFormat::Deb {
-                prerequisites.insert("dpkg");
                 needs_apt_refresh = true;
             }
             push_operation(&mut phases, PlannerPhase::BinaryPackages, Operation::BinaryPackage(planned));
@@ -207,7 +205,7 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
 
     plan_integrations(config, platform, &mut phases, &mut prerequisites);
     plan_desktop(config, platform, &mut phases, &mut prerequisites);
-    plan_updates(config, platform, &mut phases, &mut needs_apt_refresh)?;
+    plan_updates(config, &mut phases, &mut needs_apt_refresh)?;
 
     if needs_apt_refresh {
         push_operation(&mut phases, PlannerPhase::AptMetadataRefresh, Operation::AptMetadataRefresh);
@@ -279,36 +277,23 @@ fn plan_repository(
     )
 }
 
-fn plan_binary(
-    binary: &crate::config::BinaryPackage,
-    architecture: Architecture,
-    mode: BinaryPackageMode,
-) -> Result<Option<BinaryPackageOperation>> {
-    let Some(native) = binary.source.resolve_native(architecture) else {
-        return Ok(None);
-    };
+fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
+    let native = binary.source.resolve_native(architecture)?;
     let source = match native {
-        ResolvedNativeBinary::Github { repository, selector } => BinarySourceOperation::GithubLatest {
-            repository: GithubRepository::parse(repository.to_owned())?,
-            selector: BinaryPackageSelector::new(selector.to_owned())?,
-            sha256: None,
-        },
-        ResolvedNativeBinary::Url { url, sha256 } => {
-            BinarySourceOperation::ChecksummedUrl { url: url.clone(), sha256: BinarySha256::parse(sha256.as_str())? }
+        ResolvedNativeBinary::Github { repository, selector } => {
+            BinarySourceOperation::GithubLatest { repository: repository.to_owned(), selector: selector.to_owned() }
         }
+        ResolvedNativeBinary::Url { url } => BinarySourceOperation::Url { url: url.clone() },
     };
-    BinaryPackageOperation::new(
+    Some(BinaryPackageOperation::new(
         binary.name.clone(),
         match binary.format {
             BinaryFormat::Deb => BinaryPackageFormat::Deb,
             BinaryFormat::Appimage => BinaryPackageFormat::AppImage,
         },
-        binary.commands.clone().unwrap_or_default(),
         architecture,
         source,
-        mode,
-    )
-    .map(Some)
+    ))
 }
 
 fn plan_system_states(
@@ -504,7 +489,6 @@ fn plan_desktop(
 
 fn plan_updates(
     config: &Config,
-    platform: &Platform,
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     needs_apt_refresh: &mut bool,
 ) -> Result<()> {
@@ -550,20 +534,6 @@ fn plan_updates(
                 PlannerPhase::Updates,
                 Operation::NpmPackageSet { packages: configured, mode: NpmPackageMode::UpdateCurrent },
             );
-        }
-        if package_updates.binaries == Some(true)
-            && let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref())
-        {
-            for binary in binaries {
-                if matches!(
-                    binary.source.resolve_native(platform.architecture),
-                    Some(ResolvedNativeBinary::Github { .. })
-                ) {
-                    let planned = plan_binary(binary, platform.architecture, BinaryPackageMode::Update)?
-                        .expect("native GitHub source was resolved");
-                    push_operation(phases, PlannerPhase::Updates, Operation::BinaryPackage(planned));
-                }
-            }
         }
     }
     if updates.fonts == Some(true)

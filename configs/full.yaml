@@ -149,8 +149,6 @@ packages:
   binaries:
     - name: drawio
       format: deb
-      commands:
-        - drawio
       source:
         provider: github
         repository: jgraph/drawio-desktop
@@ -159,8 +157,6 @@ packages:
           arm64: ^drawio-arm64-.*\.deb$
     - name: fastfetch
       format: deb
-      commands:
-        - fastfetch
       source:
         provider: github
         repository: fastfetch-cli/fastfetch
@@ -170,8 +166,6 @@ packages:
           arm32: ^fastfetch-linux-armv7l.*\.deb$
     - name: git-credential-manager
       format: deb
-      commands:
-        - git-credential-manager
       source:
         provider: github
         repository: git-ecosystem/git-credential-manager
@@ -263,5 +257,4 @@ updates:
   packages:
     cargo: true
     npm: true
-    binaries: true
   fonts: true

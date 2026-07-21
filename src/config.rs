@@ -417,17 +417,10 @@ impl Packages {
         }
         if let Some(binaries) = &self.binaries {
             let mut names = HashSet::new();
-            let mut command_owners = BTreeMap::new();
             for (index, binary) in binaries.iter().enumerate() {
                 binary.validate(index)?;
                 if !names.insert(binary.name.as_str()) {
                     bail!("packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
-                }
-                for (command_index, command) in binary.commands.iter().flatten().enumerate() {
-                    let command_path = format!("packages.binaries[{index}].commands[{command_index}]");
-                    if let Some(owner_path) = command_owners.insert(command.as_str(), command_path.clone()) {
-                        bail!("{command_path}: command {command:?} is already claimed by {owner_path}");
-                    }
                 }
             }
         }
@@ -649,7 +642,6 @@ pub enum BinaryFormat {
 pub struct BinaryPackage {
     pub name: String,
     pub format: BinaryFormat,
-    pub commands: Option<Vec<String>>,
     pub source: BinarySource,
 }
 
@@ -657,16 +649,6 @@ impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("packages.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        match (self.format, self.commands.as_deref()) {
-            (BinaryFormat::Deb, Some(commands)) => {
-                validate_string_values(commands, &format!("{path}.commands"), validate_executable)?;
-            }
-            (BinaryFormat::Deb, None) => bail!("{path}.commands: required for Debian packages"),
-            (BinaryFormat::Appimage, None) => {}
-            (BinaryFormat::Appimage, Some(_)) => {
-                bail!("{path}.commands: not supported for AppImages managed by appimaged")
-            }
-        }
         self.source.validate(&format!("{path}.source"))
     }
 }
@@ -675,7 +657,7 @@ impl BinaryPackage {
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
     Github { repository: String, assets: AssetMap },
-    Url { urls: Box<ArchitectureUrls>, sha256: Box<ArchitectureHashes> },
+    Url { urls: Box<ArchitectureUrls> },
 }
 
 impl BinarySource {
@@ -685,19 +667,8 @@ impl BinarySource {
                 validate_github_repository(repository, &format!("{path}.repository"))?;
                 assets.validate(&format!("{path}.assets"))
             }
-            Self::Url { urls, sha256 } => {
-                urls.validate(&format!("{path}.urls"))?;
-                sha256.validate(&format!("{path}.sha256"))?;
-                if urls.keys() != sha256.keys() {
-                    bail!("{path}: urls and sha256 must contain exactly the same architecture keys");
-                }
-                Ok(())
-            }
+            Self::Url { urls } => urls.validate(&format!("{path}.urls")),
         }
-    }
-
-    pub fn is_github(&self) -> bool {
-        matches!(self, Self::Github { .. })
     }
 
     pub fn resolve_native(&self, architecture: Architecture) -> Option<ResolvedNativeBinary<'_>> {
@@ -705,17 +676,14 @@ impl BinarySource {
             Self::Github { repository, assets } => {
                 assets.get(architecture).map(|selector| ResolvedNativeBinary::Github { repository, selector })
             }
-            Self::Url { urls, sha256 } => urls
-                .get(architecture)
-                .zip(sha256.get(architecture))
-                .map(|(url, sha256)| ResolvedNativeBinary::Url { url, sha256 }),
+            Self::Url { urls } => urls.get(architecture).map(|url| ResolvedNativeBinary::Url { url }),
         }
     }
 }
 
 pub enum ResolvedNativeBinary<'a> {
     Github { repository: &'a str, selector: &'a str },
-    Url { url: &'a HttpsUrl, sha256: &'a Sha256 },
+    Url { url: &'a HttpsUrl },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -760,32 +728,6 @@ fn validate_asset_regex(value: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sha256(String);
-
-impl Sha256 {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    fn validate(&self, path: &str) -> Result<()> {
-        let value = &self.0;
-        if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
-            bail!("{path}: invalid SHA-256 {value:?}; must be exactly 64 lowercase hexadecimal characters");
-        }
-        Ok(())
-    }
-}
-
-impl<'de> Deserialize<'de> for Sha256 {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        String::deserialize(deserializer).map(Self)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArchitectureUrls {
@@ -807,42 +749,6 @@ impl ArchitectureUrls {
     }
 
     fn get(&self, architecture: Architecture) -> Option<&HttpsUrl> {
-        match architecture {
-            Architecture::Amd64 => self.amd64.as_ref(),
-            Architecture::Arm64 => self.arm64.as_ref(),
-            Architecture::Arm32 => self.arm32.as_ref(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ArchitectureHashes {
-    pub amd64: Option<Sha256>,
-    pub arm64: Option<Sha256>,
-    pub arm32: Option<Sha256>,
-}
-
-impl ArchitectureHashes {
-    fn validate(&self, path: &str) -> Result<()> {
-        if self.keys().is_empty() {
-            bail!("{path}: must contain at least one canonical architecture hash");
-        }
-        for (architecture, hash) in
-            [("amd64", self.amd64.as_ref()), ("arm64", self.arm64.as_ref()), ("arm32", self.arm32.as_ref())]
-        {
-            if let Some(hash) = hash {
-                hash.validate(&format!("{path}.{architecture}"))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn keys(&self) -> Vec<Architecture> {
-        architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
-    }
-
-    fn get(&self, architecture: Architecture) -> Option<&Sha256> {
         match architecture {
             Architecture::Amd64 => self.amd64.as_ref(),
             Architecture::Arm64 => self.arm64.as_ref(),
@@ -1082,7 +988,6 @@ impl ToolUpdates {
 pub struct PackageUpdates {
     pub cargo: Option<bool>,
     pub npm: Option<bool>,
-    pub binaries: Option<bool>,
 }
 
 impl PackageUpdates {
@@ -1096,13 +1001,6 @@ impl PackageUpdates {
             && !packages.and_then(|packages| packages.npm.as_ref()).is_some_and(|values| !values.is_empty())
         {
             bail!("updates.packages.npm: requires configured packages.npm targets");
-        }
-        if self.binaries == Some(true)
-            && !packages
-                .and_then(|packages| packages.binaries.as_ref())
-                .is_some_and(|binaries| binaries.iter().any(|binary| binary.source.is_github()))
-        {
-            bail!("updates.packages.binaries: requires at least one configured GitHub binary target");
         }
         Ok(())
     }
