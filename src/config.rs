@@ -79,6 +79,7 @@ impl Config {
         {
             sources.validate_for_platform(platform, distro, upstream)?;
         }
+        self.validate_apt_ownership(distro, upstream)?;
 
         if let Some(configured) = &self.desktop
             && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
@@ -93,6 +94,49 @@ impl Config {
                 bail!(
                     "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_apt_ownership(&self, distro: Distro, upstream: Family) -> Result<()> {
+        let Some(apt) = self.packages.as_ref().and_then(|packages| packages.apt.as_ref()) else {
+            return Ok(());
+        };
+        let Some(repositories) = apt.repositories.as_ref() else {
+            return Ok(());
+        };
+        let direct = apt.install.as_deref().unwrap_or_default().iter().map(String::as_str).collect::<HashSet<_>>();
+        let applicable = repositories
+            .iter()
+            .enumerate()
+            .filter(|(_, repository)| select_distro_map(&repository.urls, distro, upstream).is_some())
+            .collect::<Vec<_>>();
+        let targets = applicable
+            .iter()
+            .flat_map(|(_, repository)| repository.packages.iter().map(String::as_str))
+            .collect::<HashSet<_>>();
+
+        for (index, repository) in applicable {
+            if let Some(package) = repository.packages.iter().find(|package| direct.contains(package.as_str())) {
+                bail!("packages.apt.repositories[{index}].packages: package {package:?} is also a direct APT target");
+            }
+            let Some((distro_key, conflicts)) =
+                repository.conflicts.as_ref().and_then(|conflicts| select_distro_map(conflicts, distro, upstream))
+            else {
+                continue;
+            };
+            if let Some(package) = conflicts.iter().find(|package| direct.contains(package.as_str())) {
+                bail!(
+                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also a direct APT target",
+                    distro_key.as_str()
+                );
+            }
+            if let Some(package) = conflicts.iter().find(|package| targets.contains(package.as_str())) {
+                bail!(
+                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also an applicable repository target",
+                    distro_key.as_str()
                 );
             }
         }
@@ -397,7 +441,6 @@ impl Packages {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AptPackages {
-    pub remove: Option<Vec<String>>,
     pub install: Option<Vec<String>>,
     pub repositories: Option<Vec<Repository>>,
 }
@@ -485,6 +528,7 @@ pub struct Repository {
     pub suite: Option<String>,
     pub components: Option<Vec<String>>,
     pub path: Option<String>,
+    pub conflicts: Option<BTreeMap<DistroMapKey, Vec<String>>>,
     pub packages: Vec<String>,
 }
 
@@ -506,6 +550,17 @@ impl Repository {
             }
             (None, None, Some(exact_path)) => validate_apt_source_value(exact_path, &format!("{path}.path"))?,
             _ => bail!("{path}: requires exactly suite with non-empty components, or path"),
+        }
+        if let Some(conflicts) = &self.conflicts {
+            validate_non_empty_map(conflicts, &format!("{path}.conflicts"))?;
+            for (distro, packages) in conflicts {
+                if packages.is_empty() {
+                    bail!("{path}.conflicts.{}: must be a non-empty sequence", distro.as_str());
+                }
+            }
+            if self.packages.is_empty() {
+                bail!("{path}.conflicts: requires non-empty repository packages");
+            }
         }
         Ok(())
     }

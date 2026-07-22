@@ -84,6 +84,15 @@ installs configured missing APT packages, then intentionally performs a
 system-wide APT `upgrade` or `full-upgrade`; `full` also runs purge-autoremove.
 These commands run only from `cozydot update`.
 
+Direct APT packages are ensured before packages owned by third-party
+repositories. A repository may declare distro-selected `conflicts`; after that
+repository is published and APT metadata is refreshed, Cozydot purges only
+installed conflicts before ensuring the repository's packages. Conflict names
+must differ from repository target names. This makes repository migrations such
+as `docker.io` to `docker-ce` no-ops on a second `apply` while keeping all
+destructive removal tied to its replacement repository. There is no global APT
+remove list.
+
 ## Safety model
 
 - `apply` and `update` validate the complete active config and resolved
