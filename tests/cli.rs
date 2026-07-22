@@ -446,7 +446,7 @@ fn docker_logging_passes_max_size_through_to_daemon_json() {
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("cozydot.yaml"),
-        "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      max_size: native-tool-value\n",
+        "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      driver: local\n      max_size: native-tool-value\n",
     )
     .unwrap();
     write_executable(&fake_bin.join("docker"), "#!/bin/sh\nexit 0\n");

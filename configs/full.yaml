@@ -232,6 +232,7 @@ integrations:
   docker:
     add_user_to_group: true
     logging:
+      driver: local
       max_size: 10m
   virtualbox:
     add_user_to_group: true

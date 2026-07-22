@@ -786,9 +786,16 @@ pub struct DockerIntegration {
     pub logging: Option<DockerLogging>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DockerLoggingDriver {
+    Local,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DockerLogging {
+    pub driver: DockerLoggingDriver,
     pub max_size: Option<String>,
 }
 

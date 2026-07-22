@@ -116,7 +116,7 @@ generate_full() {
     ] |
     .integrations.docker = {
       "add_user_to_group": true,
-      "logging": {"max_size": "10m"}
+      "logging": {"driver": "local", "max_size": "10m"}
     } |
     .integrations.virtualbox = {"add_user_to_group": true} |
     .integrations.vscode.extensions = (.integrations.vscode.extensions + [
