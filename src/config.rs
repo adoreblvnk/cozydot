@@ -840,7 +840,9 @@ pub enum AptUpdate {
 #[serde(deny_unknown_fields)]
 pub struct ToolUpdates {
     pub rust: Option<bool>,
+    pub go: Option<bool>,
     pub node: Option<bool>,
+    pub python: Option<bool>,
 }
 
 impl ToolUpdates {
@@ -848,8 +850,14 @@ impl ToolUpdates {
         if self.rust == Some(true) && tools.and_then(|tools| tools.rust.as_ref()).is_none() {
             bail!("updates.tools.rust: requires a configured Rust selector");
         }
+        if self.go == Some(true) && tools.and_then(|tools| tools.go.as_ref()).is_none() {
+            bail!("updates.tools.go: requires a configured Go selector");
+        }
         if self.node == Some(true) && tools.and_then(|tools| tools.node.as_ref()).is_none() {
             bail!("updates.tools.node: requires a configured Node selector");
+        }
+        if self.python == Some(true) && tools.and_then(|tools| tools.python.as_ref()).is_none() {
+            bail!("updates.tools.python: requires a configured Python selector");
         }
         Ok(())
     }

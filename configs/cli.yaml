@@ -98,7 +98,9 @@ updates:
   apt: standard
   tools:
     rust: true
+    go: true
     node: true
+    python: true
   packages:
     cargo: true
     npm: true

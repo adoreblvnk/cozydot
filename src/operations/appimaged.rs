@@ -16,6 +16,18 @@ pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
     }
 
     ensure_fuse(host)?;
+    let home = host.home();
+    let destination = home.join("Applications/appimaged.AppImage");
+    if fs::symlink_metadata(&destination)
+        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
+        && require_elf(&destination, architecture).is_ok()
+    {
+        let program =
+            destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?;
+        host.require("launch appimaged", program, std::iter::empty::<&str>())?;
+        wait_until_active(host)?;
+        return Ok(());
+    }
     let _ = host.run("systemctl", ["--user", "stop", "appimaged.service"])?;
     if host.run("dpkg", ["--status", "appimagelauncher"])?.status.success() {
         host.require(
@@ -25,7 +37,6 @@ pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
         )?;
     }
 
-    let home = host.home();
     remove_if_present(&home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service"))?;
     host.require("reload user services", "systemctl", ["--user", "daemon-reload"])?;
     clear_integration_cache(&home.join(".local/share/applications"))?;
@@ -53,7 +64,7 @@ pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
             url.as_str().as_ref(),
         ],
     )?;
-    require_elf(temporary.path())?;
+    require_elf(temporary.path(), architecture)?;
     fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755))?;
     let destination = applications.join("appimaged.AppImage");
     fs::rename(temporary.path(), &destination).context("publish appimaged")?;
@@ -175,15 +186,22 @@ fn remove_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn require_elf(path: &Path) -> Result<()> {
+fn require_elf(path: &Path, architecture: Architecture) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
-    let mut magic = [0; 4];
+    let mut header = [0; 20];
+    let expected_machine = match architecture {
+        Architecture::Amd64 => 62,
+        Architecture::Arm64 => 183,
+        Architecture::Arm32 => 40,
+    };
     if !metadata.file_type().is_file()
         || metadata.len() == 0
-        || fs::File::open(path).and_then(|mut file| file.read_exact(&mut magic)).is_err()
-        || magic != *b"\x7fELF"
+        || fs::File::open(path).and_then(|mut file| file.read_exact(&mut header)).is_err()
+        || header[..4] != *b"\x7fELF"
+        || header[5] != 1
+        || u16::from_le_bytes([header[18], header[19]]) != expected_machine
     {
-        bail!("downloaded appimaged is not a nonempty ELF file");
+        bail!("appimaged is not a nonempty ELF file for {}", architecture.canonical());
     }
     Ok(())
 }

@@ -10,6 +10,52 @@ fn write_executable(path: &Path, body: &str) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
+fn run_npm_apply(state: &str, package: &str) -> (bool, String, String) {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let data_home = home.join(".local/share");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("npm.log");
+    fs::create_dir_all(config_home.join("cozydot")).unwrap();
+    fs::write(
+        config_home.join("cozydot/cozydot.yaml"),
+        format!("version: 1.0.0\npackages:\n  npm: [\"{package}\"]\ntools:\n  node: latest\n"),
+    )
+    .unwrap();
+    write_executable(
+        &data_home.join("fnm/fnm"),
+        &format!(
+            r#"#!/bin/sh
+printf 'fnm %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+if [ "$*" = "exec --using=default -- npm list --global --depth=0 --json" ]; then
+  printf '%s\n' '{state}'
+fi
+"#,
+        ),
+    );
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nexit 99\n");
+    write_executable(
+        &fake_bin.join("npm"),
+        "#!/bin/sh\nprintf 'ambient npm %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\nexit 98\n",
+    );
+
+    let output = Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .output()
+        .unwrap();
+    (output.status.success(), fs::read_to_string(log).unwrap_or_default(), String::from_utf8(output.stderr).unwrap())
+}
+
 fn os_release_value(key: &str) -> String {
     fs::read_to_string("/etc/os-release")
         .unwrap()
@@ -23,12 +69,11 @@ fn os_release_value(key: &str) -> String {
 #[test]
 fn help_and_version() {
     for args in [Vec::<&str>::new(), vec!["--help"]] {
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .args(args)
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("init").and(predicate::str::contains("apply")));
+        Command::cargo_bin("cozydot").unwrap().args(args).assert().success().stdout(
+            predicate::str::contains("init")
+                .and(predicate::str::contains("apply"))
+                .and(predicate::str::contains("update")),
+        );
     }
 
     Command::cargo_bin("cozydot")
@@ -150,14 +195,16 @@ fn empty_config_apply_has_no_synthetic_report_output() {
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\n").unwrap();
 
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", temp.path())
-        .env("XDG_CURRENT_DESKTOP", "gnome")
-        .arg("apply")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
+    for command in ["apply", "update"] {
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg(command)
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty());
+    }
 }
 
 #[test]
@@ -298,7 +345,9 @@ updates:
   fonts: false
   tools:
     rust: false
+    go: false
     node: false
+    python: false
   packages:
     cargo: false
     npm: false
@@ -306,14 +355,16 @@ updates:
     )
     .unwrap();
 
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", temp.path())
-        .env("XDG_CURRENT_DESKTOP", "gnome")
-        .arg("apply")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
+    for command in ["apply", "update"] {
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg(command)
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty());
+    }
 }
 
 #[test]
@@ -334,6 +385,11 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
         (
             "version: 1.0.0\npackages:\n  npm: []\nupdates:\n  packages:\n    npm: true\n",
             "updates.packages.npm: requires configured packages.npm targets",
+        ),
+        ("version: 1.0.0\nupdates:\n  tools:\n    go: true\n", "updates.tools.go: requires a configured Go selector"),
+        (
+            "version: 1.0.0\nupdates:\n  tools:\n    python: true\n",
+            "updates.tools.python: requires a configured Python selector",
         ),
         (
             "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n          arm64: ^app\\.AppImage$\n          arm32: ^app\\.AppImage$\n",
@@ -642,6 +698,332 @@ fn apt_remove_install_overlap_finishes_with_install() {
 }
 
 #[test]
+fn apt_apply_installs_only_missing_and_update_then_upgrades_system_wide() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("apt-state.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  apt:
+    install: [present-ripgrep, missing-bat]
+updates:
+  apt: standard
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(
+        &fake_bin.join("dpkg-query"),
+        r#"#!/bin/sh
+last=
+for argument in "$@"; do last="$argument"; done
+printf 'dpkg-query %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+case "$last" in
+  present-ripgrep) printf 'installed\n' ;;
+  missing-bat) printf 'not-installed\n' ;;
+  *) printf 'installed\n' ;;
+esac
+"#,
+    );
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+
+    for command in ["apply", "update"] {
+        fs::write(&log, "").unwrap();
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .env("COZYDOT_TEST_LOG", &log)
+            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+            .arg(command)
+            .assert()
+            .success();
+
+        let log = fs::read_to_string(&log).unwrap();
+        let mutations = log.lines().filter(|line| line.starts_with("sudo ")).collect::<Vec<_>>();
+        let install = "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- missing-bat+";
+        assert!(mutations.contains(&install), "{command} did not install only the missing package: {log}");
+        assert!(
+            mutations.iter().all(|line| !line.contains("present-ripgrep") && !line.contains("unconfigured-package")),
+            "{command} mutated an installed or unconfigured package: {log}"
+        );
+        assert!(!log.contains("unconfigured-package"), "{command} inspected or mutated an unconfigured package: {log}");
+        if command == "apply" {
+            assert_eq!(mutations, ["sudo apt-get update -qq", install]);
+            assert!(!log.contains("apt-get upgrade"));
+        } else {
+            let refresh = mutations.iter().position(|line| *line == "sudo apt-get update -qq").unwrap();
+            let install_position = mutations.iter().position(|line| *line == install).unwrap();
+            let upgrade = mutations
+                .iter()
+                .position(|line| *line == "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --")
+                .unwrap();
+            assert!(refresh < install_position && install_position < upgrade, "unexpected update order: {log}");
+            assert_eq!(mutations.len(), 3, "unexpected APT update mutation: {log}");
+        }
+    }
+}
+
+#[test]
+fn apt_inspection_operational_failure_does_not_guess_package_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("sudo.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\npackages:\n  apt:\n    install: [ripgrep]\n").unwrap();
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'database failure\\n' >&2\nexit 2\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("APT package inspection failed for \"ripgrep\": database failure"));
+    let log = fs::read_to_string(log).unwrap();
+    assert!(log.contains("apt-get update -qq"));
+    assert!(!log.contains("apt-get install"));
+}
+
+#[test]
+fn npm_apply_repairs_only_unhealthy_configured_packages() {
+    let cases = [
+        ("empty root", r#"{"name":"lib"}"#, true),
+        ("healthy configured package", r#"{"dependencies":{"@scope/tool":{"version":"1.0.0"}}}"#, false),
+        ("configured package empty version", r#"{"dependencies":{"@scope/tool":{"version":""}}}"#, true),
+        (
+            "configured package error",
+            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","error":{"code":"EFAIL"}}}}"#,
+            true,
+        ),
+        (
+            "configured package problems",
+            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","problems":["broken"]}}}"#,
+            true,
+        ),
+        ("configured package invalid", r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","invalid":true}}}"#, true),
+        ("configured package missing", r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","missing":true}}}"#, true),
+        (
+            "configured package invalid type",
+            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","invalid":"yes"}}}"#,
+            true,
+        ),
+        (
+            "configured package missing type",
+            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","missing":1}}}"#,
+            true,
+        ),
+        ("configured package non-object metadata", r#"{"dependencies":{"@scope/tool":"broken"}}"#, true),
+        (
+            "unrelated malformed metadata",
+            r#"{"dependencies":{"unrelated":{"version":"1","version":false},"@scope/tool":{"version":"1.0.0"}}}"#,
+            false,
+        ),
+        (
+            "manager-wide problems",
+            r#"{"problems":["unattributed"],"dependencies":{"@scope/tool":{"version":"1.0.0"}}}"#,
+            false,
+        ),
+    ];
+
+    for (label, state, should_install) in cases {
+        let (success, log, stderr) = run_npm_apply(state, "@scope/tool@^1");
+        assert!(success, "{label} failed: {stderr}\n{log}");
+        assert_eq!(
+            log.matches("fnm exec --using=default -- npm list --global --depth=0 --json\n").count(),
+            1,
+            "{label} did not query npm state exactly once: {log}"
+        );
+        assert!(!log.contains("ambient npm"), "{label} invoked ambient npm: {log}");
+        assert_eq!(
+            log.contains("fnm exec --using=default -- npm install --global -- @scope/tool@^1\n"),
+            should_install,
+            "{label} selected the wrong npm mutation: {log}"
+        );
+    }
+}
+
+#[test]
+fn npm_apply_fails_closed_on_structurally_unreliable_configured_state() {
+    let cases = [
+        ("duplicate root key", r#"{"name":"first","name":"second"}"#),
+        (
+            "duplicate configured identity",
+            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0"},"@scope/tool":{"missing":true}}}"#,
+        ),
+        (
+            "duplicate configured metadata key",
+            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","version":"2.0.0"}}}"#,
+        ),
+        ("explicit root error", r#"{"error":null,"dependencies":{}}"#),
+    ];
+
+    for (label, state) in cases {
+        let (success, log, stderr) = run_npm_apply(state, "@scope/tool@^1");
+        assert!(!success, "{label} was accepted: {log}");
+        assert!(stderr.contains("npm global package state"), "{label} returned an unclear error: {stderr}");
+        assert!(!log.contains("npm install --global"), "{label} mutated npm state: {log}");
+        assert!(!log.contains("ambient npm"), "{label} invoked ambient npm: {log}");
+    }
+}
+
+#[test]
+fn mixed_package_states_keep_apply_ensure_only_and_update_configured_only() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let cargo_home = home.join(".cargo");
+    let data_home = home.join(".local/share");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("packages.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  cargo: [ripgrep, bat, probe]
+  npm: [typescript, eslint]
+  flatpak: [org.example.Present, org.example.Missing]
+tools:
+  rust: stable
+  node: latest
+updates:
+  flatpak: true
+  tools:
+    rust: false
+    node: false
+  packages:
+    cargo: true
+    npm: true
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &cargo_home.join("bin/rustup"),
+        "#!/bin/sh\nprintf 'rustup %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
+    );
+    write_executable(
+        &cargo_home.join("bin/cargo"),
+        r#"#!/bin/sh
+printf 'cargo %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+if [ "$*" = "install --list" ]; then
+  printf 'ripgrep v13.0.0:\n    rg\nprobe v1.0.0 (/tmp/probe source):\n    probe\neza v0.1.0:\n    eza\n'
+fi
+"#,
+    );
+    write_executable(
+        &cargo_home.join("bin/cargo-binstall"),
+        "#!/bin/sh\nprintf 'cargo-binstall %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
+    );
+    write_executable(
+        &data_home.join("fnm/fnm"),
+        r#"#!/bin/sh
+printf 'fnm %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+if [ "$*" = "exec --using=default -- npm list --global --depth=0 --json" ]; then
+  printf '%s\n' '{"dependencies":{"typescript":{"version":"4.0.0"},"prettier":{"version":"3.0.0"}}}'
+fi
+"#,
+    );
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 97\n");
+    write_executable(
+        &fake_bin.join("flatpak"),
+        r#"#!/bin/sh
+printf 'flatpak %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+case "$*" in
+  "--user info --show-ref -- org.example.Present") printf 'app/org.example.Present/x86_64/stable\n' ;;
+  "--user info --show-ref -- org.example.Missing") exit 1 ;;
+  "--user info --show-ref -- org.example.Unrelated") printf 'app/org.example.Unrelated/x86_64/stable\n' ;;
+esac
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("CARGO_HOME", &cargo_home)
+        .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let apply = fs::read_to_string(&log).unwrap();
+    assert!(apply.contains("cargo-binstall --no-confirm -- bat probe\n"), "missing Cargo apply convergence: {apply}");
+    assert!(
+        apply.contains("fnm exec --using=default -- npm install --global -- eslint\n"),
+        "missing npm apply convergence through managed FNM: {apply}"
+    );
+    assert!(
+        apply.contains("flatpak --user install --app --noninteractive -y flathub -- org.example.Missing\n"),
+        "missing Flatpak apply convergence: {apply}"
+    );
+    for forbidden in [
+        "cargo-binstall --no-confirm -- ripgrep",
+        "cargo-binstall --no-confirm -- eza",
+        "npm install --global -- typescript",
+        "npm install --global -- prettier",
+        "flatpak --user install --app --noninteractive -y flathub -- org.example.Present",
+        "org.example.Unrelated",
+    ] {
+        assert!(!apply.contains(forbidden), "apply mutated a present or unrelated package via {forbidden:?}: {apply}");
+    }
+
+    fs::write(&log, "").unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("CARGO_HOME", &cargo_home)
+        .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("update")
+        .assert()
+        .success();
+
+    let update = fs::read_to_string(&log).unwrap();
+    assert!(
+        update.contains("cargo install --locked -- ripgrep bat probe\n"),
+        "Cargo update was not configured-only: {update}"
+    );
+    assert!(
+        update.contains("fnm exec --using=default -- npm install --global -- typescript eslint\n"),
+        "npm update was not configured-only through managed FNM: {update}"
+    );
+    assert!(
+        update.contains(
+            "flatpak --user install --or-update --app --noninteractive -y flathub -- org.example.Present org.example.Missing\n"
+        ),
+        "Flatpak update did not use configured install --or-update convergence: {update}"
+    );
+    for unrelated in ["eza", "prettier", "org.example.Unrelated"] {
+        assert!(!update.contains(unrelated), "update included unrelated package {unrelated:?}: {update}");
+    }
+    assert!(!update.contains("cargo-binstall"), "Cargo update did not use managed cargo: {update}");
+}
+
+#[test]
 fn docker_logging_passes_max_size_through_to_daemon_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_home = temp.path().join("config");
@@ -738,24 +1120,36 @@ esac
 }
 
 #[test]
-fn go_updates_are_declared_by_the_tool_selector() {
+fn python_update_control_validates_and_apply_uses_local_state() {
     let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
     let config_dir = temp.path().join("cozydot");
+    let log = temp.path().join("tools.log");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("cozydot.yaml"),
-        "version: 1.0.0\ntools:\n  go: \"1.26\"\nupdates:\n  tools:\n    go: true\n",
+        "version: 1.0.0\ntools:\n  python: \"3.13\"\nupdates:\n  tools:\n    python: true\n",
     )
     .unwrap();
+    write_executable(&home.join(".local/bin/uv"), "#!/bin/sh\nprintf 'uv %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+    let fake_bin = temp.path().join("bin");
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 99\n");
 
     Command::cargo_bin("cozydot")
         .unwrap()
+        .env("HOME", &home)
+        .env("UV_INSTALL_DIR", home.join(".local/bin"))
         .env("XDG_CONFIG_HOME", temp.path())
         .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("unknown field `go`"));
+        .success();
+
+    let log = fs::read_to_string(log).unwrap();
+    assert!(log.contains("python find --no-config --managed-python --no-python-downloads --show-version -- 3.13"));
+    assert!(!log.contains("python install"));
 }
 
 #[test]
@@ -768,7 +1162,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("cozydot.yaml"),
-        "version: 1.0.0\ntools:\n  rust: stable\n  node: latest\n  python: \"3.13\"\nupdates:\n  tools:\n    rust: true\n    node: true\n",
+        "version: 1.0.0\ntools:\n  rust: stable\n  node: latest\n  python: \"3.13\"\nupdates:\n  tools:\n    rust: true\n    node: true\n    python: true\n",
     )
     .unwrap();
 
@@ -805,11 +1199,45 @@ fn toolchains_delegate_convergence_to_native_managers() {
     assert_eq!(
         fs::read_to_string(&log).unwrap(),
         concat!(
-            "rustup toolchain install --profile minimal --no-self-update -- stable\n",
+            "rustup toolchain install --profile minimal --no-self-update --no-update -- stable\n",
+            "rustup default -- stable\n",
+            "fnm exec --using latest -- node --version\n",
+            "fnm default -- latest\n",
+            "uv python find --no-config --managed-python --no-python-downloads --show-version -- 3.13\n",
+        )
+    );
+
+    fs::write(&log, "").unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("CARGO_HOME", home.join(".cargo"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("UV_INSTALL_DIR", home.join(".local/bin"))
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("update")
+        .assert()
+        .success()
+        .stdout(concat!(
+            "Updating APT bootstrap packages\n",
+            "Updating Rustup bootstrap\n",
+            "Updating FNM bootstrap\n",
+            "Updating uv bootstrap\n",
+            "Updating Rust toolchain\n",
+            "Updating Node.js toolchain\n",
+            "Updating Python toolchain\n",
+        ));
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        concat!(
+            "rustup update --no-self-update stable\n",
             "rustup default -- stable\n",
             "fnm install --progress never -- latest\n",
             "fnm default -- latest\n",
-            "uv python install --no-config --managed-python --no-progress --default -- 3.13\n",
+            "uv python install --no-config --managed-python --no-progress --upgrade --default -- 3.13\n",
         )
     );
 
@@ -826,7 +1254,10 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .arg("apply")
         .assert()
         .success();
-    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never --lts\nfnm default -- lts-latest\n");
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "fnm exec --using lts-latest -- node --version\nfnm default -- lts-latest\n"
+    );
 
     fs::write(
         config_dir.join("cozydot.yaml"),
@@ -845,7 +1276,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .arg("apply")
         .assert()
         .success();
-    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never -- 20\nfnm default -- 20\n");
+    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm exec --using 20 -- node --version\nfnm default -- 20\n");
 }
 
 #[test]
@@ -966,6 +1397,7 @@ packages:
     )
     .unwrap();
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\n/usr/bin/uname \"$@\"\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'not-installed\\n'\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
     write_executable(
         &fake_bin.join("curl"),
@@ -1020,6 +1452,7 @@ fn appimaged_is_ensured_once_before_appimages_are_published() {
     let systemctl_log = temp.path().join("systemctl.log");
     let systemctl_count = temp.path().join("systemctl.count");
     let sudo_log = temp.path().join("sudo.log");
+    let corrupt_launch = temp.path().join("corrupt-appimaged-launched");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("cozydot.yaml"),
@@ -1060,7 +1493,7 @@ integrations:
 
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_SUDO_LOG\"\n");
     write_executable(&fake_bin.join("apt-cache"), "#!/bin/sh\nexit 0\n");
-    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'rc '\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'not-installed\\n'\n");
     write_executable(
         &fake_bin.join("dpkg"),
         "#!/bin/sh\ncase \"$*\" in *appimagelauncher*) exit 1;; *) exit 0;; esac\n",
@@ -1116,6 +1549,10 @@ esac
     );
 
     fs::create_dir_all(home.join("Applications")).unwrap();
+    write_executable(
+        &home.join("Applications/appimaged.AppImage"),
+        "#!/bin/sh\nprintf launched > \"$COZYDOT_CORRUPT_LAUNCH\"\n",
+    );
     fs::copy("/bin/true", home.join("Applications/fixed.AppImage")).unwrap();
     let user_cache_directory = home.join(".local/share/applications/appimage-backup");
     fs::create_dir_all(&user_cache_directory).unwrap();
@@ -1128,6 +1565,7 @@ esac
         .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
         .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
         .env("COZYDOT_SUDO_LOG", &sudo_log)
+        .env("COZYDOT_CORRUPT_LAUNCH", &corrupt_launch)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()
@@ -1145,6 +1583,8 @@ esac
         assert!(fs::metadata(appimage).unwrap().permissions().mode() & 0o111 != 0);
     }
     assert_eq!(fs::read(home.join("Applications/fixed.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
+    assert_eq!(fs::read(home.join("Applications/appimaged.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
+    assert!(!corrupt_launch.exists());
     assert!(user_cache_directory.is_dir());
     assert!(fs::read_to_string(&sudo_log).unwrap().contains("apt-get install -y -qq -- libfuse2t64"));
     assert!(!home.join(".local/bin").exists());
@@ -1160,6 +1600,7 @@ esac
         .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
         .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
         .env("COZYDOT_SUDO_LOG", &sudo_log)
+        .env("COZYDOT_CORRUPT_LAUNCH", &corrupt_launch)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()

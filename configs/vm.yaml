@@ -135,7 +135,9 @@ updates:
   flatpak: true
   tools:
     rust: true
+    go: true
     node: true
+    python: true
   packages:
     cargo: true
     npm: true

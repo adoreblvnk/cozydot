@@ -6,7 +6,7 @@ use crate::{
     operations::{
         AptRepositoryOperation, AptUpgradePolicy, BinaryPackageOperation, BinarySourceOperation, CargoPackageMode,
         DesktopEnvironment, DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, NpmPackageMode,
-        Operation,
+        Operation, ToolchainMode,
     },
     platform::{Architecture, Platform},
 };
@@ -50,8 +50,9 @@ enum PlannerPhase {
     Updates,
 }
 
-pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Operation>> {
+pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Operation>> {
     config.validate_for_platform(platform)?;
+    validate_binary_integrations(config, platform.architecture)?;
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
         (PlannerPhase::SystemPrerequisites, Vec::new()),
@@ -74,7 +75,6 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
         (PlannerPhase::Dotfiles, Vec::new()),
         (PlannerPhase::Integrations, Vec::new()),
         (PlannerPhase::Desktop, Vec::new()),
-        (PlannerPhase::Updates, Vec::new()),
     ];
     let mut prerequisites = BTreeSet::new();
     let mut managers = BTreeSet::new();
@@ -174,11 +174,6 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             let Some(planned) = plan_binary(binary, platform.architecture) else {
                 continue;
             };
-            if binary.format == BinaryFormat::Appimage
-                && config.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true)
-            {
-                anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
-            }
             prerequisites.insert("ca-certificates");
             prerequisites.insert("curl");
             if binary.format == BinaryFormat::Deb {
@@ -216,8 +211,6 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
 
     plan_integrations(config, platform, &mut phases, &mut prerequisites);
     plan_desktop(config, platform, &mut phases, &mut prerequisites);
-    plan_updates(config, &mut phases, &mut needs_apt_refresh)?;
-
     if needs_apt_refresh {
         push_operation(&mut phases, PlannerPhase::AptMetadataRefresh, Operation::AptMetadataRefresh);
     }
@@ -341,7 +334,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::RustToolchain { selector: selector.to_owned() },
+            Operation::RustToolchain { selector: selector.to_owned(), mode: ToolchainMode::EnsurePresent },
         );
     }
     if let Some(selector) = tools.go.as_deref() {
@@ -349,7 +342,11 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::GoToolchain { selector: go_selector_main(selector), architecture: platform.architecture },
+            Operation::GoToolchain {
+                selector: go_selector_main(selector),
+                architecture: platform.architecture,
+                mode: ToolchainMode::EnsurePresent,
+            },
         );
     }
     if let Some(selector) = tools.node.as_deref() {
@@ -358,7 +355,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::NodeToolchain { selector: selector.to_owned() },
+            Operation::NodeToolchain { selector: selector.to_owned(), mode: ToolchainMode::EnsurePresent },
         );
     }
     if let Some(selector) = &tools.python {
@@ -367,7 +364,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::PythonToolchain { version: selector.clone() },
+            Operation::PythonToolchain { version: selector.clone(), mode: ToolchainMode::EnsurePresent },
         );
     }
 }
@@ -480,19 +477,66 @@ fn plan_desktop(
     }
 }
 
-fn plan_updates(
-    config: &Config,
-    phases: &mut [(PlannerPhase, Vec<Operation>)],
-    needs_apt_refresh: &mut bool,
-) -> Result<()> {
+pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation>> {
+    config.validate_for_platform(platform)?;
+    validate_binary_integrations(config, platform.architecture)?;
     let Some(updates) = &config.updates else {
-        return Ok(());
+        return Ok(Vec::new());
     };
+    let mut phases = [
+        (PlannerPhase::SystemPrerequisites, Vec::new()),
+        (PlannerPhase::ManagerBootstraps, Vec::new()),
+        (PlannerPhase::ThirdPartyRepositories, Vec::new()),
+        (PlannerPhase::AptMetadataRefresh, Vec::new()),
+        (PlannerPhase::FlatpakApplications, Vec::new()),
+        (PlannerPhase::LanguageToolchains, Vec::new()),
+        (PlannerPhase::LanguagePackages, Vec::new()),
+        (PlannerPhase::Fonts, Vec::new()),
+        (PlannerPhase::Updates, Vec::new()),
+    ];
     let packages = config.packages.as_ref();
+    let tools = config.tools.as_ref();
+    let mut prerequisites = BTreeSet::new();
+    let mut managers = BTreeSet::new();
+
     if let Some(policy) = updates.apt {
-        *needs_apt_refresh = true;
+        let identity = resolve_platform_identity(platform)?;
+        let apt = packages.and_then(|packages| packages.apt.as_ref());
+        let mut configured = BTreeSet::new();
+        if let Some(install) = apt.and_then(|apt| apt.install.as_ref()) {
+            configured.extend(install.iter().cloned());
+        }
+        if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
+            for repository in repositories {
+                let Some(operation) = plan_repository(repository, platform, identity) else { continue };
+                if repository.packages.is_empty() {
+                    continue;
+                }
+                prerequisites.extend(["ca-certificates", "curl", "gnupg"]);
+                configured.extend(repository.packages.iter().cloned());
+                push_operation(
+                    &mut phases,
+                    PlannerPhase::ThirdPartyRepositories,
+                    Operation::AptRepository(Box::new(operation)),
+                );
+            }
+        }
+        if config.system.as_ref().and_then(|system| system.ubuntu.as_ref()).is_some_and(|ubuntu| ubuntu.codecs)
+            && platform.upstream == "ubuntu"
+        {
+            configured.insert("ubuntu-restricted-extras".into());
+        }
+
+        push_operation(&mut phases, PlannerPhase::AptMetadataRefresh, Operation::AptMetadataRefresh);
+        if !configured.is_empty() {
+            push_operation(
+                &mut phases,
+                PlannerPhase::Updates,
+                Operation::AptPackages { packages: configured.into_iter().collect() },
+            );
+        }
         push_operation(
-            phases,
+            &mut phases,
             PlannerPhase::Updates,
             Operation::AptUpgrade {
                 policy: match policy {
@@ -502,38 +546,135 @@ fn plan_updates(
             },
         );
     }
-    if updates.flatpak == Some(true)
-        && let Some(refs) = packages.and_then(|packages| packages.flatpak.clone()).filter(|values| !values.is_empty())
-    {
-        push_operation(phases, PlannerPhase::Updates, Operation::FlatpakUpdateApps { refs });
+    if updates.flatpak == Some(true) {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        managers.insert(ManagerBootstrap::Flatpak);
+        let refs = packages.and_then(|packages| packages.flatpak.clone()).expect("validated Flatpak update targets");
+        push_operation(&mut phases, PlannerPhase::FlatpakApplications, Operation::FlatpakUpdateApps { refs });
     }
-    if let Some(package_updates) = &updates.packages {
-        if package_updates.cargo == Some(true)
-            && let Some(configured) =
-                packages.and_then(|packages| packages.cargo.clone()).filter(|values| !values.is_empty())
-        {
-            push_operation(
-                phases,
-                PlannerPhase::Updates,
-                Operation::CargoPackageSet { packages: configured, mode: CargoPackageMode::UpdateCurrent },
-            );
-        }
-        if package_updates.npm == Some(true)
-            && let Some(configured) =
-                packages.and_then(|packages| packages.npm.clone()).filter(|values| !values.is_empty())
-        {
-            push_operation(
-                phases,
-                PlannerPhase::Updates,
-                Operation::NpmPackageSet { packages: configured, mode: NpmPackageMode::UpdateCurrent },
-            );
-        }
+
+    let tool_updates = updates.tools.as_ref();
+    let rust_update = tool_updates.is_some_and(|updates| updates.rust == Some(true));
+    let go_update = tool_updates.is_some_and(|updates| updates.go == Some(true));
+    let node_update = tool_updates.is_some_and(|updates| updates.node == Some(true));
+    let python_update = tool_updates.is_some_and(|updates| updates.python == Some(true));
+    let package_updates = updates.packages.as_ref();
+    let cargo_update = package_updates.is_some_and(|updates| updates.cargo == Some(true));
+    let npm_update = package_updates.is_some_and(|updates| updates.npm == Some(true));
+
+    if rust_update || cargo_update {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        managers.insert(ManagerBootstrap::Rustup);
+        let selector = tools.and_then(|tools| tools.rust.clone()).expect("validated Rust selector");
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::RustToolchain {
+                selector,
+                mode: if rust_update { ToolchainMode::ConvergeLatest } else { ToolchainMode::EnsurePresent },
+            },
+        );
     }
-    if updates.fonts == Some(true)
-        && let Some(families) =
-            config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).filter(|values| !values.is_empty())
-    {
-        push_operation(phases, PlannerPhase::Updates, Operation::NerdFonts { families, mode: NerdFontsMode::Update });
+    if go_update {
+        prerequisites.extend(["ca-certificates", "curl", "tar"]);
+        let selector = tools.and_then(|tools| tools.go.as_deref()).expect("validated Go selector");
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::GoToolchain {
+                selector: go_selector_main(selector),
+                architecture: platform.architecture,
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
+    }
+    if node_update || npm_update {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        managers.insert(ManagerBootstrap::Fnm);
+        let selector = tools.and_then(|tools| tools.node.clone()).expect("validated Node selector");
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::NodeToolchain {
+                selector,
+                mode: if node_update { ToolchainMode::ConvergeLatest } else { ToolchainMode::EnsurePresent },
+            },
+        );
+    }
+    if python_update {
+        prerequisites.extend(["ca-certificates", "curl"]);
+        managers.insert(ManagerBootstrap::Uv);
+        let version = tools.and_then(|tools| tools.python.clone()).expect("validated Python selector");
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::PythonToolchain { version, mode: ToolchainMode::ConvergeLatest },
+        );
+    }
+    if cargo_update {
+        let configured = packages.and_then(|packages| packages.cargo.clone()).expect("validated Cargo update targets");
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguagePackages,
+            Operation::CargoPackageSet { packages: configured, mode: CargoPackageMode::UpdateCurrent },
+        );
+    }
+    if npm_update {
+        let configured = packages.and_then(|packages| packages.npm.clone()).expect("validated npm update targets");
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguagePackages,
+            Operation::NpmPackageSet { packages: configured, mode: NpmPackageMode::UpdateCurrent },
+        );
+    }
+    if updates.fonts == Some(true) {
+        prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"]);
+        let families =
+            config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).expect("validated Nerd Font update targets");
+        push_operation(
+            &mut phases,
+            PlannerPhase::Fonts,
+            Operation::NerdFonts { families, mode: NerdFontsMode::Update },
+        );
+    }
+
+    if managers.contains(&ManagerBootstrap::Flatpak) {
+        prerequisites.insert("flatpak");
+    }
+    if managers.contains(&ManagerBootstrap::Fnm) {
+        prerequisites.insert("unzip");
+    }
+    if !prerequisites.is_empty() {
+        push_operation(
+            &mut phases,
+            PlannerPhase::SystemPrerequisites,
+            Operation::AptBootstrapPackages {
+                packages: prerequisites.iter().map(|value| (*value).to_owned()).collect(),
+            },
+        );
+    }
+    for manager in managers {
+        let operation = match manager {
+            ManagerBootstrap::Flatpak => Operation::FlatpakEnsureFlathub,
+            ManagerBootstrap::Rustup => Operation::RustupBootstrap,
+            ManagerBootstrap::Fnm => Operation::FnmBootstrap,
+            ManagerBootstrap::Uv => Operation::UvBootstrap,
+            ManagerBootstrap::CargoBinstall => unreachable!("updates do not use cargo-binstall"),
+        };
+        push_operation(&mut phases, PlannerPhase::ManagerBootstraps, operation);
+    }
+    Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
+}
+
+fn validate_binary_integrations(config: &Config, architecture: Architecture) -> Result<()> {
+    let has_appimage =
+        config.packages.as_ref().and_then(|packages| packages.binaries.as_ref()).is_some_and(|binaries| {
+            binaries
+                .iter()
+                .any(|binary| binary.format == BinaryFormat::Appimage && plan_binary(binary, architecture).is_some())
+        });
+    if has_appimage && config.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true) {
+        anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
     }
     Ok(())
 }

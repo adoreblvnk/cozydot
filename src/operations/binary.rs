@@ -175,12 +175,18 @@ fn install_appimage(host: &Host, operation: &BinaryPackageOperation, temporary: 
 pub(crate) mod cargo_binstall {
     use super::super::Host;
     use anyhow::{Context, Result, bail};
-    use std::path::PathBuf;
+    use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 
     pub(crate) fn execute(host: &Host) -> Result<()> {
         let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
         if !cargo_home.is_absolute() {
             bail!("cargo-binstall managed CARGO_HOME must be absolute");
+        }
+        let installed = cargo_home.join("bin/cargo-binstall");
+        if std::fs::metadata(&installed)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        {
+            return Ok(());
         }
         let cargo_bin = cargo_home.join("bin/cargo");
         let program = cargo_bin
