@@ -98,11 +98,11 @@ mod system;
 mod tools;
 
 pub use apt::AptUpgradePolicy;
-pub use binary::{BinaryPackageFormat, BinaryPackageOperation, BinarySourceOperation};
+pub use binary::{BinaryPackageOperation, BinarySourceOperation};
 pub use packages::cargo::CargoPackageMode;
 pub use packages::fonts::NerdFontsMode;
 pub use packages::npm::NpmPackageMode;
-pub use repository::{AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken};
+pub use repository::AptRepositoryOperation;
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
 pub use tools::GoToolchainSelector;
 
@@ -120,7 +120,7 @@ const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 pub enum Operation {
     AptBootstrapPackages { packages: Vec<String> },
     AptMetadataRefresh,
-    AptRepository(AptRepositoryOperation),
+    AptRepository(Box<AptRepositoryOperation>),
     ManagedAptSources(ManagedAptSources),
     AptPackages { packages: Vec<String> },
     AptPurge { packages: Vec<String> },

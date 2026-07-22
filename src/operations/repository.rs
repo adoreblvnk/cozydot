@@ -2,7 +2,6 @@ use super::{Host, TempPath};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{
-    collections::BTreeSet,
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
@@ -12,89 +11,33 @@ use url::Url;
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AptRepositoryToken(String);
-
-impl AptRepositoryToken {
-    pub fn parse(value: impl Into<String>) -> Result<Self> {
-        let value = value.into();
-        if value != "*"
-            && (value.is_empty()
-                || !value.as_bytes()[0].is_ascii_lowercase() && !value.as_bytes()[0].is_ascii_digit()
-                || !value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._+-".contains(&byte)))
-        {
-            bail!("invalid APT repository token {value:?}");
-        }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AptRepositoryPath(String);
-
-impl AptRepositoryPath {
-    pub fn parse(value: impl Into<String>) -> Result<Self> {
-        let value = value.into();
-        let valid = value == "./"
-            || value.ends_with('/')
-                && !value.starts_with('/')
-                && !value.contains('\\')
-                && !value.contains("//")
-                && value[..value.len() - 1].split('/').all(valid_definition_name);
-        if !valid {
-            bail!("invalid exact APT repository path {value:?}");
-        }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AptRepositorySourceLayout {
-    SuiteComponents { suite: AptRepositoryToken, components: Vec<AptRepositoryToken> },
-    ExactPath(AptRepositoryPath),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepositoryOperation {
     name: String,
     key_url: Url,
     source_url: Url,
     architecture: Architecture,
-    layout: AptRepositorySourceLayout,
+    suite: Option<String>,
+    components: Vec<String>,
+    path: Option<String>,
     keyring_path: PathBuf,
     source_list_path: PathBuf,
 }
 
 impl AptRepositoryOperation {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
         key_url: Url,
         source_url: Url,
         architecture: Architecture,
-        layout: AptRepositorySourceLayout,
+        suite: Option<String>,
+        components: Vec<String>,
+        path: Option<String>,
         keyring_path: PathBuf,
-    ) -> Result<Self> {
+    ) -> Self {
         let name = name.into();
-        if !valid_definition_name(&name) {
-            bail!("invalid APT repository name {name:?}");
-        }
-        validate_layout(&layout)?;
-
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-
-        validate_keyring_destination(&keyring_path)?;
-        validate_source_list_destination(&source_list_path, &name)?;
-
-        Ok(Self { name, key_url, source_url, architecture, layout, keyring_path, source_list_path })
+        Self { name, key_url, source_url, architecture, suite, components, path, keyring_path, source_list_path }
     }
 
     pub fn render_source(&self) -> String {
@@ -104,15 +47,13 @@ impl AptRepositoryOperation {
             self.keyring_path.display(),
             self.source_url.as_str()
         );
-        match &self.layout {
-            AptRepositorySourceLayout::SuiteComponents { suite, components } => format!(
+        match &self.path {
+            None => format!(
                 "{prefix}{} {}\n",
-                suite.as_str(),
-                components.iter().map(AptRepositoryToken::as_str).collect::<Vec<_>>().join(" ")
+                self.suite.as_deref().expect("validated suite/components repository"),
+                self.components.join(" ")
             ),
-            AptRepositorySourceLayout::ExactPath(path) => {
-                format!("{prefix}{}\n", path.as_str())
-            }
+            Some(path) => format!("{prefix}{path}\n"),
         }
     }
 }
@@ -128,40 +69,6 @@ pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result
     converge_owned_bytes(host, &operation.source_list_path, &source, "APT repository source")?;
 
     Ok(())
-}
-
-fn validate_layout(layout: &AptRepositorySourceLayout) -> Result<()> {
-    match layout {
-        AptRepositorySourceLayout::SuiteComponents { suite, components } => {
-            AptRepositoryToken::parse(suite.as_str())?;
-            if suite.as_str() == "system" {
-                bail!("APT repository suite 'system' must be resolved before operation construction");
-            }
-            if components.is_empty() {
-                bail!("APT repository components must be nonempty");
-            }
-            let mut seen = BTreeSet::new();
-            for component in components {
-                AptRepositoryToken::parse(component.as_str())?;
-                if component.as_str() == "system" {
-                    bail!("APT repository component 'system' is reserved for suite resolution");
-                }
-                if !seen.insert(component.as_str()) {
-                    bail!("duplicate APT repository component {:?}", component.as_str());
-                }
-            }
-        }
-        AptRepositorySourceLayout::ExactPath(path) => {
-            AptRepositoryPath::parse(path.as_str())?;
-        }
-    }
-    Ok(())
-}
-
-fn valid_definition_name(value: &str) -> bool {
-    value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-        && value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
-        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
 fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
@@ -314,55 +221,6 @@ fn inspect_owned_file(host: &Host, path: &Path, label: &str) -> Result<Option<Ve
     Ok(Some(
         host.require(&format!("{label} inspection"), "sudo", [OsStr::new("cat"), OsStr::new("--"), path_arg])?.stdout,
     ))
-}
-
-fn validate_keyring_destination(destination: &Path) -> Result<()> {
-    let dest_str = destination.to_str().context("keyring path is not UTF-8")?;
-    if dest_str.as_bytes().contains(&0) || !destination.is_absolute() {
-        bail!("keyring path must be absolute and contain no null bytes");
-    }
-    let parent = destination.parent().ok_or_else(|| anyhow::anyhow!("keyring path has no parent"))?;
-    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
-        bail!("keyring path must be a direct child of /etc/apt/keyrings/ or /usr/share/keyrings/");
-    }
-    let file_name = destination
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow::anyhow!("keyring path has no file name"))?;
-    if parent.join(file_name).to_str() != Some(dest_str) {
-        bail!("keyring path must use its canonical direct-child spelling");
-    }
-    if !file_name.ends_with(".asc") && !file_name.ends_with(".gpg") {
-        bail!("keyring path extension must be .asc or .gpg");
-    }
-    let stem = destination
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("keyring path has no file stem"))?;
-    if !valid_definition_name(stem) {
-        bail!("keyring path file stem must be a valid definition name");
-    }
-    Ok(())
-}
-
-fn validate_source_list_destination(destination: &Path, filename_stem: &str) -> Result<()> {
-    let dest_str = destination.to_str().context("source list path is not UTF-8")?;
-    if dest_str.as_bytes().contains(&0) || !destination.is_absolute() {
-        bail!("source list path must be absolute and contain no null bytes");
-    }
-    let parent = destination.parent().ok_or_else(|| anyhow::anyhow!("source list path has no parent"))?;
-    if parent != Path::new(SOURCES_DIRECTORY) {
-        bail!("source list path must be a direct child of {SOURCES_DIRECTORY}");
-    }
-    let expected_name = format!("{filename_stem}.list");
-    let file_name = destination
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow::anyhow!("source list path has no file name"))?;
-    if file_name != expected_name {
-        bail!("source list path filename {file_name:?} must match expected name {expected_name:?}");
-    }
-    Ok(())
 }
 
 pub(crate) mod managed_apt {
