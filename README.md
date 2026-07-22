@@ -42,6 +42,8 @@ curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh 
 cozydot init
 $EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
 cozydot apply
+# Optional: converge update-enabled configured targets to their latest allowed versions.
+cozydot update
 ```
 
 `init` defaults to the embedded `cozydot` preset. Use
@@ -58,12 +60,35 @@ and `configs/vm.yaml`; do not edit those generated files directly. Builds embed
 snapshots of all four presets.
 
 The active `cozydot.yaml` created by `init` is user configuration, not a
-generated repository file. Edit that active file before running `apply`.
+generated repository file. Edit that active file before running `apply` or
+`update`.
+
+## Apply and update behavior
+
+| Command | Configured and missing | Configured and present | Unconfigured |
+| --- | --- | --- | --- |
+| `cozydot apply` | Installs | Leaves unchanged, even when outdated | Leaves unchanged |
+| `cozydot update` | Installs the latest allowed version when its update category is enabled | Checks and updates to the latest allowed version when its category is enabled | Leaves unchanged |
+
+An absent or empty `updates:` section, or one containing only false controls,
+makes `cozydot update` a validated silent no-op. `apply` validates update
+controls but never executes update operations. Update categories cover
+configured Flatpaks, Rust/Node/Go/Python toolchains, Cargo/npm packages, and
+Nerd Font families. Explicit font updates redownload configured families; no
+release receipt is retained. Managed Deb and AppImage binaries remain
+ensure-only and have no update category.
+
+`updates.apt: standard|full` is the documented exception to configured-only
+updates: it converges applicable repositories needed by configured APT targets,
+installs configured missing APT packages, then intentionally performs a
+system-wide APT `upgrade` or `full-upgrade`; `full` also runs purge-autoremove.
+These commands run only from `cozydot update`.
 
 ## Safety model
 
-- `apply` validates the complete active config and resolved platform, then
-  plans the complete ordered typed-operation workflow before starting side effects.
+- `apply` and `update` validate the complete active config and resolved
+  platform, then plan their complete ordered typed-operation workflows before
+  starting side effects.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
   execution uses a fixed set of typed operations.

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{Host, TempPath};
+use super::{Host, TempPath, ToolchainMode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
@@ -19,24 +19,40 @@ struct GoRelease {
     filename: String,
 }
 
-pub(crate) fn execute_rust(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn execute_rust(host: &Host, selector: &str, mode: ToolchainMode) -> Result<()> {
     let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
-    host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
+    match mode {
+        ToolchainMode::EnsurePresent => {
+            host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
+        }
+        ToolchainMode::ConvergeLatest => {
+            host.require("Rust toolchain update", &rustup, ["update", "--no-self-update", selector])?;
+        }
+    }
     host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
     Ok(())
 }
 
-pub(crate) fn execute_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+pub(crate) fn execute_go(
+    host: &Host,
+    selector: &GoToolchainSelector,
+    architecture: Architecture,
+    mode: ToolchainMode,
+) -> Result<()> {
     let expected_arch = architecture.go();
     let current = inspect_go(host, "/usr/local/go/bin/go")?;
     let requested = match selector {
         GoToolchainSelector::Latest => "latest",
         GoToolchainSelector::Version(version) => version,
     };
-    if numeric_version(requested, 3, 3)
-        && current.as_ref().is_some_and(|state| state.version == requested && state.architecture == expected_arch)
-    {
+    if current.as_ref().is_some_and(|state| {
+        state.architecture == expected_arch
+            && match mode {
+                ToolchainMode::EnsurePresent => go_selector_matches(requested, &state.version),
+                ToolchainMode::ConvergeLatest => numeric_version(requested, 3, 3) && state.version == requested,
+            }
+    }) {
         return Ok(());
     }
 
@@ -84,28 +100,52 @@ pub(crate) fn execute_go(host: &Host, selector: &GoToolchainSelector, architectu
     Ok(())
 }
 
-pub(crate) fn execute_node(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn execute_node(host: &Host, selector: &str, mode: ToolchainMode) -> Result<()> {
     let fnm = resolve_fnm(host)?;
-    let default = if selector == "lts" {
-        host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--lts"])?;
-        "lts-latest"
-    } else {
-        host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--", selector])?;
-        selector
-    };
+    let default = node_alias(selector);
+    let present = mode == ToolchainMode::EnsurePresent
+        && host.run(&fnm, ["exec", "--using", default, "--", "node", "--version"])?.status.success();
+    if !present {
+        if selector == "lts" {
+            host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--lts"])?;
+        } else {
+            host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--", selector])?;
+        }
+    }
     host.require("Node default toolchain mutation", &fnm, ["default", "--", default])?;
     Ok(())
 }
 
-pub(crate) fn execute_python(host: &Host, version: &str) -> Result<()> {
+pub(crate) fn execute_python(host: &Host, version: &str, mode: ToolchainMode) -> Result<()> {
     let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
         .context("Python toolchain operation: uv is unavailable after bootstrap")?;
 
-    host.require(
-        "Python toolchain mutation",
-        &uv,
-        ["python", "install", "--no-config", "--managed-python", "--no-progress", "--default", "--", version],
-    )?;
+    if mode == ToolchainMode::EnsurePresent
+        && host
+            .run(
+                &uv,
+                [
+                    "python",
+                    "find",
+                    "--no-config",
+                    "--managed-python",
+                    "--no-python-downloads",
+                    "--show-version",
+                    "--",
+                    version,
+                ],
+            )?
+            .status
+            .success()
+    {
+        return Ok(());
+    }
+    let mut args = vec!["python", "install", "--no-config", "--managed-python", "--no-progress"];
+    if mode == ToolchainMode::ConvergeLatest {
+        args.push("--upgrade");
+    }
+    args.extend(["--default", "--", version]);
+    host.require("Python toolchain mutation", &uv, args)?;
     Ok(())
 }
 
@@ -230,8 +270,27 @@ mod state {
 use resolution::*;
 use state::*;
 
-fn rust_install_args(toolchain: &str) -> [&str; 7] {
-    ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
+fn rust_install_args(toolchain: &str) -> [&str; 8] {
+    ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--no-update", "--", toolchain]
+}
+
+fn node_alias(selector: &str) -> &str {
+    match selector {
+        "lts" => "lts-latest",
+        value => value,
+    }
+}
+
+fn go_selector_matches(selector: &str, version: &str) -> bool {
+    if selector == "latest" {
+        return numeric_version(version, 2, 3);
+    }
+    if !numeric_version(selector, 1, 3) || !numeric_version(version, 2, 3) {
+        return false;
+    }
+    let requested = selector.split('.').collect::<Vec<_>>();
+    let installed = version.split('.').collect::<Vec<_>>();
+    requested.len() <= installed.len() && requested.iter().zip(installed).all(|(left, right)| *left == right)
 }
 
 fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {

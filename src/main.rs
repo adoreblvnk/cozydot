@@ -24,6 +24,8 @@ enum CliCommand {
     },
     /// Apply the active configuration to this host
     Apply,
+    /// Update enabled configured targets to the latest allowed versions
+    Update,
 }
 
 fn main() -> Result<()> {
@@ -36,23 +38,29 @@ fn main() -> Result<()> {
         CliCommand::Init { preset } => {
             println!("Initialized cozydot in {}", init::run(preset)?.display());
         }
-        CliCommand::Apply => apply()?,
+        CliCommand::Apply => {
+            run("Applying", |config, platform, root| planner::plan_apply(config, platform, &root.join("dotfiles")))?
+        }
+        CliCommand::Update => run("Updating", |config, platform, _| planner::plan_update(config, platform))?,
     }
     Ok(())
 }
 
-fn apply() -> Result<()> {
+fn run(
+    progress: &str,
+    plan: impl FnOnce(&config::Config, &platform::Platform, &std::path::Path) -> Result<Vec<operations::Operation>>,
+) -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
     let config =
         config::Config::load(&path).with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
-    let operations = planner::plan(&config, &platform, &root.join("dotfiles"))?;
+    let operations = plan(&config, &platform, &root)?;
     for operation in operations {
         let label = operation.label();
-        println!("Applying {label}");
+        println!("{progress} {label}");
         if matches!(
-            operations::execute(&operation).with_context(|| format!("apply {label}"))?,
+            operations::execute(&operation).with_context(|| format!("{} {label}", progress.to_lowercase()))?,
             operations::OperationOutcome::LoginRequired
         ) {
             println!("Login required to finish {label}");

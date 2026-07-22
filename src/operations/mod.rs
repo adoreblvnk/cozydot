@@ -116,6 +116,12 @@ use std::{
 
 const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolchainMode {
+    EnsurePresent,
+    ConvergeLatest,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     AptBootstrapPackages { packages: Vec<String> },
@@ -139,18 +145,18 @@ pub enum Operation {
     GnomeExtensions { extensions: Vec<String> },
     GnomeDock,
     GnomeRoundedCorners,
-    GoToolchain { selector: GoToolchainSelector, architecture: Architecture },
+    GoToolchain { selector: GoToolchainSelector, architecture: Architecture, mode: ToolchainMode },
     NerdFonts { families: Vec<String>, mode: NerdFontsMode },
     RustupBootstrap,
     CargoBinstallBootstrap,
-    RustToolchain { selector: String },
+    RustToolchain { selector: String, mode: ToolchainMode },
     CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
-    NodeToolchain { selector: String },
+    NodeToolchain { selector: String, mode: ToolchainMode },
     NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
     UbuntuSnap { enabled: bool },
     UnattendedUpgrades { enabled: bool },
     UvBootstrap,
-    PythonToolchain { version: String },
+    PythonToolchain { version: String, mode: ToolchainMode },
     VirtualBoxGroup,
     VsCodeExtensionSet { extensions: Vec<String> },
 }
@@ -230,20 +236,20 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
         Operation::GnomeDock => system::gnome_dock(&host),
         Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
-        Operation::GoToolchain { selector, architecture } => {
-            completed(tools::execute_go(&host, selector, *architecture))
+        Operation::GoToolchain { selector, architecture, mode } => {
+            completed(tools::execute_go(&host, selector, *architecture, *mode))
         }
         Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
         Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::RustToolchain { selector } => completed(tools::execute_rust(&host, selector)),
+        Operation::RustToolchain { selector, mode } => completed(tools::execute_rust(&host, selector, *mode)),
         Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
-        Operation::NodeToolchain { selector } => completed(tools::execute_node(&host, selector)),
+        Operation::NodeToolchain { selector, mode } => completed(tools::execute_node(&host, selector, *mode)),
         Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
         Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
         Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
         Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::PythonToolchain { version } => completed(tools::execute_python(&host, version)),
+        Operation::PythonToolchain { version, mode } => completed(tools::execute_python(&host, version, *mode)),
         Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
         Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
     }
@@ -355,15 +361,52 @@ pub(crate) mod apt {
         if packages.is_empty() {
             anyhow::bail!("APT bootstrap package sequence must not be empty");
         }
+        let missing = missing_packages(host, packages)?;
+        if missing.is_empty() {
+            return Ok(());
+        }
         host.require("APT bootstrap metadata refresh", "sudo", ["apt-get", "update", "-qq"])?;
-        install(host, "APT bootstrap package installation", packages.to_vec())
+        install(host, "APT bootstrap package installation", missing)
     }
 
     pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
-        install(host, "APT package installation", packages.to_vec())
+        let missing = missing_packages(host, packages)?;
+        if missing.is_empty() {
+            return Ok(());
+        }
+        install(host, "APT package installation", missing)
+    }
+
+    fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
+        let mut missing = Vec::new();
+        for package in packages {
+            let output = host.run("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
+            if !output.status.success() {
+                if output.status.code() == Some(1) {
+                    missing.push(package.clone());
+                    continue;
+                }
+                anyhow::bail!(
+                    "APT package inspection failed for {package:?}: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            match output.stdout.as_slice() {
+                b"installed\n" => {}
+                b"not-installed\n"
+                | b"config-files\n"
+                | b"half-installed\n"
+                | b"unpacked\n"
+                | b"half-configured\n"
+                | b"triggers-awaited\n"
+                | b"triggers-pending\n" => missing.push(package.clone()),
+                _ => anyhow::bail!("APT package inspection returned malformed state for {package:?}"),
+            }
+        }
+        Ok(missing)
     }
 
     fn install(host: &Host, operation: &str, packages: Vec<String>) -> Result<()> {
@@ -545,16 +588,65 @@ pub(crate) mod packages {
             if !cargo_home.is_absolute() {
                 bail!("Cargo package operation requires an absolute CARGO_HOME");
             }
-            let binstall = resolve_binstall(&cargo_home)?
-                .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
-            let mut args = vec!["--no-confirm".to_owned()];
-            if mode == CargoPackageMode::UpdateCurrent {
-                args.push("--force".into());
+            match mode {
+                CargoPackageMode::EnsurePresent => {
+                    let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
+                    let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
+                    let installed = installed_crates(&output.stdout)?;
+                    let missing = packages
+                        .iter()
+                        .filter(|package| !installed.contains(crate_identity(package)))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if missing.is_empty() {
+                        return Ok(());
+                    }
+                    let binstall = resolve_binstall(&cargo_home)?
+                        .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
+                    let mut args = vec!["--no-confirm".to_owned(), "--".into()];
+                    args.extend(missing);
+                    host.require("Cargo package mutation", &binstall, args)?;
+                }
+                CargoPackageMode::UpdateCurrent => {
+                    let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
+                    let mut args = vec!["install".to_owned(), "--locked".into(), "--".into()];
+                    args.extend(packages.to_vec());
+                    host.require("Cargo package convergence", &cargo, args)?;
+                }
             }
-            args.push("--".into());
-            args.extend(packages.to_vec());
-            host.require("Cargo package mutation", &binstall, args)?;
             Ok(())
+        }
+
+        fn installed_crates(output: &[u8]) -> Result<std::collections::BTreeSet<String>> {
+            let output = std::str::from_utf8(output).context("cargo install --list returned non-UTF-8 state")?;
+            let mut installed = std::collections::BTreeSet::new();
+            for line in output.lines().filter(|line| !line.is_empty()) {
+                if line.starts_with(char::is_whitespace) {
+                    continue;
+                }
+                let header = line.strip_suffix(':').context("cargo install --list returned malformed state")?;
+                let mut fields = header.splitn(3, char::is_whitespace).filter(|field| !field.is_empty());
+                let name = fields.next().context("cargo install --list returned malformed state")?;
+                let version = fields.next().context("cargo install --list returned malformed state")?;
+                if !version.starts_with('v') || name.chars().any(char::is_control) {
+                    bail!("cargo install --list returned malformed state");
+                }
+                match fields.next() {
+                    None => {
+                        installed.insert(name.to_owned());
+                    }
+                    Some(source)
+                        if source.starts_with('(')
+                            && source.ends_with(')')
+                            && !source.chars().any(char::is_control) => {}
+                    Some(_) => bail!("cargo install --list returned malformed state"),
+                }
+            }
+            Ok(installed)
+        }
+
+        fn crate_identity(package: &str) -> &str {
+            package.split_once('@').map_or(package, |(name, _)| name)
         }
 
         fn resolve_binstall(cargo_home: &Path) -> Result<Option<String>> {
@@ -577,7 +669,10 @@ pub(crate) mod packages {
 
     pub(crate) mod npm {
         use anyhow::{Context, Result, bail};
+        use serde::de::{DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
         use std::{
+            collections::BTreeSet,
+            fmt,
             os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
         };
@@ -591,17 +686,270 @@ pub(crate) mod packages {
         }
 
         pub(crate) fn execute(host: &Host, packages: &[String], mode: NpmPackageMode) -> Result<()> {
+            let configured = packages.iter().map(|package| package_identity(package).to_owned()).collect();
             let fnm = resolve_fnm(host)?;
-            let version = selected_version(host, &fnm)?;
-
-            let command = match mode {
-                NpmPackageMode::EnsurePresent => "install",
-                NpmPackageMode::UpdateCurrent => "update",
+            let selected = match mode {
+                NpmPackageMode::EnsurePresent => {
+                    let output = run_npm_required(
+                        host,
+                        &fnm,
+                        "npm installed package query",
+                        ["list", "--global", "--depth=0", "--json"],
+                    )?;
+                    let installed = installed_packages(&output.stdout, &configured)?;
+                    packages
+                        .iter()
+                        .filter(|package| !installed.contains(package_identity(package)))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                }
+                NpmPackageMode::UpdateCurrent => packages.to_vec(),
             };
-            let mut npm_args = vec![command.to_owned(), "--global".into(), "--".into()];
-            npm_args.extend(packages.to_vec());
-            run_npm_required(host, &fnm, &version, "npm package mutation", npm_args)?;
+            if selected.is_empty() {
+                return Ok(());
+            }
+            let mut npm_args = vec!["install".to_owned(), "--global".into(), "--".into()];
+            npm_args.extend(selected);
+            run_npm_required(host, &fnm, "npm package mutation", npm_args)?;
             Ok(())
+        }
+
+        fn installed_packages(output: &[u8], configured: &BTreeSet<String>) -> Result<BTreeSet<String>> {
+            let mut deserializer = serde_json::Deserializer::from_slice(output);
+            let installed =
+                NpmStateSeed { configured }.deserialize(&mut deserializer).context("parse npm global package state")?;
+            deserializer.end().context("parse npm global package state")?;
+            Ok(installed)
+        }
+
+        struct NpmStateSeed<'a> {
+            configured: &'a BTreeSet<String>,
+        }
+
+        impl<'de> DeserializeSeed<'de> for NpmStateSeed<'_> {
+            type Value = BTreeSet<String>;
+
+            fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_map(NpmStateVisitor { configured: self.configured })
+            }
+        }
+
+        struct NpmStateVisitor<'a> {
+            configured: &'a BTreeSet<String>,
+        }
+
+        impl<'de> Visitor<'de> for NpmStateVisitor<'_> {
+            type Value = BTreeSet<String>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("npm global package state object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut root_keys = BTreeSet::new();
+                let mut installed = BTreeSet::new();
+                let mut reports_error = false;
+                while let Some(key) = map.next_key::<String>()? {
+                    if !root_keys.insert(key.clone()) {
+                        return Err(A::Error::custom(format!(
+                            "npm global package state has duplicate root key {key:?}"
+                        )));
+                    }
+                    match key.as_str() {
+                        "dependencies" => {
+                            installed = map.next_value_seed(DependenciesSeed { configured: self.configured })?;
+                        }
+                        "error" => {
+                            reports_error = true;
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                if reports_error {
+                    return Err(A::Error::custom("npm global package state reports an error"));
+                }
+                Ok(installed)
+            }
+        }
+
+        struct DependenciesSeed<'a> {
+            configured: &'a BTreeSet<String>,
+        }
+
+        impl<'de> DeserializeSeed<'de> for DependenciesSeed<'_> {
+            type Value = BTreeSet<String>;
+
+            fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_map(DependenciesVisitor { configured: self.configured })
+            }
+        }
+
+        struct DependenciesVisitor<'a> {
+            configured: &'a BTreeSet<String>,
+        }
+
+        impl<'de> Visitor<'de> for DependenciesVisitor<'_> {
+            type Value = BTreeSet<String>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("npm dependencies state object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut configured_keys = BTreeSet::new();
+                let mut installed = BTreeSet::new();
+                while let Some(name) = map.next_key::<String>()? {
+                    if !self.configured.contains(&name) {
+                        map.next_value::<IgnoredAny>()?;
+                        continue;
+                    }
+                    if !configured_keys.insert(name.clone()) {
+                        return Err(A::Error::custom(format!(
+                            "npm dependencies state has duplicate configured identity {name:?}"
+                        )));
+                    }
+                    if map.next_value_seed(PackageMetadataSeed)? {
+                        installed.insert(name);
+                    }
+                }
+                Ok(installed)
+            }
+        }
+
+        struct PackageMetadataSeed;
+
+        impl<'de> DeserializeSeed<'de> for PackageMetadataSeed {
+            type Value = bool;
+
+            fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_any(PackageMetadataVisitor)
+            }
+        }
+
+        struct PackageMetadataVisitor;
+
+        impl<'de> Visitor<'de> for PackageMetadataVisitor {
+            type Value = bool;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("npm package metadata")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut keys = BTreeSet::new();
+                let mut has_version = false;
+                let mut has_error = false;
+                let mut has_problems = false;
+                let mut invalid = false;
+                let mut missing = false;
+                while let Some(key) = map.next_key::<String>()? {
+                    if !keys.insert(key.clone()) {
+                        return Err(A::Error::custom(format!(
+                            "npm configured package metadata has duplicate key {key:?}"
+                        )));
+                    }
+                    match key.as_str() {
+                        "version" => {
+                            has_version = map
+                                .next_value::<serde_json::Value>()?
+                                .as_str()
+                                .is_some_and(|version| !version.is_empty());
+                        }
+                        "error" => {
+                            has_error = true;
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                        "problems" => {
+                            has_problems = nonempty_json(&map.next_value::<serde_json::Value>()?);
+                        }
+                        "invalid" => invalid = map.next_value::<serde_json::Value>()?.as_bool() != Some(false),
+                        "missing" => missing = map.next_value::<serde_json::Value>()?.as_bool() != Some(false),
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(has_version && !has_error && !has_problems && !invalid && !missing)
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                while sequence.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(false)
+            }
+
+            fn visit_bool<E>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_i64<E>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_u64<E>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_f64<E>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_str<E>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_string<E>(self, _: String) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+
+            fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+                Ok(false)
+            }
+        }
+
+        fn nonempty_json(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Null => false,
+                serde_json::Value::String(value) => !value.is_empty(),
+                serde_json::Value::Array(values) => !values.is_empty(),
+                serde_json::Value::Object(values) => !values.is_empty(),
+                serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+            }
+        }
+
+        fn package_identity(package: &str) -> &str {
+            if package.starts_with('@') {
+                let slash = package.find('/').unwrap_or(package.len());
+                return package.rfind('@').filter(|index| *index > slash).map_or(package, |index| &package[..index]);
+            }
+            package.split_once('@').map_or(package, |(name, _)| name)
         }
 
         fn resolve_fnm(host: &Host) -> Result<String> {
@@ -617,43 +965,14 @@ pub(crate) mod packages {
             bail!("npm package operation: managed fnm is unavailable after bootstrap")
         }
 
-        fn selected_version(host: &Host, fnm: &str) -> Result<String> {
-            let output = host.require("fnm default Node query", fnm, ["default"])?;
-            let output = std::str::from_utf8(&output.stdout).context("fnm returned non-UTF-8 default Node version")?;
-            let version = output.strip_suffix('\n').unwrap_or(output);
-            if version.contains(['\n', '\r']) || !valid_node_version(version) {
-                bail!("fnm returned invalid default Node version: {version:?}");
-            }
-            Ok(version.to_owned())
-        }
-
-        fn run_npm_required<I, S>(
-            host: &Host,
-            fnm: &str,
-            version: &str,
-            operation: &str,
-            npm_args: I,
-        ) -> Result<std::process::Output>
+        fn run_npm_required<I, S>(host: &Host, fnm: &str, operation: &str, npm_args: I) -> Result<std::process::Output>
         where
             I: IntoIterator<Item = S>,
             S: AsRef<str>,
         {
-            let mut args = vec!["exec".to_owned(), "--using".into(), version.to_owned(), "--".into(), "npm".into()];
+            let mut args = vec!["exec".to_owned(), "--using=default".into(), "--".into(), "npm".into()];
             args.extend(npm_args.into_iter().map(|arg| arg.as_ref().to_owned()));
             host.require(operation, fnm, args)
-        }
-
-        fn valid_node_version(version: &str) -> bool {
-            let Some(version) = version.strip_prefix('v') else {
-                return false;
-            };
-            let parts = version.split('.').collect::<Vec<_>>();
-            parts.len() == 3
-                && parts.iter().all(|part| {
-                    !part.is_empty()
-                        && part.bytes().all(|byte| byte.is_ascii_digit())
-                        && (*part == "0" || !part.starts_with('0'))
-                })
         }
 
         fn executable_file(path: &Path) -> bool {
@@ -696,6 +1015,23 @@ pub(crate) mod packages {
         }
 
         pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
+            let mut missing = Vec::new();
+            for app_id in refs {
+                let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
+                if output.status.success() {
+                    let state = std::str::from_utf8(&output.stdout)?;
+                    let state = state.strip_suffix('\n').unwrap_or(state);
+                    let parts = state.split('/').collect::<Vec<_>>();
+                    if parts.len() != 4 || parts[0] != "app" || parts[1] != app_id {
+                        anyhow::bail!("Flatpak returned malformed state for {app_id:?}");
+                    }
+                } else {
+                    missing.push(app_id.clone());
+                }
+            }
+            if missing.is_empty() {
+                return Ok(());
+            }
             let mut args = vec![
                 "--user".to_owned(),
                 "install".into(),
@@ -705,7 +1041,7 @@ pub(crate) mod packages {
                 "flathub".into(),
                 "--".into(),
             ];
-            args.extend(refs.iter().cloned());
+            args.extend(missing);
             host.require("Flatpak application installation", "flatpak", args)?;
             Ok(())
         }
@@ -713,10 +1049,12 @@ pub(crate) mod packages {
         pub fn update_apps(host: &Host, refs: &[String]) -> Result<()> {
             let mut args = vec![
                 "--user".to_owned(),
-                "update".into(),
+                "install".into(),
+                "--or-update".into(),
                 "--app".into(),
                 "--noninteractive".into(),
                 "-y".into(),
+                "flathub".into(),
                 "--".into(),
             ];
             args.extend(refs.iter().cloned());
@@ -742,6 +1080,7 @@ pub(crate) mod packages {
 
         pub(crate) fn execute(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
             let parent = Path::new(FONT_ROOT);
+            let mut changed = false;
             for family in families {
                 let destination = parent.join(family);
                 let is_present = match fs::symlink_metadata(&destination) {
@@ -754,13 +1093,16 @@ pub(crate) mod packages {
                 };
                 if mode == NerdFontsMode::Update || !is_present {
                     install_family(host, family, &destination)?;
+                    changed = true;
                 }
             }
-            host.require(
-                "Nerd Font cache refresh",
-                "sudo",
-                [OsStr::new("fc-cache"), OsStr::new("--force"), parent.as_os_str()],
-            )?;
+            if changed {
+                host.require(
+                    "Nerd Font cache refresh",
+                    "sudo",
+                    [OsStr::new("fc-cache"), OsStr::new("--force"), parent.as_os_str()],
+                )?;
+            }
             Ok(())
         }
 
