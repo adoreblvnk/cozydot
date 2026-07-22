@@ -138,7 +138,6 @@ generate_full() {
     .updates.fonts = true |
     .packages.apt as $apt |
     .packages.apt = {
-      "remove": $apt.remove,
       "install": $apt.install,
       "repositories": $apt.repositories
     }
@@ -149,7 +148,6 @@ generate_cli() {
   yq '
     del(
       .system.ubuntu.codecs,
-      .packages.apt.remove,
       .packages.flatpak,
       .desktop,
       .updates.flatpak
@@ -182,7 +180,6 @@ generate_vm() {
       "ttf-mscorefonts-installer"
     ] | sort) |
     del(
-      .packages.apt.remove,
       .integrations.docker,
       .integrations.virtualbox
     ) |

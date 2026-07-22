@@ -19,14 +19,6 @@ system:
       - cinnamon
 packages:
   apt:
-    remove:
-      - docker.io
-      - docker-compose
-      - docker-compose-v2
-      - docker-doc
-      - podman-docker
-      - containerd
-      - runc
     install:
       - bash-completion
       - build-essential
@@ -58,6 +50,15 @@ packages:
         suite: system
         components:
           - stable
+        conflicts:
+          default:
+            - docker.io
+            - docker-compose
+            - docker-compose-v2
+            - docker-doc
+            - podman-docker
+            - containerd
+            - runc
         packages:
           - docker-ce
           - docker-ce-cli

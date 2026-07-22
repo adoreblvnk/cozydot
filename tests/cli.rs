@@ -314,7 +314,6 @@ system:
   ubuntu: {}
 packages:
   apt:
-    remove: []
     install: []
     repositories: []
   flatpak: []
@@ -417,6 +416,127 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
 }
 
 #[test]
+fn apt_repository_conflict_configuration_is_strict() {
+    let repository = |conflicts: &str, packages: &str| {
+        format!(
+            r#"version: 1.0.0
+packages:
+  apt:
+    repositories:
+      - name: vendor
+        key: https://example.com/key.gpg
+        key_path: /etc/apt/keyrings/vendor.gpg
+        urls:
+          default: https://example.com/repository
+        suite: stable
+        components: [main]
+        conflicts: {conflicts}
+        packages: {packages}
+"#
+        )
+    };
+    for (config, message) in [
+        ("version: 1.0.0\npackages:\n  apt:\n    remove: [obsolete]\n".to_owned(), "unknown field `remove`"),
+        (repository("{}", "[vendor-package]"), "conflicts: must be a non-empty mapping"),
+        (repository("{default: []}", "[vendor-package]"), "conflicts.default: must be a non-empty sequence"),
+        (
+            repository("{default: [vendor-package]}", "[vendor-package]"),
+            "package \"vendor-package\" is also an applicable repository target",
+        ),
+        (repository("{default: [distro-package]}", "[]"), "conflicts: requires non-empty repository packages"),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("cozydot");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
+
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg("apply")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(message));
+    }
+}
+
+#[test]
+fn apt_repository_ownership_validation_is_platform_aware() {
+    let unrelated = match os_release_value("ID").as_str() {
+        "ubuntu" | "pop" => "debian",
+        "debian" => "ubuntu",
+        "linuxmint" => "pop",
+        distro => panic!("unsupported test distro: {distro}"),
+    };
+    let repository = |urls: &str, conflicts: &str, packages: &str| {
+        format!(
+            r#"      - name: vendor
+        key: https://example.com/key.gpg
+        key_path: /etc/apt/keyrings/vendor.gpg
+        urls: {urls}
+        suite: stable
+        components: [main]
+        conflicts: {conflicts}
+        packages: {packages}
+"#
+        )
+    };
+    let accepted = [
+        format!(
+            "version: 1.0.0\npackages:\n  apt:\n    install: [shared]\n    repositories:\n{}",
+            repository("{default: https://example.com/repository}", &format!("{{{unrelated}: [shared]}}"), "[vendor]")
+        ),
+        format!(
+            "version: 1.0.0\npackages:\n  apt:\n    install: [shared]\n    repositories:\n{}",
+            repository(&format!("{{{unrelated}: https://example.com/repository}}"), "{default: [shared]}", "[vendor]")
+        ),
+    ];
+    for config in accepted {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("cozydot");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg("update")
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty());
+    }
+
+    let rejected = [
+        format!(
+            "version: 1.0.0\npackages:\n  apt:\n    install: [shared]\n    repositories:\n{}",
+            repository("{default: https://example.com/repository}", "{default: [shared]}", "[vendor]")
+        ),
+        format!(
+            "version: 1.0.0\npackages:\n  apt:\n    repositories:\n{}{}",
+            repository("{default: https://example.com/one}", "{default: [old-one]}", "[shared]"),
+            repository("{default: https://example.com/two}", "{default: [shared]}", "[replacement]")
+                .replace("name: vendor", "name: vendor-two")
+                .replace("vendor.gpg", "vendor-two.gpg")
+        ),
+    ];
+    for config in rejected {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("cozydot");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .arg("update")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("package \"shared\""));
+    }
+}
+
+#[test]
 fn configured_urls_accept_http_credentials_and_fragments() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
@@ -494,12 +614,15 @@ packages:
           {inapplicable_distro}: https://example.com/repository
         suite: "APT-owned suite/value"
         components: ["component/value", "component/value"]
+        conflicts:
+          default: [must-not-purge]
         packages: [must-not-install]
 "#
         ),
     )
     .unwrap();
-    for command in ["curl", "gpg", "sudo"] {
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    for command in ["curl", "gpg", "sudo", "dpkg-query"] {
         write_executable(
             &fake_bin.join(command),
             "#!/bin/sh\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\nexit 1\n",
@@ -666,56 +789,37 @@ esac
     );
 }
 
-#[test]
-fn apt_remove_install_overlap_finishes_with_install() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_home = temp.path().join("config");
-    let config_dir = config_home.join("cozydot");
-    let fake_bin = temp.path().join("bin");
-    let log = temp.path().join("apt.log");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
-        "version: 1.0.0\npackages:\n  apt:\n    remove: [overlap]\n    install: [overlap]\n",
-    )
-    .unwrap();
-    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
-
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_CURRENT_DESKTOP", "gnome")
-        .env("COZYDOT_TEST_LOG", &log)
-        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
-        .arg("apply")
-        .assert()
-        .success();
-
-    let log = fs::read_to_string(log).unwrap();
-    let purge = log.find("apt-get purge -y -qq -- overlap").unwrap();
-    let install = log.find("apt-get install -y -qq -- overlap+").unwrap();
-    assert!(purge < install);
-}
-
-#[test]
-fn apt_apply_installs_only_missing_and_update_then_upgrades_system_wide() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_home = temp.path().join("config");
-    let config_dir = config_home.join("cozydot");
-    let fake_bin = temp.path().join("bin");
-    let log = temp.path().join("apt-state.log");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+fn apt_repository_conflict_config(with_updates: bool) -> String {
+    let unrelated_distro = match os_release_value("ID").as_str() {
+        "ubuntu" | "pop" => "debian",
+        "debian" => "ubuntu",
+        "linuxmint" => "pop",
+        distro => panic!("unsupported test distro: {distro}"),
+    };
+    format!(
         r#"version: 1.0.0
 packages:
   apt:
-    install: [present-ripgrep, missing-bat]
-updates:
-  apt: standard
+    install: [direct-package]
+    repositories:
+      - name: vendor
+        key: https://example.com/vendor.gpg
+        key_path: /etc/apt/keyrings/vendor.gpg
+        urls:
+          default: https://example.com/vendor
+        suite: stable
+        components: [main]
+        conflicts:
+          default: [selected-conflict, absent-selected-conflict]
+          {unrelated_distro}: [unrelated-conflict]
+        packages: [vendor-package]
+{}
 "#,
+        if with_updates { "updates:\n  apt: standard" } else { "" }
     )
-    .unwrap();
+}
+
+fn write_apt_repository_fakes(fake_bin: &Path) {
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(
         &fake_bin.join("dpkg-query"),
@@ -723,50 +827,247 @@ updates:
 last=
 for argument in "$@"; do last="$argument"; done
 printf 'dpkg-query %s\n' "$*" >> "$COZYDOT_TEST_LOG"
-case "$last" in
-  present-ripgrep) printf 'installed\n' ;;
-  missing-bat) printf 'not-installed\n' ;;
-  *) printf 'installed\n' ;;
+if [ -f "$COZYDOT_TEST_STATE/packages/$last" ]; then
+  printf 'installed\n'
+else
+  printf 'not-installed\n'
+fi
+"#,
+    );
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+printf 'curl %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+output=
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "--output" ] || { shift; output="$1"; }
+  shift
+done
+printf 'key' > "$output"
+"#,
+    );
+    write_executable(
+        &fake_bin.join("gpg"),
+        r#"#!/bin/sh
+printf 'gpg %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+case " $* " in *" --list-keys "*) printf 'pub:x\n'; exit 0;; esac
+output=
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "--output" ] || { shift; output="$1"; }
+  shift
+done
+printf 'processed-key' > "$output"
+"#,
+    );
+    write_executable(
+        &fake_bin.join("sudo"),
+        r#"#!/bin/sh
+printf 'sudo %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+case " $* " in
+  *" apt-get install "*)
+    after=false
+    for argument in "$@"; do
+      if $after; then touch "$COZYDOT_TEST_STATE/packages/${argument%+}"; fi
+      [ "$argument" != "--" ] || after=true
+    done
+    exit 0
+    ;;
+  *" apt-get purge "*)
+    after=false
+    for argument in "$@"; do
+      if $after; then rm -f "$COZYDOT_TEST_STATE/packages/$argument"; fi
+      [ "$argument" != "--" ] || after=true
+    done
+    exit 0
+    ;;
+esac
+last=
+previous=
+for argument in "$@"; do previous="$last"; last="$argument"; done
+name=$(basename "$last")
+case "$1" in
+  install)
+    [ "$2" != "-d" ] || exit 0
+    cp "$previous" "$COZYDOT_TEST_STATE/files/$name"
+    ;;
+  mv)
+    mv "$COZYDOT_TEST_STATE/files/$(basename "$previous")" "$COZYDOT_TEST_STATE/files/$name"
+    ;;
+  test)
+    case "$*" in
+      *" ! -L "*|*" ! -d "*) exit 0;;
+      *" ! -e "*) [ ! -f "$COZYDOT_TEST_STATE/files/$name" ]; exit;;
+    esac
+    ;;
+  stat) printf '81a4:0:0\n' ;;
+  cat) cat "$COZYDOT_TEST_STATE/files/$name" ;;
+  *) exit 0 ;;
 esac
 "#,
     );
-    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
+}
 
-    for command in ["apply", "update"] {
-        fs::write(&log, "").unwrap();
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .env("XDG_CONFIG_HOME", &config_home)
-            .env("XDG_CURRENT_DESKTOP", "gnome")
-            .env("COZYDOT_TEST_LOG", &log)
-            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
-            .arg(command)
-            .assert()
-            .success();
+fn run_apt_command(command: &str, config_home: &Path, fake_bin: &Path, state: &Path, log: &Path) {
+    fs::write(log, "").unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", log)
+        .env("COZYDOT_TEST_STATE", state)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg(command)
+        .assert()
+        .success();
+}
 
-        let log = fs::read_to_string(&log).unwrap();
-        let mutations = log.lines().filter(|line| line.starts_with("sudo ")).collect::<Vec<_>>();
-        let install = "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- missing-bat+";
-        assert!(mutations.contains(&install), "{command} did not install only the missing package: {log}");
-        assert!(
-            mutations.iter().all(|line| !line.contains("present-ripgrep") && !line.contains("unconfigured-package")),
-            "{command} mutated an installed or unconfigured package: {log}"
-        );
-        assert!(!log.contains("unconfigured-package"), "{command} inspected or mutated an unconfigured package: {log}");
-        if command == "apply" {
-            assert_eq!(mutations, ["sudo apt-get update -qq", install]);
-            assert!(!log.contains("apt-get upgrade"));
-        } else {
-            let refresh = mutations.iter().position(|line| *line == "sudo apt-get update -qq").unwrap();
-            let install_position = mutations.iter().position(|line| *line == install).unwrap();
-            let upgrade = mutations
-                .iter()
-                .position(|line| *line == "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --")
-                .unwrap();
-            assert!(refresh < install_position && install_position < upgrade, "unexpected update order: {log}");
-            assert_eq!(mutations.len(), 3, "unexpected APT update mutation: {log}");
-        }
+#[test]
+fn apt_apply_orders_repository_migration_and_is_idempotent() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    let log = temp.path().join("apt.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::create_dir_all(state.join("files")).unwrap();
+    fs::create_dir_all(state.join("packages")).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), apt_repository_conflict_config(false)).unwrap();
+    for package in ["ca-certificates", "curl", "gnupg", "selected-conflict", "unrelated-conflict"] {
+        fs::write(state.join("packages").join(package), "").unwrap();
     }
+    write_apt_repository_fakes(&fake_bin);
+
+    run_apt_command("apply", &config_home, &fake_bin, &state, &log);
+    let first = fs::read_to_string(&log).unwrap();
+    let lines = first.lines().collect::<Vec<_>>();
+    let direct_refresh = lines.iter().position(|line| *line == "sudo apt-get update -qq").unwrap();
+    let direct_install =
+        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- direct-package+")).unwrap();
+    let repository_download = lines.iter().position(|line| line.starts_with("curl ")).unwrap();
+    let publication = lines
+        .iter()
+        .position(|line| line.contains("sudo mv -fT") && line.ends_with("/etc/apt/sources.list.d/vendor.list"))
+        .unwrap();
+    let repository_refresh = lines
+        .iter()
+        .enumerate()
+        .find(|(index, line)| *index > publication && **line == "sudo apt-get update -qq")
+        .map(|(index, _)| index)
+        .unwrap();
+    let purge = lines.iter().position(|line| line.ends_with("apt-get purge -y -qq -- selected-conflict")).unwrap();
+    let vendor_install =
+        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- vendor-package+")).unwrap();
+    assert!(direct_refresh < direct_install && direct_install < repository_download);
+    assert!(repository_download < publication && publication < repository_refresh);
+    assert!(repository_refresh < purge && purge < vendor_install, "unexpected apply order: {first}");
+    assert!(first.contains("dpkg-query -W -f=${db:Status-Status}\\n -- absent-selected-conflict"));
+    assert!(!lines[purge].contains("absent-selected-conflict"), "apply purged an absent selected conflict: {first}");
+    assert!(!first.contains("unrelated-conflict"), "apply inspected or purged an unselected distro conflict: {first}");
+
+    run_apt_command("apply", &config_home, &fake_bin, &state, &log);
+    let second = fs::read_to_string(&log).unwrap();
+    assert_eq!(
+        second.matches("sudo apt-get update -qq\n").count(),
+        2,
+        "second apply skipped required refreshes: {second}"
+    );
+    assert!(!second.contains(" apt-get install "), "second apply reinstalled a package: {second}");
+    assert!(!second.contains(" apt-get purge "), "second apply repurged a conflict: {second}");
+    assert!(second.contains("curl "), "second apply did not inspect/converge the repository: {second}");
+    assert!(!second.contains("unrelated-conflict"), "second apply inspected an unselected distro conflict: {second}");
+}
+
+#[test]
+fn apt_update_orders_repository_migration_before_broad_upgrade_and_is_idempotent() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    let log = temp.path().join("apt.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::create_dir_all(state.join("files")).unwrap();
+    fs::create_dir_all(state.join("packages")).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), apt_repository_conflict_config(true)).unwrap();
+    for package in ["ca-certificates", "curl", "gnupg", "selected-conflict", "unrelated-conflict"] {
+        fs::write(state.join("packages").join(package), "").unwrap();
+    }
+    write_apt_repository_fakes(&fake_bin);
+
+    run_apt_command("update", &config_home, &fake_bin, &state, &log);
+    let first = fs::read_to_string(&log).unwrap();
+    let lines = first.lines().collect::<Vec<_>>();
+    let publication = lines
+        .iter()
+        .position(|line| line.contains("sudo mv -fT") && line.ends_with("/etc/apt/sources.list.d/vendor.list"))
+        .unwrap();
+    let refresh = lines.iter().position(|line| *line == "sudo apt-get update -qq").unwrap();
+    let direct_install =
+        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- direct-package+")).unwrap();
+    let purge = lines.iter().position(|line| line.ends_with("apt-get purge -y -qq -- selected-conflict")).unwrap();
+    let vendor_install =
+        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- vendor-package+")).unwrap();
+    let upgrade = lines.iter().position(|line| line.ends_with("apt-get upgrade -y -qq --")).unwrap();
+    assert!(publication < refresh && refresh < direct_install);
+    assert!(
+        direct_install < purge && purge < vendor_install && vendor_install < upgrade,
+        "unexpected update order: {first}"
+    );
+    assert!(first.contains("dpkg-query -W -f=${db:Status-Status}\\n -- absent-selected-conflict"));
+    assert!(!lines[purge].contains("absent-selected-conflict"), "update purged an absent selected conflict: {first}");
+    assert!(!first.contains("unrelated-conflict"), "update inspected an unselected distro conflict: {first}");
+
+    run_apt_command("update", &config_home, &fake_bin, &state, &log);
+    let second = fs::read_to_string(&log).unwrap();
+    assert!(!second.contains(" apt-get install "), "second update reinstalled a package: {second}");
+    assert!(!second.contains(" apt-get purge "), "second update repurged a conflict: {second}");
+    assert!(second.contains("sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --"));
+    assert!(second.contains("curl "), "second update did not inspect/converge the repository: {second}");
+    assert!(!second.contains("unrelated-conflict"), "second update inspected an unselected distro conflict: {second}");
+}
+
+#[test]
+fn apt_update_converges_applicable_repository_without_targets() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    let log = temp.path().join("apt.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::create_dir_all(state.join("files")).unwrap();
+    fs::create_dir_all(state.join("packages")).unwrap();
+    for package in ["ca-certificates", "curl", "gnupg"] {
+        fs::write(state.join("packages").join(package), "").unwrap();
+    }
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  apt:
+    repositories:
+      - name: vendor
+        key: https://example.com/vendor.gpg
+        key_path: /etc/apt/keyrings/vendor.gpg
+        urls:
+          default: https://example.com/vendor
+        suite: stable
+        components: [main]
+        packages: []
+updates:
+  apt: standard
+"#,
+    )
+    .unwrap();
+    write_apt_repository_fakes(&fake_bin);
+
+    run_apt_command("update", &config_home, &fake_bin, &state, &log);
+    let log = fs::read_to_string(log).unwrap();
+    let publication = log.find("/etc/apt/sources.list.d/vendor.list").unwrap();
+    let refresh = log.find("sudo apt-get update -qq").unwrap();
+    let upgrade = log.find("sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --").unwrap();
+    assert!(publication < refresh && refresh < upgrade, "unexpected empty-repository update order: {log}");
 }
 
 #[test]

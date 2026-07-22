@@ -27,19 +27,19 @@ pub enum ManagerBootstrap {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PlannerPhase {
-    SystemPrerequisites,
-    ManagerBootstraps,
     AdministrativeVerification,
     OfficialAptSources,
-    ThirdPartyRepositories,
-    AptMetadataRefresh,
-    SystemPackageStates,
-    AptPurge,
-    RepositoryPackages,
-    AptPackages,
-    FlatpakApplications,
+    SystemPrerequisites,
+    ManagerBootstraps,
     LanguageToolchains,
     CargoBinstallBootstrap,
+    DirectAptMetadataRefresh,
+    SystemPackageStates,
+    AptPackages,
+    ThirdPartyRepositories,
+    RepositoryMetadataRefresh,
+    RepositoryPackages,
+    FlatpakApplications,
     LanguagePackages,
     AppImageManager,
     BinaryPackages,
@@ -55,19 +55,19 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     validate_binary_integrations(config, platform.architecture)?;
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
-        (PlannerPhase::SystemPrerequisites, Vec::new()),
-        (PlannerPhase::ManagerBootstraps, Vec::new()),
         (PlannerPhase::AdministrativeVerification, Vec::new()),
         (PlannerPhase::OfficialAptSources, Vec::new()),
-        (PlannerPhase::ThirdPartyRepositories, Vec::new()),
-        (PlannerPhase::AptMetadataRefresh, Vec::new()),
+        (PlannerPhase::DirectAptMetadataRefresh, Vec::new()),
         (PlannerPhase::SystemPackageStates, Vec::new()),
-        (PlannerPhase::AptPurge, Vec::new()),
-        (PlannerPhase::RepositoryPackages, Vec::new()),
-        (PlannerPhase::AptPackages, Vec::new()),
-        (PlannerPhase::FlatpakApplications, Vec::new()),
+        (PlannerPhase::SystemPrerequisites, Vec::new()),
+        (PlannerPhase::ManagerBootstraps, Vec::new()),
         (PlannerPhase::LanguageToolchains, Vec::new()),
         (PlannerPhase::CargoBinstallBootstrap, Vec::new()),
+        (PlannerPhase::AptPackages, Vec::new()),
+        (PlannerPhase::ThirdPartyRepositories, Vec::new()),
+        (PlannerPhase::RepositoryMetadataRefresh, Vec::new()),
+        (PlannerPhase::RepositoryPackages, Vec::new()),
+        (PlannerPhase::FlatpakApplications, Vec::new()),
         (PlannerPhase::LanguagePackages, Vec::new()),
         (PlannerPhase::AppImageManager, Vec::new()),
         (PlannerPhase::BinaryPackages, Vec::new()),
@@ -78,7 +78,8 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     ];
     let mut prerequisites = BTreeSet::new();
     let mut managers = BTreeSet::new();
-    let mut needs_apt_refresh = false;
+    let mut needs_direct_apt_refresh = false;
+    let mut needs_repository_refresh = false;
 
     let packages = config.packages.as_ref();
     let apt = packages.and_then(|packages| packages.apt.as_ref());
@@ -113,22 +114,21 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
                 push_operation(
                     &mut phases,
                     PlannerPhase::RepositoryPackages,
-                    Operation::AptPackages { packages: repository.packages.clone() },
+                    Operation::AptRepositoryPackages {
+                        conflicts: selected_repository_conflicts(repository, identity).unwrap_or_default(),
+                        packages: repository.packages.clone(),
+                    },
                 );
             }
-            needs_apt_refresh = true;
+            needs_repository_refresh = true;
         }
     }
 
-    plan_system_states(config, platform, &mut phases, &mut needs_apt_refresh);
+    plan_system_states(config, platform, &mut phases, &mut needs_direct_apt_refresh);
 
-    if let Some(remove) = apt.and_then(|apt| apt.remove.as_ref()).filter(|values| !values.is_empty()) {
-        push_operation(&mut phases, PlannerPhase::AptPurge, Operation::AptPurge { packages: remove.clone() });
-        needs_apt_refresh = true;
-    }
     if let Some(install) = apt.and_then(|apt| apt.install.as_ref()).filter(|values| !values.is_empty()) {
         push_operation(&mut phases, PlannerPhase::AptPackages, Operation::AptPackages { packages: install.clone() });
-        needs_apt_refresh = true;
+        needs_direct_apt_refresh = true;
     }
 
     if let Some(applications) =
@@ -177,7 +177,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             prerequisites.insert("ca-certificates");
             prerequisites.insert("curl");
             if binary.format == BinaryFormat::Deb {
-                needs_apt_refresh = true;
+                needs_direct_apt_refresh = true;
             }
             push_operation(&mut phases, PlannerPhase::BinaryPackages, Operation::BinaryPackage(planned));
         }
@@ -211,8 +211,11 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
 
     plan_integrations(config, platform, &mut phases, &mut prerequisites);
     plan_desktop(config, platform, &mut phases, &mut prerequisites);
-    if needs_apt_refresh {
-        push_operation(&mut phases, PlannerPhase::AptMetadataRefresh, Operation::AptMetadataRefresh);
+    if needs_direct_apt_refresh {
+        push_operation(&mut phases, PlannerPhase::DirectAptMetadataRefresh, Operation::AptMetadataRefresh);
+    }
+    if needs_repository_refresh {
+        push_operation(&mut phases, PlannerPhase::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
     }
 
     if managers.contains(&ManagerBootstrap::Flatpak) {
@@ -273,6 +276,17 @@ fn plan_repository(
         repository.path.clone(),
         PathBuf::from(&repository.key_path),
     ))
+}
+
+fn selected_repository_conflicts(
+    repository: &crate::config::Repository,
+    identity: crate::config::PlatformIdentity,
+) -> Option<Vec<String>> {
+    repository
+        .conflicts
+        .as_ref()
+        .and_then(|conflicts| select_distro_map(conflicts, identity.distro, identity.upstream))
+        .map(|(_, packages)| packages.clone())
 }
 
 fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
@@ -487,12 +501,14 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         (PlannerPhase::SystemPrerequisites, Vec::new()),
         (PlannerPhase::ManagerBootstraps, Vec::new()),
         (PlannerPhase::ThirdPartyRepositories, Vec::new()),
-        (PlannerPhase::AptMetadataRefresh, Vec::new()),
+        (PlannerPhase::RepositoryMetadataRefresh, Vec::new()),
+        (PlannerPhase::AptPackages, Vec::new()),
+        (PlannerPhase::RepositoryPackages, Vec::new()),
+        (PlannerPhase::Updates, Vec::new()),
         (PlannerPhase::FlatpakApplications, Vec::new()),
         (PlannerPhase::LanguageToolchains, Vec::new()),
         (PlannerPhase::LanguagePackages, Vec::new()),
         (PlannerPhase::Fonts, Vec::new()),
-        (PlannerPhase::Updates, Vec::new()),
     ];
     let packages = config.packages.as_ref();
     let tools = config.tools.as_ref();
@@ -502,37 +518,43 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if let Some(policy) = updates.apt {
         let identity = resolve_platform_identity(platform)?;
         let apt = packages.and_then(|packages| packages.apt.as_ref());
-        let mut configured = BTreeSet::new();
-        if let Some(install) = apt.and_then(|apt| apt.install.as_ref()) {
-            configured.extend(install.iter().cloned());
-        }
+        let mut direct =
+            apt.and_then(|apt| apt.install.as_ref()).into_iter().flatten().cloned().collect::<BTreeSet<_>>();
         if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
             for repository in repositories {
-                let Some(operation) = plan_repository(repository, platform, identity) else { continue };
-                if repository.packages.is_empty() {
+                let Some(operation) = plan_repository(repository, platform, identity) else {
                     continue;
-                }
+                };
                 prerequisites.extend(["ca-certificates", "curl", "gnupg"]);
-                configured.extend(repository.packages.iter().cloned());
                 push_operation(
                     &mut phases,
                     PlannerPhase::ThirdPartyRepositories,
                     Operation::AptRepository(Box::new(operation)),
                 );
+                if !repository.packages.is_empty() {
+                    push_operation(
+                        &mut phases,
+                        PlannerPhase::RepositoryPackages,
+                        Operation::AptRepositoryPackages {
+                            conflicts: selected_repository_conflicts(repository, identity).unwrap_or_default(),
+                            packages: repository.packages.clone(),
+                        },
+                    );
+                }
             }
         }
         if config.system.as_ref().and_then(|system| system.ubuntu.as_ref()).is_some_and(|ubuntu| ubuntu.codecs)
             && platform.upstream == "ubuntu"
         {
-            configured.insert("ubuntu-restricted-extras".into());
+            direct.insert("ubuntu-restricted-extras".into());
         }
 
-        push_operation(&mut phases, PlannerPhase::AptMetadataRefresh, Operation::AptMetadataRefresh);
-        if !configured.is_empty() {
+        push_operation(&mut phases, PlannerPhase::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
+        if !direct.is_empty() {
             push_operation(
                 &mut phases,
-                PlannerPhase::Updates,
-                Operation::AptPackages { packages: configured.into_iter().collect() },
+                PlannerPhase::AptPackages,
+                Operation::AptPackages { packages: direct.into_iter().collect() },
             );
         }
         push_operation(

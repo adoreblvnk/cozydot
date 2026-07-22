@@ -129,7 +129,7 @@ pub enum Operation {
     AptRepository(Box<AptRepositoryOperation>),
     ManagedAptSources(ManagedAptSources),
     AptPackages { packages: Vec<String> },
-    AptPurge { packages: Vec<String> },
+    AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
     AptUpgrade { policy: AptUpgradePolicy },
     Appimaged { architecture: Architecture },
     DockerGroup,
@@ -175,7 +175,7 @@ impl Operation {
             Self::AptRepository(_) => "APT repository",
             Self::ManagedAptSources(_) => "managed APT sources",
             Self::AptPackages { .. } => "APT packages",
-            Self::AptPurge { .. } => "APT package removal",
+            Self::AptRepositoryPackages { .. } => "APT repository packages",
             Self::AptUpgrade { .. } => "APT upgrade",
             Self::Appimaged { .. } => "appimaged",
             Self::DockerGroup => "Docker group membership",
@@ -220,7 +220,9 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
         Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
-        Operation::AptPurge { packages } => completed(apt::purge(&host, packages)),
+        Operation::AptRepositoryPackages { conflicts, packages } => {
+            completed(apt::repository_packages(&host, conflicts, packages))
+        }
         Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
         Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
         Operation::DockerGroup => completed(system::docker_group(&host)),
@@ -380,33 +382,44 @@ pub(crate) mod apt {
         install(host, "APT package installation", missing)
     }
 
+    pub fn repository_packages(host: &Host, conflicts: &[String], packages: &[String]) -> Result<()> {
+        purge(host, conflicts)?;
+        self::packages(host, packages)
+    }
+
     fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
-        let mut missing = Vec::new();
-        for package in packages {
-            let output = host.run("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
-            if !output.status.success() {
-                if output.status.code() == Some(1) {
-                    missing.push(package.clone());
-                    continue;
-                }
-                anyhow::bail!(
-                    "APT package inspection failed for {package:?}: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
+        packages
+            .iter()
+            .filter_map(|package| match package_is_installed(host, package) {
+                Ok(true) => None,
+                Ok(false) => Some(Ok(package.clone())),
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
+    }
+
+    fn package_is_installed(host: &Host, package: &str) -> Result<bool> {
+        let output = host.run("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
+        if !output.status.success() {
+            if output.status.code() == Some(1) {
+                return Ok(false);
             }
-            match output.stdout.as_slice() {
-                b"installed\n" => {}
-                b"not-installed\n"
-                | b"config-files\n"
-                | b"half-installed\n"
-                | b"unpacked\n"
-                | b"half-configured\n"
-                | b"triggers-awaited\n"
-                | b"triggers-pending\n" => missing.push(package.clone()),
-                _ => anyhow::bail!("APT package inspection returned malformed state for {package:?}"),
-            }
+            anyhow::bail!(
+                "APT package inspection failed for {package:?}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
-        Ok(missing)
+        match output.stdout.as_slice() {
+            b"installed\n" => Ok(true),
+            b"not-installed\n"
+            | b"config-files\n"
+            | b"half-installed\n"
+            | b"unpacked\n"
+            | b"half-configured\n"
+            | b"triggers-awaited\n"
+            | b"triggers-pending\n" => Ok(false),
+            _ => anyhow::bail!("APT package inspection returned malformed state for {package:?}"),
+        }
     }
 
     fn install(host: &Host, operation: &str, packages: Vec<String>) -> Result<()> {
@@ -427,6 +440,17 @@ pub(crate) mod apt {
         if packages.is_empty() {
             return Ok(());
         }
+        let installed = packages
+            .iter()
+            .map(|package| Ok((package, package_is_installed(host, package)?)))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(_, installed)| *installed)
+            .map(|(package, _)| package.clone())
+            .collect::<Vec<_>>();
+        if installed.is_empty() {
+            return Ok(());
+        }
         let mut args = vec![
             "DEBIAN_FRONTEND=noninteractive".to_owned(),
             "apt-get".to_owned(),
@@ -435,7 +459,7 @@ pub(crate) mod apt {
             "-qq".into(),
             "--".into(),
         ];
-        args.extend(packages.iter().cloned());
+        args.extend(installed);
         host.require("APT package purge", "sudo", args)?;
         Ok(())
     }
