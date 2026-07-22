@@ -10,6 +10,16 @@ fn write_executable(path: &Path, body: &str) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
+fn os_release_value(key: &str) -> String {
+    fs::read_to_string("/etc/os-release")
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")))
+        .unwrap()
+        .trim_matches('"')
+        .to_owned()
+}
+
 #[test]
 fn help_and_version() {
     for args in [Vec::<&str>::new(), vec!["--help"]] {
@@ -326,7 +336,7 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
             "updates.packages.npm: requires configured packages.npm targets",
         ),
         (
-            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n",
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n          arm64: ^app\\.AppImage$\n          arm32: ^app\\.AppImage$\n",
             "AppImages require integrations.appimaged: true",
         ),
         (
@@ -403,6 +413,201 @@ done
     let log = fs::read_to_string(log).unwrap();
     assert!(log.contains("http://user:password@example.com/probe.deb#asset"));
     assert!(!log.contains("--proto =https"));
+}
+
+#[test]
+fn inapplicable_repository_skips_its_packages_and_side_effects() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("side-effects.log");
+    fs::create_dir_all(&config_dir).unwrap();
+    let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        format!(
+            r#"version: 1.0.0
+packages:
+  apt:
+    repositories:
+      - name: inapplicable
+        key: https://example.com/key.gpg
+        key_path: /etc/apt/keyrings/inapplicable.gpg
+        urls:
+          {inapplicable_distro}: https://example.com/repository
+        suite: "APT-owned suite/value"
+        components: ["component/value", "component/value"]
+        packages: [must-not-install]
+"#
+        ),
+    )
+    .unwrap();
+    for command in ["curl", "gpg", "sudo"] {
+        write_executable(
+            &fake_bin.join(command),
+            "#!/bin/sh\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\nexit 1\n",
+        );
+    }
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    assert!(!log.exists(), "inapplicable repository unexpectedly executed a side effect");
+}
+
+#[test]
+fn binaries_without_a_native_architecture_url_are_noops() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("side-effects.log");
+    let selector = match std::env::consts::ARCH {
+        "x86_64" => "arm64",
+        "aarch64" | "arm" => "amd64",
+        architecture => panic!("unsupported test architecture: {architecture}"),
+    };
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        format!(
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: absent-native-deb\n      format: deb\n      source:\n        provider: url\n        urls:\n          {selector}: https://example.com/absent.deb\n    - name: absent-native-appimage\n      format: appimage\n      source:\n        provider: url\n        urls:\n          {selector}: https://example.com/absent.AppImage\n"
+        ),
+    )
+    .unwrap();
+    for command in ["curl", "sudo"] {
+        write_executable(
+            &fake_bin.join(command),
+            "#!/bin/sh\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\nexit 1\n",
+        );
+    }
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    assert!(!log.exists(), "architecture-inapplicable binary unexpectedly executed a side effect");
+}
+
+#[test]
+fn repository_rendering_resolves_system_suite_and_passes_apt_values_through() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::create_dir_all(&state).unwrap();
+    fs::write(
+        config_dir.join("cozydot.yaml"),
+        r#"version: 1.0.0
+packages:
+  apt:
+    repositories:
+      - name: system-suite
+        key: https://example.com/key.gpg
+        key_path: /etc/apt/keyrings/system-suite.gpg
+        urls:
+          default: https://example.com/system
+        suite: system
+        components: [main]
+        packages: []
+      - name: native-values
+        key: https://example.com/key.gpg
+        key_path: /etc/apt/keyrings/native-values.gpg
+        urls:
+          default: https://example.com/native
+        suite: "APT-owned suite/value"
+        components: ["component/value", "component/value"]
+        packages: []
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+output=
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "--output" ] || { shift; output="$1"; }
+  shift
+done
+printf 'key' > "$output"
+"#,
+    );
+    write_executable(
+        &fake_bin.join("gpg"),
+        r#"#!/bin/sh
+case " $* " in *" --list-keys "*) printf 'pub:x\n'; exit 0;; esac
+output=
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "--output" ] || { shift; output="$1"; }
+  shift
+done
+printf 'processed-key' > "$output"
+"#,
+    );
+    write_executable(
+        &fake_bin.join("sudo"),
+        r#"#!/bin/sh
+last=
+previous=
+for argument in "$@"; do previous="$last"; last="$argument"; done
+name=$(basename "$last")
+case "$1" in
+  install)
+    [ "$2" != "-d" ] || exit 0
+    cp "$previous" "$COZYDOT_TEST_STATE/$name"
+    ;;
+  mv)
+    mv "$COZYDOT_TEST_STATE/$(basename "$previous")" "$COZYDOT_TEST_STATE/$name"
+    ;;
+  test)
+    case "$*" in
+      *" ! -L "*) exit 0;;
+      *" ! -e "*) [ ! -f "$COZYDOT_TEST_STATE/$name" ]; exit;;
+    esac
+    ;;
+  stat) printf '81a4:0:0\n' ;;
+  cat) cat "$COZYDOT_TEST_STATE/$name" ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_STATE", &state)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    let system = fs::read_to_string(state.join("system-suite.list")).unwrap();
+    let codename = os_release_value("VERSION_CODENAME");
+    assert!(system.ends_with(&format!(" {codename} main\n")), "unexpected system suite source: {system:?}");
+    let native = fs::read_to_string(state.join("native-values.list")).unwrap();
+    assert!(
+        native.ends_with(" APT-owned suite/value component/value component/value\n"),
+        "APT-owned values were not rendered unchanged: {native:?}"
+    );
 }
 
 #[test]

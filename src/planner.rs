@@ -1,12 +1,12 @@
 use crate::{
     config::{
-        AptUpdate, BinaryFormat, Config, EnabledDisabled, ResolvedNativeBinary, SourceMode, Theme,
-        resolve_platform_identity,
+        AptUpdate, BinaryFormat, BinarySource, Config, EnabledDisabled, SourceMode, Theme, resolve_platform_identity,
+        select_distro_map, selected_repository_codename,
     },
     operations::{
-        AptRepositoryOperation, AptRepositoryPath, AptRepositorySourceLayout, AptRepositoryToken, AptUpgradePolicy,
-        BinaryPackageFormat, BinaryPackageOperation, BinarySourceOperation, CargoPackageMode, DesktopEnvironment,
-        DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, NpmPackageMode, Operation,
+        AptRepositoryOperation, AptUpgradePolicy, BinaryPackageOperation, BinarySourceOperation, CargoPackageMode,
+        DesktopEnvironment, DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, NpmPackageMode,
+        Operation,
     },
     platform::{Architecture, Platform},
 };
@@ -97,12 +97,18 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
     }
 
     if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()).filter(|values| !values.is_empty()) {
-        prerequisites.insert("ca-certificates");
-        prerequisites.insert("curl");
-        prerequisites.insert("gnupg");
         for repository in repositories {
-            let operation = plan_repository(repository, platform, identity)?;
-            push_operation(&mut phases, PlannerPhase::ThirdPartyRepositories, Operation::AptRepository(operation));
+            let Some(operation) = plan_repository(repository, platform, identity) else {
+                continue;
+            };
+            prerequisites.insert("ca-certificates");
+            prerequisites.insert("curl");
+            prerequisites.insert("gnupg");
+            push_operation(
+                &mut phases,
+                PlannerPhase::ThirdPartyRepositories,
+                Operation::AptRepository(Box::new(operation)),
+            );
             if !repository.packages.is_empty() {
                 push_operation(
                     &mut phases,
@@ -168,6 +174,11 @@ pub fn plan(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resul
             let Some(planned) = plan_binary(binary, platform.architecture) else {
                 continue;
             };
+            if binary.format == BinaryFormat::Appimage
+                && config.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true)
+            {
+                anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
+            }
             prerequisites.insert("ca-certificates");
             prerequisites.insert("curl");
             if binary.format == BinaryFormat::Deb {
@@ -250,50 +261,36 @@ fn plan_repository(
     repository: &crate::config::Repository,
     platform: &Platform,
     identity: crate::config::PlatformIdentity,
-) -> Result<AptRepositoryOperation> {
-    let resolved = repository.resolve_for_platform(0, platform, identity)?;
-    let layout = if let Some(path) = &repository.path {
-        AptRepositorySourceLayout::ExactPath(AptRepositoryPath::parse(path)?)
-    } else {
-        let suite_token = resolved.suite.as_ref().expect("validated suite/components repository");
-        AptRepositorySourceLayout::SuiteComponents {
-            suite: AptRepositoryToken::parse(suite_token.as_str())?,
-            components: repository
-                .components
-                .as_ref()
-                .expect("validated suite/components repository")
-                .iter()
-                .map(|component| AptRepositoryToken::parse(component.as_str()))
-                .collect::<Result<Vec<_>>>()?,
+) -> Option<AptRepositoryOperation> {
+    let (key, source_url) = select_distro_map(&repository.urls, identity.distro, identity.upstream)?;
+    let suite = repository.suite.as_ref().map(|suite| {
+        if suite == "system" {
+            selected_repository_codename(key, platform, identity.distro).to_owned()
+        } else {
+            suite.clone()
         }
-    };
-    AptRepositoryOperation::new(
+    });
+    Some(AptRepositoryOperation::new(
         repository.name.clone(),
         repository.key.clone(),
-        resolved.source_url.clone(),
+        source_url.clone(),
         platform.architecture,
-        layout,
+        suite,
+        repository.components.clone().unwrap_or_default(),
+        repository.path.clone(),
         PathBuf::from(&repository.key_path),
-    )
+    ))
 }
 
 fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
-    let native = binary.source.resolve_native(architecture)?;
-    let source = match native {
-        ResolvedNativeBinary::Github { repository, selector } => {
-            BinarySourceOperation::GithubLatest { repository: repository.to_owned(), selector: selector.to_owned() }
+    let source = match &binary.source {
+        BinarySource::Github { repository, assets } => {
+            let selector = assets.get(architecture)?;
+            BinarySourceOperation::GithubLatest { repository: repository.clone(), selector: selector.to_owned() }
         }
-        ResolvedNativeBinary::Url { url } => BinarySourceOperation::Url { url: url.clone() },
+        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.clone() },
     };
-    Some(BinaryPackageOperation::new(
-        binary.name.clone(),
-        match binary.format {
-            BinaryFormat::Deb => BinaryPackageFormat::Deb,
-            BinaryFormat::Appimage => BinaryPackageFormat::AppImage,
-        },
-        architecture,
-        source,
-    ))
+    Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, architecture, source))
 }
 
 fn plan_system_states(

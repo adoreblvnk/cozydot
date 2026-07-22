@@ -1,5 +1,5 @@
 use super::{Host, TempPath};
-use crate::platform::Architecture;
+use crate::{config::BinaryFormat, platform::Architecture};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde_json::Value;
@@ -10,12 +10,6 @@ const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
 const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BinaryPackageFormat {
-    Deb,
-    AppImage,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
     GithubLatest { repository: String, selector: String },
@@ -25,18 +19,13 @@ pub enum BinarySourceOperation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BinaryPackageOperation {
     name: String,
-    format: BinaryPackageFormat,
+    format: BinaryFormat,
     architecture: Architecture,
     source: BinarySourceOperation,
 }
 
 impl BinaryPackageOperation {
-    pub fn new(
-        name: String,
-        format: BinaryPackageFormat,
-        architecture: Architecture,
-        source: BinarySourceOperation,
-    ) -> Self {
+    pub fn new(name: String, format: BinaryFormat, architecture: Architecture, source: BinarySourceOperation) -> Self {
         Self { name, format, architecture, source }
     }
 }
@@ -48,15 +37,15 @@ pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result
     let url = resolve(host, operation)?;
     let temporary = download(host, operation, &url)?;
     match operation.format {
-        BinaryPackageFormat::Deb => install_deb(host, temporary),
-        BinaryPackageFormat::AppImage => install_appimage(host, operation, temporary),
+        BinaryFormat::Deb => install_deb(host, temporary),
+        BinaryFormat::Appimage => install_appimage(host, operation, temporary),
     }
 }
 
 fn installed(host: &Host, operation: &BinaryPackageOperation) -> bool {
     match operation.format {
-        BinaryPackageFormat::Deb => executable_on_path(host, &operation.name),
-        BinaryPackageFormat::AppImage => appimage_destination(host, operation).exists(),
+        BinaryFormat::Deb => executable_on_path(host, &operation.name),
+        BinaryFormat::Appimage => appimage_destination(host, operation).exists(),
     }
 }
 
@@ -134,8 +123,8 @@ fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation
 
 fn download(host: &Host, operation: &BinaryPackageOperation, url: &Url) -> Result<TempPath> {
     let temporary = match operation.format {
-        BinaryPackageFormat::Deb => TempPath::new_with_suffix(host, &operation.name, ".deb")?,
-        BinaryPackageFormat::AppImage => {
+        BinaryFormat::Deb => TempPath::new_with_suffix(host, &operation.name, ".deb")?,
+        BinaryFormat::Appimage => {
             let applications = host.home().join("Applications");
             fs::create_dir_all(&applications).context("create Applications directory")?;
             TempPath::new_in_with_suffix(&applications, &format!("{}-", operation.name), ".part")?

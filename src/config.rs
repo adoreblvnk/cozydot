@@ -80,18 +80,6 @@ impl Config {
             sources.validate_for_platform(platform, distro, upstream)?;
         }
 
-        for (index, repository) in self
-            .packages
-            .as_ref()
-            .and_then(|packages| packages.apt.as_ref())
-            .and_then(|apt| apt.repositories.as_ref())
-            .into_iter()
-            .flatten()
-            .enumerate()
-        {
-            repository.validate_for_platform(index, platform, distro, upstream)?;
-        }
-
         if let Some(configured) = &self.desktop
             && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
         {
@@ -117,14 +105,6 @@ impl Config {
         }
         if let Some(packages) = &self.packages {
             packages.validate()?;
-        }
-        let has_appimages = self
-            .packages
-            .as_ref()
-            .and_then(|packages| packages.binaries.as_ref())
-            .is_some_and(|binaries| binaries.iter().any(|binary| binary.format == BinaryFormat::Appimage));
-        if has_appimages && self.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true) {
-            bail!("packages.binaries: AppImages require integrations.appimaged: true");
         }
         if let Some(fonts) = &self.fonts {
             fonts.validate()?;
@@ -503,7 +483,7 @@ pub struct Repository {
     pub key_path: String,
     pub urls: BTreeMap<DistroMapKey, Url>,
     pub suite: Option<String>,
-    pub components: Option<Vec<AptToken>>,
+    pub components: Option<Vec<String>>,
     pub path: Option<String>,
     pub packages: Vec<String>,
 }
@@ -516,93 +496,26 @@ impl Repository {
         validate_key_path(&self.key_path, &format!("{path}.key_path"))?;
         match (&self.suite, &self.components, &self.path) {
             (Some(suite), Some(components), None) => {
-                validate_suite(suite, &format!("{path}.suite"))?;
+                validate_apt_source_value(suite, &format!("{path}.suite"))?;
                 if components.is_empty() {
                     bail!("{path}.components: required with suite");
                 }
                 for (component_index, component) in components.iter().enumerate() {
-                    let component_path = format!("{path}.components[{component_index}]");
-                    validate_apt_token(component.as_str(), &component_path)?;
-                    if component.as_str() == "system" {
-                        bail!("{component_path}: value {:?} is reserved for the suite field", component.as_str());
-                    }
+                    validate_apt_source_value(component, &format!("{path}.components[{component_index}]"))?;
                 }
             }
-            (None, None, Some(exact_path)) => validate_repository_path(exact_path, &format!("{path}.path"))?,
+            (None, None, Some(exact_path)) => validate_apt_source_value(exact_path, &format!("{path}.path"))?,
             _ => bail!("{path}: requires exactly suite with non-empty components, or path"),
         }
         Ok(())
     }
-
-    pub fn validate_for_platform(
-        &self,
-        index: usize,
-        platform: &Platform,
-        distro: Distro,
-        upstream: Family,
-    ) -> Result<()> {
-        let identity = PlatformIdentity { distro, upstream };
-        let resolved = self.resolve_for_platform(index, platform, identity)?;
-        if self.suite.as_deref() == Some("system") {
-            validate_apt_token(
-                resolved.suite.as_ref().context("system repository suite did not resolve")?.as_str(),
-                &format!("packages.apt.repositories[{index}].suite resolved codename"),
-            )?;
-        }
-        Ok(())
-    }
-
-    pub fn resolve_for_platform(
-        &self,
-        index: usize,
-        platform: &Platform,
-        identity: PlatformIdentity,
-    ) -> Result<ResolvedRepository<'_>> {
-        let (key, source_url) = select_distro_map(&self.urls, identity.distro, identity.upstream).ok_or_else(|| {
-            anyhow::anyhow!(
-                "packages.apt.repositories[{index}].urls: no URL for distribution {:?}, upstream {:?}, or default",
-                platform.distro,
-                platform.upstream
-            )
-        })?;
-        let suite = match self.suite.as_deref() {
-            Some("system") => Some(AptToken(selected_repository_codename(key, platform, identity.distro).to_owned())),
-            Some(value) => Some(AptToken(value.to_owned())),
-            None => None,
-        };
-        Ok(ResolvedRepository { source_url, suite })
-    }
 }
 
-pub struct ResolvedRepository<'a> {
-    pub source_url: &'a Url,
-    pub suite: Option<AptToken>,
-}
-
-fn selected_repository_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
+pub fn selected_repository_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
     if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
         &platform.distro_codename
     } else {
         &platform.base_codename
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AptToken(String);
-
-impl AptToken {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for AptToken {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(Self(value))
     }
 }
 
@@ -646,20 +559,6 @@ impl BinarySource {
             Self::Url { urls } => urls.validate(&format!("{path}.urls")),
         }
     }
-
-    pub fn resolve_native(&self, architecture: Architecture) -> Option<ResolvedNativeBinary<'_>> {
-        match self {
-            Self::Github { repository, assets } => {
-                assets.get(architecture).map(|selector| ResolvedNativeBinary::Github { repository, selector })
-            }
-            Self::Url { urls } => urls.get(architecture).map(|url| ResolvedNativeBinary::Url { url }),
-        }
-    }
-}
-
-pub enum ResolvedNativeBinary<'a> {
-    Github { repository: &'a str, selector: &'a str },
-    Url { url: &'a Url },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -687,7 +586,7 @@ impl AssetMap {
         [("amd64", self.amd64.as_ref()), ("arm64", self.arm64.as_ref()), ("arm32", self.arm32.as_ref())]
     }
 
-    fn get(&self, architecture: Architecture) -> Option<&str> {
+    pub fn get(&self, architecture: Architecture) -> Option<&str> {
         match architecture {
             Architecture::Amd64 => self.amd64.as_deref(),
             Architecture::Arm64 => self.arm64.as_deref(),
@@ -721,7 +620,7 @@ impl ArchitectureUrls {
         architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
-    fn get(&self, architecture: Architecture) -> Option<&Url> {
+    pub fn get(&self, architecture: Architecture) -> Option<&Url> {
         match architecture {
             Architecture::Amd64 => self.amd64.as_ref(),
             Architecture::Arm64 => self.arm64.as_ref(),
@@ -1054,36 +953,9 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_suite(value: &str, path: &str) -> Result<()> {
-    if value == "system" || value == "*" {
-        return Ok(());
-    }
-    validate_apt_token(value, path)
-}
-
-fn validate_apt_token(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^(?:\*|[a-z0-9][a-z0-9._+-]*)$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid APT token {value:?}; must be one lowercase token or the complete literal '*'");
-    }
-    Ok(())
-}
-
-fn validate_repository_path(value: &str, path: &str) -> Result<()> {
-    if value == "./" {
-        return Ok(());
-    }
-    if !value.ends_with('/') || value.starts_with('/') || value.contains('\\') {
-        bail!("{path}: invalid repository path {value:?}; must be './' or a safe relative path ending in '/'");
-    }
-    let body = &value[..value.len() - 1];
-    if body.is_empty() {
-        bail!("{path}: invalid repository path {value:?}; must contain at least one safe relative path segment");
-    }
-    for segment in body.split('/') {
-        if matches!(segment, "" | "." | "..") || validate_definition_name(segment, path).is_err() {
-            bail!("{path}: invalid repository path {value:?}; contains invalid relative path segment {segment:?}");
-        }
+fn validate_apt_source_value(value: &str, path: &str) -> Result<()> {
+    if value.chars().any(char::is_control) {
+        bail!("{path}: APT source value must fit on one line and contain no control characters");
     }
     Ok(())
 }
