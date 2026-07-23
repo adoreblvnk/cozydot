@@ -29,17 +29,6 @@ pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
         return Ok(());
     }
     let _ = host.run("systemctl", ["--user", "stop", "appimaged.service"])?;
-    if host.run("dpkg", ["--status", "appimagelauncher"])?.status.success() {
-        host.require(
-            "remove conflicting AppImageLauncher",
-            "sudo",
-            ["apt-get", "purge", "-y", "-qq", "--", "appimagelauncher"],
-        )?;
-    }
-
-    remove_if_present(&home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service"))?;
-    host.require("reload user services", "systemctl", ["--user", "daemon-reload"])?;
-    clear_integration_cache(&home.join(".local/share/applications"))?;
 
     let applications = home.join("Applications");
     fs::create_dir_all(&applications).context("create Applications directory")?;
@@ -151,39 +140,6 @@ fn resolve_asset(host: &Host, architecture: Architecture) -> Result<Url> {
         bail!("appimaged release selector matched {} assets for {}", matches.len(), architecture.canonical());
     }
     Url::parse(matches[0]).context("selected appimaged release asset has an invalid browser_download_url")
-}
-
-fn clear_integration_cache(applications: &Path) -> Result<()> {
-    let entries = match fs::read_dir(applications) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    for entry in entries {
-        let path = entry?.path();
-        if path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("appimage"))
-            && !fs::symlink_metadata(&path)?.file_type().is_dir()
-        {
-            remove_file(&path)?;
-        }
-    }
-    Ok(())
-}
-
-fn remove_if_present(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => remove_file(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn remove_file(path: &Path) -> Result<()> {
-    if fs::symlink_metadata(path)?.file_type().is_dir() {
-        bail!("refusing to recursively remove directory {}", path.display());
-    }
-    fs::remove_file(path)?;
-    Ok(())
 }
 
 fn require_elf(path: &Path, architecture: Architecture) -> Result<()> {
