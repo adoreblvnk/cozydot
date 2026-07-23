@@ -701,8 +701,8 @@ packages:
   apt:
     repositories:
       - name: system-suite
-        key: https://example.com/key.gpg
-        key_path: /etc/apt/keyrings/system-suite.gpg
+        key: https://example.com/key.asc
+        key_path: /etc/apt/keyrings/system-suite.asc
         urls:
           default: https://example.com/system
         suite: system
@@ -733,7 +733,12 @@ printf 'key' > "$output"
     write_executable(
         &fake_bin.join("gpg"),
         r#"#!/bin/sh
-case " $* " in *" --list-keys "*) printf 'pub:x\n'; exit 0;; esac
+case " $* " in
+  *" --list-keys "*)
+    [ "${COZYDOT_GPG_NO_PUBLIC:-}" = 1 ] || printf 'pub:x\n'
+    exit 0
+    ;;
+esac
 output=
 while [ "$#" -gt 0 ]; do
   [ "$1" != "--output" ] || { shift; output="$1"; }
@@ -763,12 +768,24 @@ case "$1" in
       *" ! -e "*) [ ! -f "$COZYDOT_TEST_STATE/$name" ]; exit;;
     esac
     ;;
-  stat) printf '81a4:0:0\n' ;;
-  cat) cat "$COZYDOT_TEST_STATE/$name" ;;
+  stat|cat) exit 99 ;;
   *) exit 0 ;;
 esac
 "#,
     );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_STATE", &state)
+        .env("COZYDOT_GPG_NO_PUBLIC", "1")
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("repository key validation found no public key"));
+    assert!(fs::read_dir(&state).unwrap().next().is_none(), "invalid key published repository state");
 
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -780,6 +797,8 @@ esac
         .assert()
         .success();
 
+    assert_eq!(fs::read(state.join("system-suite.asc")).unwrap(), b"key");
+    assert_eq!(fs::read(state.join("native-values.gpg")).unwrap(), b"processed-key");
     let system = fs::read_to_string(state.join("system-suite.list")).unwrap();
     let codename = os_release_value("VERSION_CODENAME");
     assert!(system.ends_with(&format!(" {codename} main\n")), "unexpected system suite source: {system:?}");
@@ -900,8 +919,7 @@ case "$1" in
       *" ! -e "*) [ ! -f "$COZYDOT_TEST_STATE/files/$name" ]; exit;;
     esac
     ;;
-  stat) printf '81a4:0:0\n' ;;
-  cat) cat "$COZYDOT_TEST_STATE/files/$name" ;;
+  stat|cat) exit 99 ;;
   *) exit 0 ;;
 esac
 "#,

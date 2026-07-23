@@ -1,11 +1,7 @@
 use super::{Host, TempPath};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
-use std::{
-    ffi::OsStr,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 use url::Url;
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
@@ -60,18 +56,23 @@ impl AptRepositoryOperation {
 
 pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result<()> {
     let keyring_path_str = operation.keyring_path.to_str().context("keyring path is not UTF-8")?;
-    let use_armor = keyring_path_str.ends_with(".asc");
+    let preserve_armor = keyring_path_str.ends_with(".asc");
 
-    let key = processed_key(host, operation.key_url.as_str(), use_armor)?;
+    let key = processed_key(host, operation.key_url.as_str(), preserve_armor)?;
     let source = operation.render_source().into_bytes();
 
-    converge_owned_bytes(host, &operation.keyring_path, &key, "APT repository key")?;
-    converge_owned_bytes(host, &operation.source_list_path, &source, "APT repository source")?;
+    super::privileged_file::publish_bytes(host, &operation.keyring_path, &key, "APT repository key publication")?;
+    super::privileged_file::publish_bytes(
+        host,
+        &operation.source_list_path,
+        &source,
+        "APT repository source publication",
+    )?;
 
     Ok(())
 }
 
-fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
+fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
     let downloaded = TempPath::new(host, "repository-key-download")?;
     host.require(
         "repository key download",
@@ -134,93 +135,15 @@ fn processed_key(host: &Host, url: &str, use_armor: bool) -> Result<Vec<u8>> {
         bail!("repository key validation found no public key");
     }
 
-    // Now export in the desired format
-    let exported = TempPath::new(host, "repository-key-exported")?;
-    if use_armor {
-        host.require(
-            "repository key export",
-            "gpg",
-            [
-                "--no-options",
-                "--batch",
-                "--yes",
-                "--no-default-keyring",
-                "--keyring",
-                &binary_keyring.path().to_string_lossy(),
-                "--armor",
-                "--output",
-                &exported.path().to_string_lossy(),
-                "--export",
-            ],
-        )?;
+    if preserve_armor {
+        Ok(downloaded_bytes)
     } else {
-        host.require(
-            "repository key export",
-            "gpg",
-            [
-                "--no-options",
-                "--batch",
-                "--yes",
-                "--no-default-keyring",
-                "--keyring",
-                &binary_keyring.path().to_string_lossy(),
-                "--output",
-                &exported.path().to_string_lossy(),
-                "--export",
-            ],
-        )?;
+        let bytes = fs::read(binary_keyring.path()).context("read dearmored repository key")?;
+        if bytes.is_empty() {
+            bail!("repository key conversion produced empty output");
+        }
+        Ok(bytes)
     }
-
-    let bytes = fs::read(exported.path()).context("read exported repository key")?;
-    if bytes.is_empty() {
-        bail!("repository key export produced empty output");
-    }
-    Ok(bytes)
-}
-
-fn converge_owned_bytes(host: &Host, path: &Path, expected: &[u8], label: &str) -> Result<()> {
-    super::privileged_file::publish_bytes(host, path, expected, &format!("{label} publication"))?;
-    let final_bytes =
-        inspect_owned_file(host, path, label)?.with_context(|| format!("{label} postcondition is missing"))?;
-    if final_bytes != expected {
-        bail!("{label} publication did not establish exact bytes");
-    }
-    Ok(())
-}
-
-fn inspect_owned_file(host: &Host, path: &Path, label: &str) -> Result<Option<Vec<u8>>> {
-    let path_arg = path.as_os_str();
-    let absent = host.run("sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-e"), path_arg])?.status.success();
-    let not_symlink =
-        host.run("sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-L"), path_arg])?.status.success();
-    if absent && not_symlink {
-        return Ok(None);
-    }
-    if !not_symlink {
-        bail!("{label} destination is a symlink");
-    }
-    let state = host.require(
-        &format!("{label} inspection"),
-        "sudo",
-        [OsStr::new("stat"), OsStr::new("--format=%f:%u:%g"), OsStr::new("--"), path_arg],
-    )?;
-    let state = std::str::from_utf8(&state.stdout)
-        .with_context(|| format!("{label} stat returned non-UTF-8 output"))?
-        .trim_end();
-    let mut fields = state.split(':');
-    let mode = fields.next().and_then(|value| u32::from_str_radix(value, 16).ok());
-    let uid = fields.next().and_then(|value| value.parse::<u32>().ok());
-    let gid = fields.next().and_then(|value| value.parse::<u32>().ok());
-    if fields.next().is_some()
-        || mode.is_none_or(|mode| mode & 0o170000 != 0o100000 || mode & 0o7777 != 0o0644)
-        || uid != Some(0)
-        || gid != Some(0)
-    {
-        bail!("{label} has mismatched type, ownership, or permissions");
-    }
-    Ok(Some(
-        host.require(&format!("{label} inspection"), "sudo", [OsStr::new("cat"), OsStr::new("--"), path_arg])?.stdout,
-    ))
 }
 
 pub(crate) mod managed_apt {
