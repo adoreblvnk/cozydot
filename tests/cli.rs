@@ -10,7 +10,7 @@ fn write_executable(path: &Path, body: &str) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
-fn run_npm_apply(state: &str, package: &str) -> (bool, String, String) {
+fn run_npm_apply(query_success: bool, package: &str) -> (bool, String, String) {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let config_home = temp.path().join("config");
@@ -28,10 +28,11 @@ fn run_npm_apply(state: &str, package: &str) -> (bool, String, String) {
         &format!(
             r#"#!/bin/sh
 printf 'fnm %s\n' "$*" >> "$COZYDOT_TEST_LOG"
-if [ "$*" = "exec --using=default -- npm list --global --depth=0 --json" ]; then
-  printf '%s\n' '{state}'
+if [ "$1" = "exec" ] && [ "$5" = "list" ]; then
+  exit {}
 fi
 "#,
+            if query_success { 0 } else { 1 },
         ),
     );
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
@@ -1099,84 +1100,22 @@ fn apt_inspection_operational_failure_does_not_guess_package_state() {
 }
 
 #[test]
-fn npm_apply_repairs_only_unhealthy_configured_packages() {
+fn npm_apply_uses_per_target_native_presence_checks() {
     let cases = [
-        ("empty root", r#"{"name":"lib"}"#, true),
-        ("healthy configured package", r#"{"dependencies":{"@scope/tool":{"version":"1.0.0"}}}"#, false),
-        ("configured package empty version", r#"{"dependencies":{"@scope/tool":{"version":""}}}"#, true),
-        (
-            "configured package error",
-            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","error":{"code":"EFAIL"}}}}"#,
-            true,
-        ),
-        (
-            "configured package problems",
-            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","problems":["broken"]}}}"#,
-            true,
-        ),
-        ("configured package invalid", r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","invalid":true}}}"#, true),
-        ("configured package missing", r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","missing":true}}}"#, true),
-        (
-            "configured package invalid type",
-            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","invalid":"yes"}}}"#,
-            true,
-        ),
-        (
-            "configured package missing type",
-            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","missing":1}}}"#,
-            true,
-        ),
-        ("configured package non-object metadata", r#"{"dependencies":{"@scope/tool":"broken"}}"#, true),
-        (
-            "unrelated malformed metadata",
-            r#"{"dependencies":{"unrelated":{"version":"1","version":false},"@scope/tool":{"version":"1.0.0"}}}"#,
-            false,
-        ),
-        (
-            "manager-wide problems",
-            r#"{"problems":["unattributed"],"dependencies":{"@scope/tool":{"version":"1.0.0"}}}"#,
-            false,
-        ),
+        ("present scoped package", true, "@scope/tool@^1", "@scope/tool", false),
+        ("missing scoped package", false, "@scope/tool@^1", "@scope/tool", true),
+        ("present aliased package", true, "tool-alias@npm:tool@^1", "tool-alias", false),
+        ("missing scoped alias", false, "@scope/tool-alias@npm:@scope/tool@^1", "@scope/tool-alias", true),
     ];
 
-    for (label, state, should_install) in cases {
-        let (success, log, stderr) = run_npm_apply(state, "@scope/tool@^1");
+    for (label, query_success, package, identity, should_install) in cases {
+        let (success, log, stderr) = run_npm_apply(query_success, package);
         assert!(success, "{label} failed: {stderr}\n{log}");
-        assert_eq!(
-            log.matches("fnm exec --using=default -- npm list --global --depth=0 --json\n").count(),
-            1,
-            "{label} did not query npm state exactly once: {log}"
-        );
+        let query = format!("fnm exec --using=default -- npm list --global --depth=0 -- {identity}\n");
+        assert_eq!(log.matches(&query).count(), 1, "{label} did not query the configured identity once: {log}");
         assert!(!log.contains("ambient npm"), "{label} invoked ambient npm: {log}");
-        assert_eq!(
-            log.contains("fnm exec --using=default -- npm install --global -- @scope/tool@^1\n"),
-            should_install,
-            "{label} selected the wrong npm mutation: {log}"
-        );
-    }
-}
-
-#[test]
-fn npm_apply_fails_closed_on_structurally_unreliable_configured_state() {
-    let cases = [
-        ("duplicate root key", r#"{"name":"first","name":"second"}"#),
-        (
-            "duplicate configured identity",
-            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0"},"@scope/tool":{"missing":true}}}"#,
-        ),
-        (
-            "duplicate configured metadata key",
-            r#"{"dependencies":{"@scope/tool":{"version":"1.0.0","version":"2.0.0"}}}"#,
-        ),
-        ("explicit root error", r#"{"error":null,"dependencies":{}}"#),
-    ];
-
-    for (label, state) in cases {
-        let (success, log, stderr) = run_npm_apply(state, "@scope/tool@^1");
-        assert!(!success, "{label} was accepted: {log}");
-        assert!(stderr.contains("npm global package state"), "{label} returned an unclear error: {stderr}");
-        assert!(!log.contains("npm install --global"), "{label} mutated npm state: {log}");
-        assert!(!log.contains("ambient npm"), "{label} invoked ambient npm: {log}");
+        let mutation = format!("fnm exec --using=default -- npm install --global -- {package}\n");
+        assert_eq!(log.contains(&mutation), should_install, "{label} selected the wrong npm mutation: {log}");
     }
 }
 
@@ -1234,9 +1173,10 @@ fi
         &data_home.join("fnm/fnm"),
         r#"#!/bin/sh
 printf 'fnm %s\n' "$*" >> "$COZYDOT_TEST_LOG"
-if [ "$*" = "exec --using=default -- npm list --global --depth=0 --json" ]; then
-  printf '%s\n' '{"dependencies":{"typescript":{"version":"4.0.0"},"prettier":{"version":"3.0.0"}}}'
-fi
+case "$*" in
+  "exec --using=default -- npm list --global --depth=0 -- typescript") exit 0 ;;
+  "exec --using=default -- npm list --global --depth=0 -- eslint") exit 1 ;;
+esac
 "#,
     );
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");

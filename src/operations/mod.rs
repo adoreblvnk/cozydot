@@ -693,10 +693,7 @@ pub(crate) mod packages {
 
     pub(crate) mod npm {
         use anyhow::{Context, Result, bail};
-        use serde::de::{DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
         use std::{
-            collections::BTreeSet,
-            fmt,
             os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
         };
@@ -710,22 +707,21 @@ pub(crate) mod packages {
         }
 
         pub(crate) fn execute(host: &Host, packages: &[String], mode: NpmPackageMode) -> Result<()> {
-            let configured = packages.iter().map(|package| package_identity(package).to_owned()).collect();
             let fnm = resolve_fnm(host)?;
             let selected = match mode {
                 NpmPackageMode::EnsurePresent => {
-                    let output = run_npm_required(
-                        host,
-                        &fnm,
-                        "npm installed package query",
-                        ["list", "--global", "--depth=0", "--json"],
-                    )?;
-                    let installed = installed_packages(&output.stdout, &configured)?;
-                    packages
-                        .iter()
-                        .filter(|package| !installed.contains(package_identity(package)))
-                        .cloned()
-                        .collect::<Vec<_>>()
+                    let mut missing = Vec::new();
+                    for package in packages {
+                        let identity = package_identity(package);
+                        let output = host.run(
+                            &fnm,
+                            ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", identity],
+                        )?;
+                        if !output.status.success() {
+                            missing.push(package.clone());
+                        }
+                    }
+                    missing
                 }
                 NpmPackageMode::UpdateCurrent => packages.to_vec(),
             };
@@ -738,240 +734,11 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        fn installed_packages(output: &[u8], configured: &BTreeSet<String>) -> Result<BTreeSet<String>> {
-            let mut deserializer = serde_json::Deserializer::from_slice(output);
-            let installed =
-                NpmStateSeed { configured }.deserialize(&mut deserializer).context("parse npm global package state")?;
-            deserializer.end().context("parse npm global package state")?;
-            Ok(installed)
-        }
-
-        struct NpmStateSeed<'a> {
-            configured: &'a BTreeSet<String>,
-        }
-
-        impl<'de> DeserializeSeed<'de> for NpmStateSeed<'_> {
-            type Value = BTreeSet<String>;
-
-            fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                deserializer.deserialize_map(NpmStateVisitor { configured: self.configured })
-            }
-        }
-
-        struct NpmStateVisitor<'a> {
-            configured: &'a BTreeSet<String>,
-        }
-
-        impl<'de> Visitor<'de> for NpmStateVisitor<'_> {
-            type Value = BTreeSet<String>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("npm global package state object")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut root_keys = BTreeSet::new();
-                let mut installed = BTreeSet::new();
-                let mut reports_error = false;
-                while let Some(key) = map.next_key::<String>()? {
-                    if !root_keys.insert(key.clone()) {
-                        return Err(A::Error::custom(format!(
-                            "npm global package state has duplicate root key {key:?}"
-                        )));
-                    }
-                    match key.as_str() {
-                        "dependencies" => {
-                            installed = map.next_value_seed(DependenciesSeed { configured: self.configured })?;
-                        }
-                        "error" => {
-                            reports_error = true;
-                            map.next_value::<IgnoredAny>()?;
-                        }
-                        _ => {
-                            map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-                if reports_error {
-                    return Err(A::Error::custom("npm global package state reports an error"));
-                }
-                Ok(installed)
-            }
-        }
-
-        struct DependenciesSeed<'a> {
-            configured: &'a BTreeSet<String>,
-        }
-
-        impl<'de> DeserializeSeed<'de> for DependenciesSeed<'_> {
-            type Value = BTreeSet<String>;
-
-            fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                deserializer.deserialize_map(DependenciesVisitor { configured: self.configured })
-            }
-        }
-
-        struct DependenciesVisitor<'a> {
-            configured: &'a BTreeSet<String>,
-        }
-
-        impl<'de> Visitor<'de> for DependenciesVisitor<'_> {
-            type Value = BTreeSet<String>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("npm dependencies state object")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut configured_keys = BTreeSet::new();
-                let mut installed = BTreeSet::new();
-                while let Some(name) = map.next_key::<String>()? {
-                    if !self.configured.contains(&name) {
-                        map.next_value::<IgnoredAny>()?;
-                        continue;
-                    }
-                    if !configured_keys.insert(name.clone()) {
-                        return Err(A::Error::custom(format!(
-                            "npm dependencies state has duplicate configured identity {name:?}"
-                        )));
-                    }
-                    if map.next_value_seed(PackageMetadataSeed)? {
-                        installed.insert(name);
-                    }
-                }
-                Ok(installed)
-            }
-        }
-
-        struct PackageMetadataSeed;
-
-        impl<'de> DeserializeSeed<'de> for PackageMetadataSeed {
-            type Value = bool;
-
-            fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                deserializer.deserialize_any(PackageMetadataVisitor)
-            }
-        }
-
-        struct PackageMetadataVisitor;
-
-        impl<'de> Visitor<'de> for PackageMetadataVisitor {
-            type Value = bool;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("npm package metadata")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut keys = BTreeSet::new();
-                let mut has_version = false;
-                let mut has_error = false;
-                let mut has_problems = false;
-                let mut invalid = false;
-                let mut missing = false;
-                while let Some(key) = map.next_key::<String>()? {
-                    if !keys.insert(key.clone()) {
-                        return Err(A::Error::custom(format!(
-                            "npm configured package metadata has duplicate key {key:?}"
-                        )));
-                    }
-                    match key.as_str() {
-                        "version" => {
-                            has_version = map
-                                .next_value::<serde_json::Value>()?
-                                .as_str()
-                                .is_some_and(|version| !version.is_empty());
-                        }
-                        "error" => {
-                            has_error = true;
-                            map.next_value::<IgnoredAny>()?;
-                        }
-                        "problems" => {
-                            has_problems = nonempty_json(&map.next_value::<serde_json::Value>()?);
-                        }
-                        "invalid" => invalid = map.next_value::<serde_json::Value>()?.as_bool() != Some(false),
-                        "missing" => missing = map.next_value::<serde_json::Value>()?.as_bool() != Some(false),
-                        _ => {
-                            map.next_value::<IgnoredAny>()?;
-                        }
-                    }
-                }
-                Ok(has_version && !has_error && !has_problems && !invalid && !missing)
-            }
-
-            fn visit_seq<A>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                while sequence.next_element::<IgnoredAny>()?.is_some() {}
-                Ok(false)
-            }
-
-            fn visit_bool<E>(self, _: bool) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_i64<E>(self, _: i64) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_u64<E>(self, _: u64) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_f64<E>(self, _: f64) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_str<E>(self, _: &str) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_string<E>(self, _: String) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-
-            fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
-                Ok(false)
-            }
-        }
-
-        fn nonempty_json(value: &serde_json::Value) -> bool {
-            match value {
-                serde_json::Value::Null => false,
-                serde_json::Value::String(value) => !value.is_empty(),
-                serde_json::Value::Array(values) => !values.is_empty(),
-                serde_json::Value::Object(values) => !values.is_empty(),
-                serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
-            }
-        }
-
         fn package_identity(package: &str) -> &str {
             if package.starts_with('@') {
                 let slash = package.find('/').unwrap_or(package.len());
-                return package.rfind('@').filter(|index| *index > slash).map_or(package, |index| &package[..index]);
+                let version = package[slash..].find('@').map(|index| slash + index);
+                return version.map_or(package, |index| &package[..index]);
             }
             package.split_once('@').map_or(package, |(name, _)| name)
         }
