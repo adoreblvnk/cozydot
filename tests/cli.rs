@@ -1737,7 +1737,7 @@ integrations:
     write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'not-installed\\n'\n");
     write_executable(
         &fake_bin.join("dpkg"),
-        "#!/bin/sh\ncase \"$*\" in *appimagelauncher*) exit 1;; *) exit 0;; esac\n",
+        "#!/bin/sh\nprintf 'dpkg %s\\n' \"$*\" >> \"$COZYDOT_SUDO_LOG\"\nexit 98\n",
     );
     write_executable(
         &fake_bin.join("systemctl"),
@@ -1795,8 +1795,12 @@ esac
         "#!/bin/sh\nprintf launched > \"$COZYDOT_CORRUPT_LAUNCH\"\n",
     );
     fs::copy("/bin/true", home.join("Applications/fixed.AppImage")).unwrap();
-    let user_cache_directory = home.join(".local/share/applications/appimage-backup");
-    fs::create_dir_all(&user_cache_directory).unwrap();
+    let legacy_cache = home.join(".local/share/applications/appimagekit-test.desktop");
+    fs::create_dir_all(legacy_cache.parent().unwrap()).unwrap();
+    fs::write(&legacy_cache, "legacy cache").unwrap();
+    let legacy_unit = home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service");
+    fs::create_dir_all(legacy_unit.parent().unwrap()).unwrap();
+    fs::write(&legacy_unit, "legacy unit").unwrap();
 
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -1826,11 +1830,15 @@ esac
     assert_eq!(fs::read(home.join("Applications/fixed.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
     assert_eq!(fs::read(home.join("Applications/appimaged.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
     assert!(!corrupt_launch.exists());
-    assert!(user_cache_directory.is_dir());
-    assert!(fs::read_to_string(&sudo_log).unwrap().contains("apt-get install -y -qq -- libfuse2t64"));
+    assert_eq!(fs::read_to_string(legacy_cache).unwrap(), "legacy cache");
+    assert_eq!(fs::read_to_string(legacy_unit).unwrap(), "legacy unit");
+    let sudo_calls = fs::read_to_string(&sudo_log).unwrap();
+    assert!(sudo_calls.contains("apt-get install -y -qq -- libfuse2t64"));
+    assert!(!sudo_calls.contains("appimagelauncher"));
     assert!(!home.join(".local/bin").exists());
     let systemctl_calls = fs::read_to_string(&systemctl_log).unwrap();
     assert_eq!(systemctl_calls.matches("is-active").count(), 3);
+    assert!(!systemctl_calls.contains("daemon-reload"));
 
     write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 1\n");
     Command::cargo_bin("cozydot")
