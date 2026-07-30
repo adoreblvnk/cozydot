@@ -99,7 +99,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
 
     if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()).filter(|values| !values.is_empty()) {
         for repository in repositories {
-            let Some(operation) = plan_repository(repository, platform, identity) else {
+            let Some(operation) = plan_repository(repository, platform, identity)? else {
                 continue;
             };
             prerequisites.insert("ca-certificates");
@@ -257,8 +257,10 @@ fn plan_repository(
     repository: &crate::config::Repository,
     platform: &Platform,
     identity: crate::config::PlatformIdentity,
-) -> Option<AptRepositoryOperation> {
-    let (key, source_url) = select_distro_map(&repository.urls, identity.distro, identity.upstream)?;
+) -> Result<Option<AptRepositoryOperation>> {
+    let Some((key, source_url)) = select_distro_map(&repository.urls, identity.distro, identity.upstream) else {
+        return Ok(None);
+    };
     let suite = repository.suite.as_ref().map(|suite| {
         if suite == "system" {
             selected_repository_codename(key, platform, identity.distro).to_owned()
@@ -266,7 +268,7 @@ fn plan_repository(
             suite.clone()
         }
     });
-    Some(AptRepositoryOperation::new(
+    AptRepositoryOperation::new(
         repository.name.clone(),
         repository.key.clone(),
         source_url.clone(),
@@ -275,7 +277,8 @@ fn plan_repository(
         repository.components.clone().unwrap_or_default(),
         repository.path.clone(),
         PathBuf::from(&repository.key_path),
-    ))
+    )
+    .map(Some)
 }
 
 fn selected_repository_conflicts(
@@ -295,7 +298,7 @@ fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture
             let selector = assets.get(architecture)?;
             BinarySourceOperation::GithubLatest { repository: repository.clone(), selector: selector.to_owned() }
         }
-        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.clone() },
+        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.to_owned() },
     };
     Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, architecture, source))
 }
@@ -522,7 +525,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
             apt.and_then(|apt| apt.install.as_ref()).into_iter().flatten().cloned().collect::<BTreeSet<_>>();
         if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
             for repository in repositories {
-                let Some(operation) = plan_repository(repository, platform, identity) else {
+                let Some(operation) = plan_repository(repository, platform, identity)? else {
                     continue;
                 };
                 prerequisites.extend(["ca-certificates", "curl", "gnupg"]);
