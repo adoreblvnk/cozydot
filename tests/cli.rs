@@ -424,8 +424,6 @@ fn rust_update_without_apply_selector_updates_installed_toolchains() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("rustup.log");
     fs::create_dir_all(config_home.join("cozydot")).unwrap();
-    fs::write(config_home.join("cozydot/cozydot.yaml"), "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n")
-        .unwrap();
     write_executable(
         &cargo_home.join("bin/rustup"),
         "#!/bin/sh\nprintf 'rustup %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
@@ -433,19 +431,26 @@ fn rust_update_without_apply_selector_updates_installed_toolchains() {
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
 
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("HOME", &home)
-        .env("CARGO_HOME", &cargo_home)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_CURRENT_DESKTOP", "gnome")
-        .env("COZYDOT_TEST_LOG", &log)
-        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
-        .arg("update")
-        .assert()
-        .success();
+    for config in [
+        "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n",
+        "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n  packages:\n    cargo: true\n",
+    ] {
+        fs::write(config_home.join("cozydot/cozydot.yaml"), config).unwrap();
+        fs::write(&log, "").unwrap();
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("HOME", &home)
+            .env("CARGO_HOME", &cargo_home)
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .env("COZYDOT_TEST_LOG", &log)
+            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+            .arg("update")
+            .assert()
+            .success();
 
-    assert_eq!(fs::read_to_string(log).unwrap(), "rustup update --no-self-update\n");
+        assert_eq!(fs::read_to_string(&log).unwrap(), "rustup update --no-self-update\n");
+    }
 }
 
 #[test]
