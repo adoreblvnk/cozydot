@@ -351,7 +351,7 @@ fn plan_tools(
         push_operation(
             phases,
             PlannerPhase::LanguageToolchains,
-            Operation::RustToolchain { selector: selector.to_owned(), mode: ToolchainMode::EnsurePresent },
+            Operation::RustToolchain { selector: Some(selector.to_owned()), mode: ToolchainMode::EnsurePresent },
         );
     }
     if let Some(selector) = tools.go.as_deref() {
@@ -572,10 +572,8 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         );
     }
     if updates.flatpak == Some(true) {
-        prerequisites.extend(["ca-certificates", "curl"]);
-        managers.insert(ManagerBootstrap::Flatpak);
-        let refs = packages.and_then(|packages| packages.flatpak.clone()).expect("validated Flatpak update targets");
-        push_operation(&mut phases, PlannerPhase::FlatpakApplications, Operation::FlatpakUpdateApps { refs });
+        prerequisites.insert("flatpak");
+        push_operation(&mut phases, PlannerPhase::FlatpakApplications, Operation::FlatpakUpdateApps);
     }
 
     let tool_updates = updates.tools.as_ref();
@@ -590,7 +588,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if rust_update || cargo_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Rustup);
-        let selector = tools.and_then(|tools| tools.rust.clone()).expect("validated Rust selector");
+        let selector = tools.and_then(|tools| tools.rust.clone()).or_else(|| cargo_update.then(|| "stable".to_owned()));
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -602,7 +600,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     }
     if go_update {
         prerequisites.extend(["ca-certificates", "curl", "tar"]);
-        let selector = tools.and_then(|tools| tools.go.as_deref()).expect("validated Go selector");
+        let selector = tools.and_then(|tools| tools.go.as_deref()).unwrap_or("latest");
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -616,7 +614,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if node_update || npm_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Fnm);
-        let selector = tools.and_then(|tools| tools.node.clone()).expect("validated Node selector");
+        let selector = tools.and_then(|tools| tools.node.clone()).unwrap_or_else(|| "latest".to_owned());
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -629,7 +627,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if python_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Uv);
-        let version = tools.and_then(|tools| tools.python.clone()).expect("validated Python selector");
+        let version = tools.and_then(|tools| tools.python.clone()).unwrap_or_else(|| "3".to_owned());
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -637,30 +635,29 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         );
     }
     if cargo_update {
-        let configured = packages.and_then(|packages| packages.cargo.clone()).expect("validated Cargo update targets");
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::CargoPackageSet { packages: configured, mode: CargoPackageMode::UpdateCurrent },
+            Operation::CargoPackageSet { packages: Vec::new(), mode: CargoPackageMode::UpdateCurrent },
         );
     }
     if npm_update {
-        let configured = packages.and_then(|packages| packages.npm.clone()).expect("validated npm update targets");
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::NpmPackageSet { packages: configured, mode: NpmPackageMode::UpdateCurrent },
+            Operation::NpmPackageSet { packages: Vec::new(), mode: NpmPackageMode::UpdateCurrent },
         );
     }
     if updates.fonts == Some(true) {
-        prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"]);
-        let families =
-            config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).expect("validated Nerd Font update targets");
-        push_operation(
-            &mut phases,
-            PlannerPhase::Fonts,
-            Operation::NerdFonts { families, mode: NerdFontsMode::Update },
-        );
+        let families = config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).unwrap_or_default();
+        if !families.is_empty() {
+            prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"]);
+            push_operation(
+                &mut phases,
+                PlannerPhase::Fonts,
+                Operation::NerdFonts { families, mode: NerdFontsMode::Update },
+            );
+        }
     }
 
     if managers.contains(&ManagerBootstrap::Flatpak) {

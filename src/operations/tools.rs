@@ -19,18 +19,26 @@ struct GoRelease {
     filename: String,
 }
 
-pub(crate) fn execute_rust(host: &Host, selector: &str, mode: ToolchainMode) -> Result<()> {
+pub(crate) fn execute_rust(host: &Host, selector: Option<&str>, mode: ToolchainMode) -> Result<()> {
     let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
         .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
     match mode {
         ToolchainMode::EnsurePresent => {
+            let selector = selector.context("Rust apply operation requires a configured selector")?;
             host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
+            host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
         }
         ToolchainMode::ConvergeLatest => {
-            host.require("Rust toolchain update", &rustup, ["update", "--no-self-update", selector])?;
+            let mut args = vec!["update", "--no-self-update"];
+            if let Some(selector) = selector {
+                args.extend(["--", selector]);
+            }
+            host.require("Rust toolchain update", &rustup, args)?;
+            if let Some(selector) = selector {
+                host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
+            }
         }
     }
-    host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
     Ok(())
 }
 

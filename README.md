@@ -42,7 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh 
 cozydot init
 $EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
 cozydot apply
-# Optional: converge update-enabled configured targets to their latest allowed versions.
+# Optional: run the enabled ecosystem updates.
 cozydot update
 ```
 
@@ -65,24 +65,26 @@ generated repository file. Edit that active file before running `apply` or
 
 ## Apply and update behavior
 
-| Command | Configured and missing | Configured and present | Unconfigured |
-| --- | --- | --- | --- |
-| `cozydot apply` | Installs | Leaves unchanged, even when outdated | Leaves unchanged |
-| `cozydot update` | Installs the latest allowed version when its update category is enabled | Checks and updates to the latest allowed version when its category is enabled | Leaves unchanged |
+`cozydot apply` installs configured missing targets and leaves present or
+unconfigured software unchanged, even when it is outdated.
+
+`cozydot update` runs each enabled update category independently from apply
+targets. Flatpak updates installed user applications; Cargo updates installed
+registry crates; npm updates global packages. Rust updates all installed
+rustup toolchains when no selector is configured. Selectorless Go, Node, and
+Python updates use `latest`, `latest`, and `3` respectively. Font updates still
+redownload configured Nerd Font families because fonts have no native manager;
+an absent family list is a no-op.
 
 An absent or empty `updates:` section, or one containing only false controls,
-makes `cozydot update` a validated silent no-op. `apply` validates update
-controls but never executes update operations. Update categories cover
-configured Flatpaks, Rust/Node/Go/Python toolchains, Cargo/npm packages, and
-Nerd Font families. Explicit font updates redownload configured families; no
-release receipt is retained. Managed Deb and AppImage binaries remain
-ensure-only and have no update category.
+makes `cozydot update` a validated silent no-op. `apply` accepts update controls
+but never executes them. Managed Deb and AppImage binaries remain ensure-only
+and have no update category.
 
-`updates.apt: standard|full` is the documented exception to configured-only
-updates: it converges applicable repositories needed by configured APT targets,
-installs configured missing APT packages, then intentionally performs a
-system-wide APT `upgrade` or `full-upgrade`; `full` also runs purge-autoremove.
-These commands run only from `cozydot update`.
+`updates.apt: standard|full` converges applicable repositories, installs
+configured missing APT packages, then performs a system-wide APT `upgrade` or
+`full-upgrade`; `full` also runs purge-autoremove. These commands run only from
+`cozydot update`.
 
 Direct APT packages are ensured before packages owned by third-party
 repositories. A repository may declare distro-selected `conflicts`; after that
