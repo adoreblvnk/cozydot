@@ -17,25 +17,16 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ManagerBootstrap {
-    Flatpak,
-    Rustup,
-    CargoBinstall,
-    Fnm,
-    Uv,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PlannerPhase {
     AdministrativeVerification,
     OfficialAptSources,
+    DirectAptMetadataRefresh,
+    SystemPackageStates,
     SystemPrerequisites,
     ManagerBootstraps,
     LanguageToolchains,
     CargoBinstallBootstrap,
-    DirectAptMetadataRefresh,
-    SystemPackageStates,
-    AptPackages,
+    DirectAptPackages,
     ThirdPartyRepositories,
     RepositoryMetadataRefresh,
     RepositoryPackages,
@@ -48,6 +39,15 @@ enum PlannerPhase {
     Integrations,
     Desktop,
     Updates,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ManagerBootstrap {
+    Flatpak,
+    Rustup,
+    Fnm,
+    Uv,
+    CargoBinstall,
 }
 
 pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Operation>> {
@@ -63,7 +63,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         (PlannerPhase::ManagerBootstraps, Vec::new()),
         (PlannerPhase::LanguageToolchains, Vec::new()),
         (PlannerPhase::CargoBinstallBootstrap, Vec::new()),
-        (PlannerPhase::AptPackages, Vec::new()),
+        (PlannerPhase::DirectAptPackages, Vec::new()),
         (PlannerPhase::ThirdPartyRepositories, Vec::new()),
         (PlannerPhase::RepositoryMetadataRefresh, Vec::new()),
         (PlannerPhase::RepositoryPackages, Vec::new()),
@@ -97,6 +97,18 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         push_operation(&mut phases, PlannerPhase::OfficialAptSources, Operation::ManagedAptSources(managed));
     }
 
+    plan_system_states(config, platform, &mut phases, &mut needs_direct_apt_refresh);
+    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers);
+
+    if let Some(install) = apt.and_then(|apt| apt.install.as_ref()).filter(|values| !values.is_empty()) {
+        push_operation(
+            &mut phases,
+            PlannerPhase::DirectAptPackages,
+            Operation::AptPackages { packages: install.clone() },
+        );
+        needs_direct_apt_refresh = true;
+    }
+
     if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()).filter(|values| !values.is_empty()) {
         for repository in repositories {
             let Some(operation) = plan_repository(repository, platform, identity)? else {
@@ -124,13 +136,6 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         }
     }
 
-    plan_system_states(config, platform, &mut phases, &mut needs_direct_apt_refresh);
-
-    if let Some(install) = apt.and_then(|apt| apt.install.as_ref()).filter(|values| !values.is_empty()) {
-        push_operation(&mut phases, PlannerPhase::AptPackages, Operation::AptPackages { packages: install.clone() });
-        needs_direct_apt_refresh = true;
-    }
-
     if let Some(applications) =
         packages.and_then(|packages| packages.flatpak.as_ref()).filter(|values| !values.is_empty())
     {
@@ -143,8 +148,6 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             Operation::FlatpakEnsureApps { refs: applications.clone() },
         );
     }
-
-    plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers);
 
     if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()).filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
@@ -167,6 +170,8 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             Operation::NpmPackageSet { packages: npm.clone(), mode: NpmPackageMode::EnsurePresent },
         );
     }
+
+    plan_appimaged(config, platform, &mut phases, &mut prerequisites);
 
     if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()).filter(|values| !values.is_empty())
     {
@@ -209,13 +214,10 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         );
     }
 
-    plan_integrations(config, platform, &mut phases, &mut prerequisites);
+    plan_integrations(config, &mut phases);
     plan_desktop(config, platform, &mut phases, &mut prerequisites);
     if needs_direct_apt_refresh {
         push_operation(&mut phases, PlannerPhase::DirectAptMetadataRefresh, Operation::AptMetadataRefresh);
-    }
-    if needs_repository_refresh {
-        push_operation(&mut phases, PlannerPhase::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
     }
 
     if managers.contains(&ManagerBootstrap::Flatpak) {
@@ -224,7 +226,6 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     if managers.contains(&ManagerBootstrap::Fnm) {
         prerequisites.insert("unzip");
     }
-
     if !prerequisites.is_empty() {
         push_operation(
             &mut phases,
@@ -232,18 +233,21 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             Operation::AptBootstrapPackages { packages: prerequisites.iter().map(|s| (*s).to_owned()).collect() },
         );
     }
-
     for manager in &managers {
         let (phase, operation) = match manager {
             ManagerBootstrap::Flatpak => (PlannerPhase::ManagerBootstraps, Operation::FlatpakEnsureFlathub),
             ManagerBootstrap::Rustup => (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap),
+            ManagerBootstrap::Fnm => (PlannerPhase::ManagerBootstraps, Operation::FnmBootstrap),
+            ManagerBootstrap::Uv => (PlannerPhase::ManagerBootstraps, Operation::UvBootstrap),
             ManagerBootstrap::CargoBinstall => {
                 (PlannerPhase::CargoBinstallBootstrap, Operation::CargoBinstallBootstrap)
             }
-            ManagerBootstrap::Fnm => (PlannerPhase::ManagerBootstraps, Operation::FnmBootstrap),
-            ManagerBootstrap::Uv => (PlannerPhase::ManagerBootstraps, Operation::UvBootstrap),
         };
         push_operation(&mut phases, phase, operation);
+    }
+
+    if needs_repository_refresh {
+        push_operation(&mut phases, PlannerPhase::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
     }
 
     Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
@@ -253,54 +257,17 @@ fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerP
     phases.iter_mut().find(|(p, _)| *p == phase).expect("phase exists").1.push(op);
 }
 
-fn plan_repository(
-    repository: &crate::config::Repository,
-    platform: &Platform,
-    identity: crate::config::PlatformIdentity,
-) -> Result<Option<AptRepositoryOperation>> {
-    let Some((key, source_url)) = select_distro_map(&repository.urls, identity.distro, identity.upstream) else {
-        return Ok(None);
-    };
-    let suite = repository.suite.as_ref().map(|suite| {
-        if suite == "system" {
-            selected_repository_codename(key, platform, identity.distro).to_owned()
-        } else {
-            suite.clone()
-        }
-    });
-    AptRepositoryOperation::new(
-        repository.name.clone(),
-        repository.key.clone(),
-        source_url.clone(),
-        platform.architecture,
-        suite,
-        repository.components.clone().unwrap_or_default(),
-        repository.path.clone(),
-        PathBuf::from(&repository.key_path),
-    )
-    .map(Some)
-}
-
-fn selected_repository_conflicts(
-    repository: &crate::config::Repository,
-    identity: crate::config::PlatformIdentity,
-) -> Option<Vec<String>> {
-    repository
-        .conflicts
-        .as_ref()
-        .and_then(|conflicts| select_distro_map(conflicts, identity.distro, identity.upstream))
-        .map(|(_, packages)| packages.clone())
-}
-
-fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
-    let source = match &binary.source {
-        BinarySource::Github { repository, assets } => {
-            let selector = assets.get(architecture)?;
-            BinarySourceOperation::GithubLatest { repository: repository.clone(), selector: selector.to_owned() }
-        }
-        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.to_owned() },
-    };
-    Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, architecture, source))
+fn validate_binary_integrations(config: &Config, architecture: Architecture) -> Result<()> {
+    let has_appimage =
+        config.packages.as_ref().and_then(|packages| packages.binaries.as_ref()).is_some_and(|binaries| {
+            binaries
+                .iter()
+                .any(|binary| binary.format == BinaryFormat::Appimage && plan_binary(binary, architecture).is_some())
+        });
+    if has_appimage && config.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true) {
+        anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
+    }
+    Ok(())
 }
 
 fn plan_system_states(
@@ -334,6 +301,10 @@ fn plan_system_states(
             Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
         );
     }
+}
+
+fn enabled(state: EnabledDisabled) -> bool {
+    state == EnabledDisabled::Enabled
 }
 
 fn plan_tools(
@@ -386,14 +357,56 @@ fn plan_tools(
     }
 }
 
-fn plan_integrations(
+fn go_selector_main(value: &str) -> GoToolchainSelector {
+    if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
+}
+
+fn plan_repository(
+    repository: &crate::config::Repository,
+    platform: &Platform,
+    identity: crate::config::PlatformIdentity,
+) -> Result<Option<AptRepositoryOperation>> {
+    let Some((key, source_url)) = select_distro_map(&repository.urls, identity.distro, identity.upstream) else {
+        return Ok(None);
+    };
+    let suite = repository.suite.as_ref().map(|suite| {
+        if suite == "system" {
+            selected_repository_codename(key, platform, identity.distro).to_owned()
+        } else {
+            suite.clone()
+        }
+    });
+    AptRepositoryOperation::new(
+        repository.name.clone(),
+        repository.key.clone(),
+        source_url.clone(),
+        platform.architecture,
+        suite,
+        repository.components.clone().unwrap_or_default(),
+        repository.path.clone(),
+        PathBuf::from(&repository.key_path),
+    )
+    .map(Some)
+}
+
+fn selected_repository_conflicts(
+    repository: &crate::config::Repository,
+    identity: crate::config::PlatformIdentity,
+) -> Option<Vec<String>> {
+    repository
+        .conflicts
+        .as_ref()
+        .and_then(|conflicts| select_distro_map(conflicts, identity.distro, identity.upstream))
+        .map(|(_, packages)| packages.clone())
+}
+
+fn plan_appimaged(
     config: &Config,
     platform: &Platform,
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
 ) {
-    let Some(integrations) = &config.integrations else { return };
-    if integrations.appimaged == Some(true) {
+    if config.integrations.as_ref().is_some_and(|integrations| integrations.appimaged == Some(true)) {
         prerequisites.extend(["ca-certificates", "curl"]);
         push_operation(
             phases,
@@ -401,6 +414,21 @@ fn plan_integrations(
             Operation::Appimaged { architecture: platform.architecture },
         );
     }
+}
+
+fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
+    let source = match &binary.source {
+        BinarySource::Github { repository, assets } => {
+            let selector = assets.get(architecture)?;
+            BinarySourceOperation::GithubLatest { repository: repository.clone(), selector: selector.to_owned() }
+        }
+        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.to_owned() },
+    };
+    Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, architecture, source))
+}
+
+fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation>)]) {
+    let Some(integrations) = &config.integrations else { return };
     if let Some(docker) = &integrations.docker {
         if docker.add_user_to_group == Some(true) {
             push_operation(phases, PlannerPhase::Integrations, Operation::DockerGroup);
@@ -505,7 +533,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         (PlannerPhase::ManagerBootstraps, Vec::new()),
         (PlannerPhase::ThirdPartyRepositories, Vec::new()),
         (PlannerPhase::RepositoryMetadataRefresh, Vec::new()),
-        (PlannerPhase::AptPackages, Vec::new()),
+        (PlannerPhase::DirectAptPackages, Vec::new()),
         (PlannerPhase::RepositoryPackages, Vec::new()),
         (PlannerPhase::Updates, Vec::new()),
         (PlannerPhase::FlatpakApplications, Vec::new()),
@@ -556,7 +584,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         if !direct.is_empty() {
             push_operation(
                 &mut phases,
-                PlannerPhase::AptPackages,
+                PlannerPhase::DirectAptPackages,
                 Operation::AptPackages { packages: direct.into_iter().collect() },
             );
         }
@@ -680,25 +708,4 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         push_operation(&mut phases, PlannerPhase::ManagerBootstraps, operation);
     }
     Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
-}
-
-fn validate_binary_integrations(config: &Config, architecture: Architecture) -> Result<()> {
-    let has_appimage =
-        config.packages.as_ref().and_then(|packages| packages.binaries.as_ref()).is_some_and(|binaries| {
-            binaries
-                .iter()
-                .any(|binary| binary.format == BinaryFormat::Appimage && plan_binary(binary, architecture).is_some())
-        });
-    if has_appimage && config.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true) {
-        anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
-    }
-    Ok(())
-}
-
-fn go_selector_main(value: &str) -> GoToolchainSelector {
-    if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
-}
-
-fn enabled(state: EnabledDisabled) -> bool {
-    state == EnabledDisabled::Enabled
 }

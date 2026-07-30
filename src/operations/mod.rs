@@ -1,6 +1,259 @@
 mod appimaged;
 mod binary;
 
+mod repository;
+mod system;
+mod tools;
+
+pub use apt::AptUpgradePolicy;
+pub use binary::{BinaryPackageOperation, BinarySourceOperation};
+pub use packages::cargo::CargoPackageMode;
+pub use packages::fonts::NerdFontsMode;
+pub use packages::npm::NpmPackageMode;
+pub use repository::AptRepositoryOperation;
+pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
+pub use tools::GoToolchainSelector;
+
+use crate::platform::{Architecture, ManagedAptSources};
+use anyhow::{Context, Result, bail};
+use std::{
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
+
+const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolchainMode {
+    EnsurePresent,
+    ConvergeLatest,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Operation {
+    EnsureAdmin,
+    ManagedAptSources(ManagedAptSources),
+    AptMetadataRefresh,
+    UbuntuSnap { enabled: bool },
+    UnattendedUpgrades { enabled: bool },
+    AptBootstrapPackages { packages: Vec<String> },
+    FlatpakEnsureFlathub,
+    RustupBootstrap,
+    FnmBootstrap,
+    UvBootstrap,
+    RustToolchain { selector: Option<String>, mode: ToolchainMode },
+    GoToolchain { selector: GoToolchainSelector, architecture: Architecture, mode: ToolchainMode },
+    NodeToolchain { selector: String, mode: ToolchainMode },
+    PythonToolchain { version: String, mode: ToolchainMode },
+    CargoBinstallBootstrap,
+    AptPackages { packages: Vec<String> },
+    AptRepository(Box<AptRepositoryOperation>),
+    AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
+    FlatpakEnsureApps { refs: Vec<String> },
+    CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
+    NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
+    Appimaged { architecture: Architecture },
+    BinaryPackage(BinaryPackageOperation),
+    NerdFonts { families: Vec<String>, mode: NerdFontsMode },
+    Dotfiles { root: PathBuf, packages: Vec<String> },
+    DockerGroup,
+    DockerLocalLog { max_size: Option<String> },
+    VirtualBoxGroup,
+    VsCodeExtensionSet { extensions: Vec<String> },
+    DesktopSetting { target: DesktopEnvironment, setting: DesktopSetting },
+    GnomeExtensions { extensions: Vec<String> },
+    GnomeDock,
+    GnomeRoundedCorners,
+    AptUpgrade { policy: AptUpgradePolicy },
+    FlatpakUpdateApps,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperationOutcome {
+    Completed,
+    LoginRequired,
+}
+
+impl Operation {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::EnsureAdmin => "administrator access",
+            Self::ManagedAptSources(_) => "managed APT sources",
+            Self::AptMetadataRefresh => "APT metadata refresh",
+            Self::UbuntuSnap { .. } => "Ubuntu Snap",
+            Self::UnattendedUpgrades { .. } => "unattended upgrades",
+            Self::AptBootstrapPackages { .. } => "APT bootstrap packages",
+            Self::FlatpakEnsureFlathub => "Flathub remote",
+            Self::RustupBootstrap => "Rustup bootstrap",
+            Self::FnmBootstrap => "FNM bootstrap",
+            Self::UvBootstrap => "uv bootstrap",
+            Self::RustToolchain { .. } => "Rust toolchain",
+            Self::GoToolchain { .. } => "Go toolchain",
+            Self::NodeToolchain { .. } => "Node.js toolchain",
+            Self::PythonToolchain { .. } => "Python toolchain",
+            Self::CargoBinstallBootstrap => "cargo-binstall bootstrap",
+            Self::AptPackages { .. } => "APT packages",
+            Self::AptRepository(_) => "APT repository",
+            Self::AptRepositoryPackages { .. } => "APT repository packages",
+            Self::FlatpakEnsureApps { .. } => "Flatpak applications",
+            Self::CargoPackageSet { .. } => "Cargo packages",
+            Self::NpmPackageSet { .. } => "npm packages",
+            Self::Appimaged { .. } => "appimaged",
+            Self::BinaryPackage(_) => "binary package",
+            Self::NerdFonts { .. } => "Nerd Fonts",
+            Self::Dotfiles { .. } => "dotfiles",
+            Self::DockerGroup => "Docker group membership",
+            Self::DockerLocalLog { .. } => "Docker logging",
+            Self::VirtualBoxGroup => "VirtualBox group membership",
+            Self::VsCodeExtensionSet { .. } => "Visual Studio Code extensions",
+            Self::DesktopSetting { .. } => "desktop setting",
+            Self::GnomeExtensions { .. } => "GNOME extensions",
+            Self::GnomeDock => "GNOME dock",
+            Self::GnomeRoundedCorners => "GNOME rounded corners",
+            Self::AptUpgrade { .. } => "APT upgrade",
+            Self::FlatpakUpdateApps => "Flatpak application updates",
+        }
+    }
+}
+
+pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
+    execute_on_host(operation, Host::new()?)
+}
+
+fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
+    match operation {
+        Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
+        Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
+        Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
+        Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
+        Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
+        Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
+        Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
+        Operation::RustupBootstrap => completed(languages::rustup(&host)),
+        Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
+        Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
+        Operation::RustToolchain { selector, mode } => {
+            completed(tools::execute_rust(&host, selector.as_deref(), *mode))
+        }
+        Operation::GoToolchain { selector, architecture, mode } => {
+            completed(tools::execute_go(&host, selector, *architecture, *mode))
+        }
+        Operation::NodeToolchain { selector, mode } => completed(tools::execute_node(&host, selector, *mode)),
+        Operation::PythonToolchain { version, mode } => completed(tools::execute_python(&host, version, *mode)),
+        Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
+        Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
+        Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
+        Operation::AptRepositoryPackages { conflicts, packages } => {
+            completed(apt::repository_packages(&host, conflicts, packages))
+        }
+        Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
+        Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
+        Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
+        Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
+        Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
+        Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
+        Operation::Dotfiles { root, packages } => completed(packages::dotfiles::execute(&host, root, packages)),
+        Operation::DockerGroup => completed(system::docker_group(&host)),
+        Operation::DockerLocalLog { max_size } => completed(system::docker_local_log(&host, max_size.as_deref())),
+        Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
+        Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
+        Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
+        Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
+        Operation::GnomeDock => system::gnome_dock(&host),
+        Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
+        Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
+        Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
+    }
+}
+
+fn completed(result: Result<()>) -> Result<OperationOutcome> {
+    result.map(|()| OperationOutcome::Completed)
+}
+
+pub(crate) struct Host {
+    home: PathBuf,
+}
+
+impl Host {
+    fn new() -> Result<Self> {
+        let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
+        Ok(Self { home })
+    }
+
+    pub fn run<I, S>(&self, program: &str, args: I) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
+        let mut command = Command::new(program);
+        command.args(&args);
+        command.output().with_context(|| format!("{program} operation: start {}", display(program, &args)))
+    }
+
+    pub fn require<I, S>(&self, operation: &str, program: &str, args: I) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let output = self.run(program, args)?;
+        if !output.status.success() {
+            bail!(
+                "{operation}: {program} failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(output)
+    }
+
+    pub fn home(&self) -> PathBuf {
+        self.home.clone()
+    }
+
+    pub fn temp_dir(&self) -> PathBuf {
+        self.value("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
+    }
+
+    pub fn value(&self, name: &str) -> Option<OsString> {
+        std::env::var_os(name)
+    }
+}
+
+pub(crate) struct TempPath(tempfile::TempPath);
+
+impl TempPath {
+    pub fn new(host: &Host, stem: &str) -> Result<Self> {
+        Self::new_with_suffix(host, stem, "")
+    }
+
+    pub fn new_with_suffix(host: &Host, stem: &str, suffix: &str) -> Result<Self> {
+        Self::new_in_with_suffix(&host.temp_dir(), stem, suffix)
+    }
+
+    pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
+        tempfile::Builder::new()
+            .prefix(stem)
+            .suffix(suffix)
+            .tempfile_in(parent)
+            .map(|file| Self(file.into_temp_path()))
+            .context("create operation temporary file")
+    }
+
+    pub fn path(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
+fn display(program: &str, args: &[OsString]) -> String {
+    std::iter::once(OsStr::new(program))
+        .chain(args.iter().map(OsString::as_os_str))
+        .map(|part| part.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub(crate) mod privileged_file {
     use super::{Host, TempPath};
     use anyhow::{Context, Result, bail};
@@ -91,259 +344,6 @@ pub(crate) mod privileged_file {
         host.require(operation, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()])?;
         Ok(())
     }
-}
-
-mod repository;
-mod system;
-mod tools;
-
-pub use apt::AptUpgradePolicy;
-pub use binary::{BinaryPackageOperation, BinarySourceOperation};
-pub use packages::cargo::CargoPackageMode;
-pub use packages::fonts::NerdFontsMode;
-pub use packages::npm::NpmPackageMode;
-pub use repository::AptRepositoryOperation;
-pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
-pub use tools::GoToolchainSelector;
-
-use crate::platform::{Architecture, ManagedAptSources};
-use anyhow::{Context, Result, bail};
-use std::{
-    ffi::{OsStr, OsString},
-    path::{Path, PathBuf},
-    process::{Command, Output},
-};
-
-const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolchainMode {
-    EnsurePresent,
-    ConvergeLatest,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Operation {
-    AptBootstrapPackages { packages: Vec<String> },
-    AptMetadataRefresh,
-    AptRepository(Box<AptRepositoryOperation>),
-    ManagedAptSources(ManagedAptSources),
-    AptPackages { packages: Vec<String> },
-    AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
-    AptUpgrade { policy: AptUpgradePolicy },
-    Appimaged { architecture: Architecture },
-    DockerGroup,
-    DockerLocalLog { max_size: Option<String> },
-    DesktopSetting { target: DesktopEnvironment, setting: DesktopSetting },
-    BinaryPackage(BinaryPackageOperation),
-    Dotfiles { root: PathBuf, packages: Vec<String> },
-    FlatpakEnsureFlathub,
-    FlatpakEnsureApps { refs: Vec<String> },
-    FlatpakUpdateApps,
-    FnmBootstrap,
-    EnsureAdmin,
-    GnomeExtensions { extensions: Vec<String> },
-    GnomeDock,
-    GnomeRoundedCorners,
-    GoToolchain { selector: GoToolchainSelector, architecture: Architecture, mode: ToolchainMode },
-    NerdFonts { families: Vec<String>, mode: NerdFontsMode },
-    RustupBootstrap,
-    CargoBinstallBootstrap,
-    RustToolchain { selector: Option<String>, mode: ToolchainMode },
-    CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
-    NodeToolchain { selector: String, mode: ToolchainMode },
-    NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
-    UbuntuSnap { enabled: bool },
-    UnattendedUpgrades { enabled: bool },
-    UvBootstrap,
-    PythonToolchain { version: String, mode: ToolchainMode },
-    VirtualBoxGroup,
-    VsCodeExtensionSet { extensions: Vec<String> },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OperationOutcome {
-    Completed,
-    LoginRequired,
-}
-
-impl Operation {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::AptBootstrapPackages { .. } => "APT bootstrap packages",
-            Self::AptMetadataRefresh => "APT metadata refresh",
-            Self::AptRepository(_) => "APT repository",
-            Self::ManagedAptSources(_) => "managed APT sources",
-            Self::AptPackages { .. } => "APT packages",
-            Self::AptRepositoryPackages { .. } => "APT repository packages",
-            Self::AptUpgrade { .. } => "APT upgrade",
-            Self::Appimaged { .. } => "appimaged",
-            Self::DockerGroup => "Docker group membership",
-            Self::DockerLocalLog { .. } => "Docker logging",
-            Self::DesktopSetting { .. } => "desktop setting",
-            Self::BinaryPackage(_) => "binary package",
-            Self::Dotfiles { .. } => "dotfiles",
-            Self::FlatpakEnsureFlathub => "Flathub remote",
-            Self::FlatpakEnsureApps { .. } => "Flatpak applications",
-            Self::FlatpakUpdateApps => "Flatpak application updates",
-            Self::FnmBootstrap => "FNM bootstrap",
-            Self::EnsureAdmin => "administrator access",
-            Self::GnomeExtensions { .. } => "GNOME extensions",
-            Self::GnomeDock => "GNOME dock",
-            Self::GnomeRoundedCorners => "GNOME rounded corners",
-            Self::GoToolchain { .. } => "Go toolchain",
-            Self::NerdFonts { .. } => "Nerd Fonts",
-            Self::RustupBootstrap => "Rustup bootstrap",
-            Self::CargoBinstallBootstrap => "cargo-binstall bootstrap",
-            Self::RustToolchain { .. } => "Rust toolchain",
-            Self::CargoPackageSet { .. } => "Cargo packages",
-            Self::NodeToolchain { .. } => "Node.js toolchain",
-            Self::NpmPackageSet { .. } => "npm packages",
-            Self::UbuntuSnap { .. } => "Ubuntu Snap",
-            Self::UnattendedUpgrades { .. } => "unattended upgrades",
-            Self::UvBootstrap => "uv bootstrap",
-            Self::PythonToolchain { .. } => "Python toolchain",
-            Self::VirtualBoxGroup => "VirtualBox group membership",
-            Self::VsCodeExtensionSet { .. } => "Visual Studio Code extensions",
-        }
-    }
-}
-
-pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
-    execute_on_host(operation, Host::new()?)
-}
-
-fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
-    match operation {
-        Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
-        Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
-        Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
-        Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
-        Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
-        Operation::AptRepositoryPackages { conflicts, packages } => {
-            completed(apt::repository_packages(&host, conflicts, packages))
-        }
-        Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
-        Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
-        Operation::DockerGroup => completed(system::docker_group(&host)),
-        Operation::DockerLocalLog { max_size } => completed(system::docker_local_log(&host, max_size.as_deref())),
-        Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
-        Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
-        Operation::Dotfiles { root, packages } => completed(packages::dotfiles::execute(&host, root, packages)),
-        Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
-        Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
-        Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
-        Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
-        Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
-        Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
-        Operation::GnomeDock => system::gnome_dock(&host),
-        Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
-        Operation::GoToolchain { selector, architecture, mode } => {
-            completed(tools::execute_go(&host, selector, *architecture, *mode))
-        }
-        Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
-        Operation::RustupBootstrap => completed(languages::rustup(&host)),
-        Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::RustToolchain { selector, mode } => {
-            completed(tools::execute_rust(&host, selector.as_deref(), *mode))
-        }
-        Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
-        Operation::NodeToolchain { selector, mode } => completed(tools::execute_node(&host, selector, *mode)),
-        Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
-        Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
-        Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
-        Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::PythonToolchain { version, mode } => completed(tools::execute_python(&host, version, *mode)),
-        Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
-        Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
-    }
-}
-
-fn completed(result: Result<()>) -> Result<OperationOutcome> {
-    result.map(|()| OperationOutcome::Completed)
-}
-
-pub(crate) struct Host {
-    home: PathBuf,
-}
-
-impl Host {
-    fn new() -> Result<Self> {
-        let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
-        Ok(Self { home })
-    }
-
-    pub fn run<I, S>(&self, program: &str, args: I) -> Result<Output>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
-        let mut command = Command::new(program);
-        command.args(&args);
-        command.output().with_context(|| format!("{program} operation: start {}", display(program, &args)))
-    }
-
-    pub fn require<I, S>(&self, operation: &str, program: &str, args: I) -> Result<Output>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let output = self.run(program, args)?;
-        if !output.status.success() {
-            bail!(
-                "{operation}: {program} failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        Ok(output)
-    }
-
-    pub fn home(&self) -> PathBuf {
-        self.home.clone()
-    }
-
-    pub fn temp_dir(&self) -> PathBuf {
-        self.value("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
-    }
-
-    pub fn value(&self, name: &str) -> Option<OsString> {
-        std::env::var_os(name)
-    }
-}
-
-pub(crate) struct TempPath(tempfile::TempPath);
-
-impl TempPath {
-    pub fn new(host: &Host, stem: &str) -> Result<Self> {
-        Self::new_with_suffix(host, stem, "")
-    }
-
-    pub fn new_with_suffix(host: &Host, stem: &str, suffix: &str) -> Result<Self> {
-        Self::new_in_with_suffix(&host.temp_dir(), stem, suffix)
-    }
-
-    pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
-        tempfile::Builder::new()
-            .prefix(stem)
-            .suffix(suffix)
-            .tempfile_in(parent)
-            .map(|file| Self(file.into_temp_path()))
-            .context("create operation temporary file")
-    }
-
-    pub fn path(&self) -> &Path {
-        self.0.as_ref()
-    }
-}
-
-fn display(program: &str, args: &[OsString]) -> String {
-    std::iter::once(OsStr::new(program))
-        .chain(args.iter().map(OsString::as_os_str))
-        .map(|part| part.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub(crate) mod apt {
@@ -498,6 +498,39 @@ pub(crate) mod languages {
 
     use crate::operations::{Host, RUSTUP_BOOTSTRAP_FLAGS, TempPath};
 
+    pub fn rustup(host: &Host) -> Result<()> {
+        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
+        if !cargo_home.is_absolute() {
+            bail!("rustup managed CARGO_HOME must be absolute");
+        }
+        if executable_file(&cargo_home.join("bin/rustup")) {
+            return Ok(());
+        }
+        let installer = TempPath::new(host, "rustup")?;
+        host.require(
+            "rustup bootstrap download",
+            "curl",
+            [
+                "--proto",
+                "=https",
+                "--tlsv1.2",
+                "-sSf",
+                "-o",
+                &installer.path().to_string_lossy(),
+                "https://sh.rustup.rs",
+            ],
+        )?;
+        host.require(
+            "rustup bootstrap",
+            "sh",
+            std::iter::once(installer.path().as_os_str()).chain(RUSTUP_BOOTSTRAP_FLAGS.map(OsStr::new)),
+        )?;
+        if !executable_file(&cargo_home.join("bin/rustup")) {
+            bail!("rustup bootstrap did not publish the managed rustup executable");
+        }
+        Ok(())
+    }
+
     pub fn fnm_bootstrap(host: &Host) -> Result<()> {
         let data_home =
             host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
@@ -557,42 +590,84 @@ pub(crate) mod languages {
         std::fs::symlink_metadata(path)
             .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
     }
-
-    pub fn rustup(host: &Host) -> Result<()> {
-        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
-        if !cargo_home.is_absolute() {
-            bail!("rustup managed CARGO_HOME must be absolute");
-        }
-        if executable_file(&cargo_home.join("bin/rustup")) {
-            return Ok(());
-        }
-        let installer = TempPath::new(host, "rustup")?;
-        host.require(
-            "rustup bootstrap download",
-            "curl",
-            [
-                "--proto",
-                "=https",
-                "--tlsv1.2",
-                "-sSf",
-                "-o",
-                &installer.path().to_string_lossy(),
-                "https://sh.rustup.rs",
-            ],
-        )?;
-        host.require(
-            "rustup bootstrap",
-            "sh",
-            std::iter::once(installer.path().as_os_str()).chain(RUSTUP_BOOTSTRAP_FLAGS.map(OsStr::new)),
-        )?;
-        if !executable_file(&cargo_home.join("bin/rustup")) {
-            bail!("rustup bootstrap did not publish the managed rustup executable");
-        }
-        Ok(())
-    }
 }
 
 pub(crate) mod packages {
+
+    pub(crate) mod flatpak {
+        use super::super::Host;
+        use anyhow::Result;
+
+        const FLATHUB_NAME: &str = "flathub";
+        const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
+        const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
+
+        pub fn ensure_flathub(host: &Host) -> Result<()> {
+            host.require(
+                "Flathub remote ensure",
+                "flatpak",
+                ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
+            )?;
+            let url_arg = format!("--url={FLATHUB_URL}");
+            host.require(
+                "Flathub remote security canonicalization",
+                "flatpak",
+                [
+                    "--user",
+                    "remote-modify",
+                    &url_arg,
+                    "--gpg-verify",
+                    "--enumerate",
+                    "--use-for-deps",
+                    "--enable",
+                    "--no-filter",
+                    FLATHUB_NAME,
+                ],
+            )?;
+            Ok(())
+        }
+
+        pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
+            let mut missing = Vec::new();
+            for app_id in refs {
+                let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
+                if output.status.success() {
+                    let state = std::str::from_utf8(&output.stdout)?;
+                    let state = state.strip_suffix('\n').unwrap_or(state);
+                    let parts = state.split('/').collect::<Vec<_>>();
+                    if parts.len() != 4 || parts[0] != "app" || parts[1] != app_id {
+                        anyhow::bail!("Flatpak returned malformed state for {app_id:?}");
+                    }
+                } else {
+                    missing.push(app_id.clone());
+                }
+            }
+            if missing.is_empty() {
+                return Ok(());
+            }
+            let mut args = vec![
+                "--user".to_owned(),
+                "install".into(),
+                "--app".into(),
+                "--noninteractive".into(),
+                "-y".into(),
+                "flathub".into(),
+                "--".into(),
+            ];
+            args.extend(missing);
+            host.require("Flatpak application installation", "flatpak", args)?;
+            Ok(())
+        }
+
+        pub fn update_apps(host: &Host) -> Result<()> {
+            host.require(
+                "Flatpak application update",
+                "flatpak",
+                ["--user", "update", "--app", "--noninteractive", "-y"],
+            )?;
+            Ok(())
+        }
+    }
 
     pub(crate) mod cargo {
         use anyhow::{Context, Result, bail};
@@ -797,81 +872,6 @@ pub(crate) mod packages {
         fn executable_file(path: &Path) -> bool {
             std::fs::metadata(path)
                 .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        }
-    }
-
-    pub(crate) mod flatpak {
-        use super::super::Host;
-        use anyhow::Result;
-
-        const FLATHUB_NAME: &str = "flathub";
-        const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
-        const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
-
-        pub fn ensure_flathub(host: &Host) -> Result<()> {
-            host.require(
-                "Flathub remote ensure",
-                "flatpak",
-                ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
-            )?;
-            let url_arg = format!("--url={FLATHUB_URL}");
-            host.require(
-                "Flathub remote security canonicalization",
-                "flatpak",
-                [
-                    "--user",
-                    "remote-modify",
-                    &url_arg,
-                    "--gpg-verify",
-                    "--enumerate",
-                    "--use-for-deps",
-                    "--enable",
-                    "--no-filter",
-                    FLATHUB_NAME,
-                ],
-            )?;
-            Ok(())
-        }
-
-        pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
-            let mut missing = Vec::new();
-            for app_id in refs {
-                let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
-                if output.status.success() {
-                    let state = std::str::from_utf8(&output.stdout)?;
-                    let state = state.strip_suffix('\n').unwrap_or(state);
-                    let parts = state.split('/').collect::<Vec<_>>();
-                    if parts.len() != 4 || parts[0] != "app" || parts[1] != app_id {
-                        anyhow::bail!("Flatpak returned malformed state for {app_id:?}");
-                    }
-                } else {
-                    missing.push(app_id.clone());
-                }
-            }
-            if missing.is_empty() {
-                return Ok(());
-            }
-            let mut args = vec![
-                "--user".to_owned(),
-                "install".into(),
-                "--app".into(),
-                "--noninteractive".into(),
-                "-y".into(),
-                "flathub".into(),
-                "--".into(),
-            ];
-            args.extend(missing);
-            host.require("Flatpak application installation", "flatpak", args)?;
-            Ok(())
-        }
-
-        pub fn update_apps(host: &Host) -> Result<()> {
-            host.require(
-                "Flatpak application update",
-                "flatpak",
-                ["--user", "update", "--app", "--noninteractive", "-y"],
-            )?;
-            Ok(())
         }
     }
 
