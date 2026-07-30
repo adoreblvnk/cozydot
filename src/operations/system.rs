@@ -136,10 +136,6 @@ pub(crate) fn docker_group(host: &Host) -> Result<()> {
     ensure_product_group(host, Product::Docker)
 }
 
-pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
-    ensure_product_group(host, Product::VirtualBox)
-}
-
 pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()> {
     preflight(host, Product::Docker)?;
     let mut requested = read_daemon_config(host)?;
@@ -157,6 +153,10 @@ pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()
     bytes.push(b'\n');
     publish_bytes(host, Path::new(DOCKER_DAEMON_CONFIG), &bytes, "Docker daemon config publication")?;
     Ok(())
+}
+
+pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
+    ensure_product_group(host, Product::VirtualBox)
 }
 
 pub(crate) fn vscode_extensions(host: &Host, extensions: &[String]) -> Result<()> {

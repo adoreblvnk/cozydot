@@ -35,8 +35,9 @@ pub enum Operation {
     EnsureAdmin,
     ManagedAptSources(ManagedAptSources),
     AptMetadataRefresh,
-    UbuntuSnap { enabled: bool },
     UnattendedUpgrades { enabled: bool },
+    UbuntuSnap { enabled: bool },
+    AptPackages { packages: Vec<String> },
     AptBootstrapPackages { packages: Vec<String> },
     FlatpakEnsureFlathub,
     RustupBootstrap,
@@ -47,7 +48,6 @@ pub enum Operation {
     NodeToolchain { selector: String, mode: ToolchainMode },
     PythonToolchain { version: String, mode: ToolchainMode },
     CargoBinstallBootstrap,
-    AptPackages { packages: Vec<String> },
     AptRepository(Box<AptRepositoryOperation>),
     AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
     FlatpakEnsureApps { refs: Vec<String> },
@@ -81,8 +81,9 @@ impl Operation {
             Self::EnsureAdmin => "administrator access",
             Self::ManagedAptSources(_) => "managed APT sources",
             Self::AptMetadataRefresh => "APT metadata refresh",
-            Self::UbuntuSnap { .. } => "Ubuntu Snap",
             Self::UnattendedUpgrades { .. } => "unattended upgrades",
+            Self::UbuntuSnap { .. } => "Ubuntu Snap",
+            Self::AptPackages { .. } => "APT packages",
             Self::AptBootstrapPackages { .. } => "APT bootstrap packages",
             Self::FlatpakEnsureFlathub => "Flathub remote",
             Self::RustupBootstrap => "Rustup bootstrap",
@@ -93,7 +94,6 @@ impl Operation {
             Self::NodeToolchain { .. } => "Node.js toolchain",
             Self::PythonToolchain { .. } => "Python toolchain",
             Self::CargoBinstallBootstrap => "cargo-binstall bootstrap",
-            Self::AptPackages { .. } => "APT packages",
             Self::AptRepository(_) => "APT repository",
             Self::AptRepositoryPackages { .. } => "APT repository packages",
             Self::FlatpakEnsureApps { .. } => "Flatpak applications",
@@ -126,8 +126,9 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
         Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
         Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
-        Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
         Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
+        Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
+        Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
         Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
@@ -142,7 +143,6 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::NodeToolchain { selector, mode } => completed(tools::execute_node(&host, selector, *mode)),
         Operation::PythonToolchain { version, mode } => completed(tools::execute_python(&host, version, *mode)),
         Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
         Operation::AptRepositoryPackages { conflicts, packages } => {
             completed(apt::repository_packages(&host, conflicts, packages))
@@ -594,81 +594,6 @@ pub(crate) mod languages {
 
 pub(crate) mod packages {
 
-    pub(crate) mod flatpak {
-        use super::super::Host;
-        use anyhow::Result;
-
-        const FLATHUB_NAME: &str = "flathub";
-        const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
-        const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
-
-        pub fn ensure_flathub(host: &Host) -> Result<()> {
-            host.require(
-                "Flathub remote ensure",
-                "flatpak",
-                ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
-            )?;
-            let url_arg = format!("--url={FLATHUB_URL}");
-            host.require(
-                "Flathub remote security canonicalization",
-                "flatpak",
-                [
-                    "--user",
-                    "remote-modify",
-                    &url_arg,
-                    "--gpg-verify",
-                    "--enumerate",
-                    "--use-for-deps",
-                    "--enable",
-                    "--no-filter",
-                    FLATHUB_NAME,
-                ],
-            )?;
-            Ok(())
-        }
-
-        pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
-            let mut missing = Vec::new();
-            for app_id in refs {
-                let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
-                if output.status.success() {
-                    let state = std::str::from_utf8(&output.stdout)?;
-                    let state = state.strip_suffix('\n').unwrap_or(state);
-                    let parts = state.split('/').collect::<Vec<_>>();
-                    if parts.len() != 4 || parts[0] != "app" || parts[1] != app_id {
-                        anyhow::bail!("Flatpak returned malformed state for {app_id:?}");
-                    }
-                } else {
-                    missing.push(app_id.clone());
-                }
-            }
-            if missing.is_empty() {
-                return Ok(());
-            }
-            let mut args = vec![
-                "--user".to_owned(),
-                "install".into(),
-                "--app".into(),
-                "--noninteractive".into(),
-                "-y".into(),
-                "flathub".into(),
-                "--".into(),
-            ];
-            args.extend(missing);
-            host.require("Flatpak application installation", "flatpak", args)?;
-            Ok(())
-        }
-
-        pub fn update_apps(host: &Host) -> Result<()> {
-            host.require(
-                "Flatpak application update",
-                "flatpak",
-                ["--user", "update", "--app", "--noninteractive", "-y"],
-            )?;
-            Ok(())
-        }
-    }
-
     pub(crate) mod cargo {
         use anyhow::{Context, Result, bail};
         use std::{
@@ -872,6 +797,81 @@ pub(crate) mod packages {
         fn executable_file(path: &Path) -> bool {
             std::fs::metadata(path)
                 .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        }
+    }
+
+    pub(crate) mod flatpak {
+        use super::super::Host;
+        use anyhow::Result;
+
+        const FLATHUB_NAME: &str = "flathub";
+        const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
+        const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
+
+        pub fn ensure_flathub(host: &Host) -> Result<()> {
+            host.require(
+                "Flathub remote ensure",
+                "flatpak",
+                ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
+            )?;
+            let url_arg = format!("--url={FLATHUB_URL}");
+            host.require(
+                "Flathub remote security canonicalization",
+                "flatpak",
+                [
+                    "--user",
+                    "remote-modify",
+                    &url_arg,
+                    "--gpg-verify",
+                    "--enumerate",
+                    "--use-for-deps",
+                    "--enable",
+                    "--no-filter",
+                    FLATHUB_NAME,
+                ],
+            )?;
+            Ok(())
+        }
+
+        pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
+            let mut missing = Vec::new();
+            for app_id in refs {
+                let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
+                if output.status.success() {
+                    let state = std::str::from_utf8(&output.stdout)?;
+                    let state = state.strip_suffix('\n').unwrap_or(state);
+                    let parts = state.split('/').collect::<Vec<_>>();
+                    if parts.len() != 4 || parts[0] != "app" || parts[1] != app_id {
+                        anyhow::bail!("Flatpak returned malformed state for {app_id:?}");
+                    }
+                } else {
+                    missing.push(app_id.clone());
+                }
+            }
+            if missing.is_empty() {
+                return Ok(());
+            }
+            let mut args = vec![
+                "--user".to_owned(),
+                "install".into(),
+                "--app".into(),
+                "--noninteractive".into(),
+                "-y".into(),
+                "flathub".into(),
+                "--".into(),
+            ];
+            args.extend(missing);
+            host.require("Flatpak application installation", "flatpak", args)?;
+            Ok(())
+        }
+
+        pub fn update_apps(host: &Host) -> Result<()> {
+            host.require(
+                "Flatpak application update",
+                "flatpak",
+                ["--user", "update", "--app", "--noninteractive", "-y"],
+            )?;
+            Ok(())
         }
     }
 
