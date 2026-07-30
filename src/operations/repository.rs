@@ -1,16 +1,18 @@
 use super::{Host, TempPath};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
-use std::{fs, path::PathBuf};
-use url::Url;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepositoryOperation {
     name: String,
-    key_url: Url,
-    source_url: Url,
+    key_url: String,
+    source_url: String,
     architecture: Architecture,
     suite: Option<String>,
     components: Vec<String>,
@@ -23,17 +25,27 @@ impl AptRepositoryOperation {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
-        key_url: Url,
-        source_url: Url,
+        key_url: String,
+        source_url: String,
         architecture: Architecture,
         suite: Option<String>,
         components: Vec<String>,
         path: Option<String>,
         keyring_path: PathBuf,
-    ) -> Self {
+    ) -> Result<Self> {
         let name = name.into();
+        validate_keyring_path(&keyring_path)?;
+        for value in std::iter::once(source_url.as_str())
+            .chain(suite.as_deref())
+            .chain(components.iter().map(String::as_str))
+            .chain(path.as_deref())
+        {
+            if value.chars().any(char::is_control) {
+                bail!("APT repository source values must fit on one line and contain no control characters");
+            }
+        }
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Self { name, key_url, source_url, architecture, suite, components, path, keyring_path, source_list_path }
+        Ok(Self { name, key_url, source_url, architecture, suite, components, path, keyring_path, source_list_path })
     }
 
     pub fn render_source(&self) -> String {
@@ -41,7 +53,7 @@ impl AptRepositoryOperation {
             "deb [arch={} signed-by={}] {} ",
             self.architecture.debian(),
             self.keyring_path.display(),
-            self.source_url.as_str()
+            self.source_url
         );
         match &self.path {
             None => format!(
@@ -54,11 +66,25 @@ impl AptRepositoryOperation {
     }
 }
 
+fn validate_keyring_path(path: &Path) -> Result<()> {
+    let parent = path.parent().context("APT repository key path has no parent")?;
+    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
+        bail!("APT repository key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
+    }
+    let name = path.file_name().and_then(|name| name.to_str()).context("APT repository key path has no filename")?;
+    if !matches!(path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
+        || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        bail!("APT repository key path must name a safe .asc or .gpg file");
+    }
+    Ok(())
+}
+
 pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result<()> {
     let keyring_path_str = operation.keyring_path.to_str().context("keyring path is not UTF-8")?;
     let preserve_armor = keyring_path_str.ends_with(".asc");
 
-    let key = processed_key(host, operation.key_url.as_str(), preserve_armor)?;
+    let key = processed_key(host, &operation.key_url, preserve_armor)?;
     let source = operation.render_source().into_bytes();
 
     super::privileged_file::publish_bytes(host, &operation.keyring_path, &key, "APT repository key publication")?;

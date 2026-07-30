@@ -7,7 +7,6 @@ use std::{
     fs,
     path::Path,
 };
-use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigVersion;
@@ -522,13 +521,14 @@ pub fn select_distro_map<T>(
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     pub name: String,
-    pub key: Url,
+    pub key: String,
     pub key_path: String,
-    pub urls: BTreeMap<DistroMapKey, Url>,
+    pub urls: BTreeMap<DistroMapKey, String>,
     pub suite: Option<String>,
     pub components: Option<Vec<String>>,
     pub path: Option<String>,
     pub conflicts: Option<BTreeMap<DistroMapKey, Vec<String>>>,
+    #[serde(default)]
     pub packages: Vec<String>,
 }
 
@@ -537,30 +537,14 @@ impl Repository {
         let path = format!("packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
-        validate_key_path(&self.key_path, &format!("{path}.key_path"))?;
         match (&self.suite, &self.components, &self.path) {
-            (Some(suite), Some(components), None) => {
-                validate_apt_source_value(suite, &format!("{path}.suite"))?;
+            (Some(_), Some(components), None) => {
                 if components.is_empty() {
                     bail!("{path}.components: required with suite");
                 }
-                for (component_index, component) in components.iter().enumerate() {
-                    validate_apt_source_value(component, &format!("{path}.components[{component_index}]"))?;
-                }
             }
-            (None, None, Some(exact_path)) => validate_apt_source_value(exact_path, &format!("{path}.path"))?,
+            (None, None, Some(_)) => {}
             _ => bail!("{path}: requires exactly suite with non-empty components, or path"),
-        }
-        if let Some(conflicts) = &self.conflicts {
-            validate_non_empty_map(conflicts, &format!("{path}.conflicts"))?;
-            for (distro, packages) in conflicts {
-                if packages.is_empty() {
-                    bail!("{path}.conflicts.{}: must be a non-empty sequence", distro.as_str());
-                }
-            }
-            if self.packages.is_empty() {
-                bail!("{path}.conflicts: requires non-empty repository packages");
-            }
         }
         Ok(())
     }
@@ -607,10 +591,7 @@ pub enum BinarySource {
 impl BinarySource {
     fn validate(&self, path: &str) -> Result<()> {
         match self {
-            Self::Github { repository, assets } => {
-                validate_github_repository(repository, &format!("{path}.repository"))?;
-                assets.validate(&format!("{path}.assets"))
-            }
+            Self::Github { assets, .. } => assets.validate(&format!("{path}.assets")),
             Self::Url { urls } => urls.validate(&format!("{path}.urls")),
         }
     }
@@ -629,11 +610,6 @@ impl AssetMap {
         if self.values().iter().all(|(_, value)| value.is_none()) {
             bail!("{path}: must contain at least one canonical architecture selector");
         }
-        for (architecture, selector) in self.values() {
-            if let Some(selector) = selector {
-                validate_asset_regex(selector, &format!("{path}.{architecture}"))?;
-            }
-        }
         Ok(())
     }
 
@@ -650,17 +626,12 @@ impl AssetMap {
     }
 }
 
-fn validate_asset_regex(value: &str, path: &str) -> Result<()> {
-    Regex::new(value).with_context(|| format!("{path}: invalid asset regex {value:?}"))?;
-    Ok(())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArchitectureUrls {
-    pub amd64: Option<Url>,
-    pub arm64: Option<Url>,
-    pub arm32: Option<Url>,
+    pub amd64: Option<String>,
+    pub arm64: Option<String>,
+    pub arm32: Option<String>,
 }
 
 impl ArchitectureUrls {
@@ -675,11 +646,11 @@ impl ArchitectureUrls {
         architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
     }
 
-    pub fn get(&self, architecture: Architecture) -> Option<&Url> {
+    pub fn get(&self, architecture: Architecture) -> Option<&str> {
         match architecture {
-            Architecture::Amd64 => self.amd64.as_ref(),
-            Architecture::Arm64 => self.arm64.as_ref(),
-            Architecture::Arm32 => self.arm32.as_ref(),
+            Architecture::Amd64 => self.amd64.as_deref(),
+            Architecture::Arm64 => self.arm64.as_deref(),
+            Architecture::Arm32 => self.arm32.as_deref(),
         }
     }
 }
@@ -973,32 +944,6 @@ fn validate_definition_name(value: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_key_path(value: &str, path: &str) -> Result<()> {
-    if value.as_bytes().contains(&0) {
-        bail!("{path}: key path must not contain a null byte");
-    }
-    let p = Path::new(value);
-    if !p.is_absolute() {
-        bail!("{path}: key path must be absolute");
-    }
-    let parent = p.parent().ok_or_else(|| anyhow::anyhow!("{path}: key path has no parent"))?;
-    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
-        bail!("{path}: key path must be a direct child of /etc/apt/keyrings/ or /usr/share/keyrings/");
-    }
-    let file_name =
-        p.file_name().and_then(|f| f.to_str()).ok_or_else(|| anyhow::anyhow!("{path}: key path has no file name"))?;
-    if parent.join(file_name).to_str() != Some(value) {
-        bail!("{path}: key path must use its canonical direct-child spelling");
-    }
-    if !file_name.ends_with(".asc") && !file_name.ends_with(".gpg") {
-        bail!("{path}: key path extension must be .asc or .gpg");
-    }
-    let stem =
-        p.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow::anyhow!("{path}: key path has no file stem"))?;
-    validate_definition_name(stem, &format!("{path} file stem"))?;
-    Ok(())
-}
-
 fn validate_dotfile_package(value: &str, path: &str) -> Result<()> {
     if matches!(value, "." | "..") {
         bail!("{path}: must denote exactly one child directory, not {value:?}");
@@ -1012,21 +957,6 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
         bail!(
             "{path}: invalid executable basename {value:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'"
         );
-    }
-    Ok(())
-}
-
-fn validate_apt_source_value(value: &str, path: &str) -> Result<()> {
-    if value.chars().any(char::is_control) {
-        bail!("{path}: APT source value must fit on one line and contain no control characters");
-    }
-    Ok(())
-}
-
-fn validate_github_repository(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
-    if !re.is_match(value) {
-        bail!("{path}: invalid GitHub repository {value:?}; must be an owner/repository coordinate");
     }
     Ok(())
 }

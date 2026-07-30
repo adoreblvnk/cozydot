@@ -67,6 +67,19 @@ fn os_release_value(key: &str) -> String {
         .to_owned()
 }
 
+fn run_config(config: &str, command: &str) -> std::process::Output {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("cozydot")).unwrap();
+    fs::write(temp.path().join("cozydot/cozydot.yaml"), config).unwrap();
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .arg(command)
+        .output()
+        .unwrap()
+}
+
 #[test]
 fn help_and_version() {
     for args in [Vec::<&str>::new(), vec!["--help"]] {
@@ -417,7 +430,7 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
 }
 
 #[test]
-fn apt_repository_conflict_configuration_is_strict() {
+fn apt_repository_validation_keeps_structure_and_allows_optional_values() {
     let repository = |conflicts: &str, packages: &str| {
         format!(
             r#"version: 1.0.0
@@ -425,41 +438,70 @@ packages:
   apt:
     repositories:
       - name: vendor
-        key: https://example.com/key.gpg
-        key_path: /etc/apt/keyrings/vendor.gpg
+        key: not-validated-during-config-loading
+        key_path: not-validated-during-config-loading
         urls:
-          default: https://example.com/repository
+          default: not-validated-during-config-loading
         suite: stable
         components: [main]
         conflicts: {conflicts}
-        packages: {packages}
-"#
+{packages}"#
         )
     };
+
+    for config in [
+        repository("{}", "        packages: []\n"),
+        repository("{default: []}", "        packages: [vendor-package]\n"),
+        repository("{default: [obsolete]}", ""),
+    ] {
+        let output = run_config(&config, "update");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+    }
+
     for (config, message) in [
         ("version: 1.0.0\npackages:\n  apt:\n    remove: [obsolete]\n".to_owned(), "unknown field `remove`"),
-        (repository("{}", "[vendor-package]"), "conflicts: must be a non-empty mapping"),
-        (repository("{default: []}", "[vendor-package]"), "conflicts.default: must be a non-empty sequence"),
+        (repository("{default: obsolete}", ""), "invalid type"),
         (
-            repository("{default: [vendor-package]}", "[vendor-package]"),
-            "package \"vendor-package\" is also an applicable repository target",
+            "version: 1.0.0\npackages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: path\n        urls: {default: source}\n        suite: stable\n        packages: []\n".to_owned(),
+            "requires exactly suite with non-empty components, or path",
         ),
-        (repository("{default: [distro-package]}", "[]"), "conflicts: requires non-empty repository packages"),
     ] {
-        let temp = tempfile::tempdir().unwrap();
-        let config_dir = temp.path().join("cozydot");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
-
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .env("XDG_CONFIG_HOME", temp.path())
-            .env("XDG_CURRENT_DESKTOP", "gnome")
-            .arg("apply")
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains(message));
+        let output = run_config(&config, "update");
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(message));
     }
+
+    let output = run_config(&repository("{}", ""), "apply");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("key path must be a direct child"));
+}
+
+#[test]
+fn binary_validation_uses_tagged_structure_and_defers_native_values() {
+    let output = run_config(
+        r#"version: 1.0.0
+packages:
+  binaries:
+    - name: github-probe
+      format: deb
+      source:
+        provider: github
+        repository: not-a-coordinate
+        assets:
+          amd64: "["
+    - name: url-probe
+      format: deb
+      source:
+        provider: url
+        urls:
+          amd64: not-validated-during-config-loading
+"#,
+        "update",
+    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
