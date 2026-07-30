@@ -42,6 +42,11 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        Self::parse(&text).with_context(|| format!("validate {}", path.display()))
+    }
+
     pub fn parse(text: &str) -> Result<Self> {
         let deserializer = yaml_serde::Deserializer::from_str(text);
         let config: Self = serde_path_to_error::deserialize(deserializer).map_err(|error| {
@@ -53,11 +58,6 @@ impl Config {
         Ok(config)
     }
 
-    pub fn load(path: &Path) -> Result<Self> {
-        let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        Self::parse(&text).with_context(|| format!("validate {}", path.display()))
-    }
-
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         let identity = resolve_platform_identity(platform)?;
@@ -66,7 +66,7 @@ impl Config {
 
         if let Some(require) = self.system.as_ref().and_then(|system| system.require.as_ref()) {
             if require.distros.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
-                map_distro_error(platform, distro)?;
+                bail!("system.require.distros: detected distribution {:?} is not allowed", platform.distro);
             }
             if require.desktops.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
                 bail!("system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
@@ -78,7 +78,9 @@ impl Config {
         {
             sources.validate_for_platform(platform, distro, upstream)?;
         }
-        self.validate_apt_ownership(distro, upstream)?;
+        if let Some(apt) = self.packages.as_ref().and_then(|packages| packages.apt.as_ref()) {
+            apt.validate_ownership(distro, upstream)?;
+        }
 
         if let Some(configured) = &self.desktop
             && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
@@ -93,49 +95,6 @@ impl Config {
                 bail!(
                     "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
-                );
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_apt_ownership(&self, distro: Distro, upstream: Family) -> Result<()> {
-        let Some(apt) = self.packages.as_ref().and_then(|packages| packages.apt.as_ref()) else {
-            return Ok(());
-        };
-        let Some(repositories) = apt.repositories.as_ref() else {
-            return Ok(());
-        };
-        let direct = apt.install.as_deref().unwrap_or_default().iter().map(String::as_str).collect::<HashSet<_>>();
-        let applicable = repositories
-            .iter()
-            .enumerate()
-            .filter(|(_, repository)| select_distro_map(&repository.urls, distro, upstream).is_some())
-            .collect::<Vec<_>>();
-        let targets = applicable
-            .iter()
-            .flat_map(|(_, repository)| repository.packages.iter().map(String::as_str))
-            .collect::<HashSet<_>>();
-
-        for (index, repository) in applicable {
-            if let Some(package) = repository.packages.iter().find(|package| direct.contains(package.as_str())) {
-                bail!("packages.apt.repositories[{index}].packages: package {package:?} is also a direct APT target");
-            }
-            let Some((distro_key, conflicts)) =
-                repository.conflicts.as_ref().and_then(|conflicts| select_distro_map(conflicts, distro, upstream))
-            else {
-                continue;
-            };
-            if let Some(package) = conflicts.iter().find(|package| direct.contains(package.as_str())) {
-                bail!(
-                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also a direct APT target",
-                    distro_key.as_str()
-                );
-            }
-            if let Some(package) = conflicts.iter().find(|package| targets.contains(package.as_str())) {
-                bail!(
-                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also an applicable repository target",
-                    distro_key.as_str()
                 );
             }
         }
@@ -170,10 +129,6 @@ impl Config {
         }
         Ok(())
     }
-}
-
-fn map_distro_error(platform: &Platform, _distro: Distro) -> Result<()> {
-    bail!("system.require.distros: detected distribution {:?} is not allowed", platform.distro);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
@@ -248,6 +203,57 @@ impl DesktopKind {
             _ => bail!("system.require.desktops: unsupported detected desktop {value:?}"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DistroMapKey {
+    Default,
+    Ubuntu,
+    Linuxmint,
+    Pop,
+    Debian,
+}
+
+impl DistroMapKey {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Ubuntu => "ubuntu",
+            Self::Linuxmint => "linuxmint",
+            Self::Pop => "pop",
+            Self::Debian => "debian",
+        }
+    }
+
+    fn from_distro(distro: Distro) -> Self {
+        match distro {
+            Distro::Ubuntu => Self::Ubuntu,
+            Distro::Linuxmint => Self::Linuxmint,
+            Distro::Pop => Self::Pop,
+            Distro::Debian => Self::Debian,
+        }
+    }
+
+    fn from_family(family: Family) -> Self {
+        match family {
+            Family::Ubuntu => Self::Ubuntu,
+            Family::Debian => Self::Debian,
+        }
+    }
+}
+
+pub fn select_distro_map<T>(
+    map: &BTreeMap<DistroMapKey, T>,
+    distro: Distro,
+    upstream: Family,
+) -> Option<(DistroMapKey, &T)> {
+    let exact = DistroMapKey::from_distro(distro);
+    let family = DistroMapKey::from_family(upstream);
+    map.get(&exact)
+        .map(|value| (exact, value))
+        .or_else(|| map.get(&family).map(|value| (family, value)))
+        .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -461,57 +467,46 @@ impl AptPackages {
         }
         Ok(())
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DistroMapKey {
-    Default,
-    Ubuntu,
-    Linuxmint,
-    Pop,
-    Debian,
-}
+    fn validate_ownership(&self, distro: Distro, upstream: Family) -> Result<()> {
+        let Some(repositories) = self.repositories.as_ref() else {
+            return Ok(());
+        };
+        let direct = self.install.as_deref().unwrap_or_default().iter().map(String::as_str).collect::<HashSet<_>>();
+        let applicable = repositories
+            .iter()
+            .enumerate()
+            .filter(|(_, repository)| select_distro_map(&repository.urls, distro, upstream).is_some())
+            .collect::<Vec<_>>();
+        let targets = applicable
+            .iter()
+            .flat_map(|(_, repository)| repository.packages.iter().map(String::as_str))
+            .collect::<HashSet<_>>();
 
-impl DistroMapKey {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Ubuntu => "ubuntu",
-            Self::Linuxmint => "linuxmint",
-            Self::Pop => "pop",
-            Self::Debian => "debian",
+        for (index, repository) in applicable {
+            if let Some(package) = repository.packages.iter().find(|package| direct.contains(package.as_str())) {
+                bail!("packages.apt.repositories[{index}].packages: package {package:?} is also a direct APT target");
+            }
+            let Some((distro_key, conflicts)) =
+                repository.conflicts.as_ref().and_then(|conflicts| select_distro_map(conflicts, distro, upstream))
+            else {
+                continue;
+            };
+            if let Some(package) = conflicts.iter().find(|package| direct.contains(package.as_str())) {
+                bail!(
+                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also a direct APT target",
+                    distro_key.as_str()
+                );
+            }
+            if let Some(package) = conflicts.iter().find(|package| targets.contains(package.as_str())) {
+                bail!(
+                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also an applicable repository target",
+                    distro_key.as_str()
+                );
+            }
         }
+        Ok(())
     }
-
-    fn from_distro(distro: Distro) -> Self {
-        match distro {
-            Distro::Ubuntu => Self::Ubuntu,
-            Distro::Linuxmint => Self::Linuxmint,
-            Distro::Pop => Self::Pop,
-            Distro::Debian => Self::Debian,
-        }
-    }
-
-    fn from_family(family: Family) -> Self {
-        match family {
-            Family::Ubuntu => Self::Ubuntu,
-            Family::Debian => Self::Debian,
-        }
-    }
-}
-
-pub fn select_distro_map<T>(
-    map: &BTreeMap<DistroMapKey, T>,
-    distro: Distro,
-    upstream: Family,
-) -> Option<(DistroMapKey, &T)> {
-    let exact = DistroMapKey::from_distro(distro);
-    let family = DistroMapKey::from_family(upstream);
-    map.get(&exact)
-        .map(|value| (exact, value))
-        .or_else(|| map.get(&family).map(|value| (family, value)))
-        .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
