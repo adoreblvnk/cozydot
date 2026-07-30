@@ -585,17 +585,14 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     let cargo_update = package_updates.is_some_and(|updates| updates.cargo == Some(true));
     let npm_update = package_updates.is_some_and(|updates| updates.npm == Some(true));
 
-    if rust_update || cargo_update {
+    if rust_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Rustup);
-        let selector = tools.and_then(|tools| tools.rust.clone()).or_else(|| cargo_update.then(|| "stable".to_owned()));
+        let selector = tools.and_then(|tools| tools.rust.clone());
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
-            Operation::RustToolchain {
-                selector,
-                mode: if rust_update { ToolchainMode::ConvergeLatest } else { ToolchainMode::EnsurePresent },
-            },
+            Operation::RustToolchain { selector, mode: ToolchainMode::ConvergeLatest },
         );
     }
     if go_update {
@@ -611,17 +608,14 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
             },
         );
     }
-    if node_update || npm_update {
+    if node_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Fnm);
         let selector = tools.and_then(|tools| tools.node.clone()).unwrap_or_else(|| "latest".to_owned());
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
-            Operation::NodeToolchain {
-                selector,
-                mode: if node_update { ToolchainMode::ConvergeLatest } else { ToolchainMode::EnsurePresent },
-            },
+            Operation::NodeToolchain { selector, mode: ToolchainMode::ConvergeLatest },
         );
     }
     if python_update {

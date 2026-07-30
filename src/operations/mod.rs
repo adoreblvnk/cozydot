@@ -634,7 +634,11 @@ pub(crate) mod packages {
                     host.require("Cargo package mutation", &binstall, args)?;
                 }
                 CargoPackageMode::UpdateCurrent => {
-                    let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
+                    let cargo_path = cargo_home.join("bin/cargo");
+                    if packages.is_empty() && !executable_file(&cargo_path) {
+                        return Ok(());
+                    }
+                    let cargo = path_program(&cargo_path, "managed Cargo executable path")?;
                     let packages = if packages.is_empty() {
                         let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
                         installed_crates(&output.stdout)?.into_iter().collect()
@@ -718,7 +722,12 @@ pub(crate) mod packages {
         }
 
         pub(crate) fn execute(host: &Host, packages: &[String], mode: NpmPackageMode) -> Result<()> {
-            let fnm = resolve_fnm(host)?;
+            let Some(fnm) = resolve_fnm(host)? else {
+                if mode == NpmPackageMode::UpdateCurrent && packages.is_empty() {
+                    return Ok(());
+                }
+                bail!("npm package operation: managed fnm is unavailable after bootstrap");
+            };
             let selected = match mode {
                 NpmPackageMode::EnsurePresent => {
                     let mut missing = Vec::new();
@@ -758,7 +767,7 @@ pub(crate) mod packages {
             package.split_once('@').map_or(package, |(name, _)| name)
         }
 
-        fn resolve_fnm(host: &Host) -> Result<String> {
+        fn resolve_fnm(host: &Host) -> Result<Option<String>> {
             let data_home =
                 host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
             if !data_home.is_absolute() {
@@ -766,9 +775,13 @@ pub(crate) mod packages {
             }
             let managed = data_home.join("fnm/fnm");
             if executable_file(&managed) {
-                return managed.to_str().map(str::to_owned).context("managed fnm executable path is not UTF-8");
+                return managed
+                    .to_str()
+                    .map(str::to_owned)
+                    .map(Some)
+                    .context("managed fnm executable path is not UTF-8");
             }
-            bail!("npm package operation: managed fnm is unavailable after bootstrap")
+            Ok(None)
         }
 
         fn run_npm_required<I, S>(host: &Host, fnm: &str, operation: &str, npm_args: I) -> Result<std::process::Output>

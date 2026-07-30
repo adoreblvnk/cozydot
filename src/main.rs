@@ -24,7 +24,7 @@ enum CliCommand {
     },
     /// Apply the active configuration to this host
     Apply,
-    /// Update enabled configured targets to the latest allowed versions
+    /// Run enabled ecosystem updates
     Update,
 }
 
