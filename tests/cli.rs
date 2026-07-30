@@ -765,10 +765,13 @@ packages:
         &fake_bin.join("curl"),
         r#"#!/bin/sh
 output=
+separator=false
 while [ "$#" -gt 0 ]; do
   [ "$1" != "--output" ] || { shift; output="$1"; }
+  [ "$1" != "--" ] || separator=true
   shift
 done
+[ "$separator" = true ] || exit 98
 printf 'key' > "$output"
 "#,
     );

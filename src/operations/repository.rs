@@ -114,6 +114,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
             "--retry-all-errors",
             "--output",
             &downloaded.path().to_string_lossy(),
+            "--",
             url,
         ],
     )?;
