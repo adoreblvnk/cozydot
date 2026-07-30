@@ -381,29 +381,25 @@ updates:
 }
 
 #[test]
-fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
+fn update_flags_do_not_require_apply_targets() {
+    for config in [
+        "version: 1.0.0\nupdates:\n  flatpak: true\n",
+        "version: 1.0.0\nupdates:\n  fonts: true\n",
+        "version: 1.0.0\nupdates:\n  packages:\n    cargo: true\n",
+        "version: 1.0.0\nupdates:\n  packages:\n    npm: true\n",
+        "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n    go: true\n",
+        "version: 1.0.0\nupdates:\n  tools:\n    node: true\n    python: true\n",
+    ] {
+        let output = run_config(config, "apply");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+    }
+
+    let output = run_config("version: 1.0.0\nupdates:\n  fonts: true\n", "update");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.stdout.is_empty());
+
     for (config, message) in [
-        (
-            "version: 1.0.0\npackages:\n  flatpak: []\nupdates:\n  flatpak: true\n",
-            "updates.flatpak: requires configured packages.flatpak targets",
-        ),
-        (
-            "version: 1.0.0\nfonts:\n  nerd: []\nupdates:\n  fonts: true\n",
-            "updates.fonts: requires configured fonts.nerd targets",
-        ),
-        (
-            "version: 1.0.0\npackages:\n  cargo: []\nupdates:\n  packages:\n    cargo: true\n",
-            "updates.packages.cargo: requires configured packages.cargo targets",
-        ),
-        (
-            "version: 1.0.0\npackages:\n  npm: []\nupdates:\n  packages:\n    npm: true\n",
-            "updates.packages.npm: requires configured packages.npm targets",
-        ),
-        ("version: 1.0.0\nupdates:\n  tools:\n    go: true\n", "updates.tools.go: requires a configured Go selector"),
-        (
-            "version: 1.0.0\nupdates:\n  tools:\n    python: true\n",
-            "updates.tools.python: requires a configured Python selector",
-        ),
         (
             "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n          arm64: ^app\\.AppImage$\n          arm32: ^app\\.AppImage$\n",
             "AppImages require integrations.appimaged: true",
@@ -413,20 +409,43 @@ fn true_updates_require_nonempty_targets_and_domain_values_stay_valid() {
             "unknown field `commands`",
         ),
     ] {
-        let temp = tempfile::tempdir().unwrap();
-        let config_dir = temp.path().join("cozydot");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
-
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .env("XDG_CONFIG_HOME", temp.path())
-            .env("XDG_CURRENT_DESKTOP", "gnome")
-            .arg("apply")
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains(message));
+        let output = run_config(config, "apply");
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(message));
     }
+}
+
+#[test]
+fn rust_update_without_apply_selector_updates_installed_toolchains() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let cargo_home = home.join(".cargo");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("rustup.log");
+    fs::create_dir_all(config_home.join("cozydot")).unwrap();
+    fs::write(config_home.join("cozydot/cozydot.yaml"), "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n")
+        .unwrap();
+    write_executable(
+        &cargo_home.join("bin/rustup"),
+        "#!/bin/sh\nprintf 'rustup %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
+    );
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("CARGO_HOME", &cargo_home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("update")
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(log).unwrap(), "rustup update --no-self-update\n");
 }
 
 #[test]
@@ -1183,7 +1202,7 @@ fn npm_apply_uses_per_target_native_presence_checks() {
 }
 
 #[test]
-fn mixed_package_states_keep_apply_ensure_only_and_update_configured_only() {
+fn mixed_package_states_keep_apply_missing_only_and_update_ecosystems() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let config_home = temp.path().join("config");
@@ -1308,22 +1327,17 @@ esac
 
     let update = fs::read_to_string(&log).unwrap();
     assert!(
-        update.contains("cargo install --locked -- ripgrep bat probe\n"),
-        "Cargo update was not configured-only: {update}"
+        update.contains("cargo install --locked -- eza ripgrep\n"),
+        "Cargo update was not ecosystem-wide: {update}"
     );
     assert!(
-        update.contains("fnm exec --using=default -- npm install --global -- typescript eslint\n"),
-        "npm update was not configured-only through managed FNM: {update}"
+        update.contains("fnm exec --using=default -- npm update --global\n"),
+        "npm update was not ecosystem-wide through managed FNM: {update}"
     );
     assert!(
-        update.contains(
-            "flatpak --user install --or-update --app --noninteractive -y flathub -- org.example.Present org.example.Missing\n"
-        ),
-        "Flatpak update did not use configured install --or-update convergence: {update}"
+        update.contains("flatpak --user update --app --noninteractive -y\n"),
+        "Flatpak update was not ecosystem-wide: {update}"
     );
-    for unrelated in ["eza", "prettier", "org.example.Unrelated"] {
-        assert!(!update.contains(unrelated), "update included unrelated package {unrelated:?}: {update}");
-    }
     assert!(!update.contains("cargo-binstall"), "Cargo update did not use managed cargo: {update}");
 }
 
@@ -1537,7 +1551,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
     assert_eq!(
         fs::read_to_string(&log).unwrap(),
         concat!(
-            "rustup update --no-self-update stable\n",
+            "rustup update --no-self-update -- stable\n",
             "rustup default -- stable\n",
             "fnm install --progress never -- latest\n",
             "fnm default -- latest\n",

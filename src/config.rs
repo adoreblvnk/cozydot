@@ -158,9 +158,6 @@ impl Config {
         if let Some(desktop) = &self.desktop {
             desktop.validate()?;
         }
-        if let Some(updates) = &self.updates {
-            updates.validate(self)?;
-        }
         if self.packages.as_ref().and_then(|packages| packages.cargo.as_ref()).is_some_and(|values| !values.is_empty())
             && self.tools.as_ref().and_then(|tools| tools.rust.as_ref()).is_none()
         {
@@ -829,32 +826,6 @@ pub struct Updates {
     pub fonts: Option<bool>,
 }
 
-impl Updates {
-    fn validate(&self, config: &Config) -> Result<()> {
-        if self.flatpak == Some(true)
-            && !config
-                .packages
-                .as_ref()
-                .and_then(|packages| packages.flatpak.as_ref())
-                .is_some_and(|values| !values.is_empty())
-        {
-            bail!("updates.flatpak: requires configured packages.flatpak targets");
-        }
-        if self.fonts == Some(true)
-            && !config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()).is_some_and(|values| !values.is_empty())
-        {
-            bail!("updates.fonts: requires configured fonts.nerd targets");
-        }
-        if let Some(tools) = &self.tools {
-            tools.validate(config.tools.as_ref())?;
-        }
-        if let Some(packages) = &self.packages {
-            packages.validate(config.packages.as_ref())?;
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AptUpdate {
@@ -871,45 +842,11 @@ pub struct ToolUpdates {
     pub python: Option<bool>,
 }
 
-impl ToolUpdates {
-    fn validate(&self, tools: Option<&Tools>) -> Result<()> {
-        if self.rust == Some(true) && tools.and_then(|tools| tools.rust.as_ref()).is_none() {
-            bail!("updates.tools.rust: requires a configured Rust selector");
-        }
-        if self.go == Some(true) && tools.and_then(|tools| tools.go.as_ref()).is_none() {
-            bail!("updates.tools.go: requires a configured Go selector");
-        }
-        if self.node == Some(true) && tools.and_then(|tools| tools.node.as_ref()).is_none() {
-            bail!("updates.tools.node: requires a configured Node selector");
-        }
-        if self.python == Some(true) && tools.and_then(|tools| tools.python.as_ref()).is_none() {
-            bail!("updates.tools.python: requires a configured Python selector");
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageUpdates {
     pub cargo: Option<bool>,
     pub npm: Option<bool>,
-}
-
-impl PackageUpdates {
-    fn validate(&self, packages: Option<&Packages>) -> Result<()> {
-        if self.cargo == Some(true)
-            && !packages.and_then(|packages| packages.cargo.as_ref()).is_some_and(|values| !values.is_empty())
-        {
-            bail!("updates.packages.cargo: requires configured packages.cargo targets");
-        }
-        if self.npm == Some(true)
-            && !packages.and_then(|packages| packages.npm.as_ref()).is_some_and(|values| !values.is_empty())
-        {
-            bail!("updates.packages.npm: requires configured packages.npm targets");
-        }
-        Ok(())
-    }
 }
 
 fn validate_non_empty_map<K, V>(map: &BTreeMap<K, V>, path: &str) -> Result<()> {

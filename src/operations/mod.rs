@@ -139,7 +139,7 @@ pub enum Operation {
     Dotfiles { root: PathBuf, packages: Vec<String> },
     FlatpakEnsureFlathub,
     FlatpakEnsureApps { refs: Vec<String> },
-    FlatpakUpdateApps { refs: Vec<String> },
+    FlatpakUpdateApps,
     FnmBootstrap,
     EnsureAdmin,
     GnomeExtensions { extensions: Vec<String> },
@@ -149,7 +149,7 @@ pub enum Operation {
     NerdFonts { families: Vec<String>, mode: NerdFontsMode },
     RustupBootstrap,
     CargoBinstallBootstrap,
-    RustToolchain { selector: String, mode: ToolchainMode },
+    RustToolchain { selector: Option<String>, mode: ToolchainMode },
     CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
     NodeToolchain { selector: String, mode: ToolchainMode },
     NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
@@ -185,7 +185,7 @@ impl Operation {
             Self::Dotfiles { .. } => "dotfiles",
             Self::FlatpakEnsureFlathub => "Flathub remote",
             Self::FlatpakEnsureApps { .. } => "Flatpak applications",
-            Self::FlatpakUpdateApps { .. } => "Flatpak application updates",
+            Self::FlatpakUpdateApps => "Flatpak application updates",
             Self::FnmBootstrap => "FNM bootstrap",
             Self::EnsureAdmin => "administrator access",
             Self::GnomeExtensions { .. } => "GNOME extensions",
@@ -232,7 +232,7 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::Dotfiles { root, packages } => completed(packages::dotfiles::execute(&host, root, packages)),
         Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
         Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
-        Operation::FlatpakUpdateApps { refs } => completed(packages::flatpak::update_apps(&host, refs)),
+        Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
         Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
         Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
         Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
@@ -244,7 +244,9 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
         Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::RustToolchain { selector, mode } => completed(tools::execute_rust(&host, selector, *mode)),
+        Operation::RustToolchain { selector, mode } => {
+            completed(tools::execute_rust(&host, selector.as_deref(), *mode))
+        }
         Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
         Operation::NodeToolchain { selector, mode } => completed(tools::execute_node(&host, selector, *mode)),
         Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
@@ -633,8 +635,17 @@ pub(crate) mod packages {
                 }
                 CargoPackageMode::UpdateCurrent => {
                     let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
+                    let packages = if packages.is_empty() {
+                        let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
+                        installed_crates(&output.stdout)?.into_iter().collect()
+                    } else {
+                        packages.to_vec()
+                    };
+                    if packages.is_empty() {
+                        return Ok(());
+                    }
                     let mut args = vec!["install".to_owned(), "--locked".into(), "--".into()];
-                    args.extend(packages.to_vec());
+                    args.extend(packages);
                     host.require("Cargo package convergence", &cargo, args)?;
                 }
             }
@@ -722,6 +733,10 @@ pub(crate) mod packages {
                         }
                     }
                     missing
+                }
+                NpmPackageMode::UpdateCurrent if packages.is_empty() => {
+                    run_npm_required(host, &fnm, "npm package update", ["update", "--global"])?;
+                    return Ok(());
                 }
                 NpmPackageMode::UpdateCurrent => packages.to_vec(),
             };
@@ -837,19 +852,12 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        pub fn update_apps(host: &Host, refs: &[String]) -> Result<()> {
-            let mut args = vec![
-                "--user".to_owned(),
-                "install".into(),
-                "--or-update".into(),
-                "--app".into(),
-                "--noninteractive".into(),
-                "-y".into(),
-                "flathub".into(),
-                "--".into(),
-            ];
-            args.extend(refs.iter().cloned());
-            host.require("Flatpak configured application update", "flatpak", args)?;
+        pub fn update_apps(host: &Host) -> Result<()> {
+            host.require(
+                "Flatpak application update",
+                "flatpak",
+                ["--user", "update", "--app", "--noninteractive", "-y"],
+            )?;
             Ok(())
         }
     }
