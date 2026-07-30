@@ -3,55 +3,6 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use etc_os_release::OsRelease;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Architecture {
-    Amd64,
-    Arm64,
-    Arm32,
-}
-
-impl Architecture {
-    pub fn normalize(value: &str) -> Result<Self> {
-        match value {
-            "x86_64" | "amd64" => Ok(Self::Amd64),
-            "aarch64" | "arm64" => Ok(Self::Arm64),
-            "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
-            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"),
-        }
-    }
-
-    pub fn canonical(self) -> &'static str {
-        match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "arm64",
-            Self::Arm32 => "arm32",
-        }
-    }
-
-    pub fn debian(self) -> &'static str {
-        match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "arm64",
-            Self::Arm32 => "armhf",
-        }
-    }
-
-    pub fn go(self) -> &'static str {
-        match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "arm64",
-            Self::Arm32 => "arm",
-        }
-    }
-
-    pub fn go_archive(self) -> &'static str {
-        match self {
-            Self::Arm32 => "armv6l",
-            other => other.go(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Platform {
     pub distro: String,
@@ -60,42 +11,6 @@ pub struct Platform {
     pub base_codename: String,
     pub desktop: String,
     pub architecture: Architecture,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedAptSources {
-    pub distro: String,
-    pub release: String,
-    pub architecture: Architecture,
-    pub components: Vec<String>,
-    pub stanzas: Vec<ManagedAptStanza>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedAptStanza {
-    pub uri: String,
-    pub suites: Vec<String>,
-    pub signed_by: String,
-}
-
-impl ManagedAptSources {
-    pub fn render_deb822(&self) -> String {
-        let components = self.components.join(" ");
-        self.stanzas
-            .iter()
-            .map(|stanza| {
-                format!(
-                    "Types: deb\nURIs: {}\nSuites: {}\nComponents: {}\nArchitectures: {}\nSigned-By: {}\n",
-                    stanza.uri,
-                    stanza.suites.join(" "),
-                    components,
-                    self.architecture.debian(),
-                    stanza.signed_by,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 }
 
 impl Platform {
@@ -124,20 +39,6 @@ impl Platform {
             desktop: normalize_desktop(&desktop),
             architecture,
         })
-    }
-
-    fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
-        let distro = os.id().to_owned();
-        let upstream: String = upstream(&distro, os.get_value("ID_LIKE"))?.into();
-        let distro_codename = os.version_codename().unwrap_or_default().to_owned();
-        let base_codename = match upstream.as_str() {
-            "ubuntu" => os.get_value("UBUNTU_CODENAME"),
-            "debian" => os.get_value("DEBIAN_CODENAME"),
-            _ => unreachable!(),
-        }
-        .unwrap_or(&distro_codename)
-        .to_owned();
-        Self::from_release_parts(distro, upstream, distro_codename, base_codename, desktop, arch)
     }
 
     pub fn managed_apt_sources(&self, configured_components: &[&str]) -> Result<ManagedAptSources> {
@@ -223,6 +124,105 @@ impl Platform {
             _ => unreachable!(),
         };
         Ok(ManagedAptSources { distro: self.distro.clone(), release, architecture, components, stanzas })
+    }
+
+    fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
+        let distro = os.id().to_owned();
+        let upstream: String = upstream(&distro, os.get_value("ID_LIKE"))?.into();
+        let distro_codename = os.version_codename().unwrap_or_default().to_owned();
+        let base_codename = match upstream.as_str() {
+            "ubuntu" => os.get_value("UBUNTU_CODENAME"),
+            "debian" => os.get_value("DEBIAN_CODENAME"),
+            _ => unreachable!(),
+        }
+        .unwrap_or(&distro_codename)
+        .to_owned();
+        Self::from_release_parts(distro, upstream, distro_codename, base_codename, desktop, arch)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Architecture {
+    Amd64,
+    Arm64,
+    Arm32,
+}
+
+impl Architecture {
+    pub fn normalize(value: &str) -> Result<Self> {
+        match value {
+            "x86_64" | "amd64" => Ok(Self::Amd64),
+            "aarch64" | "arm64" => Ok(Self::Arm64),
+            "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
+            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"),
+        }
+    }
+
+    pub fn canonical(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+            Self::Arm32 => "arm32",
+        }
+    }
+
+    pub fn debian(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+            Self::Arm32 => "armhf",
+        }
+    }
+
+    pub fn go(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+            Self::Arm32 => "arm",
+        }
+    }
+
+    pub fn go_archive(self) -> &'static str {
+        match self {
+            Self::Arm32 => "armv6l",
+            other => other.go(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAptSources {
+    pub distro: String,
+    pub release: String,
+    pub architecture: Architecture,
+    pub components: Vec<String>,
+    pub stanzas: Vec<ManagedAptStanza>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAptStanza {
+    pub uri: String,
+    pub suites: Vec<String>,
+    pub signed_by: String,
+}
+
+impl ManagedAptSources {
+    pub fn render_deb822(&self) -> String {
+        let components = self.components.join(" ");
+        self.stanzas
+            .iter()
+            .map(|stanza| {
+                format!(
+                    "Types: deb\nURIs: {}\nSuites: {}\nComponents: {}\nArchitectures: {}\nSigned-By: {}\n",
+                    stanza.uri,
+                    stanza.suites.join(" "),
+                    components,
+                    self.architecture.debian(),
+                    stanza.signed_by,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 

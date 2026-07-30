@@ -10,29 +10,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Debug)]
-pub struct Record {
-    pub path: &'static str,
-    pub bytes: &'static [u8],
-    pub mode: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct PresetRecord {
-    pub name: &'static str,
-    pub bytes: &'static [u8],
-}
-
-include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
-
-pub fn records() -> &'static [Record] {
-    RECORDS
-}
-
-pub fn preset(name: &str) -> Option<&'static PresetRecord> {
-    PRESETS.iter().find(|preset| preset.name == name)
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum Preset {
     #[default]
@@ -63,6 +40,36 @@ pub fn run(preset_val: Preset) -> Result<PathBuf> {
     Ok(root)
 }
 
+pub fn config_root() -> Result<PathBuf> {
+    if let Some(path) = env::var_os("XDG_CONFIG_HOME").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path).join("cozydot"));
+    }
+    Ok(PathBuf::from(env::var_os("HOME").context("HOME is not set")?).join(".config/cozydot"))
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Record {
+    pub path: &'static str,
+    pub bytes: &'static [u8],
+    pub mode: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PresetRecord {
+    pub name: &'static str,
+    pub bytes: &'static [u8],
+}
+
+include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
+
+pub fn records() -> &'static [Record] {
+    RECORDS
+}
+
+pub fn preset(name: &str) -> Option<&'static PresetRecord> {
+    PRESETS.iter().find(|preset| preset.name == name)
+}
+
 fn sync(root: &Path, records: &[Record]) -> Result<()> {
     ensure_directory_path(root, Path::new(""))?;
     let manifest_path = root.join(".managed-files");
@@ -88,13 +95,6 @@ fn sync(root: &Path, records: &[Record]) -> Result<()> {
     }
     write_manifest(&manifest_path, &managed)?;
     Ok(())
-}
-
-pub fn config_root() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("XDG_CONFIG_HOME").filter(|path| !path.is_empty()) {
-        return Ok(PathBuf::from(path).join("cozydot"));
-    }
-    Ok(PathBuf::from(env::var_os("HOME").context("HOME is not set")?).join(".config/cozydot"))
 }
 
 fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
