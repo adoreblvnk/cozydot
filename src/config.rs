@@ -73,6 +73,9 @@ impl Config {
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         if platform.is_macos() {
+            if self.macos().system.rosetta == Some(true) && platform.architecture != Architecture::DarwinArm64 {
+                bail!("os.macos.system.rosetta: Rosetta requires Apple Silicon macOS");
+            }
             return Ok(());
         }
         let identity = resolve_platform_identity(platform)?;

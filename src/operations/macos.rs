@@ -14,7 +14,7 @@ pub enum MacDefault {
 }
 
 pub fn bootstrap(host: &Host) -> Result<()> {
-    if host.run("brew", ["--version"]).is_ok_and(|output| output.status.success()) {
+    if brew_program(host).is_ok() {
         return Ok(());
     }
     let script = TempPath::new(host, "homebrew-install")?;
@@ -40,21 +40,33 @@ pub fn bootstrap(host: &Host) -> Result<()> {
 }
 
 pub fn packages(host: &Host, formulae: &[String], casks: &[String]) -> Result<()> {
+    let brew = brew_program(host)?;
     for formula in formulae {
-        if !installed(host, "--formula", formula)? {
-            host.require("Homebrew formula install", "brew", ["install", formula])?;
+        if !installed(host, &brew, "--formula", formula)? {
+            host.require("Homebrew formula install", &brew, ["install", formula])?;
         }
     }
     for cask in casks {
-        if !installed(host, "--cask", cask)? {
-            host.require("Homebrew cask install", "brew", ["install", "--cask", cask])?;
+        if !installed(host, &brew, "--cask", cask)? {
+            host.require("Homebrew cask install", &brew, ["install", "--cask", cask])?;
         }
     }
     Ok(())
 }
 
-fn installed(host: &Host, kind: &str, name: &str) -> Result<bool> {
-    Ok(host.run("brew", ["list", kind, name])?.status.success())
+fn installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
+    Ok(host.run(brew, ["list", kind, name])?.status.success())
+}
+
+fn brew_program(host: &Host) -> Result<String> {
+    for candidate in ["brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
+        if host.run(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {
+            return Ok(candidate.to_owned());
+        }
+    }
+    bail!(
+        "Homebrew is unavailable after bootstrap; expected brew on PATH, /opt/homebrew/bin/brew, or /usr/local/bin/brew"
+    )
 }
 
 pub fn xcode_command_line_tools(host: &Host) -> Result<()> {
@@ -71,12 +83,13 @@ pub fn rosetta(host: &Host) -> Result<()> {
 }
 
 pub fn update(host: &Host, formulae: bool, casks: bool) -> Result<()> {
-    host.require("Homebrew metadata refresh", "brew", ["update"])?;
+    let brew = brew_program(host)?;
+    host.require("Homebrew metadata refresh", &brew, ["update"])?;
     if formulae {
-        host.require("Homebrew formula updates", "brew", ["upgrade"])?;
+        host.require("Homebrew formula updates", &brew, ["upgrade"])?;
     }
     if casks {
-        host.require("Homebrew cask updates", "brew", ["upgrade", "--cask"])?;
+        host.require("Homebrew cask updates", &brew, ["upgrade", "--cask"])?;
     }
     Ok(())
 }
