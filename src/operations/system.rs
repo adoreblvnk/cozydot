@@ -160,9 +160,20 @@ pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
 }
 
 pub(crate) fn vscode_extensions(host: &Host, extensions: &[String]) -> Result<()> {
-    preflight(host, Product::VsCode)?;
+    let program = if cfg!(target_os = "macos") {
+        [
+            "code",
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code",
+        ]
+        .into_iter()
+        .find(|candidate| host.run(candidate, ["--version"]).is_ok_and(|output| output.status.success()))
+        .context("VS Code integration requires the VS Code CLI; install the `code` shell command or the visual-studio-code cask")?
+    } else {
+        "code"
+    };
     for extension in extensions {
-        host.require("VS Code extension installation", "code", ["--install-extension", extension.as_str()])?;
+        host.require("VS Code extension installation", program, ["--install-extension", extension.as_str()])?;
     }
     Ok(())
 }
@@ -171,7 +182,6 @@ pub(crate) fn vscode_extensions(host: &Host, extensions: &[String]) -> Result<()
 enum Product {
     Docker,
     VirtualBox,
-    VsCode,
 }
 
 impl Product {
@@ -179,21 +189,18 @@ impl Product {
         match self {
             Self::Docker => "Docker",
             Self::VirtualBox => "VirtualBox",
-            Self::VsCode => "VS Code",
         }
     }
     fn program(self) -> &'static str {
         match self {
             Self::Docker => "docker",
             Self::VirtualBox => "VBoxManage",
-            Self::VsCode => "code",
         }
     }
     fn group(self) -> Option<&'static str> {
         match self {
             Self::Docker => Some("docker"),
             Self::VirtualBox => Some("vboxusers"),
-            Self::VsCode => None,
         }
     }
 }

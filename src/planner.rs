@@ -537,6 +537,9 @@ fn plan_shared_portable(config: &Config, architecture: Architecture, operations:
         operations.push(Operation::PythonToolchain { version: selector.clone(), mode: ToolchainMode::EnsurePresent });
     }
     if let Some(packages) = &config.shared.packages.cargo {
+        if !packages.is_empty() {
+            operations.push(Operation::CargoBinstallBootstrap);
+        }
         operations
             .push(Operation::CargoPackageSet { packages: packages.clone(), mode: CargoPackageMode::EnsurePresent });
     }
