@@ -31,13 +31,23 @@ impl<'de> Deserialize<'de> for ConfigVersion {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: ConfigVersion,
+    pub shared: SharedConfig,
+    pub os: OsConfig,
+    #[serde(skip)]
     pub system: Option<System>,
+    #[serde(skip)]
     pub packages: Option<Packages>,
+    #[serde(skip)]
     pub tools: Option<Tools>,
+    #[serde(skip)]
     pub fonts: Option<Fonts>,
+    #[serde(skip)]
     pub dotfiles: Option<Dotfiles>,
+    #[serde(skip)]
     pub integrations: Option<Integrations>,
+    #[serde(skip)]
     pub desktop: Option<Desktop>,
+    #[serde(skip)]
     pub updates: Option<Updates>,
 }
 
@@ -54,12 +64,17 @@ impl Config {
             let path = if path == "." { "config" } else { path.as_str() };
             anyhow::anyhow!("{path}: {}", error.inner())
         })?;
+        let mut config = config;
+        config.expand_linux_model();
         config.validate()?;
         Ok(config)
     }
 
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
+        if platform.is_macos() {
+            return Ok(());
+        }
         let identity = resolve_platform_identity(platform)?;
         let (distro, upstream) = (identity.distro, identity.upstream);
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
@@ -129,6 +144,179 @@ impl Config {
         }
         Ok(())
     }
+
+    fn expand_linux_model(&mut self) {
+        let linux = &self.os.linux;
+        self.system = Some(linux.system.clone());
+        self.tools = Some(self.shared.tools.clone());
+        self.fonts = Some(self.shared.fonts.clone());
+        self.packages = Some(Packages {
+            apt: linux.packages.apt.clone(),
+            flatpak: linux.packages.flatpak.clone(),
+            cargo: self.shared.packages.cargo.clone(),
+            npm: self.shared.packages.npm.clone(),
+            binaries: linux.packages.binaries.clone(),
+        });
+        self.dotfiles = Some(Dotfiles {
+            packages: self.shared.dotfiles.packages.iter().chain(linux.dotfiles.packages.iter()).cloned().collect(),
+        });
+        self.integrations = Some(Integrations {
+            appimaged: linux.integrations.appimaged,
+            docker: linux.integrations.docker.clone(),
+            virtualbox: linux.integrations.virtualbox.clone(),
+            vscode: Some(self.shared.integrations.vscode.clone()),
+        });
+        self.desktop = linux.desktop.clone();
+        self.updates = Some(Updates {
+            apt: linux.updates.as_ref().and_then(|updates| updates.apt),
+            flatpak: linux.updates.as_ref().and_then(|updates| updates.flatpak),
+            tools: Some(self.shared.updates.tools.clone()),
+            packages: Some(self.shared.updates.packages.clone()),
+            fonts: self.shared.updates.fonts,
+        });
+    }
+
+    pub fn macos(&self) -> &MacOsConfig {
+        &self.os.macos
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedConfig {
+    pub tools: Tools,
+    pub packages: SharedPackages,
+    pub fonts: Fonts,
+    pub dotfiles: Dotfiles,
+    pub integrations: SharedIntegrations,
+    pub updates: SharedUpdates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedPackages {
+    pub cargo: Option<Vec<String>>,
+    pub npm: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedIntegrations {
+    pub vscode: VsCodeIntegration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedUpdates {
+    pub tools: ToolUpdates,
+    pub packages: PackageUpdates,
+    pub fonts: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OsConfig {
+    pub linux: LinuxConfig,
+    pub macos: MacOsConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxConfig {
+    pub system: System,
+    pub packages: Packages,
+    pub dotfiles: Dotfiles,
+    pub integrations: Integrations,
+    pub desktop: Option<Desktop>,
+    pub updates: Option<LinuxUpdates>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxUpdates {
+    pub apt: Option<AptUpdate>,
+    pub flatpak: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacOsConfig {
+    pub system: MacSystem,
+    pub homebrew: Homebrew,
+    pub dotfiles: Dotfiles,
+    pub desktop: MacDesktop,
+    pub updates: MacUpdates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacSystem {
+    pub ensure_admin: Option<bool>,
+    pub xcode: MacXcode,
+    pub rosetta: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacXcode {
+    pub command_line_tools: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Homebrew {
+    pub formulae: Vec<String>,
+    pub casks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacDesktop {
+    pub appearance: Option<Theme>,
+    pub dock: Option<MacDock>,
+    pub finder: Option<MacFinder>,
+    pub keyboard: Option<MacKeyboard>,
+    pub trackpad: Option<MacTrackpad>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacDock {
+    pub autohide: Option<bool>,
+    pub show_recent_applications: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacFinder {
+    pub show_filename_extensions: Option<bool>,
+    pub show_hidden_files: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacKeyboard {
+    pub key_repeat: Option<i32>,
+    pub initial_key_repeat: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacTrackpad {
+    pub tap_to_click: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacUpdates {
+    pub homebrew: MacHomebrewUpdates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacHomebrewUpdates {
+    pub formulae: Option<bool>,
+    pub casks: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
@@ -612,7 +800,7 @@ impl AssetMap {
     pub fn get(&self, architecture: Architecture) -> Option<&str> {
         match architecture {
             Architecture::Amd64 => self.amd64.as_deref(),
-            Architecture::Arm64 => self.arm64.as_deref(),
+            Architecture::Arm64 | Architecture::DarwinArm64 => self.arm64.as_deref(),
             Architecture::Arm32 => self.arm32.as_deref(),
         }
     }
@@ -641,7 +829,7 @@ impl ArchitectureUrls {
     pub fn get(&self, architecture: Architecture) -> Option<&str> {
         match architecture {
             Architecture::Amd64 => self.amd64.as_deref(),
-            Architecture::Arm64 => self.arm64.as_deref(),
+            Architecture::Arm64 | Architecture::DarwinArm64 => self.arm64.as_deref(),
             Architecture::Arm32 => self.arm32.as_deref(),
         }
     }
@@ -891,4 +1079,20 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn full_example_is_valid_v1_configuration() {
+        Config::parse(include_str!("../examples/full.yaml")).unwrap();
+    }
+
+    #[test]
+    fn legacy_root_fields_are_rejected() {
+        let error = Config::parse("version: 1.0.0\npackages: {}\n").unwrap_err().to_string();
+        assert!(error.contains("unknown field `packages`"));
+    }
 }

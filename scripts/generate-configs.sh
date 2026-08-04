@@ -14,227 +14,61 @@ temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 
 generate_full() {
-  yq '
-    .packages.apt.install = (.packages.apt.install + [
-      "ttf-mscorefonts-installer"
-    ] | sort) |
-    .packages.apt.repositories = (.packages.apt.repositories + [
-      {
-        "name": "helium",
-        "key": "https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc",
-        "key_path": "/usr/share/keyrings/helium.gpg",
-        "urls": {"default": "https://pkg.helium.computer/deb"},
-        "suite": "stable",
-        "components": ["main"],
-        "packages": ["helium-bin"]
-      },
-      {
-        "name": "onlyoffice",
-        "key": "https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE",
-        "key_path": "/usr/share/keyrings/onlyoffice.gpg",
-        "urls": {"default": "https://download.onlyoffice.com/repo/debian"},
-        "suite": "squeeze",
-        "components": ["main"],
-        "packages": ["onlyoffice-desktopeditors"]
-      },
-      {
-        "name": "virtualbox",
-        "key": "https://www.virtualbox.org/download/oracle_vbox_2016.asc",
-        "key_path": "/usr/share/keyrings/oracle-virtualbox-2016.asc",
-        "urls": {"default": "https://download.virtualbox.org/virtualbox/debian"},
-        "suite": "system",
-        "components": ["contrib"],
-        "packages": ["virtualbox-7.1"]
-      }
-    ] | sort_by(.name)) |
-    .packages.flatpak = (.packages.flatpak + [
-      "org.shotcut.Shotcut"
-    ] | sort) |
-    .packages.npm |= sort |
-    .packages.binaries = [
-      {
-        "name": "drawio",
-        "format": "deb",
-        "source": {
-          "provider": "github",
-          "repository": "jgraph/drawio-desktop",
-          "assets": {
-            "amd64": "^drawio-amd64-.*\\.deb$",
-            "arm64": "^drawio-arm64-.*\\.deb$"
-          }
-        }
-      },
-      {
-        "name": "fastfetch",
-        "format": "deb",
-        "source": {
-          "provider": "github",
-          "repository": "fastfetch-cli/fastfetch",
-          "assets": {
-            "amd64": "^fastfetch-linux-amd64\\.deb$",
-            "arm64": "^fastfetch-linux-aarch64\\.deb$",
-            "arm32": "^fastfetch-linux-armv7l.*\\.deb$"
-          }
-        }
-      },
-      {
-        "name": "git-credential-manager",
-        "format": "deb",
-        "source": {
-          "provider": "github",
-          "repository": "git-ecosystem/git-credential-manager",
-          "assets": {
-            "amd64": "^gcm-linux-x64-.*\\.deb$",
-            "arm64": "^gcm-linux-arm64-.*\\.deb$"
-          }
-        }
-      },
-      {
-        "name": "obsidian",
-        "format": "appimage",
-        "source": {
-          "provider": "github",
-          "repository": "obsidianmd/obsidian-releases",
-          "assets": {
-            "amd64": "^Obsidian-[0-9]+(?:\\.[0-9]+)+\\.AppImage$",
-            "arm64": "^Obsidian-[0-9]+(?:\\.[0-9]+)+-arm64\\.AppImage$"
-          }
-        }
-      },
-      {
-        "name": "zen-browser",
-        "format": "appimage",
-        "source": {
-          "provider": "github",
-          "repository": "zen-browser/desktop",
-          "assets": {
-            "amd64": "^zen-x86_6[0-9]\\.AppImage$",
-            "arm64": "^zen-aarch6[0-9]\\.AppImage$"
-          }
-        }
-      }
-    ] |
-    .integrations.docker = {
-      "add_user_to_group": true,
-      "logging": {"driver": "local", "max_size": "10m"}
-    } |
-    .integrations.virtualbox = {"add_user_to_group": true} |
-    .integrations.vscode.extensions = (.integrations.vscode.extensions + [
-      "christian-kohler.path-intellisense",
-      "ecmel.vscode-html-css",
-      "foxundermoon.shell-format",
-      "golang.go",
-      "llvm-vs-code-extensions.vscode-clangd",
-      "ms-python.debugpy",
-      "ms-python.vscode-pylance",
-      "prettier.prettier-vscode",
-      "rust-lang.rust-analyzer",
-      "streetsidesoftware.code-spell-checker",
-      "timonwong.shellcheck",
-      "wayou.vscode-todo-highlight"
-    ] | sort) |
-    .desktop.terminal = "wezterm" |
-    .updates.apt = "full" |
-    .updates.fonts = true |
-    .packages.apt as $apt |
-    .packages.apt = {
-      "install": $apt.install,
-      "repositories": $apt.repositories
-    }
-  ' "$base"
+  cp "$base" "$temporary/full.yaml"
 }
 
 generate_cli() {
   yq '
     del(
-      .system.ubuntu.codecs,
-      .packages.flatpak,
-      .desktop,
-      .updates.flatpak
+      .os.linux.system.ubuntu.codecs,
+      .os.linux.packages.flatpak,
+      .os.linux.desktop,
+      .os.linux.updates.flatpak
     ) |
-    .integrations = {"appimaged": false} |
-    .packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
-    .packages.apt.repositories |= map(select(.name == "github-cli")) |
-    .packages.npm = ["opencode-ai"] |
-    .packages.binaries |= map(select(
+    .os.linux.integrations = {"appimaged": false} |
+    .os.linux.packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
+    .os.linux.packages.apt.repositories |= map(select(.name == "github-cli")) |
+    .shared.packages.npm = ["opencode-ai"] |
+    .os.linux.packages.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .dotfiles.packages -= ["opencode", "vscode", "wezterm"]
+    .shared.dotfiles.packages -= ["opencode", "vscode", "wezterm"]
   ' "$base"
 }
 
 generate_vm() {
   yq '
-    .system.require = {
+    .os.linux.system.require = {
       "distros": ["ubuntu", "debian"],
       "desktops": ["gnome"]
     } |
-    .system.apt.sources = {
+    .os.linux.system.apt.sources = {
       "mode": "managed",
       "components": {
         "ubuntu": ["main", "restricted", "universe", "multiverse"],
         "debian": ["main", "contrib", "non-free", "non-free-firmware"]
       }
     } |
-    .packages.apt.install = (.packages.apt.install + [
-      "ttf-mscorefonts-installer"
-    ] | sort) |
     del(
-      .integrations.docker,
-      .integrations.virtualbox
+      .os.linux.integrations.docker,
+      .os.linux.integrations.virtualbox
     ) |
-    .integrations.appimaged = false |
-    .packages.apt.repositories = ((.packages.apt.repositories | map(select(.name == "vscode"))) + [
-      {
-        "name": "wezterm",
-        "key": "https://apt.fury.io/wez/gpg.key",
-        "key_path": "/usr/share/keyrings/wezterm-fury.asc",
-        "urls": {"default": "https://apt.fury.io/wez/"},
-        "suite": "*",
-        "components": ["*"],
-        "packages": ["wezterm-nightly"]
-      }
-    ] | sort_by(.name)) |
-    .packages.flatpak = ["com.bitwarden.desktop"] |
-    .packages.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
-    .packages.npm = ["opencode-ai"] |
-    .packages.binaries = [
-      {
-        "name": "fastfetch",
-        "format": "deb",
-        "source": {
-          "provider": "github",
-          "repository": "fastfetch-cli/fastfetch",
-          "assets": {
-            "amd64": "^fastfetch-linux-amd64\\.deb$",
-            "arm64": "^fastfetch-linux-aarch64\\.deb$",
-            "arm32": "^fastfetch-linux-armv7l.*\\.deb$"
-          }
-        }
-      },
-      {
-        "name": "git-credential-manager",
-        "format": "deb",
-        "source": {
-          "provider": "github",
-          "repository": "git-ecosystem/git-credential-manager",
-          "assets": {
-            "amd64": "^gcm-linux-x64-.*\\.deb$",
-            "arm64": "^gcm-linux-arm64-.*\\.deb$"
-          }
-        }
-      }
-    ] |
-    .tools.node = "latest" |
-    .dotfiles.packages -= ["opencode"] |
-    .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
-    .desktop.terminal = "wezterm" |
-    .updates.apt = "full" |
-    .updates.fonts = true
+    .os.linux.integrations.appimaged = false |
+    .os.linux.packages.apt.repositories |= map(select(.name == "vscode" or .name == "wezterm")) |
+    .os.linux.packages.flatpak = ["com.bitwarden.desktop"] |
+    .shared.packages.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
+    .shared.packages.npm = ["opencode-ai"] |
+    .os.linux.packages.binaries |= map(select(
+      .name == "fastfetch" or .name == "git-credential-manager"
+    )) |
+    .shared.tools.node = "latest" |
+    .shared.dotfiles.packages -= ["opencode"] |
+    .shared.integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
+    .os.linux.updates.apt = "full"
   ' "$base"
 }
 
-generate_full >"$temporary/full.yaml"
+generate_full
 generate_cli >"$temporary/cli.yaml"
 generate_vm >"$temporary/vm.yaml"
 

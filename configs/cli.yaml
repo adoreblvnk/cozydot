@@ -1,107 +1,202 @@
+# Proposed cross-platform configuration. The current 1.0.0 schema does not parse this file yet.
 version: 1.0.0
-system:
-  ensure_admin: true
-  apt:
-    sources:
-      mode: preserve
-    unattended_upgrades: disabled
-  ubuntu:
-    snap: disabled
-  require:
-    distros:
-      - ubuntu
-      - debian
-      - pop
-      - linuxmint
-    desktops:
-      - gnome
-      - cinnamon
-packages:
-  apt:
-    install:
-      - bash-completion
-      - build-essential
-      - cmake
-      - curl
-      - default-jdk
-      - figlet
-      - fzf
-      - git
-      - lolcat
-      - openssh-server
-      - pandoc
-      - pass
-      - pinentry-tty
-      - trash-cli
-      - unzip
-      - vim
-      - xz-utils
-    repositories:
-      - name: github-cli
-        key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
-        key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-        urls:
-          default: https://cli.github.com/packages
-        suite: stable
-        components: [main]
-        packages: [gh]
-  cargo:
-    - bat
-    - bottom
-    - du-dust
-    - eza
-    - fd-find
-    - presenterm
-    - starship
-    - tealdeer
-    - yazi-fm
-    - zoxide
-  npm:
-    - opencode-ai
-  binaries:
-    - name: fastfetch
-      format: deb
-      source:
-        provider: github
-        repository: fastfetch-cli/fastfetch
-        assets:
-          amd64: ^fastfetch-linux-amd64\.deb$
-          arm64: ^fastfetch-linux-aarch64\.deb$
-          arm32: ^fastfetch-linux-armv7l.*\.deb$
-    - name: git-credential-manager
-      format: deb
-      source:
-        provider: github
-        repository: git-ecosystem/git-credential-manager
-        assets:
-          amd64: ^gcm-linux-x64-.*\.deb$
-          arm64: ^gcm-linux-arm64-.*\.deb$
-tools:
-  rust: stable
-  go: latest
-  node: lts
-  python: "3.13"
-fonts:
-  nerd: [GeistMono]
-dotfiles:
-  packages:
-    - bash
-    - bin
-    - bat
-    - bottom
-    - fastfetch
-    - starship
-    - yazi
-integrations:
-  appimaged: false
-updates:
-  apt: standard
+shared:
   tools:
-    rust: true
-    go: true
-    node: true
-    python: true
+    rust: stable
+    go: latest
+    node: lts
+    python: "3.13"
   packages:
-    cargo: true
-    npm: true
-  fonts: true
+    cargo:
+      - bat
+      - bottom
+      - du-dust
+      - eza
+      - fd-find
+      - presenterm
+      - starship
+      - tealdeer
+      - yazi-fm
+      - zoxide
+    npm:
+      - opencode-ai
+  fonts:
+    nerd:
+      - GeistMono
+  dotfiles:
+    packages:
+      - bat
+      - bin
+      - bottom
+      - fastfetch
+      - starship
+      - yazi
+  integrations:
+    vscode:
+      extensions:
+        - catppuccin.catppuccin-vsc
+        - charliermarsh.ruff
+        - christian-kohler.path-intellisense
+        - eamodio.gitlens
+        - ecmel.vscode-html-css
+        - foxundermoon.shell-format
+        - golang.go
+        - llvm-vs-code-extensions.vscode-clangd
+        - ms-python.debugpy
+        - ms-python.python
+        - ms-python.vscode-pylance
+        - prettier.prettier-vscode
+        - redhat.vscode-yaml
+        - rust-lang.rust-analyzer
+        - streetsidesoftware.code-spell-checker
+        - timonwong.shellcheck
+        - wayou.vscode-todo-highlight
+        - yzhang.markdown-all-in-one
+  updates:
+    tools:
+      rust: true
+      go: true
+      node: true
+      python: true
+    packages:
+      cargo: true
+      npm: true
+    fonts: true
+os:
+  linux:
+    system:
+      ensure_admin: true
+      require:
+        distros:
+          - ubuntu
+          - debian
+          - pop
+          - linuxmint
+        desktops:
+          - gnome
+          - cinnamon
+      apt:
+        sources:
+          mode: preserve
+        unattended_upgrades: disabled
+      ubuntu:
+        snap: disabled
+    packages:
+      apt:
+        install:
+          - bash-completion
+          - build-essential
+          - cmake
+          - curl
+          - default-jdk
+          - figlet
+          - fzf
+          - git
+          - lolcat
+          - openssh-server
+          - pandoc
+          - pass
+          - pinentry-tty
+          - trash-cli
+          - ttf-mscorefonts-installer
+          - unzip
+          - vim
+          - xz-utils
+        repositories:
+          - name: github-cli
+            key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+            key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+            urls:
+              default: https://cli.github.com/packages
+            suite: stable
+            components:
+              - main
+            packages:
+              - gh
+      binaries:
+        - name: fastfetch
+          format: deb
+          source:
+            provider: github
+            repository: fastfetch-cli/fastfetch
+            assets:
+              amd64: ^fastfetch-linux-amd64\.deb$
+              arm64: ^fastfetch-linux-aarch64\.deb$
+              arm32: ^fastfetch-linux-armv7l.*\.deb$
+        - name: git-credential-manager
+          format: deb
+          source:
+            provider: github
+            repository: git-ecosystem/git-credential-manager
+            assets:
+              amd64: ^gcm-linux-x64-.*\.deb$
+              arm64: ^gcm-linux-arm64-.*\.deb$
+    dotfiles:
+      packages:
+        - bash
+    integrations:
+      appimaged: false
+    updates:
+      apt: full
+  macos:
+    system:
+      ensure_admin: true
+      xcode:
+        command_line_tools: true
+      rosetta: false
+    homebrew:
+      formulae:
+        - cmake
+        - ffmpeg
+        - fastfetch
+        - figlet
+        - fzf
+        - gh
+        - git
+        - imagemagick
+        - lolcat
+        - openjdk
+        - pandoc
+        - pass
+        - pinentry-mac
+        - stow
+        - trash
+        - vim
+      casks:
+        - bitwarden
+        - discord
+        - docker
+        - drawio
+        - gimp
+        - git-credential-manager
+        - helium-browser
+        - obs
+        - obsidian
+        - onlyoffice
+        - qbittorrent
+        - shotcut
+        - telegram
+        - virtualbox
+        - visual-studio-code
+        - vlc
+        - wezterm
+        - zen
+    dotfiles:
+      packages: []
+    desktop:
+      appearance: dark
+      dock:
+        autohide: true
+        show_recent_applications: false
+      finder:
+        show_filename_extensions: true
+        show_hidden_files: true
+      keyboard:
+        key_repeat: 2
+        initial_key_repeat: 15
+      trackpad:
+        tap_to_click: true
+    updates:
+      homebrew:
+        formulae: true
+        casks: true

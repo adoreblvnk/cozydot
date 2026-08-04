@@ -6,13 +6,15 @@ BASE_URL="${COZYDOT_RELEASE_BASE_URL:-https://github.com/adoreblvnk/cozydot/rele
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 
 case "$(uname -s):$(uname -m)" in
-  Linux:x86_64) ARCH=amd64 ;;
-  Linux:aarch64 | Linux:arm64) ARCH=arm64 ;;
-  Linux:armv7 | Linux:armv7l | Linux:armhf) ARCH=arm32 ;;
+  Linux:x86_64) PLATFORM=linux; ARCH=amd64 ;;
+  Linux:aarch64 | Linux:arm64) PLATFORM=linux; ARCH=arm64 ;;
+  Linux:armv7 | Linux:armv7l | Linux:armhf) PLATFORM=linux; ARCH=arm32 ;;
+  Darwin:x86_64) PLATFORM=macos; ARCH=amd64 ;;
+  Darwin:arm64) PLATFORM=macos; ARCH=arm64 ;;
   *) printf 'cozydot: unsupported platform\n' >&2; exit 1 ;;
 esac
 
-ASSET="cozydot-${VERSION#v}-linux-$ARCH.tar.gz"
+ASSET="cozydot-${VERSION#v}-$PLATFORM-$ARCH.tar.gz"
 URL="$BASE_URL/download/v${VERSION#v}"
 umask 077
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cozydot-install.XXXXXX")"
@@ -25,7 +27,11 @@ valid_pair() {
   [[ -f $archive && -f $checksum ]] || return 1
   read -r expected _ <"$checksum" || return 1
   [[ $expected =~ ^[[:xdigit:]]{64}$ ]] || return 1
-  actual="$(sha256sum "$archive")"
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$archive")"
+  else
+    actual="$(shasum -a 256 "$archive")"
+  fi
   [[ ${actual%% *} == "$expected" ]]
 }
 

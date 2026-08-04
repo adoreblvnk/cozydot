@@ -1,12 +1,11 @@
 # cozydot
 
-Cozydot is a Linux bootstrapper that provisions packages, development tools,
-dotfiles, integrations, desktop settings, and updates from one active YAML
-configuration.
+Cozydot provisions packages, development tools, dotfiles, integrations, desktop
+settings, and updates on Linux and macOS from one active YAML configuration.
 
 Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
-`aarch64` (`arm64`), and 32-bit ARMv7 (`arm32`). Other architectures are
-rejected.
+`aarch64` (`arm64`), and 32-bit ARMv7 (`arm32`), plus macOS on Intel and Apple
+silicon. Other architectures are rejected.
 
 ## Install
 

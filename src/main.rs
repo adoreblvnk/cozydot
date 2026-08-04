@@ -8,7 +8,7 @@ mod planner;
 mod platform;
 
 #[derive(Debug, Parser)]
-#[command(name = "cozydot", version, about = "Provision a Linux system from one active configuration")]
+#[command(name = "cozydot", version, about = "Provision Linux and macOS from one active configuration")]
 struct Cli {
     #[command(subcommand)]
     command: Option<CliCommand>,
