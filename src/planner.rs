@@ -52,6 +52,9 @@ pub enum ManagerBootstrap {
 
 pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Operation>> {
     config.validate_for_platform(platform)?;
+    if platform.is_macos() {
+        return plan_macos_apply(config, platform.architecture, dotfiles_root);
+    }
     validate_binary_integrations(config, platform.architecture)?;
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
@@ -255,6 +258,9 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
 
 pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation>> {
     config.validate_for_platform(platform)?;
+    if platform.is_macos() {
+        return plan_macos_update(config, platform.architecture);
+    }
     validate_binary_integrations(config, platform.architecture)?;
     let Some(updates) = &config.updates else {
         return Ok(Vec::new());
@@ -439,6 +445,160 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         push_operation(&mut phases, PlannerPhase::ManagerBootstraps, operation);
     }
     Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
+}
+
+fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path) -> Result<Vec<Operation>> {
+    let mac = config.macos();
+    let mut operations = Vec::new();
+    if mac.system.ensure_admin == Some(true) {
+        operations.push(Operation::EnsureAdmin);
+    }
+    if mac.system.xcode.command_line_tools == Some(true) {
+        operations.push(Operation::XcodeCommandLineTools);
+    }
+    if mac.system.rosetta == Some(true) {
+        operations.push(Operation::Rosetta);
+    }
+    if !mac.homebrew.formulae.is_empty() || !mac.homebrew.casks.is_empty() {
+        operations.push(Operation::HomebrewBootstrap);
+        operations.push(Operation::HomebrewPackages {
+            formulae: mac.homebrew.formulae.clone(),
+            casks: mac.homebrew.casks.clone(),
+        });
+    }
+    plan_shared_portable(config, architecture, &mut operations);
+    if !config.shared.integrations.vscode.extensions.is_empty() {
+        operations
+            .push(Operation::VsCodeExtensionSet { extensions: config.shared.integrations.vscode.extensions.clone() });
+    }
+    let packages =
+        config.shared.dotfiles.packages.iter().chain(mac.dotfiles.packages.iter()).cloned().collect::<Vec<_>>();
+    if !packages.is_empty() {
+        operations.push(Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages });
+    }
+    let mut settings = Vec::new();
+    if let Some(value) = mac.desktop.appearance {
+        settings.push(crate::operations::macos::MacDefault::Appearance(value == Theme::Dark));
+    }
+    if let Some(dock) = &mac.desktop.dock {
+        if let Some(value) = dock.autohide {
+            settings.push(crate::operations::macos::MacDefault::DockAutohide(value));
+        }
+        if let Some(value) = dock.show_recent_applications {
+            settings.push(crate::operations::macos::MacDefault::DockRecentApplications(value));
+        }
+    }
+    if let Some(finder) = &mac.desktop.finder {
+        if let Some(value) = finder.show_filename_extensions {
+            settings.push(crate::operations::macos::MacDefault::FinderExtensions(value));
+        }
+        if let Some(value) = finder.show_hidden_files {
+            settings.push(crate::operations::macos::MacDefault::FinderHiddenFiles(value));
+        }
+    }
+    if let Some(keyboard) = &mac.desktop.keyboard {
+        if let Some(value) = keyboard.key_repeat {
+            settings.push(crate::operations::macos::MacDefault::KeyRepeat(value));
+        }
+        if let Some(value) = keyboard.initial_key_repeat {
+            settings.push(crate::operations::macos::MacDefault::InitialKeyRepeat(value));
+        }
+    }
+    if let Some(trackpad) = &mac.desktop.trackpad
+        && let Some(value) = trackpad.tap_to_click
+    {
+        settings.push(crate::operations::macos::MacDefault::TrackpadTapToClick(value));
+    }
+    if !settings.is_empty() {
+        operations.push(Operation::MacDefaults { settings });
+    }
+    Ok(operations)
+}
+
+fn plan_shared_portable(config: &Config, architecture: Architecture, operations: &mut Vec<Operation>) {
+    if let Some(selector) = &config.shared.tools.rust {
+        operations.push(Operation::RustupBootstrap);
+        operations
+            .push(Operation::RustToolchain { selector: Some(selector.clone()), mode: ToolchainMode::EnsurePresent });
+    }
+    if let Some(selector) = &config.shared.tools.go {
+        operations.push(Operation::GoToolchain {
+            selector: go_selector_main(selector),
+            architecture,
+            mode: ToolchainMode::EnsurePresent,
+        });
+    }
+    if let Some(selector) = &config.shared.tools.node {
+        operations.push(Operation::FnmBootstrap);
+        operations.push(Operation::NodeToolchain { selector: selector.clone(), mode: ToolchainMode::EnsurePresent });
+    }
+    if let Some(selector) = &config.shared.tools.python {
+        operations.push(Operation::UvBootstrap);
+        operations.push(Operation::PythonToolchain { version: selector.clone(), mode: ToolchainMode::EnsurePresent });
+    }
+    if let Some(packages) = &config.shared.packages.cargo {
+        operations
+            .push(Operation::CargoPackageSet { packages: packages.clone(), mode: CargoPackageMode::EnsurePresent });
+    }
+    if let Some(packages) = &config.shared.packages.npm {
+        operations.push(Operation::NpmPackageSet { packages: packages.clone(), mode: NpmPackageMode::EnsurePresent });
+    }
+    if !config.shared.fonts.nerd.as_deref().unwrap_or_default().is_empty() {
+        operations.push(Operation::UserNerdFonts {
+            families: config.shared.fonts.nerd.clone().unwrap_or_default(),
+            mode: NerdFontsMode::EnsurePresent,
+        });
+    }
+}
+
+fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<Operation>> {
+    let updates = &config.macos().updates.homebrew;
+    let formulae = updates.formulae == Some(true);
+    let casks = updates.casks == Some(true);
+    let mut operations = Vec::new();
+    if formulae || casks {
+        operations.push(Operation::HomebrewUpdate { formulae, casks });
+    }
+    let tools = &config.shared.updates.tools;
+    if tools.rust == Some(true) {
+        operations.push(Operation::RustToolchain {
+            selector: config.shared.tools.rust.clone(),
+            mode: ToolchainMode::ConvergeLatest,
+        });
+    }
+    if tools.go == Some(true) {
+        operations.push(Operation::GoToolchain {
+            selector: go_selector_main(config.shared.tools.go.as_deref().unwrap_or("latest")),
+            architecture,
+            mode: ToolchainMode::ConvergeLatest,
+        });
+    }
+    if tools.node == Some(true) {
+        operations.push(Operation::NodeToolchain {
+            selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".into()),
+            mode: ToolchainMode::ConvergeLatest,
+        });
+    }
+    if tools.python == Some(true) {
+        operations.push(Operation::PythonToolchain {
+            version: config.shared.tools.python.clone().unwrap_or_else(|| "latest".into()),
+            mode: ToolchainMode::ConvergeLatest,
+        });
+    }
+    let packages = &config.shared.updates.packages;
+    if packages.cargo == Some(true) {
+        operations.push(Operation::CargoPackageSet { packages: Vec::new(), mode: CargoPackageMode::UpdateCurrent });
+    }
+    if packages.npm == Some(true) {
+        operations.push(Operation::NpmPackageSet { packages: Vec::new(), mode: NpmPackageMode::UpdateCurrent });
+    }
+    if config.shared.updates.fonts == Some(true) {
+        operations.push(Operation::UserNerdFonts {
+            families: config.shared.fonts.nerd.clone().unwrap_or_default(),
+            mode: NerdFontsMode::Update,
+        });
+    }
+    Ok(operations)
 }
 
 fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerPhase, op: Operation) {
@@ -707,5 +867,46 @@ fn plan_desktop(
             prerequisites.insert("gnome-shell");
             push_operation(phases, PlannerPhase::Desktop, Operation::GnomeRoundedCorners);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn macos_platform() -> Platform {
+        Platform::from_release_parts(
+            "macos".into(),
+            "macos".into(),
+            String::new(),
+            String::new(),
+            "none".into(),
+            "aarch64",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn full_example_parses_macos_configuration() {
+        let config = Config::parse(include_str!("../examples/full.yaml")).unwrap();
+        assert_eq!(config.macos().homebrew.formulae[0], "cmake");
+        assert_eq!(config.macos().desktop.appearance, Some(Theme::Dark));
+    }
+
+    #[test]
+    fn macos_planner_emits_native_operations() {
+        let mut config = Config::parse(include_str!("../examples/full.yaml")).unwrap();
+        config.os.macos.system.rosetta = Some(true);
+        let operations = plan_apply(&config, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap();
+
+        assert!(operations.contains(&Operation::HomebrewBootstrap));
+        assert!(operations.contains(&Operation::XcodeCommandLineTools));
+        assert!(operations.contains(&Operation::Rosetta));
+        assert!(
+            operations
+                .iter()
+                .any(|operation| matches!(operation, Operation::MacDefaults { settings } if settings.len() == 8))
+        );
     }
 }

@@ -1,6 +1,95 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::{Value, json};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+
+fn merge_object(target: &mut Value, source: &Value) {
+    let target = target.as_object_mut().unwrap();
+    for (key, value) in source.as_object().unwrap() {
+        target.insert(key.clone(), value.clone());
+    }
+}
+
+// Keep CLI fixtures focused on the behavior under test while materializing the
+// required v1 containers around their Linux-era payloads.
+fn v1_config(legacy: &str) -> String {
+    let input: Value = yaml_serde::from_str(legacy).unwrap();
+    let mut config = json!({
+        "version": "1.0.0",
+        "shared": {
+            "tools": {}, "packages": {}, "fonts": {}, "dotfiles": {"packages": []},
+            "integrations": {"vscode": {"extensions": []}},
+            "updates": {"tools": {}, "packages": {}, "fonts": null}
+        },
+        "os": {
+            "linux": {
+                "system": {}, "packages": {}, "dotfiles": {"packages": []},
+                "integrations": {}, "desktop": null, "updates": null
+            },
+            "macos": {
+                "system": {"xcode": {}}, "homebrew": {"formulae": [], "casks": []},
+                "dotfiles": {"packages": []}, "desktop": {},
+                "updates": {"homebrew": {}}
+            }
+        }
+    });
+    let input = input.as_object().unwrap();
+    for key in ["tools", "fonts", "dotfiles"] {
+        if let Some(value) = input.get(key) {
+            config["shared"][key] = value.clone();
+        }
+    }
+    if let Some(packages) = input.get("packages").and_then(Value::as_object) {
+        let shared_packages = packages
+            .iter()
+            .filter(|(key, _)| matches!(key.as_str(), "cargo" | "npm"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        let linux_packages = packages
+            .iter()
+            .filter(|(key, _)| !matches!(key.as_str(), "cargo" | "npm"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        merge_object(&mut config["shared"]["packages"], &Value::Object(shared_packages));
+        merge_object(&mut config["os"]["linux"]["packages"], &Value::Object(linux_packages));
+    }
+    if let Some(integrations) = input.get("integrations").and_then(Value::as_object) {
+        if let Some(vscode) = integrations.get("vscode") {
+            config["shared"]["integrations"]["vscode"] = vscode.clone();
+        }
+        let linux_integrations = integrations
+            .iter()
+            .filter(|(key, _)| key.as_str() != "vscode")
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        merge_object(&mut config["os"]["linux"]["integrations"], &Value::Object(linux_integrations));
+    }
+    if let Some(updates) = input.get("updates").and_then(Value::as_object) {
+        for key in ["tools", "packages", "fonts"] {
+            if let Some(value) = updates.get(key) {
+                config["shared"]["updates"][key] = value.clone();
+            }
+        }
+        for key in ["apt", "flatpak"] {
+            if let Some(value) = updates.get(key) {
+                if config["os"]["linux"]["updates"].is_null() {
+                    config["os"]["linux"]["updates"] = json!({});
+                }
+                config["os"]["linux"]["updates"][key] = value.clone();
+            }
+        }
+    }
+    for key in ["system", "desktop"] {
+        if let Some(value) = input.get(key) {
+            config["os"]["linux"][key] = value.clone();
+        }
+    }
+    serde_json::to_string(&config).unwrap()
+}
+
+fn write_v1_config(path: &Path, legacy: &str) {
+    fs::write(path, v1_config(legacy)).unwrap();
+}
 
 fn write_executable(path: &Path, body: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -20,7 +109,7 @@ fn run_npm_apply(query_success: bool, package: &str) -> (bool, String, String) {
     fs::create_dir_all(config_home.join("cozydot")).unwrap();
     fs::write(
         config_home.join("cozydot/cozydot.yaml"),
-        format!("version: 1.0.0\npackages:\n  npm: [\"{package}\"]\ntools:\n  node: latest\n"),
+        v1_config(&format!("version: 1.0.0\npackages:\n  npm: [\"{package}\"]\ntools:\n  node: latest\n")),
     )
     .unwrap();
     write_executable(
@@ -70,7 +159,7 @@ fn os_release_value(key: &str) -> String {
 fn run_config(config: &str, command: &str) -> std::process::Output {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir_all(temp.path().join("cozydot")).unwrap();
-    fs::write(temp.path().join("cozydot/cozydot.yaml"), config).unwrap();
+    fs::write(temp.path().join("cozydot/cozydot.yaml"), v1_config(config)).unwrap();
     Command::cargo_bin("cozydot")
         .unwrap()
         .env("XDG_CONFIG_HOME", temp.path())
@@ -207,7 +296,7 @@ fn empty_config_apply_has_no_synthetic_report_output() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\n").unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), v1_config("version: 1.0.0\n")).unwrap();
 
     for command in ["apply", "update"] {
         Command::cargo_bin("cozydot")
@@ -226,7 +315,7 @@ fn standard_yaml_null_is_accepted() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\nsystem: null\n").unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), v1_config("version: 1.0.0\nsystem:\n  require: null\n")).unwrap();
 
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -263,7 +352,7 @@ fn unsupported_distros_are_rejected() {
         fs::create_dir_all(&config_dir).unwrap();
         fs::write(
             config_dir.join("cozydot.yaml"),
-            format!("version: \"1.0.0\"\nsystem:\n  require:\n    distros: [{distro}]\n"),
+            v1_config(&format!("version: \"1.0.0\"\nsystem:\n  require:\n    distros: [{distro}]\n")),
         )
         .unwrap();
 
@@ -283,8 +372,8 @@ fn unsupported_architecture_selector_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: "1.0.0"
 packages:
   binaries:
@@ -298,8 +387,7 @@ packages:
 integrations:
   appimaged: true
 "#,
-    )
-    .unwrap();
+    );
 
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -316,8 +404,8 @@ fn empty_sections_and_false_enable_flags_are_noops() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 system:
   require:
@@ -365,8 +453,7 @@ updates:
     cargo: false
     npm: false
 "#,
-    )
-    .unwrap();
+    );
 
     for command in ["apply", "update"] {
         Command::cargo_bin("cozydot")
@@ -435,7 +522,7 @@ fn rust_update_without_apply_selector_updates_installed_toolchains() {
         "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n",
         "version: 1.0.0\nupdates:\n  tools:\n    rust: true\n  packages:\n    cargo: true\n",
     ] {
-        fs::write(config_home.join("cozydot/cozydot.yaml"), config).unwrap();
+        fs::write(config_home.join("cozydot/cozydot.yaml"), v1_config(config)).unwrap();
         fs::write(&log, "").unwrap();
         Command::cargo_bin("cozydot")
             .unwrap()
@@ -563,7 +650,7 @@ fn apt_repository_ownership_validation_is_platform_aware() {
         let temp = tempfile::tempdir().unwrap();
         let config_dir = temp.path().join("cozydot");
         fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), v1_config(&config)).unwrap();
         Command::cargo_bin("cozydot")
             .unwrap()
             .env("XDG_CONFIG_HOME", temp.path())
@@ -591,7 +678,7 @@ fn apt_repository_ownership_validation_is_platform_aware() {
         let temp = tempfile::tempdir().unwrap();
         let config_dir = temp.path().join("cozydot");
         fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("cozydot.yaml"), config).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), v1_config(&config)).unwrap();
         Command::cargo_bin("cozydot")
             .unwrap()
             .env("XDG_CONFIG_HOME", temp.path())
@@ -612,8 +699,8 @@ fn configured_urls_accept_http_credentials_and_fragments() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("url.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 packages:
   binaries:
@@ -626,8 +713,7 @@ packages:
           arm64: http://user:password@example.com/probe.deb#asset
           arm32: http://user:password@example.com/probe.deb#asset
 "#,
-    )
-    .unwrap();
+    );
     write_executable(
         &fake_bin.join("curl"),
         r#"#!/bin/sh
@@ -667,9 +753,9 @@ fn inapplicable_repository_skips_its_packages_and_side_effects() {
     let log = temp.path().join("side-effects.log");
     fs::create_dir_all(&config_dir).unwrap();
     let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
-    fs::write(
-        config_dir.join("cozydot.yaml"),
-        format!(
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
+        &format!(
             r#"version: 1.0.0
 packages:
   apt:
@@ -686,8 +772,7 @@ packages:
         packages: [must-not-install]
 "#
         ),
-    )
-    .unwrap();
+    );
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     for command in ["curl", "gpg", "sudo", "dpkg-query"] {
         write_executable(
@@ -723,13 +808,12 @@ fn binaries_without_a_native_architecture_url_are_noops() {
         architecture => panic!("unsupported test architecture: {architecture}"),
     };
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
-        format!(
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
+        &format!(
             "version: 1.0.0\npackages:\n  binaries:\n    - name: absent-native-deb\n      format: deb\n      source:\n        provider: url\n        urls:\n          {selector}: https://example.com/absent.deb\n    - name: absent-native-appimage\n      format: appimage\n      source:\n        provider: url\n        urls:\n          {selector}: https://example.com/absent.AppImage\n"
         ),
-    )
-    .unwrap();
+    );
     for command in ["curl", "sudo"] {
         write_executable(
             &fake_bin.join(command),
@@ -760,8 +844,8 @@ fn repository_rendering_resolves_system_suite_and_passes_apt_values_through() {
     let state = temp.path().join("state");
     fs::create_dir_all(&config_dir).unwrap();
     fs::create_dir_all(&state).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 packages:
   apt:
@@ -783,8 +867,7 @@ packages:
         components: ["component/value", "component/value"]
         packages: []
 "#,
-    )
-    .unwrap();
+    );
     write_executable(
         &fake_bin.join("curl"),
         r#"#!/bin/sh
@@ -885,7 +968,7 @@ fn apt_repository_conflict_config(with_updates: bool) -> String {
         "linuxmint" => "pop",
         distro => panic!("unsupported test distro: {distro}"),
     };
-    format!(
+    v1_config(&format!(
         r#"version: 1.0.0
 packages:
   apt:
@@ -905,7 +988,7 @@ packages:
 {}
 "#,
         if with_updates { "updates:\n  apt: standard" } else { "" }
-    )
+    ))
 }
 
 fn write_apt_repository_fakes(fake_bin: &Path) {
@@ -1129,8 +1212,8 @@ fn apt_update_converges_applicable_repository_without_targets() {
     for package in ["ca-certificates", "curl", "gnupg"] {
         fs::write(state.join("packages").join(package), "").unwrap();
     }
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 packages:
   apt:
@@ -1146,8 +1229,7 @@ packages:
 updates:
   apt: standard
 "#,
-    )
-    .unwrap();
+    );
     write_apt_repository_fakes(&fake_bin);
 
     run_apt_command("update", &config_home, &fake_bin, &state, &log);
@@ -1166,7 +1248,7 @@ fn apt_inspection_operational_failure_does_not_guess_package_state() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("sudo.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\npackages:\n  apt:\n    install: [ripgrep]\n").unwrap();
+    write_v1_config(&config_dir.join("cozydot.yaml"), "version: 1.0.0\npackages:\n  apt:\n    install: [ripgrep]\n");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'database failure\\n' >&2\nexit 2\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
@@ -1217,8 +1299,8 @@ fn mixed_package_states_keep_apply_missing_only_and_update_ecosystems() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("packages.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 packages:
   cargo: [ripgrep, bat, probe]
@@ -1236,8 +1318,7 @@ updates:
     cargo: true
     npm: true
 "#,
-    )
-    .unwrap();
+    );
 
     write_executable(
         &cargo_home.join("bin/rustup"),
@@ -1354,11 +1435,10 @@ fn docker_logging_passes_max_size_through_to_daemon_json() {
     let fake_bin = temp.path().join("bin");
     let captured = temp.path().join("daemon.json");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         "version: 1.0.0\nintegrations:\n  docker:\n    logging:\n      driver: local\n      max_size: native-tool-value\n",
-    )
-    .unwrap();
+    );
     write_executable(&fake_bin.join("docker"), "#!/bin/sh\nexit 0\n");
     write_executable(
         &fake_bin.join("sudo"),
@@ -1396,11 +1476,10 @@ fn gnome_extension_state_uses_exact_info_query() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("gnome.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         "version: 1.0.0\ndesktop:\n  gnome:\n    extensions: [installed@example.com, absent@example.com]\n",
-    )
-    .unwrap();
+    );
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nexit 0\n");
     write_executable(
         &fake_bin.join("gnome-extensions"),
@@ -1449,11 +1528,10 @@ fn python_update_control_validates_and_apply_uses_local_state() {
     let config_dir = temp.path().join("cozydot");
     let log = temp.path().join("tools.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         "version: 1.0.0\ntools:\n  python: \"3.13\"\nupdates:\n  tools:\n    python: true\n",
-    )
-    .unwrap();
+    );
     write_executable(&home.join(".local/bin/uv"), "#!/bin/sh\nprintf 'uv %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
     let fake_bin = temp.path().join("bin");
     write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 99\n");
@@ -1483,11 +1561,10 @@ fn toolchains_delegate_convergence_to_native_managers() {
     let config_dir = config_home.join("cozydot");
     let log = temp.path().join("manager.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         "version: 1.0.0\ntools:\n  rust: stable\n  node: latest\n  python: \"3.13\"\nupdates:\n  tools:\n    rust: true\n    node: true\n    python: true\n",
-    )
-    .unwrap();
+    );
 
     let recorder = "#!/bin/sh\nprintf '%s %s\\n' \"${0##*/}\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\n";
     write_executable(&home.join(".cargo/bin/rustup"), recorder);
@@ -1564,7 +1641,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
         )
     );
 
-    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\ntools:\n  node: lts\n").unwrap();
+    write_v1_config(&config_dir.join("cozydot.yaml"), "version: 1.0.0\ntools:\n  node: lts\n");
     fs::write(&log, "").unwrap();
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -1582,11 +1659,10 @@ fn toolchains_delegate_convergence_to_native_managers() {
         "fnm exec --using lts-latest -- node --version\nfnm default -- lts-latest\n"
     );
 
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         "version: 1.0.0\ntools:\n  node: \"20\"\nupdates:\n  tools:\n    node: true\n",
-    )
-    .unwrap();
+    );
     fs::write(&log, "").unwrap();
     Command::cargo_bin("cozydot")
         .unwrap()
@@ -1612,7 +1688,7 @@ fn nerd_fonts_install_system_wide_after_download() {
     let log = temp.path().join("fonts.log");
     let family = format!("CozydotTestFont{}", std::process::id());
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), format!("version: 1.0.0\nfonts:\n  nerd: [{family}]\n")).unwrap();
+    write_v1_config(&config_dir.join("cozydot.yaml"), &format!("version: 1.0.0\nfonts:\n  nerd: [{family}]\n"));
     write_executable(&fake_bin.join("curl"), "#!/bin/sh\nprintf 'curl %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
 
@@ -1647,7 +1723,7 @@ fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("go.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), "version: 1.0.0\ntools:\n  go: \"99.88\"\n").unwrap();
+    write_v1_config(&config_dir.join("cozydot.yaml"), "version: 1.0.0\ntools:\n  go: \"99.88\"\n");
 
     let archive_arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -1687,7 +1763,7 @@ fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
     assert!(log.contains(&format!("go99.88.5.linux-{archive_arch}.tar.gz")));
     assert!(!log.contains(&format!("go99.89.1.linux-{archive_arch}.tar.gz\n")));
     assert!(log.contains("sudo rm -rf -- /usr/local/go\n"));
-    assert!(log.contains("sudo tar --extract --gzip --directory /usr/local --file"));
+    assert!(log.contains("sudo tar -xzf "));
     assert!(!log.contains("sha256sum"));
     assert!(!log.contains("go-stage"));
     assert!(!log.contains("sudo mv"));
@@ -1702,8 +1778,8 @@ fn deb_binary_uses_name_as_command_and_installs_only_when_missing() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("binary.log");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 packages:
   binaries:
@@ -1717,8 +1793,7 @@ packages:
           arm64: ""
           arm32: ""
 "#,
-    )
-    .unwrap();
+    );
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\n/usr/bin/uname \"$@\"\n");
     write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'not-installed\\n'\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
@@ -1777,8 +1852,8 @@ fn appimaged_is_ensured_once_before_appimages_are_published() {
     let sudo_log = temp.path().join("sudo.log");
     let corrupt_launch = temp.path().join("corrupt-appimaged-launched");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(
-        config_dir.join("cozydot.yaml"),
+    write_v1_config(
+        &config_dir.join("cozydot.yaml"),
         r#"version: 1.0.0
 packages:
   binaries:
@@ -1811,8 +1886,7 @@ packages:
 integrations:
   appimaged: true
 "#,
-    )
-    .unwrap();
+    );
 
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_SUDO_LOG\"\n");
     write_executable(&fake_bin.join("apt-cache"), "#!/bin/sh\nexit 0\n");

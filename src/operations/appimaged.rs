@@ -123,7 +123,7 @@ fn resolve_asset(host: &Host, architecture: Architecture) -> Result<Url> {
         .context("appimaged release JSON is missing assets")?;
     let suffix = match architecture {
         Architecture::Amd64 => "-x86_64.AppImage",
-        Architecture::Arm64 => "-aarch64.AppImage",
+        Architecture::Arm64 | Architecture::DarwinArm64 => "-aarch64.AppImage",
         Architecture::Arm32 => "-armhf.AppImage",
     };
     let matches = assets
@@ -147,7 +147,7 @@ fn require_elf(path: &Path, architecture: Architecture) -> Result<()> {
     let mut header = [0; 20];
     let expected_machine = match architecture {
         Architecture::Amd64 => 62,
-        Architecture::Arm64 => 183,
+        Architecture::Arm64 | Architecture::DarwinArm64 => 183,
         Architecture::Arm32 => 40,
     };
     if !metadata.file_type().is_file()

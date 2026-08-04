@@ -95,15 +95,7 @@ pub(crate) fn execute_go(
     host.require(
         "Go toolchain publication",
         "sudo",
-        [
-            "tar".as_ref(),
-            "--extract".as_ref(),
-            "--gzip".as_ref(),
-            "--directory".as_ref(),
-            "/usr/local".as_ref(),
-            "--file".as_ref(),
-            archive.path().as_os_str(),
-        ],
+        ["tar", "-xzf", archive.path().to_str().context("Go archive path is not UTF-8")?, "-C", "/usr/local"],
     )?;
     Ok(())
 }
@@ -178,10 +170,12 @@ mod resolution {
                 "https://go.dev/dl/?mode=json&include=all",
             ],
         )?;
+        let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
         let (version, filename) = super::super::latest_go(
             std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,
             requested,
             architecture.go_archive(),
+            target_os,
         )?;
         Ok(GoRelease { version, filename })
     }
@@ -220,10 +214,12 @@ mod state {
     pub(super) fn parse_go_state(output: &[u8]) -> Result<GoState> {
         let output = single_line(output, "go version")?;
         let fields = output.split_whitespace().collect::<Vec<_>>();
+        let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
         if fields.len() != 4
             || fields[0] != "go"
             || fields[1] != "version"
-            || fields[3] != "linux/amd64" && fields[3] != "linux/arm64" && fields[3] != "linux/arm"
+            || !matches!(fields[3], "linux/amd64" | "linux/arm64" | "linux/arm" | "darwin/amd64" | "darwin/arm64")
+            || !fields[3].starts_with(target_os)
         {
             bail!("go returned malformed version state");
         }
@@ -231,7 +227,10 @@ mod state {
             .strip_prefix("go")
             .filter(|version| numeric_version(version, 2, 3))
             .context("go returned malformed version state")?;
-        Ok(GoState { version: version.to_owned(), architecture: fields[3].trim_start_matches("linux/").to_owned() })
+        Ok(GoState {
+            version: version.to_owned(),
+            architecture: fields[3].trim_start_matches(&format!("{target_os}/")).to_owned(),
+        })
     }
 
     pub(super) fn resolve_fnm(host: &Host) -> Result<String> {

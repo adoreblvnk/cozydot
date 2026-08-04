@@ -1,5 +1,6 @@
 mod appimaged;
 mod binary;
+pub(crate) mod macos;
 
 mod repository;
 mod system;
@@ -67,6 +68,13 @@ pub enum Operation {
     GnomeRoundedCorners,
     AptUpgrade { policy: AptUpgradePolicy },
     FlatpakUpdateApps,
+    HomebrewBootstrap,
+    HomebrewPackages { formulae: Vec<String>, casks: Vec<String> },
+    XcodeCommandLineTools,
+    Rosetta,
+    UserNerdFonts { families: Vec<String>, mode: packages::fonts::NerdFontsMode },
+    MacDefaults { settings: Vec<macos::MacDefault> },
+    HomebrewUpdate { formulae: bool, casks: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +121,13 @@ impl Operation {
             Self::GnomeRoundedCorners => "GNOME rounded corners",
             Self::AptUpgrade { .. } => "APT upgrade",
             Self::FlatpakUpdateApps => "Flatpak application updates",
+            Self::HomebrewBootstrap => "Homebrew bootstrap",
+            Self::HomebrewPackages { .. } => "Homebrew packages",
+            Self::XcodeCommandLineTools => "Xcode command line tools",
+            Self::Rosetta => "Rosetta",
+            Self::UserNerdFonts { .. } => "user Nerd Fonts",
+            Self::MacDefaults { .. } => "macOS defaults",
+            Self::HomebrewUpdate { .. } => "Homebrew updates",
         }
     }
 }
@@ -122,6 +137,19 @@ pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
 }
 
 fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
+    if matches!(
+        operation,
+        Operation::HomebrewBootstrap
+            | Operation::HomebrewPackages { .. }
+            | Operation::XcodeCommandLineTools
+            | Operation::Rosetta
+            | Operation::UserNerdFonts { .. }
+            | Operation::MacDefaults { .. }
+            | Operation::HomebrewUpdate { .. }
+    ) && !cfg!(target_os = "macos")
+    {
+        bail!("macOS operation cannot execute on this host")
+    }
     match operation {
         Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
         Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
@@ -164,6 +192,13 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
         Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
         Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
+        Operation::HomebrewBootstrap => completed(macos::bootstrap(&host)),
+        Operation::HomebrewPackages { formulae, casks } => completed(macos::packages(&host, formulae, casks)),
+        Operation::XcodeCommandLineTools => completed(macos::xcode_command_line_tools(&host)),
+        Operation::Rosetta => completed(macos::rosetta(&host)),
+        Operation::UserNerdFonts { families, mode } => completed(packages::fonts::execute_user(&host, families, *mode)),
+        Operation::MacDefaults { settings } => completed(macos::defaults(&host, settings)),
+        Operation::HomebrewUpdate { formulae, casks } => completed(macos::update(&host, *formulae, *casks)),
     }
 }
 
@@ -891,7 +926,22 @@ pub(crate) mod packages {
         }
 
         pub(crate) fn execute(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
-            let parent = Path::new(FONT_ROOT);
+            execute_at(host, families, mode, Path::new(FONT_ROOT), true)
+        }
+
+        pub(crate) fn execute_user(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
+            let parent = host.home().join("Library/Fonts");
+            fs::create_dir_all(&parent).context("create user font directory")?;
+            execute_at(host, families, mode, &parent, false)
+        }
+
+        fn execute_at(
+            host: &Host,
+            families: &[String],
+            mode: NerdFontsMode,
+            parent: &Path,
+            privileged: bool,
+        ) -> Result<()> {
             let mut changed = false;
             for family in families {
                 let destination = parent.join(family);
@@ -904,11 +954,11 @@ pub(crate) mod packages {
                     }
                 };
                 if mode == NerdFontsMode::Update || !is_present {
-                    install_family(host, family, &destination)?;
+                    install_family(host, family, &destination, privileged)?;
                     changed = true;
                 }
             }
-            if changed {
+            if changed && privileged {
                 host.require(
                     "Nerd Font cache refresh",
                     "sudo",
@@ -918,7 +968,7 @@ pub(crate) mod packages {
             Ok(())
         }
 
-        fn install_family(host: &Host, family: &str, destination: &Path) -> Result<()> {
+        fn install_family(host: &Host, family: &str, destination: &Path, privileged: bool) -> Result<()> {
             let archive = TempPath::new_with_suffix(host, "nerd-font", ".tar.xz")?;
             let mut url =
                 Url::parse("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/placeholder.tar.xz")?;
@@ -945,35 +995,25 @@ pub(crate) mod packages {
                     url.as_str().as_ref(),
                 ],
             )?;
-            host.require(
-                "Nerd Font destination replacement",
-                "sudo",
-                [
-                    OsStr::new("rm"),
-                    OsStr::new("--recursive"),
-                    OsStr::new("--force"),
-                    OsStr::new("--"),
-                    destination.as_os_str(),
-                ],
-            )?;
-            host.require(
-                "Nerd Font destination creation",
-                "sudo",
-                [OsStr::new("mkdir"), OsStr::new("--parents"), OsStr::new("--"), destination.as_os_str()],
-            )?;
-            host.require(
-                "Nerd Font archive extraction",
-                "sudo",
-                [
-                    OsStr::new("tar"),
-                    OsStr::new("--extract"),
-                    OsStr::new("--xz"),
-                    OsStr::new("--directory"),
-                    destination.as_os_str(),
-                    OsStr::new("--file"),
-                    archive.path().as_os_str(),
-                ],
-            )?;
+            let path = destination.to_str().context("font path is not UTF-8")?;
+            let archive_path = archive.path().to_str().context("font archive path is not UTF-8")?;
+            if privileged {
+                host.require(
+                    "Nerd Font destination replacement",
+                    "sudo",
+                    ["rm", "--recursive", "--force", "--", path],
+                )?;
+                host.require("Nerd Font destination creation", "sudo", ["mkdir", "--parents", "--", path])?;
+                host.require(
+                    "Nerd Font archive extraction",
+                    "sudo",
+                    ["tar", "--extract", "--xz", "--directory", path, "--file", archive_path],
+                )?;
+            } else {
+                host.require("Nerd Font destination replacement", "rm", ["-rf", path])?;
+                host.require("Nerd Font destination creation", "mkdir", ["-p", path])?;
+                host.require("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;
+            }
             Ok(())
         }
     }
@@ -1076,11 +1116,9 @@ pub(crate) mod packages {
                 let backup = backup_root.join(relative);
                 let parent = backup.parent().context("dotfiles backup has no parent")?;
                 fs::create_dir_all(parent).context("create dotfiles backup directory")?;
-                host.require(
-                    "dotfiles conflict backup",
-                    "mv",
-                    ["--no-clobber".as_ref(), "--".as_ref(), conflict.as_os_str(), backup.as_os_str()],
-                )?;
+                fs::rename(conflict, &backup).with_context(|| {
+                    format!("move dotfiles conflict {} to {}", conflict.display(), backup.display())
+                })?;
                 if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err() {
                     bail!("dotfiles conflict backup did not move {} to {}", conflict.display(), backup.display());
                 }
@@ -1096,7 +1134,7 @@ pub(crate) mod packages {
     }
 }
 
-pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Result<(String, String)> {
+pub(super) fn latest_go(input: &str, requested: &str, arch: &str, target_os: &str) -> anyhow::Result<(String, String)> {
     use anyhow::Context;
     let value: serde_json::Value = serde_json::from_str(input).context("parse Go release JSON")?;
     let releases = value.as_array().context("Go metadata must be an array")?;
@@ -1111,7 +1149,7 @@ pub(super) fn latest_go(input: &str, requested: &str, arch: &str) -> anyhow::Res
                 || v.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
         })
         .context("Go metadata has no matching stable release")?;
-    let filename = format!("go{version}.linux-{arch}.tar.gz");
+    let filename = format!("go{version}.{target_os}-{arch}.tar.gz");
     releases
         .iter()
         .find(|release| release["version"].as_str() == Some(&format!("go{version}")))

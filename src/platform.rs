@@ -15,11 +15,27 @@ pub struct Platform {
 
 impl Platform {
     pub fn detect() -> Result<Self> {
+        if cfg!(target_os = "macos") {
+            let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
+            let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
+            return Self::from_release_parts(
+                "macos".into(),
+                "macos".into(),
+                String::new(),
+                String::new(),
+                "none".into(),
+                &arch,
+            );
+        }
         let os = OsRelease::open().context("read os-release")?;
         let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
         let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
         let desktop = normalize_desktop(std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().as_str());
         Self::from_os_release(&os, desktop, &arch)
+    }
+
+    pub fn is_macos(&self) -> bool {
+        self.distro == "macos"
     }
 
     pub fn from_release_parts(
@@ -30,7 +46,11 @@ impl Platform {
         desktop: String,
         arch: &str,
     ) -> Result<Self> {
-        let architecture = Architecture::normalize(arch)?;
+        let architecture = if distro == "macos" && matches!(arch, "aarch64" | "arm64") {
+            Architecture::DarwinArm64
+        } else {
+            Architecture::normalize(arch)?
+        };
         Ok(Self {
             distro,
             upstream,
@@ -146,6 +166,7 @@ pub enum Architecture {
     Amd64,
     Arm64,
     Arm32,
+    DarwinArm64,
 }
 
 impl Architecture {
@@ -163,6 +184,7 @@ impl Architecture {
             Self::Amd64 => "amd64",
             Self::Arm64 => "arm64",
             Self::Arm32 => "arm32",
+            Self::DarwinArm64 => "darwin-arm64",
         }
     }
 
@@ -171,6 +193,7 @@ impl Architecture {
             Self::Amd64 => "amd64",
             Self::Arm64 => "arm64",
             Self::Arm32 => "armhf",
+            Self::DarwinArm64 => "arm64",
         }
     }
 
@@ -179,12 +202,14 @@ impl Architecture {
             Self::Amd64 => "amd64",
             Self::Arm64 => "arm64",
             Self::Arm32 => "arm",
+            Self::DarwinArm64 => "arm64",
         }
     }
 
     pub fn go_archive(self) -> &'static str {
         match self {
             Self::Arm32 => "armv6l",
+            Self::DarwinArm64 => "arm64",
             other => other.go(),
         }
     }
@@ -298,4 +323,33 @@ fn normalize_desktop(value: &str) -> String {
         })
         .unwrap_or("none")
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Architecture, Platform};
+
+    #[test]
+    fn darwin_arm64_is_distinct_from_linux_arm64() {
+        let mac = Platform::from_release_parts(
+            "macos".into(),
+            "macos".into(),
+            String::new(),
+            String::new(),
+            "none".into(),
+            "arm64",
+        )
+        .unwrap();
+        let linux = Platform::from_release_parts(
+            "ubuntu".into(),
+            "ubuntu".into(),
+            "noble".into(),
+            "noble".into(),
+            "gnome".into(),
+            "arm64",
+        )
+        .unwrap();
+        assert_eq!(mac.architecture, Architecture::DarwinArm64);
+        assert_eq!(linux.architecture, Architecture::Arm64);
+    }
 }

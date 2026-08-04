@@ -2,7 +2,7 @@
 name = "cozydot"
 version = "0.0.1"
 edition = "2024"
-description = "Declarative Linux post-install, update, and dotfile manager"
+description = "Declarative Linux and macOS post-install, update, and dotfile manager"
 license = "MIT"
 repository = "https://github.com/adoreblvnk/cozydot"
 publish = false
