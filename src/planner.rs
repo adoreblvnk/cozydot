@@ -84,15 +84,14 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     let mut needs_direct_apt_refresh = false;
     let mut needs_repository_refresh = false;
 
-    let packages = config.packages.as_ref();
-    let apt = packages.and_then(|packages| packages.apt.as_ref());
+    let linux = &config.os.linux;
+    let apt = linux.packages.apt.as_ref();
 
-    if config.system.as_ref().is_some_and(|system| system.ensure_admin == Some(true)) {
+    if linux.system.ensure_admin == Some(true) {
         push_operation(&mut phases, PlannerPhase::AdministrativeVerification, Operation::EnsureAdmin);
     }
 
-    if let Some(sources) =
-        config.system.as_ref().and_then(|system| system.apt.as_ref()).and_then(|apt| apt.sources.as_ref())
+    if let Some(sources) = linux.system.apt.as_ref().and_then(|apt| apt.sources.as_ref())
         && sources.mode == SourceMode::Managed
     {
         let managed =
@@ -139,9 +138,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         }
     }
 
-    if let Some(applications) =
-        packages.and_then(|packages| packages.flatpak.as_ref()).filter(|values| !values.is_empty())
-    {
+    if let Some(applications) = linux.packages.flatpak.as_ref().filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Flatpak);
@@ -152,7 +149,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         );
     }
 
-    if let Some(cargo) = packages.and_then(|packages| packages.cargo.as_ref()).filter(|values| !values.is_empty()) {
+    if let Some(cargo) = config.shared.packages.cargo.as_ref().filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Rustup);
@@ -163,7 +160,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             Operation::CargoPackageSet { packages: cargo.clone(), mode: CargoPackageMode::EnsurePresent },
         );
     }
-    if let Some(npm) = packages.and_then(|packages| packages.npm.as_ref()).filter(|values| !values.is_empty()) {
+    if let Some(npm) = config.shared.packages.npm.as_ref().filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Fnm);
@@ -176,8 +173,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
 
     plan_appimaged(config, platform, &mut phases, &mut prerequisites);
 
-    if let Some(binaries) = packages.and_then(|packages| packages.binaries.as_ref()).filter(|values| !values.is_empty())
-    {
+    if let Some(binaries) = linux.packages.binaries.as_ref().filter(|values| !values.is_empty()) {
         for binary in binaries {
             let Some(planned) = plan_binary(binary, platform.architecture) else {
                 continue;
@@ -191,8 +187,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         }
     }
 
-    if let Some(fonts) = config.fonts.as_ref().and_then(|fonts| fonts.nerd.as_ref()).filter(|values| !values.is_empty())
-    {
+    if let Some(fonts) = config.shared.fonts.nerd.as_ref().filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         prerequisites.insert("tar");
@@ -205,7 +200,9 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         );
     }
 
-    if let Some(dotfiles) = config.dotfiles.as_ref().filter(|dotfiles| !dotfiles.packages.is_empty()) {
+    let dotfiles =
+        config.shared.dotfiles.packages.iter().chain(linux.dotfiles.packages.iter()).cloned().collect::<Vec<_>>();
+    if !dotfiles.is_empty() {
         if dotfiles_root.as_os_str().is_empty() {
             anyhow::bail!("dotfiles root must not be empty");
         }
@@ -213,7 +210,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         push_operation(
             &mut phases,
             PlannerPhase::Dotfiles,
-            Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages: dotfiles.packages.clone() },
+            Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages: dotfiles },
         );
     }
 
@@ -262,9 +259,9 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         return plan_macos_update(config, platform.architecture);
     }
     validate_binary_integrations(config, platform.architecture)?;
-    let Some(updates) = &config.updates else {
-        return Ok(Vec::new());
-    };
+    let linux = &config.os.linux;
+    let updates = linux.updates.as_ref();
+    let shared_updates = &config.shared.updates;
     let mut phases = [
         (PlannerPhase::SystemPrerequisites, Vec::new()),
         (PlannerPhase::ManagerBootstraps, Vec::new()),
@@ -278,14 +275,14 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         (PlannerPhase::LanguagePackages, Vec::new()),
         (PlannerPhase::Fonts, Vec::new()),
     ];
-    let packages = config.packages.as_ref();
-    let tools = config.tools.as_ref();
+    let packages = &linux.packages;
+    let tools = &config.shared.tools;
     let mut prerequisites = BTreeSet::new();
     let mut managers = BTreeSet::new();
 
-    if let Some(policy) = updates.apt {
+    if let Some(policy) = updates.and_then(|updates| updates.apt) {
         let identity = resolve_platform_identity(platform)?;
-        let apt = packages.and_then(|packages| packages.apt.as_ref());
+        let apt = packages.apt.as_ref();
         let mut direct =
             apt.and_then(|apt| apt.install.as_ref()).into_iter().flatten().cloned().collect::<BTreeSet<_>>();
         if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
@@ -311,9 +308,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
                 }
             }
         }
-        if config.system.as_ref().and_then(|system| system.ubuntu.as_ref()).is_some_and(|ubuntu| ubuntu.codecs)
-            && platform.upstream == "ubuntu"
-        {
+        if linux.system.ubuntu.as_ref().is_some_and(|ubuntu| ubuntu.codecs) && platform.upstream == "ubuntu" {
             direct.insert("ubuntu-restricted-extras".into());
         }
 
@@ -336,24 +331,24 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
             },
         );
     }
-    if updates.flatpak == Some(true) {
+    if updates.and_then(|updates| updates.flatpak) == Some(true) {
         prerequisites.insert("flatpak");
         push_operation(&mut phases, PlannerPhase::FlatpakApplications, Operation::FlatpakUpdateApps);
     }
 
-    let tool_updates = updates.tools.as_ref();
+    let tool_updates = Some(&shared_updates.tools);
     let rust_update = tool_updates.is_some_and(|updates| updates.rust == Some(true));
     let go_update = tool_updates.is_some_and(|updates| updates.go == Some(true));
     let node_update = tool_updates.is_some_and(|updates| updates.node == Some(true));
     let python_update = tool_updates.is_some_and(|updates| updates.python == Some(true));
-    let package_updates = updates.packages.as_ref();
+    let package_updates = Some(&shared_updates.packages);
     let cargo_update = package_updates.is_some_and(|updates| updates.cargo == Some(true));
     let npm_update = package_updates.is_some_and(|updates| updates.npm == Some(true));
 
     if rust_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Rustup);
-        let selector = tools.and_then(|tools| tools.rust.clone());
+        let selector = tools.rust.clone();
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -362,7 +357,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     }
     if go_update {
         prerequisites.extend(["ca-certificates", "curl", "tar"]);
-        let selector = tools.and_then(|tools| tools.go.as_deref()).unwrap_or("latest");
+        let selector = tools.go.as_deref().unwrap_or("latest");
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -376,7 +371,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if node_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Fnm);
-        let selector = tools.and_then(|tools| tools.node.clone()).unwrap_or_else(|| "latest".to_owned());
+        let selector = tools.node.clone().unwrap_or_else(|| "latest".to_owned());
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -386,7 +381,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if python_update {
         prerequisites.extend(["ca-certificates", "curl"]);
         managers.insert(ManagerBootstrap::Uv);
-        let version = tools.and_then(|tools| tools.python.clone()).unwrap_or_else(|| "3".to_owned());
+        let version = tools.python.clone().unwrap_or_else(|| "3".to_owned());
         push_operation(
             &mut phases,
             PlannerPhase::LanguageToolchains,
@@ -407,8 +402,8 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
             Operation::NpmPackageSet { packages: Vec::new(), mode: NpmPackageMode::UpdateCurrent },
         );
     }
-    if updates.fonts == Some(true) {
-        let families = config.fonts.as_ref().and_then(|fonts| fonts.nerd.clone()).unwrap_or_default();
+    if shared_updates.fonts == Some(true) {
+        let families = config.shared.fonts.nerd.clone().unwrap_or_default();
         if !families.is_empty() {
             prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"]);
             push_operation(
@@ -609,13 +604,12 @@ fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerP
 }
 
 fn validate_binary_integrations(config: &Config, architecture: Architecture) -> Result<()> {
-    let has_appimage =
-        config.packages.as_ref().and_then(|packages| packages.binaries.as_ref()).is_some_and(|binaries| {
-            binaries
-                .iter()
-                .any(|binary| binary.format == BinaryFormat::Appimage && plan_binary(binary, architecture).is_some())
-        });
-    if has_appimage && config.integrations.as_ref().and_then(|integrations| integrations.appimaged) != Some(true) {
+    let has_appimage = config.os.linux.packages.binaries.as_ref().is_some_and(|binaries| {
+        binaries
+            .iter()
+            .any(|binary| binary.format == BinaryFormat::Appimage && plan_binary(binary, architecture).is_some())
+    });
+    if has_appimage && config.os.linux.integrations.appimaged != Some(true) {
         anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
     }
     Ok(())
@@ -627,7 +621,7 @@ fn plan_system_states(
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     needs_apt_refresh: &mut bool,
 ) {
-    let Some(system) = &config.system else { return };
+    let system = &config.os.linux.system;
     if let Some(state) = system.apt.as_ref().and_then(|apt| apt.unattended_upgrades) {
         push_operation(
             phases,
@@ -665,7 +659,7 @@ fn plan_tools(
     prerequisites: &mut BTreeSet<&'static str>,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) {
-    let Some(tools) = &config.tools else { return };
+    let tools = &config.shared.tools;
     if let Some(selector) = tools.rust.as_deref() {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
@@ -757,7 +751,7 @@ fn plan_appimaged(
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
 ) {
-    if config.integrations.as_ref().is_some_and(|integrations| integrations.appimaged == Some(true)) {
+    if config.os.linux.integrations.appimaged == Some(true) {
         prerequisites.extend(["ca-certificates", "curl"]);
         push_operation(
             phases,
@@ -779,7 +773,7 @@ fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture
 }
 
 fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation>)]) {
-    let Some(integrations) = &config.integrations else { return };
+    let integrations = &config.os.linux.integrations;
     if let Some(docker) = &integrations.docker {
         if docker.add_user_to_group == Some(true) {
             push_operation(phases, PlannerPhase::Integrations, Operation::DockerGroup);
@@ -795,9 +789,8 @@ fn plan_integrations(config: &Config, phases: &mut [(PlannerPhase, Vec<Operation
     if integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true)) {
         push_operation(phases, PlannerPhase::Integrations, Operation::VirtualBoxGroup);
     }
-    if let Some(extensions) =
-        integrations.vscode.as_ref().map(|vscode| vscode.extensions.clone()).filter(|values| !values.is_empty())
-    {
+    if !config.shared.integrations.vscode.extensions.is_empty() {
+        let extensions = config.shared.integrations.vscode.extensions.clone();
         push_operation(phases, PlannerPhase::Integrations, Operation::VsCodeExtensionSet { extensions });
     }
 }
@@ -808,7 +801,7 @@ fn plan_desktop(
     phases: &mut [(PlannerPhase, Vec<Operation>)],
     prerequisites: &mut BTreeSet<&'static str>,
 ) {
-    let Some(desktop) = config.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
+    let Some(desktop) = config.os.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
     let target = match platform.desktop.as_str() {
         "gnome" => DesktopEnvironment::Gnome,
         "cinnamon" => DesktopEnvironment::Cinnamon,

@@ -33,22 +33,6 @@ pub struct Config {
     pub version: ConfigVersion,
     pub shared: SharedConfig,
     pub os: OsConfig,
-    #[serde(skip)]
-    pub system: Option<System>,
-    #[serde(skip)]
-    pub packages: Option<Packages>,
-    #[serde(skip)]
-    pub tools: Option<Tools>,
-    #[serde(skip)]
-    pub fonts: Option<Fonts>,
-    #[serde(skip)]
-    pub dotfiles: Option<Dotfiles>,
-    #[serde(skip)]
-    pub integrations: Option<Integrations>,
-    #[serde(skip)]
-    pub desktop: Option<Desktop>,
-    #[serde(skip)]
-    pub updates: Option<Updates>,
 }
 
 impl Config {
@@ -64,8 +48,6 @@ impl Config {
             let path = if path == "." { "config" } else { path.as_str() };
             anyhow::anyhow!("{path}: {}", error.inner())
         })?;
-        let mut config = config;
-        config.expand_linux_model();
         config.validate()?;
         Ok(config)
     }
@@ -82,7 +64,7 @@ impl Config {
         let (distro, upstream) = (identity.distro, identity.upstream);
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
-        if let Some(require) = self.system.as_ref().and_then(|system| system.require.as_ref()) {
+        if let Some(require) = self.os.linux.system.require.as_ref() {
             if require.distros.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
                 bail!("system.require.distros: detected distribution {:?} is not allowed", platform.distro);
             }
@@ -91,16 +73,14 @@ impl Config {
             }
         }
 
-        if let Some(sources) =
-            self.system.as_ref().and_then(|system| system.apt.as_ref()).and_then(|apt| apt.sources.as_ref())
-        {
+        if let Some(sources) = self.os.linux.system.apt.as_ref().and_then(|apt| apt.sources.as_ref()) {
             sources.validate_for_platform(platform, distro, upstream)?;
         }
-        if let Some(apt) = self.packages.as_ref().and_then(|packages| packages.apt.as_ref()) {
+        if let Some(apt) = self.os.linux.packages.apt.as_ref() {
             apt.validate_ownership(distro, upstream)?;
         }
 
-        if let Some(configured) = &self.desktop
+        if let Some(configured) = &self.os.linux.desktop
             && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
         {
             if configured.has_neutral_intent() {
@@ -120,63 +100,25 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
-        if let Some(system) = &self.system {
-            system.validate()?;
-        }
-        if let Some(packages) = &self.packages {
-            packages.validate()?;
-        }
-        if let Some(fonts) = &self.fonts {
-            fonts.validate()?;
-        }
-        if let Some(dotfiles) = &self.dotfiles {
-            dotfiles.validate()?;
-        }
-        if let Some(desktop) = &self.desktop {
+        self.os.linux.system.validate()?;
+        self.os.linux.packages.validate()?;
+        self.shared.fonts.validate()?;
+        self.shared.dotfiles.validate()?;
+        self.os.linux.dotfiles.validate()?;
+        if let Some(desktop) = &self.os.linux.desktop {
             desktop.validate()?;
         }
-        if self.packages.as_ref().and_then(|packages| packages.cargo.as_ref()).is_some_and(|values| !values.is_empty())
-            && self.tools.as_ref().and_then(|tools| tools.rust.as_ref()).is_none()
+        if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
+            && self.shared.tools.rust.is_none()
         {
             bail!("packages.cargo: requires tools.rust");
         }
-        if self.packages.as_ref().and_then(|packages| packages.npm.as_ref()).is_some_and(|values| !values.is_empty())
-            && self.tools.as_ref().and_then(|tools| tools.node.as_ref()).is_none()
+        if self.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty())
+            && self.shared.tools.node.is_none()
         {
             bail!("packages.npm: requires tools.node");
         }
         Ok(())
-    }
-
-    fn expand_linux_model(&mut self) {
-        let linux = &self.os.linux;
-        self.system = Some(linux.system.clone());
-        self.tools = Some(self.shared.tools.clone());
-        self.fonts = Some(self.shared.fonts.clone());
-        self.packages = Some(Packages {
-            apt: linux.packages.apt.clone(),
-            flatpak: linux.packages.flatpak.clone(),
-            cargo: self.shared.packages.cargo.clone(),
-            npm: self.shared.packages.npm.clone(),
-            binaries: linux.packages.binaries.clone(),
-        });
-        self.dotfiles = Some(Dotfiles {
-            packages: self.shared.dotfiles.packages.iter().chain(linux.dotfiles.packages.iter()).cloned().collect(),
-        });
-        self.integrations = Some(Integrations {
-            appimaged: linux.integrations.appimaged,
-            docker: linux.integrations.docker.clone(),
-            virtualbox: linux.integrations.virtualbox.clone(),
-            vscode: Some(self.shared.integrations.vscode.clone()),
-        });
-        self.desktop = linux.desktop.clone();
-        self.updates = Some(Updates {
-            apt: linux.updates.as_ref().and_then(|updates| updates.apt),
-            flatpak: linux.updates.as_ref().and_then(|updates| updates.flatpak),
-            tools: Some(self.shared.updates.tools.clone()),
-            packages: Some(self.shared.updates.packages.clone()),
-            fonts: self.shared.updates.fonts,
-        });
     }
 
     pub fn macos(&self) -> &MacOsConfig {
@@ -884,7 +826,6 @@ pub struct Integrations {
     pub appimaged: Option<bool>,
     pub docker: Option<DockerIntegration>,
     pub virtualbox: Option<VirtualBoxIntegration>,
-    pub vscode: Option<VsCodeIntegration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1000,16 +941,6 @@ impl Gnome {
             || self.dock == Some(true)
             || self.rounded_corners == Some(true)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Updates {
-    pub apt: Option<AptUpdate>,
-    pub flatpak: Option<bool>,
-    pub tools: Option<ToolUpdates>,
-    pub packages: Option<PackageUpdates>,
-    pub fonts: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
