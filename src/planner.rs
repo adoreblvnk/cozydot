@@ -892,14 +892,14 @@ mod tests {
 
     #[test]
     fn full_example_parses_macos_configuration() {
-        let config = Config::parse(include_str!("../examples/full.yaml")).unwrap();
+        let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
         assert_eq!(config.macos().homebrew.formulae[0], "cmake");
         assert_eq!(config.macos().desktop.appearance, Some(Theme::Dark));
     }
 
     #[test]
     fn macos_planner_emits_native_operations() {
-        let mut config = Config::parse(include_str!("../examples/full.yaml")).unwrap();
+        let mut config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
         config.os.macos.system.rosetta = Some(true);
         let operations = plan_apply(&config, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap();
 

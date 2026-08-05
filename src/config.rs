@@ -1021,7 +1021,7 @@ mod tests {
 
     #[test]
     fn full_example_is_valid_v1_configuration() {
-        Config::parse(include_str!("../examples/full.yaml")).unwrap();
+        Config::parse(include_str!("../configs/full.yaml")).unwrap();
     }
 
     #[test]
