@@ -539,6 +539,9 @@ fn plan_shared_portable(config: &Config, architecture: Architecture, operations:
             .push(Operation::CargoPackageSet { packages: packages.clone(), mode: CargoPackageMode::EnsurePresent });
     }
     if let Some(packages) = &config.shared.packages.npm {
+        if !packages.is_empty() {
+            operations.push(Operation::FnmBootstrap);
+        }
         operations.push(Operation::NpmPackageSet { packages: packages.clone(), mode: NpmPackageMode::EnsurePresent });
     }
     if !config.shared.fonts.nerd.as_deref().unwrap_or_default().is_empty() {
@@ -559,6 +562,7 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
     }
     let tools = &config.shared.updates.tools;
     if tools.rust == Some(true) {
+        operations.push(Operation::RustupBootstrap);
         operations.push(Operation::RustToolchain {
             selector: config.shared.tools.rust.clone(),
             mode: ToolchainMode::ConvergeLatest,
@@ -572,12 +576,14 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
         });
     }
     if tools.node == Some(true) {
+        operations.push(Operation::FnmBootstrap);
         operations.push(Operation::NodeToolchain {
             selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".into()),
             mode: ToolchainMode::ConvergeLatest,
         });
     }
     if tools.python == Some(true) {
+        operations.push(Operation::UvBootstrap);
         operations.push(Operation::PythonToolchain {
             version: config.shared.tools.python.clone().unwrap_or_else(|| "latest".into()),
             mode: ToolchainMode::ConvergeLatest,
@@ -588,6 +594,7 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
         operations.push(Operation::CargoPackageSet { packages: Vec::new(), mode: CargoPackageMode::UpdateCurrent });
     }
     if packages.npm == Some(true) {
+        operations.push(Operation::FnmBootstrap);
         operations.push(Operation::NpmPackageSet { packages: Vec::new(), mode: NpmPackageMode::UpdateCurrent });
     }
     if config.shared.updates.fonts == Some(true) {
