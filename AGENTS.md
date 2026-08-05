@@ -29,3 +29,8 @@ Cozydot targets these Linux architectures:
 - x86_64
 - aarch64
 - ARMv7 (32-bit)
+
+Cozydot targets macOS on these architectures:
+
+- Apple Silicon (arm64)
+- Intel (x86_64)
