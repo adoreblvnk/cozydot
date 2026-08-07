@@ -1,8 +1,9 @@
-# bash better auto-completion from `man readline`
-set completion-ignore-case on
-set show-all-if-ambiguous on
+# source: /etc/inputrc
+# make autocompletion case insensitive and display suggestions
+set completion-ignore-case On
+set show-all-if-ambiguous On
 
-# up & down arrow to search history based on current string
+# up & down arrow to search the history
 "\e[A": history-search-backward
 "\e[B": history-search-forward
 

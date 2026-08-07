@@ -35,6 +35,8 @@ shared:
       - bin
       - bottom
       - fastfetch
+      - git
+      - gnupg
       - opencode
       - starship
       - vscode
@@ -336,7 +338,8 @@ os:
         - zen
 
     dotfiles:
-      packages: []
+      packages:
+        - zsh
 
     desktop:
       appearance: dark

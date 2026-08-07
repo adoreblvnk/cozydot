@@ -1,4 +1,4 @@
--- base config: https://wezterm.org/config/files.html
+-- source: https://wezterm.org/config/files.html
 -- Nerd Font icon order: fa, md, oct, pl
 local wezterm = require 'wezterm'
 local act = wezterm.action

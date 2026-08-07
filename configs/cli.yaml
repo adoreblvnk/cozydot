@@ -29,6 +29,8 @@ shared:
       - bin
       - bottom
       - fastfetch
+      - git
+      - gnupg
       - starship
       - yazi
   integrations:
@@ -182,7 +184,8 @@ os:
         - wezterm
         - zen
     dotfiles:
-      packages: []
+      packages:
+        - zsh
     desktop:
       appearance: dark
       dock:
