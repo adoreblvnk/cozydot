@@ -1022,6 +1022,7 @@ pub(crate) mod packages {
         use anyhow::{Context, Result, bail};
         use std::{
             fs,
+            os::unix::fs::PermissionsExt,
             path::{Path, PathBuf},
             time::{SystemTime, UNIX_EPOCH},
         };
@@ -1052,6 +1053,7 @@ pub(crate) mod packages {
             if !conflicts.is_empty() {
                 backup_conflicts(host, package, &conflicts)?;
             }
+            prepare_gnupg_home(&source, &host.home())?;
             host.require(
                 "dotfiles Stow mutation",
                 "stow",
@@ -1065,6 +1067,21 @@ pub(crate) mod packages {
                     package.as_ref(),
                 ],
             )?;
+            Ok(())
+        }
+
+        fn prepare_gnupg_home(source: &Path, home: &Path) -> Result<()> {
+            let source = source.join(".gnupg");
+            if !source.is_dir() {
+                return Ok(());
+            }
+
+            let target = home.join(".gnupg");
+            if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+                fs::remove_file(&target).context("replace folded GnuPG dotfiles directory")?;
+            }
+            fs::create_dir_all(&target).context("create GnuPG home")?;
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
             Ok(())
         }
 
@@ -1130,6 +1147,27 @@ pub(crate) mod packages {
             fs::canonicalize(target)
                 .and_then(|target| fs::canonicalize(source).map(|source| target == source))
                 .unwrap_or(false)
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use std::os::unix::fs::{PermissionsExt, symlink};
+
+            #[test]
+            fn gnupg_package_replaces_folded_directory_with_private_home() {
+                let package = tempfile::tempdir().unwrap();
+                let source = package.path().join(".gnupg");
+                fs::create_dir(&source).unwrap();
+                let home = tempfile::tempdir().unwrap();
+                symlink(&source, home.path().join(".gnupg")).unwrap();
+
+                prepare_gnupg_home(package.path(), home.path()).unwrap();
+
+                let metadata = fs::symlink_metadata(home.path().join(".gnupg")).unwrap();
+                assert!(metadata.is_dir());
+                assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+            }
         }
     }
 }

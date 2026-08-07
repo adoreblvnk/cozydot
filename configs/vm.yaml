@@ -23,6 +23,8 @@ shared:
       - bin
       - bottom
       - fastfetch
+      - git
+      - gnupg
       - starship
       - vscode
       - wezterm
@@ -198,7 +200,8 @@ os:
         - wezterm
         - zen
     dotfiles:
-      packages: []
+      packages:
+        - zsh
     desktop:
       appearance: dark
       dock:

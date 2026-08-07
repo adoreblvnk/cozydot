@@ -1,3 +1,4 @@
+# source: /etc/skel/.bashrc
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc) for examples
 
@@ -25,12 +26,11 @@ shopt -s checkwinsize
 # Add "alert" alias for long running commands. Use like `sleep 10; alert`
 alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
 
-# best practice to add alias definitions into separate file, eg ~/.bash_aliases
+# Alias definitions.
+# You may want to put all your additions into a separate file like
+# ~/.bash_aliases, instead of adding them here directly.
+# See /usr/share/doc/bash-doc/examples in the bash-doc package.
 if [ -f ~/.bash_aliases ]; then source ~/.bash_aliases; fi
-
-# bash aliases if you don't use a bash_aliases file
-alias c=clear
-alias pip="python -m pip"
 
 # enable programmable completion features (you don't need to enable this, if it's
 # already enabled in /etc/bash.bashrc and /etc/profile sources /etc/bash.bashrc).
@@ -45,49 +45,24 @@ fi
 # force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
 export GPG_TTY=$(tty)
 
-# load env vars from ~/.config/cozydot/.env if exists
-if [[ -r ~/.config/cozydot/.env ]]; then
-  set -a
-  source ~/.config/cozydot/.env
-  set +a
-fi
-
-# tells wezterm the current cwd (for tabs) & command status
-# uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
-if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
-
 # WSL: add Win user folder as env var
 if [[ -n $WSL_DISTRO_NAME ]]; then export WIN="/mnt/c/Users/$USER"; fi
 
-# ----- Load Languages -----
-if [ -d ~/.bun/bin ]; then
-  export BUN_INSTALL="$HOME/.bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-fi
-
-if [ -f ~/.cargo/env ]; then source ~/.cargo/env; fi
-
-FNM_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/fnm"
+# Toolchains
+FNM_PATH=~/.local/share/fnm
 if [ -d "$FNM_PATH" ]; then
   export PATH="$FNM_PATH:$PATH"
   eval "$(fnm env --use-on-cd --shell bash)"
 fi
 
-if [ -d ~/.pyenv ]; then
-  # https://github.com/pyenv/pyenv-installer?tab=readme-ov-file#uninstall
-  export PATH="$HOME/.pyenv/bin:$PATH"
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
-fi
-
 # uv
-if [[ -f ~/.local/bin/env ]]; then source ~/.local/bin/env; fi
 if command -v uv &>/dev/null; then eval "$(uv generate-shell-completion bash)"; fi
 if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion bash)"; fi
 
-if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
+# Aliases
+alias c=clear
+alias pip="python -m pip"
 
-# ----- Apps -----
 if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
 
 # eza aliases
@@ -98,8 +73,7 @@ if command -v eza &>/dev/null; then
   alias tree="eza --group-directories-first --icons=auto -T"
 fi
 
-if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
-
+# Functions
 if command -v yazi &>/dev/null; then
   # https://yazi-rs.github.io/docs/quick-start#shell-wrapper
   function y() {
@@ -111,11 +85,17 @@ if command -v yazi &>/dev/null; then
   }
 fi
 
+# Shell Integrations
+# tells wezterm the current cwd (for tabs) & command status
+# uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
+if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
+
 # https://github.com/ajeetdsouza/zoxide?tab=readme-ov-file#installation
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
+# Startup
 # display system info
 if command -v fastfetch &>/dev/null; then fastfetch; fi
 
-export NVM_DIR="$HOME/.nvm"
-source "$NVM_DIR/nvm.sh"
+# Prompt
+if command -v starship >/dev/null; then eval "$(starship init bash)"; fi

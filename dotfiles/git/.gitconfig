@@ -1,10 +1,15 @@
 [core]
     autocrlf = input
 [credential]
-    credentialStore = gpg
-    helper = /usr/local/bin/git-credential-manager
+    helper = manager
 [credential "https://dev.azure.com"]
     useHttpPath = true
+[credential "https://github.com"]
+    helper =
+    helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+    helper =
+    helper = !gh auth git-credential
 [commit]
     gpgsign = true
 [tag]
@@ -12,3 +17,5 @@
 [alias]
     ll = log --pretty=format:'%C(yellow)%h%C(auto)%d %Creset%s %C(magenta)%cr' -n 10
     lm = log --graph --pretty=format:'%C(yellow)%h %C(magenta)%ch%C(auto)%d %C(reset)%s %C(blue)<%an>'
+[include]
+    path = ~/.config/cozydot/gitconfig.local
