@@ -24,6 +24,8 @@ enum CliCommand {
     },
     /// Apply the active configuration to this host
     Apply,
+    /// Validate the active configuration
+    Check,
     /// Run enabled ecosystem updates
     Update,
 }
@@ -40,6 +42,12 @@ fn main() -> Result<()> {
         }
         CliCommand::Apply => {
             run("Applying", |config, platform, root| planner::plan_apply(config, platform, &root.join("dotfiles")))?
+        }
+        CliCommand::Check => {
+            let path = init::config_root()?.join("cozydot.yaml");
+            config::Config::load(&path)
+                .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
+            println!("Checked {}", path.display());
         }
         CliCommand::Update => run("Updating", |config, platform, _| planner::plan_update(config, platform))?,
     }
