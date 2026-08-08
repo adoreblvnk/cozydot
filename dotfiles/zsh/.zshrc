@@ -9,6 +9,9 @@ WORDCHARS=${WORDCHARS//\//} # treat / as word separator
 # https://zsh.sourceforge.io/Doc/Release/Options.html
 unsetopt LIST_AMBIGUOUS # show all matches when ambiguous instead of completing the common prefix
 setopt INTERACTIVE_COMMENTS # treat # as start of comment
+# https://zsh.sourceforge.io/Doc/Release/Zsh-Line-Editor.html
+bindkey '^[[A' history-beginning-search-backward
+bindkey '^[[B' history-beginning-search-forward
 # https://zsh.sourceforge.io/Doc/Release/Completion-System.html
 # enable completion system
 autoload -U compinit
