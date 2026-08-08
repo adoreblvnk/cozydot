@@ -379,6 +379,174 @@ fn check_rejects_invalid_yaml() {
 }
 
 #[test]
+fn dotfiles_refuses_unmanaged_conflicts_without_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let state_home = temp.path().join("state");
+    let root = config_home.join("cozydot");
+    let source = root.join("dotfiles/bash/.bashrc");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(root.join("cozydot.yaml"), v1_config("version: 1.0.0\ndotfiles:\n  packages: [bash]\n")).unwrap();
+    fs::write(&source, "managed\n").unwrap();
+    fs::write(home.join(".bashrc"), "existing\n").unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .arg("dotfiles")
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("unmanaged dotfile conflicts:")
+                .and(predicate::str::contains(home.join(".bashrc").display().to_string()))
+                .and(predicate::str::contains("cozydot dotfiles --replace")),
+        );
+
+    assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
+    assert!(!state_home.exists());
+}
+
+#[test]
+fn dotfiles_replace_requires_stow_before_backing_up_conflicts() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let state_home = temp.path().join("state");
+    let fake_bin = temp.path().join("bin");
+    let root = config_home.join("cozydot");
+    let source = root.join("dotfiles/bash/.bashrc");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(root.join("cozydot.yaml"), v1_config("version: 1.0.0\ndotfiles:\n  packages: [bash]\n")).unwrap();
+    fs::write(source, "managed\n").unwrap();
+    fs::write(home.join(".bashrc"), "existing\n").unwrap();
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("PATH", &fake_bin)
+        .args(["dotfiles", "--replace"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("dotfiles require GNU Stow"));
+
+    assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
+    assert!(!state_home.exists());
+}
+
+#[test]
+fn dotfiles_replace_preflights_every_package_before_backing_up_conflicts() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let state_home = temp.path().join("state");
+    let root = config_home.join("cozydot");
+    let source = root.join("dotfiles/bash/.bashrc");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(root.join("cozydot.yaml"), v1_config("version: 1.0.0\ndotfiles:\n  packages: [bash, missing]\n"))
+        .unwrap();
+    fs::write(source, "managed\n").unwrap();
+    fs::write(home.join(".bashrc"), "existing\n").unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .args(["dotfiles", "--replace"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("dotfiles package \"missing\" does not exist"));
+
+    assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
+    assert!(!state_home.exists());
+}
+
+#[test]
+fn dotfiles_replace_backs_up_conflicts_and_accepts_short_flag() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let state_home = temp.path().join("state");
+    let fake_bin = temp.path().join("bin");
+    let root = config_home.join("cozydot");
+    let source = root.join("dotfiles/bash/.bashrc");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(root.join("cozydot.yaml"), v1_config("version: 1.0.0\ndotfiles:\n  packages: [bash]\n")).unwrap();
+    fs::write(&source, "managed\n").unwrap();
+    fs::write(home.join(".bashrc"), "existing\n").unwrap();
+    write_executable(
+        &fake_bin.join("stow"),
+        r#"#!/bin/sh
+if [ "${1-}" = "--version" ]; then
+  exit 0
+fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dir) dir=$2; shift 2 ;;
+    --target) target=$2; shift 2 ;;
+    --stow) shift ;;
+    --) package=$2; break ;;
+  esac
+done
+if [ -L "$target/.bashrc" ]; then
+  exit 0
+fi
+ln -s "$dir/$package/.bashrc" "$target/.bashrc"
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .args(["dotfiles", "-r"])
+        .assert()
+        .success()
+        .stdout("Applying dotfiles\n");
+
+    assert_eq!(fs::canonicalize(home.join(".bashrc")).unwrap(), fs::canonicalize(&source).unwrap());
+    let backups = state_home.join("cozydot/dotfile-backups");
+    let runs = fs::read_dir(backups).unwrap().collect::<std::io::Result<Vec<_>>>().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(fs::read_to_string(runs[0].path().join("bash/.bashrc")).unwrap(), "existing\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("dotfiles")
+        .assert()
+        .success()
+        .stdout("Applying dotfiles\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .args(["dotfiles", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("-r, --replace"));
+}
+
+#[test]
 fn unsupported_distros_are_rejected() {
     for distro in ["zorin", "deepin", "kali", "tails"] {
         let temp = tempfile::tempdir().unwrap();

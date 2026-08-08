@@ -26,6 +26,12 @@ enum CliCommand {
     Apply,
     /// Validate the active configuration
     Check,
+    /// Apply configured dotfiles
+    Dotfiles {
+        /// Back up conflicting files before replacing them with Cozydot links
+        #[arg(short = 'r', long)]
+        replace: bool,
+    },
     /// Run enabled ecosystem updates
     Update,
 }
@@ -49,6 +55,9 @@ fn main() -> Result<()> {
                 .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
             println!("Checked {}", path.display());
         }
+        CliCommand::Dotfiles { replace } => run("Applying", |config, platform, root| {
+            planner::plan_dotfiles(config, platform, &root.join("dotfiles"), replace)
+        })?,
         CliCommand::Update => run("Updating", |config, platform, _| planner::plan_update(config, platform))?,
     }
     Ok(())
