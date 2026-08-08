@@ -64,10 +64,19 @@ generated repository file. Edit that active file and run `cozydot check` to
 validate it without detecting the platform or making changes. `apply` and
 `update` load the same active file.
 
-## Apply and update behavior
+## Apply, dotfiles, and update behavior
 
 `cozydot apply` installs configured missing targets and leaves present or
 unconfigured software unchanged, even when it is outdated.
+
+`cozydot dotfiles` applies only the configured shared and current-platform
+dotfile packages. It reports every unmanaged destination conflict and exits
+without changing dotfiles. `cozydot dotfiles --replace` (or `-r`) first backs
+conflicts up under
+`${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups`, then applies
+Cozydot's links. The command requires GNU Stow to be installed and never adopts
+destination files into Cozydot's source. `apply` uses the same conservative
+conflict behavior.
 
 `cozydot update` runs each enabled update category independently from apply
 targets. Flatpak updates installed user applications; Cargo updates installed

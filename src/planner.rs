@@ -210,7 +210,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         push_operation(
             &mut phases,
             PlannerPhase::Dotfiles,
-            Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages: dotfiles },
+            Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages: dotfiles, replace: false },
         );
     }
 
@@ -251,6 +251,25 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     }
 
     Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
+}
+
+pub fn plan_dotfiles(
+    config: &Config,
+    platform: &Platform,
+    dotfiles_root: &Path,
+    replace: bool,
+) -> Result<Vec<Operation>> {
+    config.validate_for_platform(platform)?;
+    let platform_packages =
+        if platform.is_macos() { &config.os.macos.dotfiles.packages } else { &config.os.linux.dotfiles.packages };
+    let packages = config.shared.dotfiles.packages.iter().chain(platform_packages).cloned().collect::<Vec<_>>();
+    if packages.is_empty() {
+        return Ok(Vec::new());
+    }
+    if dotfiles_root.as_os_str().is_empty() {
+        anyhow::bail!("dotfiles root must not be empty");
+    }
+    Ok(vec![Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages, replace }])
 }
 
 pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation>> {
@@ -469,7 +488,7 @@ fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: 
     let packages =
         config.shared.dotfiles.packages.iter().chain(mac.dotfiles.packages.iter()).cloned().collect::<Vec<_>>();
     if !packages.is_empty() {
-        operations.push(Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages });
+        operations.push(Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages, replace: false });
     }
     let mut settings = Vec::new();
     if let Some(value) = mac.desktop.appearance {
@@ -906,10 +925,14 @@ mod tests {
         assert!(operations.contains(&Operation::HomebrewBootstrap));
         assert!(operations.contains(&Operation::XcodeCommandLineTools));
         assert!(operations.contains(&Operation::Rosetta));
+        assert!(operations.iter().any(|operation| matches!(operation, Operation::Dotfiles { replace: false, .. })));
         assert!(
             operations
                 .iter()
                 .any(|operation| matches!(operation, Operation::MacDefaults { settings } if settings.len() == 8))
         );
+
+        let dotfiles = plan_dotfiles(&config, &macos_platform(), Path::new("/tmp/dotfiles"), true).unwrap();
+        assert!(matches!(dotfiles.as_slice(), [Operation::Dotfiles { replace: true, .. }]));
     }
 }
