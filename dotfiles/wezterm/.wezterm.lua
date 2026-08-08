@@ -31,7 +31,18 @@ config.window_decorations = "RESIZE" -- default "TITLE | RESIZE"
 config.adjust_window_size_when_changing_font_size = false -- default true
 
 -- Appearance
-config.font = wezterm.font 'GeistMono Nerd Font'
+local font = 'AtkynsonMono'
+local font_patterns = {
+  wezterm.home_dir .. '/Library/Fonts/*' .. font .. '*.*',
+  '/Library/Fonts/*' .. font .. '*.*',
+  '/usr/share/fonts/' .. font .. '/*',
+}
+for _, pattern in ipairs(font_patterns) do
+  if #wezterm.glob(pattern) > 0 then
+    config.font = wezterm.font(font .. ' Nerd Font')
+    break
+  end
+end
 config.color_scheme = 'Catppuccin Mocha'
 local palettes = {
   ['Catppuccin Mocha'] = {
