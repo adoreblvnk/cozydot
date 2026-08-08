@@ -40,6 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh 
 ```bash
 cozydot init
 $EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
+cozydot check
 cozydot apply
 # Optional: run the enabled ecosystem updates.
 cozydot update
@@ -59,8 +60,9 @@ and `configs/vm.yaml`; do not edit those generated files directly. Builds embed
 snapshots of all four presets.
 
 The active `cozydot.yaml` created by `init` is user configuration, not a
-generated repository file. Edit that active file before running `apply` or
-`update`.
+generated repository file. Edit that active file and run `cozydot check` to
+validate it without detecting the platform or making changes. `apply` and
+`update` load the same active file.
 
 ## Apply and update behavior
 

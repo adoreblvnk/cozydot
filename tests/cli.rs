@@ -345,6 +345,40 @@ fn invalid_yaml_fails_apply() {
 }
 
 #[test]
+fn check_validates_active_config_without_detecting_the_platform() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("cozydot.yaml");
+    fs::write(&config_path, v1_config("version: 1.0.0\n")).unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env_remove("XDG_CURRENT_DESKTOP")
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(format!("Checked {}\n", config_path.display()));
+}
+
+#[test]
+fn check_rejects_invalid_yaml() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("cozydot.yaml"), "version: [\n").unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("active config is missing or invalid"));
+}
+
+#[test]
 fn unsupported_distros_are_rejected() {
     for distro in ["zorin", "deepin", "kali", "tails"] {
         let temp = tempfile::tempdir().unwrap();
