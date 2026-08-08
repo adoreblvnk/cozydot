@@ -4,6 +4,8 @@
 # do not save consecutive duplicates or commands prefixed with a space
 setopt HIST_IGNORE_DUPS HIST_IGNORE_SPACE
 
+# https://zsh.sourceforge.io/Doc/Release/Parameters.html
+WORDCHARS=${WORDCHARS//\//} # treat / as word separator
 # https://zsh.sourceforge.io/Doc/Release/Options.html
 unsetopt LIST_AMBIGUOUS # show all matches when ambiguous instead of completing the common prefix
 setopt INTERACTIVE_COMMENTS # treat # as start of comment
@@ -11,6 +13,7 @@ setopt INTERACTIVE_COMMENTS # treat # as start of comment
 # enable completion system
 autoload -U compinit
 compinit
+_comp_options+=(globdots) # include hidden files
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' # case insensitive completion
 zstyle ':completion:*' list-colors ''
 
