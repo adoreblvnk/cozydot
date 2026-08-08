@@ -51,6 +51,9 @@ if command -v yazi &>/dev/null; then
   }
 fi
 
+# Prompt
+if command -v starship &>/dev/null; then eval "$(starship init zsh)"; fi
+
 # Shell Integrations
 # tells wezterm the current cwd (for tabs) & command status
 # uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
@@ -62,6 +65,3 @@ if command -v zoxide &>/dev/null; then eval "$(zoxide init zsh)"; fi
 # Startup
 # display system info
 if command -v fastfetch &>/dev/null; then fastfetch; fi
-
-# Prompt
-if command -v starship &>/dev/null; then eval "$(starship init zsh)"; fi
