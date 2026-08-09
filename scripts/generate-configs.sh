@@ -42,13 +42,6 @@ generate_vm() {
       "distros": ["ubuntu", "debian"],
       "desktops": ["gnome"]
     } |
-    .os.linux.system.apt.sources = {
-      "mode": "managed",
-      "components": {
-        "ubuntu": ["main", "restricted", "universe", "multiverse"],
-        "debian": ["main", "contrib", "non-free", "non-free-firmware"]
-      }
-    } |
     del(
       .os.linux.integrations.docker,
       .os.linux.integrations.virtualbox

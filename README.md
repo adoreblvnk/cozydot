@@ -7,6 +7,12 @@ Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
 `aarch64` (`arm64`), and 32-bit ARMv7 (`arm32`), plus macOS on Intel and Apple
 silicon. Other architectures are rejected.
 
+Supported Debian releases are Bookworm and Trixie. On pure Debian, every
+`apply` adds `main`, `contrib`, `non-free`, and `non-free-firmware` to matching
+official source entries while preserving their files, URIs, options, and
+unrelated repositories. Official sources on Ubuntu and supported derivatives
+are left unchanged.
+
 ## Install
 
 On a supported host:

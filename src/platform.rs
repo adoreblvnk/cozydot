@@ -51,6 +51,9 @@ impl Platform {
         } else {
             Architecture::normalize(arch)?
         };
+        if distro == "debian" && !matches!(distro_codename.as_str(), "bookworm" | "trixie") {
+            bail!("unsupported Debian release {distro_codename:?}; supported releases are bookworm and trixie");
+        }
         Ok(Self {
             distro,
             upstream,
@@ -59,91 +62,6 @@ impl Platform {
             desktop: normalize_desktop(&desktop),
             architecture,
         })
-    }
-
-    pub fn managed_apt_sources(&self, configured_components: &[&str]) -> Result<ManagedAptSources> {
-        if !matches!(self.distro.as_str(), "ubuntu" | "debian") {
-            bail!("system.apt.sources: managed is unsupported for distribution {:?}; use preserve", self.distro);
-        }
-        let components = managed_components(self, configured_components)?;
-        let architecture = self.architecture;
-        if matches!(self.distro.as_str(), "ubuntu" | "debian")
-            && (self.distro_codename.is_empty()
-                || !self.distro_codename.bytes().enumerate().all(|(index, byte)| {
-                    byte.is_ascii_lowercase()
-                        || byte.is_ascii_digit()
-                        || index != 0 && matches!(byte, b'.' | b'_' | b'+' | b'-')
-                }))
-        {
-            bail!("system.apt.sources: managed requires a valid platform codename");
-        }
-        let (release, stanzas) = match self.distro.as_str() {
-            "ubuntu" => {
-                let release = self.distro_codename.as_str();
-                if !matches!(release, "jammy" | "noble" | "questing" | "resolute") {
-                    bail!(
-                        "system.apt.sources: managed Ubuntu release {:?} is unsupported; supported releases are jammy, noble, questing, and resolute",
-                        release
-                    );
-                }
-                let main_archive =
-                    architecture == Architecture::Amd64 || architecture == Architecture::Arm64 && release == "resolute";
-                let keyring = "/usr/share/keyrings/ubuntu-archive-keyring.gpg";
-                let stanzas = if main_archive {
-                    vec![
-                        ManagedAptStanza {
-                            uri: "https://archive.ubuntu.com/ubuntu".into(),
-                            suites: vec![release.into(), format!("{release}-updates"), format!("{release}-backports")],
-                            signed_by: keyring.into(),
-                        },
-                        ManagedAptStanza {
-                            uri: "https://security.ubuntu.com/ubuntu".into(),
-                            suites: vec![format!("{release}-security")],
-                            signed_by: keyring.into(),
-                        },
-                    ]
-                } else {
-                    vec![ManagedAptStanza {
-                        uri: "https://ports.ubuntu.com/ubuntu-ports".into(),
-                        suites: vec![
-                            release.into(),
-                            format!("{release}-updates"),
-                            format!("{release}-backports"),
-                            format!("{release}-security"),
-                        ],
-                        signed_by: keyring.into(),
-                    }]
-                };
-                (release.to_owned(), stanzas)
-            }
-            "debian" => {
-                let release = self.distro_codename.as_str();
-                if !matches!(release, "bullseye" | "bookworm" | "trixie") {
-                    bail!(
-                        "system.apt.sources: managed Debian release {:?} is unsupported; supported releases are bullseye, bookworm, and trixie",
-                        release
-                    );
-                }
-                let keyring = "/usr/share/keyrings/debian-archive-keyring.gpg";
-                (
-                    release.to_owned(),
-                    vec![
-                        ManagedAptStanza {
-                            uri: "https://deb.debian.org/debian".into(),
-                            suites: vec![release.into(), format!("{release}-updates")],
-                            signed_by: keyring.into(),
-                        },
-                        ManagedAptStanza {
-                            uri: "https://security.debian.org/debian-security".into(),
-                            suites: vec![format!("{release}-security")],
-                            signed_by: keyring.into(),
-                        },
-                    ],
-                )
-            }
-            _ => unreachable!(),
-        };
-        Ok(ManagedAptSources { distro: self.distro.clone(), release, architecture, components, stanzas })
     }
 
     fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
@@ -215,42 +133,6 @@ impl Architecture {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedAptSources {
-    pub distro: String,
-    pub release: String,
-    pub architecture: Architecture,
-    pub components: Vec<String>,
-    pub stanzas: Vec<ManagedAptStanza>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedAptStanza {
-    pub uri: String,
-    pub suites: Vec<String>,
-    pub signed_by: String,
-}
-
-impl ManagedAptSources {
-    pub fn render_deb822(&self) -> String {
-        let components = self.components.join(" ");
-        self.stanzas
-            .iter()
-            .map(|stanza| {
-                format!(
-                    "Types: deb\nURIs: {}\nSuites: {}\nComponents: {}\nArchitectures: {}\nSigned-By: {}\n",
-                    stanza.uri,
-                    stanza.suites.join(" "),
-                    components,
-                    self.architecture.debian(),
-                    stanza.signed_by,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-}
-
 fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
     if !success {
         bail!("uname -m failed");
@@ -281,31 +163,6 @@ fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
         }
         _ => bail!("unsupported distro: {id}"),
     }
-}
-
-fn managed_components(platform: &Platform, configured: &[&str]) -> Result<Vec<String>> {
-    let components = if configured.is_empty() { &["main"][..] } else { configured };
-    let supported: &[&str] = match platform.distro.as_str() {
-        "ubuntu" => &["main", "restricted", "universe", "multiverse"],
-        "debian" if platform.distro_codename == "bullseye" => &["main", "contrib", "non-free"],
-        "debian" => &["main", "contrib", "non-free", "non-free-firmware"],
-        _ => &[],
-    };
-    let mut result = Vec::new();
-    for (index, component) in components.iter().enumerate() {
-        if !supported.contains(component) {
-            bail!(
-                "system.apt.components[{index}]: component {component:?} is unsupported for {} {}",
-                platform.distro,
-                platform.distro_codename
-            );
-        }
-        if result.iter().any(|existing| existing == component) {
-            bail!("system.apt.components: duplicate component {component:?}");
-        }
-        result.push((*component).to_owned());
-    }
-    Ok(result)
 }
 
 fn normalize_desktop(value: &str) -> String {
@@ -351,5 +208,34 @@ mod tests {
         .unwrap();
         assert_eq!(mac.architecture, Architecture::DarwinArm64);
         assert_eq!(linux.architecture, Architecture::Arm64);
+    }
+
+    #[test]
+    fn debian_bookworm_and_trixie_are_supported() {
+        for release in ["bookworm", "trixie"] {
+            Platform::from_release_parts(
+                "debian".into(),
+                "debian".into(),
+                release.into(),
+                release.into(),
+                "none".into(),
+                "amd64",
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn debian_bullseye_is_rejected() {
+        let error = Platform::from_release_parts(
+            "debian".into(),
+            "debian".into(),
+            "bullseye".into(),
+            "bullseye".into(),
+            "none".into(),
+            "amd64",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("supported releases are bookworm and trixie"));
     }
 }

@@ -73,9 +73,6 @@ impl Config {
             }
         }
 
-        if let Some(sources) = self.os.linux.system.apt.as_ref().and_then(|apt| apt.sources.as_ref()) {
-            sources.validate_for_platform(platform, distro, upstream)?;
-        }
         if let Some(apt) = self.os.linux.packages.apt.as_ref() {
             apt.validate_ownership(distro, upstream)?;
         }
@@ -100,7 +97,6 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
-        self.os.linux.system.validate()?;
         self.os.linux.packages.validate()?;
         self.shared.fonts.validate()?;
         self.shared.dotfiles.validate()?;
@@ -398,15 +394,6 @@ pub struct System {
     pub ubuntu: Option<UbuntuSystem>,
 }
 
-impl System {
-    fn validate(&self) -> Result<()> {
-        if let Some(apt) = &self.apt {
-            apt.validate()?;
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformRequirements {
@@ -417,117 +404,7 @@ pub struct PlatformRequirements {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemApt {
-    pub sources: Option<OfficialSources>,
     pub unattended_upgrades: Option<EnabledDisabled>,
-}
-
-impl SystemApt {
-    fn validate(&self) -> Result<()> {
-        if let Some(sources) = &self.sources {
-            sources.validate()?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceMode {
-    Preserve,
-    Managed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OfficialSources {
-    pub mode: SourceMode,
-    pub components: Option<BTreeMap<DistroMapKey, Vec<AptComponent>>>,
-}
-
-impl OfficialSources {
-    fn validate(&self) -> Result<()> {
-        match (&self.mode, &self.components) {
-            (SourceMode::Managed, Some(components)) => {
-                if components.is_empty() {
-                    bail!("system.apt.sources.components: required when mode is managed");
-                }
-                for (key, values) in components {
-                    if values.is_empty() {
-                        bail!("system.apt.sources.components.{}: required when mode is managed", key.as_str());
-                    }
-                }
-            }
-            (SourceMode::Managed, None) => {
-                bail!("system.apt.sources.components: required when mode is managed")
-            }
-            (SourceMode::Preserve, Some(_)) => {
-                bail!("system.apt.sources.components: forbidden when mode is preserve")
-            }
-            (SourceMode::Preserve, None) => {}
-        }
-        Ok(())
-    }
-
-    pub fn validate_for_platform(&self, platform: &Platform, distro: Distro, upstream: Family) -> Result<()> {
-        if self.mode == SourceMode::Preserve {
-            return Ok(());
-        }
-        if !matches!(distro, Distro::Ubuntu | Distro::Debian) {
-            bail!(
-                "system.apt.sources.mode: managed is unsupported for distribution {:?}; use preserve",
-                platform.distro
-            );
-        }
-        let identity = PlatformIdentity { distro, upstream };
-        self.resolve_managed(platform, identity)?;
-        Ok(())
-    }
-
-    pub fn resolve_managed(
-        &self,
-        platform: &Platform,
-        identity: PlatformIdentity,
-    ) -> Result<Option<crate::platform::ManagedAptSources>> {
-        if self.mode == SourceMode::Preserve {
-            return Ok(None);
-        }
-        let components = self.components.as_ref().context("managed APT sources require components")?;
-        let (_, selected) = select_distro_map(components, identity.distro, identity.upstream).ok_or_else(|| {
-            anyhow::anyhow!(
-                "system.apt.sources.components: no entry for distribution {:?}, upstream {:?}, or default",
-                platform.distro,
-                platform.upstream
-            )
-        })?;
-        let names = selected.iter().map(AptComponent::as_str).collect::<Vec<_>>();
-        platform.managed_apt_sources(&names).map(Some)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AptComponent {
-    Main,
-    Restricted,
-    Universe,
-    Multiverse,
-    Contrib,
-    NonFree,
-    NonFreeFirmware,
-}
-
-impl AptComponent {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Main => "main",
-            Self::Restricted => "restricted",
-            Self::Universe => "universe",
-            Self::Multiverse => "multiverse",
-            Self::Contrib => "contrib",
-            Self::NonFree => "non-free",
-            Self::NonFreeFirmware => "non-free-firmware",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1028,5 +905,15 @@ mod tests {
     fn legacy_root_fields_are_rejected() {
         let error = Config::parse("version: 1.0.0\npackages: {}\n").unwrap_err().to_string();
         assert!(error.contains("unknown field `packages`"));
+    }
+
+    #[test]
+    fn apt_source_policy_is_not_configurable() {
+        let yaml = include_str!("../configs/full.yaml").replace(
+            "      apt:\n        unattended_upgrades: disabled",
+            "      apt:\n        sources:\n          mode: preserve\n        unattended_upgrades: disabled",
+        );
+        let error = Config::parse(&yaml).unwrap_err().to_string();
+        assert!(error.contains("unknown field `sources`"));
     }
 }

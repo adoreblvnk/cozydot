@@ -54,19 +54,6 @@ os:
         desktops:
           - gnome
       apt:
-        sources:
-          mode: managed
-          components:
-            ubuntu:
-              - main
-              - restricted
-              - universe
-              - multiverse
-            debian:
-              - main
-              - contrib
-              - non-free
-              - non-free-firmware
         unattended_upgrades: disabled
       ubuntu:
         snap: disabled
