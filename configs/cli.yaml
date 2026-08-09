@@ -78,8 +78,6 @@ os:
           - gnome
           - cinnamon
       apt:
-        sources:
-          mode: preserve
         unattended_upgrades: disabled
       ubuntu:
         snap: disabled

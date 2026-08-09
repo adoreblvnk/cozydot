@@ -15,7 +15,7 @@ pub use repository::AptRepositoryOperation;
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
 pub use tools::GoToolchainSelector;
 
-use crate::platform::{Architecture, ManagedAptSources};
+use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{
     ffi::{OsStr, OsString},
@@ -34,7 +34,7 @@ pub enum ToolchainMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     EnsureAdmin,
-    ManagedAptSources(ManagedAptSources),
+    EnsureDebianAptComponents { release: String },
     AptMetadataRefresh,
     UnattendedUpgrades { enabled: bool },
     UbuntuSnap { enabled: bool },
@@ -87,7 +87,7 @@ impl Operation {
     pub fn label(&self) -> &'static str {
         match self {
             Self::EnsureAdmin => "administrator access",
-            Self::ManagedAptSources(_) => "managed APT sources",
+            Self::EnsureDebianAptComponents { .. } => "Debian APT components",
             Self::AptMetadataRefresh => "APT metadata refresh",
             Self::UnattendedUpgrades { .. } => "unattended upgrades",
             Self::UbuntuSnap { .. } => "Ubuntu Snap",
@@ -152,7 +152,9 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
     }
     match operation {
         Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
-        Operation::ManagedAptSources(policy) => completed(repository::managed_apt::execute(&host, policy)),
+        Operation::EnsureDebianAptComponents { release } => {
+            completed(repository::debian_components::execute(&host, release))
+        }
         Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
         Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
         Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),

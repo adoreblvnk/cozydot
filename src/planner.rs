@@ -1,6 +1,6 @@
 use crate::{
     config::{
-        AptUpdate, BinaryFormat, BinarySource, Config, EnabledDisabled, SourceMode, Theme, resolve_platform_identity,
+        AptUpdate, BinaryFormat, BinarySource, Config, EnabledDisabled, Theme, resolve_platform_identity,
         select_distro_map, selected_repository_codename,
     },
     operations::{
@@ -19,7 +19,7 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PlannerPhase {
     AdministrativeVerification,
-    OfficialAptSources,
+    DebianAptComponents,
     DirectAptMetadataRefresh,
     SystemPackageStates,
     SystemPrerequisites,
@@ -59,7 +59,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
         (PlannerPhase::AdministrativeVerification, Vec::new()),
-        (PlannerPhase::OfficialAptSources, Vec::new()),
+        (PlannerPhase::DebianAptComponents, Vec::new()),
         (PlannerPhase::DirectAptMetadataRefresh, Vec::new()),
         (PlannerPhase::SystemPackageStates, Vec::new()),
         (PlannerPhase::SystemPrerequisites, Vec::new()),
@@ -91,12 +91,12 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         push_operation(&mut phases, PlannerPhase::AdministrativeVerification, Operation::EnsureAdmin);
     }
 
-    if let Some(sources) = linux.system.apt.as_ref().and_then(|apt| apt.sources.as_ref())
-        && sources.mode == SourceMode::Managed
-    {
-        let managed =
-            sources.resolve_managed(platform, identity)?.expect("managed source resolution returns an intent");
-        push_operation(&mut phases, PlannerPhase::OfficialAptSources, Operation::ManagedAptSources(managed));
+    if platform.distro == "debian" {
+        push_operation(
+            &mut phases,
+            PlannerPhase::DebianAptComponents,
+            Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() },
+        );
     }
 
     plan_system_states(config, platform, &mut phases, &mut needs_direct_apt_refresh);
@@ -909,6 +909,18 @@ mod tests {
         .unwrap()
     }
 
+    fn debian_platform() -> Platform {
+        Platform::from_release_parts(
+            "debian".into(),
+            "debian".into(),
+            "bookworm".into(),
+            "bookworm".into(),
+            "gnome".into(),
+            "amd64",
+        )
+        .unwrap()
+    }
+
     #[test]
     fn full_example_parses_macos_configuration() {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
@@ -934,5 +946,12 @@ mod tests {
 
         let dotfiles = plan_dotfiles(&config, &macos_platform(), Path::new("/tmp/dotfiles"), true).unwrap();
         assert!(matches!(dotfiles.as_slice(), [Operation::Dotfiles { replace: true, .. }]));
+    }
+
+    #[test]
+    fn debian_apply_always_ensures_required_apt_components() {
+        let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        let operations = plan_apply(&config, &debian_platform(), Path::new("/tmp/dotfiles")).unwrap();
+        assert!(operations.contains(&Operation::EnsureDebianAptComponents { release: "bookworm".into() }));
     }
 }
