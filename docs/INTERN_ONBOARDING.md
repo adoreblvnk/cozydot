@@ -209,7 +209,7 @@ Before the first side effect, it:
 2. Validates dependencies between capabilities.
 3. Builds the full ordered operation plan.
 
-On Linux, important phases include administrative verification, Debian APT component convergence, system package state, prerequisites, manager bootstraps, toolchains, packages, binaries, fonts, dotfiles, integrations, and desktop settings.
+Linux and macOS both place operations into shared dependency phases. Each platform defines its own ordered subset because APT and Homebrew have different transactions.
 
 Configuring an AppImage implicitly adds the `appimaged` prerequisite when that AppImage supports the current architecture. There is no `integrations.appimaged` field.
 
@@ -262,6 +262,85 @@ An absent, empty, or all-false update policy is a validated no-op.
 ## How the planner works
 
 The planner is more than a direct YAML-to-command mapping. It derives hidden dependencies and imposes ordering.
+
+### Shared phase vocabulary
+
+`PlannerPhase` defines the available ordering buckets:
+
+```text
+AdministrativeVerification
+PlatformFoundation
+SystemMetadataRefresh
+SystemState
+SystemPrerequisites
+SystemManagerBootstrap
+SystemPackages
+ThirdPartyRepositories
+RepositoryMetadataRefresh
+RepositoryPackages
+ApplicationManagerBootstraps
+ApplicationPackages
+LanguageManagerBootstraps
+LanguageToolchains
+LanguagePackageManagerBootstrap
+LanguagePackages
+BinaryManagerBootstrap
+BinaryPackages
+Fonts
+Integrations
+Dotfiles
+Desktop
+Updates
+```
+
+A phase does not execute or parallelize operations. Each planner discovers operations, places them into buckets, and flattens its ordered phase array into one sequential `Vec<Operation>`.
+
+Linux `apply` uses this order:
+
+```text
+AdministrativeVerification
+PlatformFoundation
+SystemMetadataRefresh
+SystemState
+SystemPrerequisites
+ApplicationManagerBootstraps
+LanguageManagerBootstraps
+LanguageToolchains
+LanguagePackageManagerBootstrap
+SystemPackages
+ThirdPartyRepositories
+RepositoryMetadataRefresh
+RepositoryPackages
+ApplicationPackages
+LanguagePackages
+BinaryManagerBootstrap
+BinaryPackages
+Fonts
+Dotfiles
+Integrations
+Desktop
+```
+
+macOS `apply` uses this order:
+
+```text
+AdministrativeVerification
+PlatformFoundation
+SystemManagerBootstrap
+SystemPackages
+LanguageManagerBootstraps
+LanguageToolchains
+LanguagePackageManagerBootstrap
+LanguagePackages
+Fonts
+Integrations
+Dotfiles
+Desktop
+```
+
+For example, `PlatformFoundation` contains Debian APT component convergence on Debian and Xcode command line tools plus optional Rosetta on macOS. `SystemManagerBootstrap` and `SystemPackages` contain Homebrew bootstrap and Homebrew packages on macOS. Empty phases contribute no operations.
+
+`ManagerBootstrap` deduplicates Flatpak, rustup, FNM, uv, and cargo-binstall requirements before routing each manager to its phase. This prevents shared tool and package intent from scheduling the same bootstrap twice.
 
 Example: configuring Cargo packages can add all of these operations:
 

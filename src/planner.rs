@@ -18,24 +18,26 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PlannerPhase {
     AdministrativeVerification,
-    DebianAptComponents,
-    DirectAptMetadataRefresh,
-    SystemPackageStates,
+    PlatformFoundation,
+    SystemMetadataRefresh,
+    SystemState,
     SystemPrerequisites,
-    ManagerBootstraps,
-    LanguageToolchains,
-    CargoBinstallBootstrap,
-    DirectAptPackages,
+    SystemManagerBootstrap,
+    SystemPackages,
     ThirdPartyRepositories,
     RepositoryMetadataRefresh,
     RepositoryPackages,
-    FlatpakApplications,
+    ApplicationManagerBootstraps,
+    ApplicationPackages,
+    LanguageManagerBootstraps,
+    LanguageToolchains,
+    LanguagePackageManagerBootstrap,
     LanguagePackages,
-    AppImageManager,
+    BinaryManagerBootstrap,
     BinaryPackages,
     Fonts,
-    Dotfiles,
     Integrations,
+    Dotfiles,
     Desktop,
     Updates,
 }
@@ -57,20 +59,21 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
         (PlannerPhase::AdministrativeVerification, Vec::new()),
-        (PlannerPhase::DebianAptComponents, Vec::new()),
-        (PlannerPhase::DirectAptMetadataRefresh, Vec::new()),
-        (PlannerPhase::SystemPackageStates, Vec::new()),
+        (PlannerPhase::PlatformFoundation, Vec::new()),
+        (PlannerPhase::SystemMetadataRefresh, Vec::new()),
+        (PlannerPhase::SystemState, Vec::new()),
         (PlannerPhase::SystemPrerequisites, Vec::new()),
-        (PlannerPhase::ManagerBootstraps, Vec::new()),
+        (PlannerPhase::ApplicationManagerBootstraps, Vec::new()),
+        (PlannerPhase::LanguageManagerBootstraps, Vec::new()),
         (PlannerPhase::LanguageToolchains, Vec::new()),
-        (PlannerPhase::CargoBinstallBootstrap, Vec::new()),
-        (PlannerPhase::DirectAptPackages, Vec::new()),
+        (PlannerPhase::LanguagePackageManagerBootstrap, Vec::new()),
+        (PlannerPhase::SystemPackages, Vec::new()),
         (PlannerPhase::ThirdPartyRepositories, Vec::new()),
         (PlannerPhase::RepositoryMetadataRefresh, Vec::new()),
         (PlannerPhase::RepositoryPackages, Vec::new()),
-        (PlannerPhase::FlatpakApplications, Vec::new()),
+        (PlannerPhase::ApplicationPackages, Vec::new()),
         (PlannerPhase::LanguagePackages, Vec::new()),
-        (PlannerPhase::AppImageManager, Vec::new()),
+        (PlannerPhase::BinaryManagerBootstrap, Vec::new()),
         (PlannerPhase::BinaryPackages, Vec::new()),
         (PlannerPhase::Fonts, Vec::new()),
         (PlannerPhase::Dotfiles, Vec::new()),
@@ -92,7 +95,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     if platform.distro == "debian" {
         push_operation(
             &mut phases,
-            PlannerPhase::DebianAptComponents,
+            PlannerPhase::PlatformFoundation,
             Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() },
         );
     }
@@ -101,11 +104,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     plan_tools(config, platform, &mut phases, &mut prerequisites, &mut managers);
 
     if let Some(install) = apt.and_then(|apt| apt.install.as_ref()).filter(|values| !values.is_empty()) {
-        push_operation(
-            &mut phases,
-            PlannerPhase::DirectAptPackages,
-            Operation::AptPackages { packages: install.clone() },
-        );
+        push_operation(&mut phases, PlannerPhase::SystemPackages, Operation::AptPackages { packages: install.clone() });
         needs_direct_apt_refresh = true;
     }
 
@@ -142,7 +141,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         managers.insert(ManagerBootstrap::Flatpak);
         push_operation(
             &mut phases,
-            PlannerPhase::FlatpakApplications,
+            PlannerPhase::ApplicationPackages,
             Operation::FlatpakEnsureApps { refs: applications.clone() },
         );
     }
@@ -183,7 +182,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     if needs_appimaged {
         push_operation(
             &mut phases,
-            PlannerPhase::AppImageManager,
+            PlannerPhase::BinaryManagerBootstrap,
             Operation::Appimaged { architecture: platform.architecture },
         );
     }
@@ -218,7 +217,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     plan_integrations(config, &mut phases);
     plan_desktop(config, platform, &mut phases, &mut prerequisites);
     if needs_direct_apt_refresh {
-        push_operation(&mut phases, PlannerPhase::DirectAptMetadataRefresh, Operation::AptMetadataRefresh);
+        push_operation(&mut phases, PlannerPhase::SystemMetadataRefresh, Operation::AptMetadataRefresh);
     }
 
     if managers.contains(&ManagerBootstrap::Flatpak) {
@@ -234,24 +233,13 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             Operation::AptBootstrapPackages { packages: prerequisites.iter().map(|s| (*s).to_owned()).collect() },
         );
     }
-    for manager in &managers {
-        let (phase, operation) = match manager {
-            ManagerBootstrap::Flatpak => (PlannerPhase::ManagerBootstraps, Operation::FlatpakEnsureFlathub),
-            ManagerBootstrap::Rustup => (PlannerPhase::ManagerBootstraps, Operation::RustupBootstrap),
-            ManagerBootstrap::Fnm => (PlannerPhase::ManagerBootstraps, Operation::FnmBootstrap),
-            ManagerBootstrap::Uv => (PlannerPhase::ManagerBootstraps, Operation::UvBootstrap),
-            ManagerBootstrap::CargoBinstall => {
-                (PlannerPhase::CargoBinstallBootstrap, Operation::CargoBinstallBootstrap)
-            }
-        };
-        push_operation(&mut phases, phase, operation);
-    }
+    push_manager_bootstraps(&mut phases, &managers);
 
     if needs_repository_refresh {
         push_operation(&mut phases, PlannerPhase::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
     }
 
-    Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
+    Ok(flatten_phases(phases))
 }
 
 pub fn plan_dotfiles(
@@ -282,15 +270,15 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     let updates = linux.updates.as_ref();
     let shared_updates = &config.shared.updates;
     let mut phases = [
-        (PlannerPhase::DebianAptComponents, Vec::new()),
+        (PlannerPhase::PlatformFoundation, Vec::new()),
         (PlannerPhase::SystemPrerequisites, Vec::new()),
-        (PlannerPhase::ManagerBootstraps, Vec::new()),
+        (PlannerPhase::LanguageManagerBootstraps, Vec::new()),
         (PlannerPhase::ThirdPartyRepositories, Vec::new()),
         (PlannerPhase::RepositoryMetadataRefresh, Vec::new()),
-        (PlannerPhase::DirectAptPackages, Vec::new()),
+        (PlannerPhase::SystemPackages, Vec::new()),
         (PlannerPhase::RepositoryPackages, Vec::new()),
         (PlannerPhase::Updates, Vec::new()),
-        (PlannerPhase::FlatpakApplications, Vec::new()),
+        (PlannerPhase::ApplicationPackages, Vec::new()),
         (PlannerPhase::LanguageToolchains, Vec::new()),
         (PlannerPhase::LanguagePackages, Vec::new()),
         (PlannerPhase::Fonts, Vec::new()),
@@ -304,7 +292,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         if platform.distro == "debian" {
             push_operation(
                 &mut phases,
-                PlannerPhase::DebianAptComponents,
+                PlannerPhase::PlatformFoundation,
                 Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() },
             );
         }
@@ -343,7 +331,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         if !direct.is_empty() {
             push_operation(
                 &mut phases,
-                PlannerPhase::DirectAptPackages,
+                PlannerPhase::SystemPackages,
                 Operation::AptPackages { packages: direct.into_iter().collect() },
             );
         }
@@ -360,7 +348,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     }
     if updates.and_then(|updates| updates.flatpak) == Some(true) {
         prerequisites.insert("flatpak");
-        push_operation(&mut phases, PlannerPhase::FlatpakApplications, Operation::FlatpakUpdateApps);
+        push_operation(&mut phases, PlannerPhase::ApplicationPackages, Operation::FlatpakUpdateApps);
     }
 
     let tool_updates = Some(&shared_updates.tools);
@@ -448,30 +436,35 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
             },
         );
     }
-    for manager in managers {
-        let operation = match manager {
-            ManagerBootstrap::Flatpak => Operation::FlatpakEnsureFlathub,
-            ManagerBootstrap::Rustup => Operation::RustupBootstrap,
-            ManagerBootstrap::Fnm => Operation::FnmBootstrap,
-            ManagerBootstrap::Uv => Operation::UvBootstrap,
-            ManagerBootstrap::CargoBinstall => unreachable!("updates do not use cargo-binstall"),
-        };
-        push_operation(&mut phases, PlannerPhase::ManagerBootstraps, operation);
-    }
-    Ok(phases.into_iter().flat_map(|(_, operations)| operations).collect())
+    push_manager_bootstraps(&mut phases, &managers);
+    Ok(flatten_phases(phases))
 }
 
 fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path) -> Result<Vec<Operation>> {
     let mac = config.macos();
-    let mut operations = Vec::new();
+    let mut phases = [
+        (PlannerPhase::AdministrativeVerification, Vec::new()),
+        (PlannerPhase::PlatformFoundation, Vec::new()),
+        (PlannerPhase::SystemManagerBootstrap, Vec::new()),
+        (PlannerPhase::SystemPackages, Vec::new()),
+        (PlannerPhase::LanguageManagerBootstraps, Vec::new()),
+        (PlannerPhase::LanguageToolchains, Vec::new()),
+        (PlannerPhase::LanguagePackageManagerBootstrap, Vec::new()),
+        (PlannerPhase::LanguagePackages, Vec::new()),
+        (PlannerPhase::Fonts, Vec::new()),
+        (PlannerPhase::Integrations, Vec::new()),
+        (PlannerPhase::Dotfiles, Vec::new()),
+        (PlannerPhase::Desktop, Vec::new()),
+    ];
+    let mut managers = BTreeSet::new();
     if mac.system.ensure_admin == Some(true) {
-        operations.push(Operation::MacEnsureAdmin);
+        push_operation(&mut phases, PlannerPhase::AdministrativeVerification, Operation::MacEnsureAdmin);
     }
     if mac.system.xcode.command_line_tools == Some(true) {
-        operations.push(Operation::XcodeCommandLineTools);
+        push_operation(&mut phases, PlannerPhase::PlatformFoundation, Operation::XcodeCommandLineTools);
     }
     if mac.system.rosetta == Some(true) {
-        operations.push(Operation::Rosetta);
+        push_operation(&mut phases, PlannerPhase::PlatformFoundation, Operation::Rosetta);
     }
     let packages =
         config.shared.dotfiles.packages.iter().chain(mac.dotfiles.packages.iter()).cloned().collect::<Vec<_>>();
@@ -480,16 +473,27 @@ fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: 
         formulae.push("stow".into());
     }
     if !formulae.is_empty() || !mac.homebrew.casks.is_empty() {
-        operations.push(Operation::HomebrewBootstrap);
-        operations.push(Operation::HomebrewPackages { formulae, casks: mac.homebrew.casks.clone() });
+        push_operation(&mut phases, PlannerPhase::SystemManagerBootstrap, Operation::HomebrewBootstrap);
+        push_operation(
+            &mut phases,
+            PlannerPhase::SystemPackages,
+            Operation::HomebrewPackages { formulae, casks: mac.homebrew.casks.clone() },
+        );
     }
-    plan_shared_portable(config, architecture, &mut operations);
+    plan_shared_portable(config, architecture, &mut phases, &mut managers);
     if !config.shared.integrations.vscode.extensions.is_empty() {
-        operations
-            .push(Operation::VsCodeExtensionSet { extensions: config.shared.integrations.vscode.extensions.clone() });
+        push_operation(
+            &mut phases,
+            PlannerPhase::Integrations,
+            Operation::VsCodeExtensionSet { extensions: config.shared.integrations.vscode.extensions.clone() },
+        );
     }
     if !packages.is_empty() {
-        operations.push(Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages, replace: false });
+        push_operation(
+            &mut phases,
+            PlannerPhase::Dotfiles,
+            Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages, replace: false },
+        );
     }
     let mut settings = Vec::new();
     if let Some(value) = mac.desktop.appearance {
@@ -525,44 +529,73 @@ fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: 
         settings.push(crate::operations::macos::MacDefault::TrackpadTapToClick(value));
     }
     if !settings.is_empty() {
-        operations.push(Operation::MacDefaults { settings });
+        push_operation(&mut phases, PlannerPhase::Desktop, Operation::MacDefaults { settings });
     }
-    Ok(operations)
+    push_manager_bootstraps(&mut phases, &managers);
+    Ok(flatten_phases(phases))
 }
 
-fn plan_shared_portable(config: &Config, architecture: Architecture, operations: &mut Vec<Operation>) {
+fn plan_shared_portable(
+    config: &Config,
+    architecture: Architecture,
+    phases: &mut [(PlannerPhase, Vec<Operation>)],
+    managers: &mut BTreeSet<ManagerBootstrap>,
+) {
     if let Some(selector) = &config.shared.tools.rust {
-        operations.push(Operation::RustupBootstrap);
-        operations
-            .push(Operation::RustToolchain { selector: Some(selector.clone()), mode: ToolchainMode::EnsurePresent });
+        managers.insert(ManagerBootstrap::Rustup);
+        push_operation(
+            phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::RustToolchain { selector: Some(selector.clone()), mode: ToolchainMode::EnsurePresent },
+        );
     }
     if let Some(selector) = &config.shared.tools.go {
-        operations.push(Operation::GoToolchain {
-            selector: go_selector_main(selector),
-            architecture,
-            mode: ToolchainMode::EnsurePresent,
-        });
+        push_operation(
+            phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::GoToolchain {
+                selector: go_selector_main(selector),
+                architecture,
+                mode: ToolchainMode::EnsurePresent,
+            },
+        );
     }
     if let Some(selector) = &config.shared.tools.node {
-        operations.push(Operation::FnmBootstrap);
-        operations.push(Operation::NodeToolchain { selector: selector.clone(), mode: ToolchainMode::EnsurePresent });
+        managers.insert(ManagerBootstrap::Fnm);
+        push_operation(
+            phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::NodeToolchain { selector: selector.clone(), mode: ToolchainMode::EnsurePresent },
+        );
     }
     if let Some(selector) = &config.shared.tools.python {
-        operations.push(Operation::UvBootstrap);
-        operations.push(Operation::PythonToolchain { version: selector.clone(), mode: ToolchainMode::EnsurePresent });
+        managers.insert(ManagerBootstrap::Uv);
+        push_operation(
+            phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::PythonToolchain { version: selector.clone(), mode: ToolchainMode::EnsurePresent },
+        );
     }
     if let Some(packages) = config.shared.packages.cargo.as_ref().filter(|packages| !packages.is_empty()) {
-        operations.push(Operation::CargoBinstallBootstrap);
-        operations.push(Operation::CargoPackageSet { packages: packages.clone() });
+        managers.insert(ManagerBootstrap::CargoBinstall);
+        push_operation(
+            phases,
+            PlannerPhase::LanguagePackages,
+            Operation::CargoPackageSet { packages: packages.clone() },
+        );
     }
     if let Some(packages) = config.shared.packages.npm.as_ref().filter(|packages| !packages.is_empty()) {
-        operations.push(Operation::NpmPackageSet { packages: packages.clone() });
+        push_operation(phases, PlannerPhase::LanguagePackages, Operation::NpmPackageSet { packages: packages.clone() });
     }
     if !config.shared.fonts.nerd.as_deref().unwrap_or_default().is_empty() {
-        operations.push(Operation::UserNerdFonts {
-            families: config.shared.fonts.nerd.clone().unwrap_or_default(),
-            mode: NerdFontsMode::EnsurePresent,
-        });
+        push_operation(
+            phases,
+            PlannerPhase::Fonts,
+            Operation::UserNerdFonts {
+                families: config.shared.fonts.nerd.clone().unwrap_or_default(),
+                mode: NerdFontsMode::EnsurePresent,
+            },
+        );
     }
 }
 
@@ -570,58 +603,105 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
     let updates = &config.macos().updates.homebrew;
     let formulae = updates.formulae == Some(true);
     let casks = updates.casks == Some(true);
-    let mut operations = Vec::new();
+    let mut phases = [
+        (PlannerPhase::Updates, Vec::new()),
+        (PlannerPhase::LanguageManagerBootstraps, Vec::new()),
+        (PlannerPhase::LanguageToolchains, Vec::new()),
+        (PlannerPhase::LanguagePackages, Vec::new()),
+        (PlannerPhase::Fonts, Vec::new()),
+    ];
+    let mut managers = BTreeSet::new();
     if formulae || casks {
-        operations.push(Operation::HomebrewUpdate { formulae, casks });
+        push_operation(&mut phases, PlannerPhase::Updates, Operation::HomebrewUpdate { formulae, casks });
     }
     let tools = &config.shared.updates.tools;
     if tools.rust == Some(true) {
-        operations.push(Operation::RustupBootstrap);
-        operations.push(Operation::RustToolchain {
-            selector: config.shared.tools.rust.clone(),
-            mode: ToolchainMode::ConvergeLatest,
-        });
+        managers.insert(ManagerBootstrap::Rustup);
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::RustToolchain {
+                selector: config.shared.tools.rust.clone(),
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
     }
     if tools.go == Some(true) {
-        operations.push(Operation::GoToolchain {
-            selector: go_selector_main(config.shared.tools.go.as_deref().unwrap_or("latest")),
-            architecture,
-            mode: ToolchainMode::ConvergeLatest,
-        });
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::GoToolchain {
+                selector: go_selector_main(config.shared.tools.go.as_deref().unwrap_or("latest")),
+                architecture,
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
     }
     if tools.node == Some(true) {
-        operations.push(Operation::FnmBootstrap);
-        operations.push(Operation::NodeToolchain {
-            selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".into()),
-            mode: ToolchainMode::ConvergeLatest,
-        });
+        managers.insert(ManagerBootstrap::Fnm);
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::NodeToolchain {
+                selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".into()),
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
     }
     if tools.python == Some(true) {
-        operations.push(Operation::UvBootstrap);
-        operations.push(Operation::PythonToolchain {
-            version: config.shared.tools.python.clone().unwrap_or_else(|| "latest".into()),
-            mode: ToolchainMode::ConvergeLatest,
-        });
+        managers.insert(ManagerBootstrap::Uv);
+        push_operation(
+            &mut phases,
+            PlannerPhase::LanguageToolchains,
+            Operation::PythonToolchain {
+                version: config.shared.tools.python.clone().unwrap_or_else(|| "latest".into()),
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
     }
     let packages = &config.shared.updates.packages;
     if packages.cargo == Some(true) {
-        operations.push(Operation::CargoPackageUpdate);
+        push_operation(&mut phases, PlannerPhase::LanguagePackages, Operation::CargoPackageUpdate);
     }
     if packages.npm == Some(true) {
-        operations.push(Operation::FnmBootstrap);
-        operations.push(Operation::NpmPackageUpdate);
+        managers.insert(ManagerBootstrap::Fnm);
+        push_operation(&mut phases, PlannerPhase::LanguagePackages, Operation::NpmPackageUpdate);
     }
     if config.shared.updates.fonts == Some(true) {
         let families = config.shared.fonts.nerd.clone().unwrap_or_default();
         if !families.is_empty() {
-            operations.push(Operation::UserNerdFonts { families, mode: NerdFontsMode::Update });
+            push_operation(
+                &mut phases,
+                PlannerPhase::Fonts,
+                Operation::UserNerdFonts { families, mode: NerdFontsMode::Update },
+            );
         }
     }
-    Ok(operations)
+    push_manager_bootstraps(&mut phases, &managers);
+    Ok(flatten_phases(phases))
 }
 
 fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerPhase, op: Operation) {
     phases.iter_mut().find(|(p, _)| *p == phase).expect("phase exists").1.push(op);
+}
+
+fn push_manager_bootstraps(phases: &mut [(PlannerPhase, Vec<Operation>)], managers: &BTreeSet<ManagerBootstrap>) {
+    for manager in managers {
+        let (phase, operation) = match manager {
+            ManagerBootstrap::Flatpak => (PlannerPhase::ApplicationManagerBootstraps, Operation::FlatpakEnsureFlathub),
+            ManagerBootstrap::Rustup => (PlannerPhase::LanguageManagerBootstraps, Operation::RustupBootstrap),
+            ManagerBootstrap::Fnm => (PlannerPhase::LanguageManagerBootstraps, Operation::FnmBootstrap),
+            ManagerBootstrap::Uv => (PlannerPhase::LanguageManagerBootstraps, Operation::UvBootstrap),
+            ManagerBootstrap::CargoBinstall => {
+                (PlannerPhase::LanguagePackageManagerBootstrap, Operation::CargoBinstallBootstrap)
+            }
+        };
+        push_operation(phases, phase, operation);
+    }
+}
+
+fn flatten_phases<const N: usize>(phases: [(PlannerPhase, Vec<Operation>); N]) -> Vec<Operation> {
+    phases.into_iter().flat_map(|(_, operations)| operations).collect()
 }
 
 fn plan_system_states(
@@ -632,11 +712,7 @@ fn plan_system_states(
 ) {
     let system = &config.os.linux.system;
     if let Some(state) = system.apt.as_ref().and_then(|apt| apt.unattended_upgrades) {
-        push_operation(
-            phases,
-            PlannerPhase::SystemPackageStates,
-            Operation::UnattendedUpgrades { enabled: enabled(state) },
-        );
+        push_operation(phases, PlannerPhase::SystemState, Operation::UnattendedUpgrades { enabled: enabled(state) });
         *needs_apt_refresh = true;
     }
     let Some(ubuntu) = &system.ubuntu else { return };
@@ -645,13 +721,13 @@ fn plan_system_states(
         && ubuntu_family
     {
         *needs_apt_refresh = true;
-        push_operation(phases, PlannerPhase::SystemPackageStates, Operation::UbuntuSnap { enabled: enabled(state) });
+        push_operation(phases, PlannerPhase::SystemState, Operation::UbuntuSnap { enabled: enabled(state) });
     }
     if ubuntu.codecs && ubuntu_family {
         *needs_apt_refresh = true;
         push_operation(
             phases,
-            PlannerPhase::SystemPackageStates,
+            PlannerPhase::SystemState,
             Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] },
         );
     }
@@ -930,6 +1006,59 @@ mod tests {
 
         let dotfiles = plan_dotfiles(&config, &macos_platform(), Path::new("/tmp/dotfiles"), true).unwrap();
         assert!(matches!(dotfiles.as_slice(), [Operation::Dotfiles { replace: true, .. }]));
+    }
+
+    #[test]
+    fn macos_apply_phases_preserve_dependency_order() {
+        let mut config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        config.os.macos.system.rosetta = Some(true);
+        let operations = plan_apply(&config, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap();
+        let position = |predicate: fn(&Operation) -> bool| operations.iter().position(predicate).unwrap();
+
+        let admin = position(|operation| matches!(operation, Operation::MacEnsureAdmin));
+        let xcode = position(|operation| matches!(operation, Operation::XcodeCommandLineTools));
+        let rosetta = position(|operation| matches!(operation, Operation::Rosetta));
+        let homebrew_bootstrap = position(|operation| matches!(operation, Operation::HomebrewBootstrap));
+        let homebrew_packages = position(|operation| matches!(operation, Operation::HomebrewPackages { .. }));
+        let rustup = position(|operation| matches!(operation, Operation::RustupBootstrap));
+        let rust = position(|operation| matches!(operation, Operation::RustToolchain { .. }));
+        let fnm = position(|operation| matches!(operation, Operation::FnmBootstrap));
+        let node = position(|operation| matches!(operation, Operation::NodeToolchain { .. }));
+        let uv = position(|operation| matches!(operation, Operation::UvBootstrap));
+        let python = position(|operation| matches!(operation, Operation::PythonToolchain { .. }));
+        let cargo_binstall = position(|operation| matches!(operation, Operation::CargoBinstallBootstrap));
+        let cargo = position(|operation| matches!(operation, Operation::CargoPackageSet { .. }));
+        let vscode = position(|operation| matches!(operation, Operation::VsCodeExtensionSet { .. }));
+        let dotfiles = position(|operation| matches!(operation, Operation::Dotfiles { .. }));
+        let desktop = position(|operation| matches!(operation, Operation::MacDefaults { .. }));
+
+        assert!(admin < xcode);
+        assert!(xcode < rosetta);
+        assert!(rosetta < homebrew_bootstrap);
+        assert!(homebrew_bootstrap < homebrew_packages);
+        assert!(homebrew_packages < rustup);
+        assert!(rustup < rust);
+        assert!(fnm < node);
+        assert!(uv < python);
+        assert!(rust < cargo_binstall);
+        assert!(cargo_binstall < cargo);
+        assert!(cargo < vscode);
+        assert!(vscode < dotfiles);
+        assert!(dotfiles < desktop);
+    }
+
+    #[test]
+    fn macos_update_phases_deduplicate_manager_bootstraps() {
+        let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        let operations = plan_update(&config, &macos_platform()).unwrap();
+        assert_eq!(operations.iter().filter(|operation| **operation == Operation::FnmBootstrap).count(), 1);
+
+        let fnm = operations.iter().position(|operation| *operation == Operation::FnmBootstrap).unwrap();
+        let node =
+            operations.iter().position(|operation| matches!(operation, Operation::NodeToolchain { .. })).unwrap();
+        let npm = operations.iter().position(|operation| *operation == Operation::NpmPackageUpdate).unwrap();
+        assert!(fnm < node);
+        assert!(node < npm);
     }
 
     #[test]
