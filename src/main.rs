@@ -59,12 +59,7 @@ fn init_command_workflow(preset: init::Preset) -> Result<()> {
 
 fn check_command_workflow() -> Result<()> {
     let path = active_configuration_path()?;
-    let validation = || -> Result<()> {
-        let config = config::Config::deserialize(&path)?;
-        config.validate()
-    };
-    validation()
-        .with_context(|| format!("validate {}", path.display()))
+    config::Config::load(&path)
         .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
     println!("Checked {}", path.display());
     Ok(())
@@ -83,13 +78,7 @@ fn apply_command_workflow() -> Result<()> {
 fn dotfiles_command_workflow(replace: bool) -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
-    let validation = || -> Result<config::Config> {
-        let config = config::Config::deserialize(&path)?;
-        config.validate()?;
-        Ok(config)
-    };
-    let config = validation()
-        .with_context(|| format!("validate {}", path.display()))
+    let config = config::Config::load(&path)
         .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
     let operations = planner::plan_standalone_dotfiles(&config, &platform, &root.join("dotfiles"), replace)?;

@@ -36,7 +36,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub(crate) fn deserialize(path: &Path) -> Result<Self> {
+    fn deserialize(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         Self::deserialize_str(&text)
     }
@@ -113,7 +113,7 @@ impl Config {
         Ok(())
     }
 
-    pub(crate) fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         self.os.linux.packages.validate()?;
         self.shared.fonts.validate()?;
         self.shared.dotfiles.validate("shared.dotfiles")?;
