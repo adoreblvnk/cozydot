@@ -14,8 +14,8 @@ Cozydot gives them one lifecycle:
 2. Parse and validate the complete configuration.
 3. Detect and validate the current platform.
 4. Plan a complete ordered list of typed operations.
-5. Execute each operation using its dedicated implementation.
-6. Leave already-satisfied targets unchanged where the operation is ensure-only.
+5. Execute each operation through its dedicated executor.
+6. Leave already-satisfied state unchanged where the operation is ensure-only.
 
 ![Cozydot lifecycle](assets/cozydot-lifecycle.svg)
 
@@ -61,7 +61,7 @@ os:
 
 ![Configuration scope](assets/cozydot-config-scope.svg)
 
-Use `shared` only for behavior with a portable implementation. Examples include Rust, Go, Node.js, Python, Cargo and npm packages, Nerd Fonts, shared dotfile packages, VS Code extensions, and their update controls.
+Use `shared` only for behavior with Linux and macOS implementations. Examples include Rust, Go, Node.js, Python, Cargo and npm packages, Nerd Fonts, shared dotfile packages, VS Code extensions, and their update controls.
 
 Use `os.linux` for APT, Flatpak, Deb and AppImage binaries, Linux integrations, Linux desktop settings, and Linux update policy.
 
@@ -141,21 +141,48 @@ A useful summary is:
 YAML -> Config -> Platform -> Planner -> Vec<Operation> -> Executor -> Host
 ```
 
-The planner decides **what and in which order**. An operation implementation decides **how to inspect and change the host safely**.
+The planner decides **what runs and in which order**. Each operation's executor decides **how to inspect and change the host safely**.
+
+## Glossary
+
+Use these terms consistently in documentation, code review, and diagnostics. Reserve *target* for a Rust compilation target or an explicit domain type such as `DesktopEnvironment`; use *state*, *resource*, *package*, or the concrete noun for configured behavior.
+
+| Term | Meaning |
+| --- | --- |
+| Active configuration | The user-owned `cozydot.yaml` loaded by `check`, `apply`, `dotfiles`, and `update`. |
+| Preset | A repository YAML snapshot embedded at build time and copied by `init`. After copying, the file is the active configuration, not a preset. |
+| Base preset | `configs/cozydot.yaml`, the only preset edited by hand. The generator derives `full`, `cli`, and `vm` from it. |
+| Scope | The configuration boundary that owns intent: `shared`, `os.linux`, or `os.macos`. |
+| Portable | Intent in `shared` with Linux and macOS implementations. Portable intent does not imply identical host commands. |
+| Intent | A validated configuration request. Intent describes desired behavior without supplying commands. |
+| Platform | The detected operating system, distribution identity, release, desktop, and architecture used for validation and planning. |
+| Plan | The complete ordered `Vec<Operation>` produced before host mutation begins. |
+| Operation | One typed unit of host behavior represented by an `Operation` enum variant. |
+| Executor | The fixed Rust implementation that inspects state and performs one operation. |
+| Prerequisite | A package or capability derived by the planner because another operation needs it. |
+| Bootstrap | An ensure operation that makes a required package manager or tool manager available. |
+| Ensure | Bring configured state into existence or into the requested setting without selecting a newer release merely because one exists. |
+| Converge | Inspect current state and move it to the configured selector or setting. Depending on the operation, this may change existing state. |
+| Update | Explicitly enabled behavior run by `cozydot update` that may move installed state to a newer release. |
+| Managed | State whose source or prior content Cozydot records or owns, such as embedded dotfiles, `.managed-files` entries, or a managed tool directory. |
+| Publication | Replace a destination with staged content, then sync it as required by that operation. |
+| Applicable | Selected for the detected distribution or architecture. An inapplicable repository or binary definition plans no operation. |
+| No-op | A successful command or operation that has no work for the current configuration and host state. |
+| Rust target | The compilation triple passed to Cargo, such as `aarch64-apple-darwin`. |
 
 ## Command semantics
 
 ### `cozydot init`
 
-Creates or safely refreshes the active preset and bundled dotfiles.
+Creates or safely refreshes the active configuration from a selected preset, along with the bundled dotfiles.
 
 It tracks files through `.managed-files` with SHA-256 hashes. On a later run, it refreshes a file only when the file is missing or still matches the previously managed content. User-edited, unmanaged, and obsolete files are preserved.
 
-Writes use temporary files, `sync_all`, and publication into the destination. Symlinked configuration paths are rejected.
+Writes use temporary files, `sync_all`, and publication into the destination. Symlinked configuration roots and intermediate directories are rejected. An existing leaf symlink is treated as a non-regular destination and preserved.
 
 ### `cozydot check`
 
-Parses and validates the active YAML without platform detection or host changes.
+Parses and validates the active configuration without platform detection or host changes.
 
 Use it for fast schema feedback:
 
@@ -165,11 +192,11 @@ cozydot check
 
 ### `cozydot apply`
 
-Ensures configured targets are present and applies configured state. It does not execute update controls and generally leaves present software unchanged even if a newer release exists.
+Ensures configured software is present and applies configured state. It does not execute update controls and generally leaves present software unchanged even if a newer release exists.
 
 Before the first side effect, it:
 
-1. Validates the full config for the detected platform.
+1. Validates the complete configuration for the detected platform.
 2. Validates dependencies between capabilities.
 3. Builds the full ordered operation plan.
 
@@ -179,7 +206,9 @@ Configuring an AppImage implicitly adds the `appimaged` prerequisite when that A
 
 ### `cozydot dotfiles`
 
-Applies only shared and current-platform dotfile packages through GNU Stow.
+Applies only shared dotfile packages and those for the current platform through GNU Stow.
+
+The standalone command requires GNU Stow to be installed. During `apply`, the planner ensures Stow before running the dotfile operation.
 
 Default behavior is conservative:
 
@@ -237,7 +266,7 @@ Cargo package set
 
 The user describes the desired capability. The planner supplies the prerequisites.
 
-The phase order prevents invalid sequences. Direct APT packages are handled before third-party repository packages. Repository metadata is refreshed after repository publication. Dotfiles run after GNU Stow has been ensured.
+The phase order prevents invalid sequences. Direct APT packages are handled before third-party repository packages. Repository metadata is refreshed after repository publication. During `apply`, dotfiles run after GNU Stow has been ensured.
 
 When adding a capability, first decide which phase owns it and which prerequisites it implies. Do not hide ordering dependencies inside an executor.
 
@@ -271,7 +300,7 @@ Debian APT component convergence compares current bytes with inspected bytes imm
 
 ### Prefer convergent operations
 
-An ensure operation should inspect first and return successfully when its target is already satisfied. Repeated `apply` runs should not perform unnecessary work.
+An ensure operation should inspect first and return successfully when the requested state is already satisfied. Repeated `apply` runs should not perform unnecessary work.
 
 ### Keep destructive behavior scoped
 
@@ -295,11 +324,12 @@ This path shows why `shared` means portable intent, not identical host commands.
 
 ### Example: a third-party APT repository
 
-1. YAML supplies the repository name, key URL, constrained key path, distro URL map, suite or path, components, conflicts, and target packages.
-2. Configuration validation rejects duplicate ownership, unsafe shapes, and target/conflict overlap.
+1. YAML supplies the repository name, key URL, constrained key path, distro URL map, suite or path, components, conflicts, and repository packages.
+2. Configuration validation rejects duplicate ownership, unsafe shapes, and repository-package/conflict overlap.
 3. Platform resolution selects exact distro, upstream family, then `default`.
 4. The planner creates an `AptRepositoryOperation`, adds download and GPG prerequisites, and schedules metadata refresh and package installation in later phases.
-5. The executor downloads and validates the public key, publishes the key and source atomically, refreshes APT, purges only installed declared conflicts, and ensures repository packages.
+5. The repository executor downloads and validates the public key, then publishes the key and source atomically.
+6. Later operations refresh APT metadata, purge installed declared conflicts, and ensure the repository packages.
 
 ## Adding a capability
 
@@ -331,7 +361,7 @@ Use this order:
    - Stage important file writes.
    - Verify the expected postcondition.
 
-6. **Update the canonical preset and regenerate derived presets.**
+6. **Update the base preset and regenerate the derived presets.**
 
 7. **Update user documentation.**
    - Explain intent, omission behavior, side effects, and any destructive path.
@@ -463,7 +493,7 @@ This is the CLI boundary. It is structured as:
 3. `main()`, which routes each subcommand.
 4. `run()`, the shared host-changing lifecycle.
 
-`run()` loads the active config, detects the platform, asks the planner for `Vec<Operation>`, then executes each operation in order. Keep business logic out of this file.
+`run()` loads the active configuration, detects the platform, asks the planner for `Vec<Operation>`, then executes each operation in order. Keep business logic out of this file.
 
 #### `src/config.rs`
 
@@ -520,7 +550,7 @@ The `.managed-files` manifest stores the last managed hash for each path. A late
 Every file in this directory executes already-planned typed operations. The common pattern is:
 
 1. Inspect current host state.
-2. Return successfully if the target is already satisfied.
+2. Return successfully if the requested state is already satisfied.
 3. Validate external data and command output.
 4. Perform the narrow mutation.
 5. Verify the expected result when possible.
@@ -592,7 +622,7 @@ Tool installation uses the manager Cozydot owns, such as rustup, FNM, or uv. Tho
 
 #### `src/operations/system.rs`
 
-This file owns Linux system and desktop state. Its sections cover:
+This file owns Linux system, integration, and desktop state, plus the portable VS Code extension executor. Its sections cover:
 
 1. Administrator-access verification.
 2. Unattended-upgrade and Ubuntu Snap state.
@@ -602,17 +632,18 @@ This file owns Linux system and desktop state. Its sections cover:
 6. GNOME extension installation and postcondition checks.
 7. dconf, gsettings, executable, UUID, user, and service helpers.
 
-Keep a capability here only when it changes Linux system, integration, or desktop state. Package installation itself belongs to the shared APT or package operation code.
+Keep Linux system, integration, and desktop behavior here. VS Code extension convergence remains here because both platform planners emit the same operation, which dispatches to one executor. Package installation itself belongs to the shared APT or package operation code.
 
 #### `src/operations/macos.rs`
 
 This file owns Apple Silicon macOS execution. It is structured as:
 
 1. `MacDefault`, the typed set of supported desktop preferences.
-2. Homebrew bootstrap and package presence convergence.
-3. Xcode command line tools and Rosetta installation.
-4. Homebrew update behavior.
-5. macOS `defaults` writes and Dock / Finder refreshes.
+2. Administrator-access verification through `sudo -v`.
+3. Homebrew bootstrap and package presence convergence.
+4. Xcode command line tools and Rosetta installation.
+5. Homebrew update behavior.
+6. macOS `defaults` writes and Dock / Finder refreshes.
 
 ### `configs/`: desired-state presets
 
@@ -697,7 +728,7 @@ The generator:
 
 The release packager:
 
-1. Resolves version and Linux architecture.
+1. Resolves the package version, host operating system, and architecture.
 2. Performs a locked release build for the corresponding Rust target.
 3. Stages exactly one executable.
 4. Normalizes timestamps, ownership, ordering, and gzip metadata.
@@ -744,7 +775,7 @@ Use the committed lockfile. Keep dependencies direct and prefer an existing proj
 Before approving a Cozydot change, ask:
 
 - Is the configuration field in the correct `shared` or OS-specific scope?
-- Is omission distinct from active convergence?
+- Is omission distinct from requested convergence?
 - Can the full configuration fail before any side effect begins?
 - Is the behavior represented by a typed operation?
 - Are prerequisites explicit in the planner?
@@ -753,7 +784,7 @@ Before approving a Cozydot change, ask:
 - Are privileged paths constrained?
 - Are important writes staged, synced, and verified?
 - Is destructive behavior explicit, narrow, and recoverable?
-- Does a second run become a no-op when the target is already satisfied?
+- Does a second run become a no-op when the requested state is already satisfied?
 - Are `apply` and `update` semantics still separate?
 
 If those answers are clear, the implementation usually fits Cozydot's architecture.
