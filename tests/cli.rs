@@ -1,7 +1,11 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};
-use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+use std::{
+    fs,
+    os::unix::fs::{PermissionsExt, symlink},
+    path::Path,
+};
 
 fn config(shared: &str, linux: &str) -> String {
     let mut config = json!({
@@ -241,6 +245,27 @@ fn init_preserves_unmanaged_existing_config_and_dotfile() {
 }
 
 #[test]
+fn init_does_not_publish_manifest_when_bundled_dotfile_synchronization_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("cozydot");
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(root.join("dotfiles")).unwrap();
+    fs::create_dir(&outside).unwrap();
+    symlink(&outside, root.join("dotfiles/bash")).unwrap();
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("refusing symlinked config path"));
+
+    assert!(root.join("cozydot.yaml").exists());
+    assert!(!root.join(".managed-files").exists());
+}
+
+#[test]
 fn empty_config_apply_has_no_synthetic_report_output() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
@@ -280,18 +305,62 @@ fn standard_yaml_null_is_accepted() {
 fn check_validates_active_config_without_detecting_the_platform() {
     let temp = tempfile::tempdir().unwrap();
     let config_dir = temp.path().join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let platform_probe = temp.path().join("platform-probe");
     fs::create_dir_all(&config_dir).unwrap();
     let config_path = config_dir.join("cozydot.yaml");
-    fs::write(&config_path, config("{}", "{}")).unwrap();
+    let original = config("{}", "{}");
+    fs::write(&config_path, &original).unwrap();
+    write_executable(
+        &fake_bin.join("uname"),
+        "#!/bin/sh\n: > \"$COZYDOT_TEST_PLATFORM_PROBE\"\nprintf 'unsupported-test-architecture\\n'\n",
+    );
 
     Command::cargo_bin("cozydot")
         .unwrap()
         .env("XDG_CONFIG_HOME", temp.path())
         .env_remove("XDG_CURRENT_DESKTOP")
+        .env("COZYDOT_TEST_PLATFORM_PROBE", &platform_probe)
+        .env("PATH", &fake_bin)
         .arg("check")
         .assert()
         .success()
         .stdout(format!("Checked {}\n", config_path.display()));
+
+    assert!(!platform_probe.exists());
+    assert_eq!(fs::read_to_string(config_path).unwrap(), original);
+}
+
+#[test]
+fn check_rejects_invalid_macos_dotfile_package_without_detecting_the_platform_or_mutating_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let platform_probe = temp.path().join("platform-probe");
+    fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("cozydot.yaml");
+    let mut invalid_config: Value = serde_json::from_str(&config("{}", "{}")).unwrap();
+    invalid_config["os"]["macos"]["dotfiles"]["packages"] = json!(["../outside"]);
+    let original = serde_json::to_string(&invalid_config).unwrap();
+    fs::write(&config_path, &original).unwrap();
+    write_executable(
+        &fake_bin.join("uname"),
+        "#!/bin/sh\n: > \"$COZYDOT_TEST_PLATFORM_PROBE\"\nprintf 'unsupported-test-architecture\\n'\n",
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path())
+        .env_remove("XDG_CURRENT_DESKTOP")
+        .env("COZYDOT_TEST_PLATFORM_PROBE", &platform_probe)
+        .env("PATH", &fake_bin)
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("os.macos.dotfiles.packages[0]: invalid value \"../outside\""));
+
+    assert!(!platform_probe.exists());
+    assert_eq!(fs::read_to_string(config_path).unwrap(), original);
 }
 
 #[test]
@@ -308,6 +377,112 @@ fn check_rejects_invalid_yaml() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("active configuration is missing or invalid"));
+}
+
+#[test]
+fn host_changing_commands_reject_invalid_config_before_platform_detection_or_mutation() {
+    for command in ["apply", "dotfiles", "update"] {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("cozydot");
+        let fake_bin = temp.path().join("bin");
+        let side_effect = temp.path().join("side-effect");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("cozydot.yaml"), "version: [\n").unwrap();
+        for program in ["uname", "stow", "sudo"] {
+            write_executable(&fake_bin.join(program), "#!/bin/sh\n: > \"$COZYDOT_TEST_SIDE_EFFECT\"\nexit 99\n");
+        }
+
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("COZYDOT_TEST_SIDE_EFFECT", &side_effect)
+            .env("PATH", &fake_bin)
+            .arg(command)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("active configuration is missing or invalid"));
+
+        assert!(!side_effect.exists(), "{command} detected the platform or attempted mutation");
+    }
+}
+
+#[test]
+fn standalone_dotfiles_combines_shared_then_platform_packages() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let root = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let log = temp.path().join("stow.log");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(root.join("dotfiles/shared-package")).unwrap();
+    fs::create_dir_all(root.join("dotfiles/platform-package")).unwrap();
+    fs::write(root.join("dotfiles/shared-package/.shared"), "shared\n").unwrap();
+    fs::write(root.join("dotfiles/platform-package/.platform"), "platform\n").unwrap();
+    fs::write(
+        root.join("cozydot.yaml"),
+        config("dotfiles:\n  packages: [shared-package]\n", "dotfiles:\n  packages: [platform-package]\n"),
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(
+        &fake_bin.join("stow"),
+        r#"#!/bin/sh
+[ "$1" = "--version" ] && exit 0
+for argument in "$@"; do package=$argument; done
+printf '%s\n' "$package" >> "$COZYDOT_TEST_LOG"
+"#,
+    );
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("PATH", &fake_bin)
+        .arg("dotfiles")
+        .assert()
+        .success()
+        .stdout("Applying dotfiles\n");
+
+    assert_eq!(fs::read_to_string(log).unwrap(), "shared-package\nplatform-package\n");
+}
+
+#[test]
+fn standalone_dotfiles_validates_platform_before_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config_home = temp.path().join("config");
+    let root = config_home.join("cozydot");
+    let fake_bin = temp.path().join("bin");
+    let mutation = temp.path().join("mutation");
+    let rejected_distro = if os_release_value("ID") == "debian" { "ubuntu" } else { "debian" };
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(root.join("dotfiles/bash")).unwrap();
+    fs::write(root.join("dotfiles/bash/.bashrc"), "managed\n").unwrap();
+    fs::write(
+        root.join("cozydot.yaml"),
+        config("dotfiles:\n  packages: [bash]\n", &format!("system:\n  require:\n    distros: [{rejected_distro}]\n")),
+    )
+    .unwrap();
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("stow"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_MUTATION", &mutation)
+        .env("PATH", &fake_bin)
+        .arg("dotfiles")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not allowed"));
+
+    assert!(!mutation.exists());
+    assert!(!home.join(".bashrc").exists());
 }
 
 #[test]

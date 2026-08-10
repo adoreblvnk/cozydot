@@ -43,36 +43,73 @@ fn main() -> Result<()> {
         return Ok(());
     };
     match command {
-        CliCommand::Init { preset } => {
-            println!("Initialized cozydot in {}", init::run(preset)?.display());
-        }
-        CliCommand::Apply => {
-            run("Applying", |config, platform, root| planner::plan_apply(config, platform, &root.join("dotfiles")))?
-        }
-        CliCommand::Check => {
-            let path = init::config_root()?.join("cozydot.yaml");
-            config::Config::load(&path)
-                .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
-            println!("Checked {}", path.display());
-        }
-        CliCommand::Dotfiles { replace } => run("Applying", |config, platform, root| {
-            planner::plan_dotfiles(config, platform, &root.join("dotfiles"), replace)
-        })?,
-        CliCommand::Update => run("Updating", |config, platform, _| planner::plan_update(config, platform))?,
+        CliCommand::Init { preset } => init_command_workflow(preset)?,
+        CliCommand::Apply => apply_command_workflow()?,
+        CliCommand::Check => check_command_workflow()?,
+        CliCommand::Dotfiles { replace } => dotfiles_command_workflow(replace)?,
+        CliCommand::Update => update_command_workflow()?,
     }
     Ok(())
 }
 
-fn run(
-    progress: &str,
-    plan: impl FnOnce(&config::Config, &platform::Platform, &std::path::Path) -> Result<Vec<operations::Operation>>,
-) -> Result<()> {
+fn init_command_workflow(preset: init::Preset) -> Result<()> {
+    println!("Initialized cozydot in {}", init::initialization_workflow(preset)?.display());
+    Ok(())
+}
+
+fn check_command_workflow() -> Result<()> {
+    let path = active_configuration_path()?;
+    let validation = || -> Result<()> {
+        let config = config::Config::deserialize(&path)?;
+        config.validate()
+    };
+    validation()
+        .with_context(|| format!("validate {}", path.display()))
+        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+    println!("Checked {}", path.display());
+    Ok(())
+}
+
+fn apply_command_workflow() -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
     let config = config::Config::load(&path)
         .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
-    let operations = plan(&config, &platform, &root)?;
+    let operations = planner::plan_apply(&config, &platform, &root.join("dotfiles"))?;
+    execute_operation_plan("Applying", operations)
+}
+
+fn dotfiles_command_workflow(replace: bool) -> Result<()> {
+    let root = init::config_root()?;
+    let path = root.join("cozydot.yaml");
+    let validation = || -> Result<config::Config> {
+        let config = config::Config::deserialize(&path)?;
+        config.validate()?;
+        Ok(config)
+    };
+    let config = validation()
+        .with_context(|| format!("validate {}", path.display()))
+        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+    let platform = platform::Platform::detect()?;
+    let operations = planner::plan_standalone_dotfiles(&config, &platform, &root.join("dotfiles"), replace)?;
+    execute_operation_plan("Applying", operations)
+}
+
+fn update_command_workflow() -> Result<()> {
+    let path = active_configuration_path()?;
+    let config = config::Config::load(&path)
+        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+    let platform = platform::Platform::detect()?;
+    let operations = planner::plan_update(&config, &platform)?;
+    execute_operation_plan("Updating", operations)
+}
+
+fn active_configuration_path() -> Result<std::path::PathBuf> {
+    Ok(init::config_root()?.join("cozydot.yaml"))
+}
+
+fn execute_operation_plan(progress: &str, operations: Vec<operations::Operation>) -> Result<()> {
     for operation in operations {
         let label = operation.label();
         println!("{progress} {label}");

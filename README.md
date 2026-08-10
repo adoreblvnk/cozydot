@@ -114,9 +114,9 @@ remove list.
 
 ## Safety model
 
-- `apply` and `update` validate the complete active configuration and resolved
-  platform, then plan their complete ordered typed-operation workflows before
-  starting side effects.
+- `apply`, `dotfiles`, and `update` validate the complete active configuration
+  and resolved platform, then plan their complete ordered typed-operation
+  workflows before starting side effects.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
   execution uses a fixed set of typed operations.
