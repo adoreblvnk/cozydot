@@ -3,8 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_ID="$(cargo pkgid --manifest-path "$ROOT/Cargo.toml")"
-VERSION="${PACKAGE_ID##*@}"
-[[ $VERSION != "$PACKAGE_ID" ]] || { printf 'unable to resolve Cargo package version\n' >&2; exit 1; }
+VERSION="${PACKAGE_ID##*#}"
+VERSION="${VERSION##*@}"
+[[ -n $VERSION && $VERSION != "$PACKAGE_ID" ]] || { printf 'unable to resolve Cargo package version\n' >&2; exit 1; }
 OUTPUT="${1:-$ROOT/target}"
 MACHINE="${COZYDOT_ARCH:-$(uname -m)}"
 SYSTEM="$(uname -s)"
