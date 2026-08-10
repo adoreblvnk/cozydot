@@ -35,25 +35,7 @@ shared:
       - yazi
   integrations:
     vscode:
-      extensions:
-        - catppuccin.catppuccin-vsc
-        - charliermarsh.ruff
-        - christian-kohler.path-intellisense
-        - eamodio.gitlens
-        - ecmel.vscode-html-css
-        - foxundermoon.shell-format
-        - golang.go
-        - llvm-vs-code-extensions.vscode-clangd
-        - ms-python.debugpy
-        - ms-python.python
-        - ms-python.vscode-pylance
-        - prettier.prettier-vscode
-        - redhat.vscode-yaml
-        - rust-lang.rust-analyzer
-        - streetsidesoftware.code-spell-checker
-        - timonwong.shellcheck
-        - wayou.vscode-todo-highlight
-        - yzhang.markdown-all-in-one
+      extensions: []
   updates:
     tools:
       rust: true

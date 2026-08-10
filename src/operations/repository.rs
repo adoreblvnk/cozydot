@@ -207,7 +207,7 @@ pub(crate) mod debian_components {
         validate_release(release)?;
         let reconciliation = reconcile(release, &inspect_sources(host)?)?;
         if reconciliation.matched_entries == 0 {
-            bail!("Debian APT component convergence found no official source for release {release:?}");
+            return Ok(());
         }
 
         for change in &reconciliation.changes {

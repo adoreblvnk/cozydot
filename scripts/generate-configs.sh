@@ -30,6 +30,7 @@ generate_cli() {
     .os.linux.packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
     .os.linux.packages.apt.repositories |= map(select(.name == "github-cli")) |
     .shared.packages.npm = ["opencode-ai"] |
+    .shared.integrations.vscode.extensions = [] |
     .os.linux.packages.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |

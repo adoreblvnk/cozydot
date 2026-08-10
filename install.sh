@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${COZYDOT_VERSION:-0.0.1}"
+VERSION="${COZYDOT_VERSION:-1.0.0}"
 BASE_URL="${COZYDOT_RELEASE_BASE_URL:-https://github.com/adoreblvnk/cozydot/releases}"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 
@@ -44,14 +44,13 @@ valid_pair "$ARCHIVE" "$CHECKSUM" || {
 }
 
 tar -tzf "$ARCHIVE" >"$WORK/members"
-mapfile -t MEMBERS <"$WORK/members"
-[[ ${#MEMBERS[@]} == 1 && ${MEMBERS[0]} == cozydot ]] || {
+[[ $(cat "$WORK/members") == cozydot ]] || {
   printf 'cozydot: release must contain exactly one cozydot entry\n' >&2
   exit 1
 }
 tar -tvzf "$ARCHIVE" >"$WORK/listing"
-mapfile -t LISTING <"$WORK/listing"
-[[ ${#LISTING[@]} == 1 && ${LISTING[0]:0:1} == - ]] || {
+LISTING="$(cat "$WORK/listing")"
+[[ $(wc -l <"$WORK/listing") -eq 1 && $LISTING == -* ]] || {
   printf 'cozydot: cozydot release entry is not a regular file\n' >&2
   exit 1
 }

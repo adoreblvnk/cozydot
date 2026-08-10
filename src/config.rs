@@ -430,8 +430,6 @@ pub struct UbuntuSystem {
 pub struct Packages {
     pub apt: Option<AptPackages>,
     pub flatpak: Option<Vec<String>>,
-    pub cargo: Option<Vec<String>>,
-    pub npm: Option<Vec<String>>,
     pub binaries: Option<Vec<BinaryPackage>>,
 }
 
@@ -917,5 +915,13 @@ mod tests {
         );
         let error = Config::parse(&yaml).unwrap_err().to_string();
         assert!(error.contains("unknown field `sources`"));
+    }
+
+    #[test]
+    fn linux_package_section_rejects_shared_package_managers() {
+        let yaml = include_str!("../configs/full.yaml")
+            .replace("    packages:\n      apt:", "    packages:\n      cargo: [ripgrep]\n      apt:");
+        let error = Config::parse(&yaml).unwrap_err().to_string();
+        assert!(error.contains("unknown field `cargo`"));
     }
 }
