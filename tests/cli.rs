@@ -1461,94 +1461,39 @@ fn apt_apply_orders_repository_migration_and_is_idempotent() {
 }
 
 #[test]
-fn apt_update_orders_repository_migration_before_broad_upgrade_and_is_idempotent() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_home = temp.path().join("config");
-    let config_dir = config_home.join("cozydot");
-    let fake_bin = temp.path().join("bin");
-    let state = temp.path().join("state");
-    let log = temp.path().join("apt.log");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::create_dir_all(state.join("files")).unwrap();
-    fs::create_dir_all(state.join("packages")).unwrap();
-    fs::write(config_dir.join("cozydot.yaml"), apt_repository_conflict_config(true)).unwrap();
-    for package in ["ca-certificates", "curl", "gnupg", "selected-conflict", "unrelated-conflict"] {
-        fs::write(state.join("packages").join(package), "").unwrap();
+fn apt_update_runs_only_refresh_then_selected_upgrade() {
+    let cases = [
+        ("standard", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --\n"),
+        (
+            "full",
+            concat!(
+                "sudo apt-get update -qq\n",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq --\n",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y -qq --\n"
+            ),
+        ),
+    ];
+
+    for (policy, expected) in cases {
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("config");
+        let config_dir = config_home.join("cozydot");
+        let fake_bin = temp.path().join("bin");
+        let state = temp.path().join("state");
+        let log = temp.path().join("apt.log");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(state.join("files")).unwrap();
+        fs::create_dir_all(state.join("packages")).unwrap();
+        let mut source: Value = serde_json::from_str(&apt_repository_conflict_config(true)).unwrap();
+        source["os"]["linux"]["updates"]["apt"] = json!(policy);
+        fs::write(config_dir.join("cozydot.yaml"), serde_json::to_string(&source).unwrap()).unwrap();
+        fs::write(state.join("packages/selected-conflict"), "").unwrap();
+        write_apt_repository_fakes(&fake_bin);
+
+        run_apt_command("update", &config_home, &fake_bin, &state, &log);
+
+        assert_eq!(fs::read_to_string(&log).unwrap(), expected, "unexpected {policy} APT update protocol");
     }
-    write_apt_repository_fakes(&fake_bin);
-
-    run_apt_command("update", &config_home, &fake_bin, &state, &log);
-    let first = fs::read_to_string(&log).unwrap();
-    let lines = first.lines().collect::<Vec<_>>();
-    let publication = lines
-        .iter()
-        .position(|line| line.contains("sudo mv -fT") && line.ends_with("/etc/apt/sources.list.d/vendor.list"))
-        .unwrap();
-    let refresh = lines.iter().position(|line| *line == "sudo apt-get update -qq").unwrap();
-    let direct_install =
-        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- direct-package+")).unwrap();
-    let purge = lines.iter().position(|line| line.ends_with("apt-get purge -y -qq -- selected-conflict")).unwrap();
-    let vendor_install =
-        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- vendor-package+")).unwrap();
-    let upgrade = lines.iter().position(|line| line.ends_with("apt-get upgrade -y -qq --")).unwrap();
-    assert!(publication < refresh && refresh < direct_install);
-    assert!(
-        direct_install < purge && purge < vendor_install && vendor_install < upgrade,
-        "unexpected update order: {first}"
-    );
-    assert!(first.contains("dpkg-query -W -f=${db:Status-Status}\\n -- absent-selected-conflict"));
-    assert!(!lines[purge].contains("absent-selected-conflict"), "update purged an absent selected conflict: {first}");
-    assert!(!first.contains("unrelated-conflict"), "update inspected an unselected distro conflict: {first}");
-
-    run_apt_command("update", &config_home, &fake_bin, &state, &log);
-    let second = fs::read_to_string(&log).unwrap();
-    assert!(!second.contains(" apt-get install "), "second update reinstalled a package: {second}");
-    assert!(!second.contains(" apt-get purge "), "second update repurged a conflict: {second}");
-    assert!(second.contains("sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --"));
-    assert!(second.contains("curl "), "second update did not inspect/converge the repository: {second}");
-    assert!(!second.contains("unrelated-conflict"), "second update inspected an unselected distro conflict: {second}");
-}
-
-#[test]
-fn apt_update_converges_applicable_repository_without_targets() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_home = temp.path().join("config");
-    let config_dir = config_home.join("cozydot");
-    let fake_bin = temp.path().join("bin");
-    let state = temp.path().join("state");
-    let log = temp.path().join("apt.log");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::create_dir_all(state.join("files")).unwrap();
-    fs::create_dir_all(state.join("packages")).unwrap();
-    for package in ["ca-certificates", "curl", "gnupg"] {
-        fs::write(state.join("packages").join(package), "").unwrap();
-    }
-    write_config(
-        &config_dir.join("cozydot.yaml"),
-        "{}",
-        r#"packages:
-  apt:
-    repositories:
-      - name: vendor
-        key: https://example.com/vendor.gpg
-        key_path: /etc/apt/keyrings/vendor.gpg
-        urls:
-          default: https://example.com/vendor
-        suite: stable
-        components: [main]
-        packages: []
-updates:
-  apt: standard
-"#,
-    );
-    write_apt_repository_fakes(&fake_bin);
-
-    run_apt_command("update", &config_home, &fake_bin, &state, &log);
-    let log = fs::read_to_string(log).unwrap();
-    let publication = log.find("/etc/apt/sources.list.d/vendor.list").unwrap();
-    let refresh = log.find("sudo apt-get update -qq").unwrap();
-    let upgrade = log.find("sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --").unwrap();
-    assert!(publication < refresh && refresh < upgrade, "unexpected empty-repository update order: {log}");
 }
 
 #[test]
@@ -1937,10 +1882,10 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .stdout(concat!(
             "Updating APT bootstrap packages\n",
             "Updating rustup bootstrap\n",
-            "Updating FNM bootstrap\n",
-            "Updating uv bootstrap\n",
             "Updating Rust toolchain\n",
+            "Updating FNM bootstrap\n",
             "Updating Node.js toolchain\n",
+            "Updating uv bootstrap\n",
             "Updating Python toolchain\n",
         ));
     assert_eq!(

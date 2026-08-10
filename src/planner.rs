@@ -20,6 +20,7 @@ enum ExecutionStage {
     AdministrativeVerification,
     PlatformFoundation,
     SystemMetadataRefresh,
+    SystemUpdates,
     SystemState,
     SystemPrerequisites,
     SystemManagerBootstrap,
@@ -29,16 +30,11 @@ enum ExecutionStage {
     RepositoryPackages,
     ApplicationManagerBootstraps,
     ApplicationPackages,
-    LanguageManagerBootstraps,
-    LanguageToolchains,
-    LanguagePackageManagerBootstrap,
-    LanguagePackages,
     BinaryManagerBootstrap,
     Fonts,
     Integrations,
     Dotfiles,
     Desktop,
-    Updates,
     RustManagerBootstrap,
     RustToolchain,
     GoToolchain,
@@ -512,178 +508,201 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if platform.is_macos() {
         return plan_macos_update(config, platform.architecture);
     }
-    let linux = &config.os.linux;
-    let updates = linux.updates.as_ref();
-    let shared_updates = &config.shared.updates;
-    let mut stages = [
-        (ExecutionStage::PlatformFoundation, Vec::new()),
-        (ExecutionStage::SystemPrerequisites, Vec::new()),
-        (ExecutionStage::LanguageManagerBootstraps, Vec::new()),
-        (ExecutionStage::ThirdPartyRepositories, Vec::new()),
-        (ExecutionStage::RepositoryMetadataRefresh, Vec::new()),
-        (ExecutionStage::SystemPackages, Vec::new()),
-        (ExecutionStage::RepositoryPackages, Vec::new()),
-        (ExecutionStage::Updates, Vec::new()),
-        (ExecutionStage::ApplicationPackages, Vec::new()),
-        (ExecutionStage::LanguageToolchains, Vec::new()),
-        (ExecutionStage::LanguagePackages, Vec::new()),
-        (ExecutionStage::Fonts, Vec::new()),
-    ];
-    let packages = &linux.packages;
-    let tools = &config.shared.tools;
-    let mut prerequisites = BTreeSet::new();
-    let mut managers = BTreeSet::new();
+    plan_linux_update(config, platform)
+}
 
-    if let Some(policy) = updates.and_then(|updates| updates.apt) {
-        if platform.distro == "debian" {
-            push_operation(
-                &mut stages,
-                ExecutionStage::PlatformFoundation,
-                Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() },
-            );
-        }
-        let identity = resolve_platform_identity(platform)?;
-        let apt = packages.apt.as_ref();
-        let mut direct =
-            apt.and_then(|apt| apt.install.as_ref()).into_iter().flatten().cloned().collect::<BTreeSet<_>>();
-        if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()) {
-            for repository in repositories {
-                let Some(operation) = plan_repository(repository, platform, identity)? else {
-                    continue;
-                };
-                prerequisites.extend(["ca-certificates", "curl", "gnupg"]);
-                push_operation(
-                    &mut stages,
-                    ExecutionStage::ThirdPartyRepositories,
-                    Operation::AptRepository(Box::new(operation)),
-                );
-                if !repository.packages.is_empty() {
-                    push_operation(
-                        &mut stages,
-                        ExecutionStage::RepositoryPackages,
-                        Operation::AptRepositoryPackages {
-                            conflicts: selected_repository_conflicts(repository, identity).unwrap_or_default(),
-                            packages: repository.packages.clone(),
-                        },
-                    );
-                }
-            }
-        }
-        if linux.system.ubuntu.as_ref().is_some_and(|ubuntu| ubuntu.codecs) && platform.upstream == "ubuntu" {
-            direct.insert("ubuntu-restricted-extras".into());
-        }
+struct LinuxUpdateWorkflow<'a> {
+    config: &'a Config,
+    platform: &'a Platform,
+    stages: Vec<(ExecutionStage, Vec<Operation>)>,
+    prerequisites: BTreeSet<&'static str>,
+    managers: BTreeSet<ManagerBootstrap>,
+}
 
-        push_operation(&mut stages, ExecutionStage::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
-        if !direct.is_empty() {
-            push_operation(
-                &mut stages,
-                ExecutionStage::SystemPackages,
-                Operation::AptPackages { packages: direct.into_iter().collect() },
-            );
-        }
-        push_operation(
-            &mut stages,
-            ExecutionStage::Updates,
-            Operation::AptUpgrade {
-                policy: match policy {
-                    AptUpdate::Standard => AptUpgradePolicy::Standard,
-                    AptUpdate::Full => AptUpgradePolicy::Full,
-                },
+fn plan_linux_update(config: &Config, platform: &Platform) -> Result<Vec<Operation>> {
+    let mut workflow = LinuxUpdateWorkflow {
+        config,
+        platform,
+        stages: vec![
+            (ExecutionStage::SystemMetadataRefresh, Vec::new()),
+            (ExecutionStage::SystemUpdates, Vec::new()),
+            (ExecutionStage::SystemPrerequisites, Vec::new()),
+            (ExecutionStage::ApplicationManagerBootstraps, Vec::new()),
+            (ExecutionStage::ApplicationPackages, Vec::new()),
+            (ExecutionStage::RustManagerBootstrap, Vec::new()),
+            (ExecutionStage::RustToolchain, Vec::new()),
+            (ExecutionStage::GoToolchain, Vec::new()),
+            (ExecutionStage::NodeManagerBootstrap, Vec::new()),
+            (ExecutionStage::NodeToolchain, Vec::new()),
+            (ExecutionStage::PythonManagerBootstrap, Vec::new()),
+            (ExecutionStage::PythonToolchain, Vec::new()),
+            (ExecutionStage::CargoPackages, Vec::new()),
+            (ExecutionStage::NpmPackages, Vec::new()),
+            (ExecutionStage::Fonts, Vec::new()),
+        ],
+        prerequisites: BTreeSet::new(),
+        managers: BTreeSet::new(),
+    };
+    linux_update_workflow(&mut workflow);
+    finish_linux_update_workflow(&mut workflow);
+    Ok(flatten_stage_vec(workflow.stages))
+}
+
+fn linux_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    linux_apt_update_workflow(workflow);
+    linux_flatpak_update_workflow(workflow);
+    linux_shared_tool_update_workflow(workflow);
+    linux_shared_package_update_workflow(workflow);
+    linux_shared_font_update_workflow(workflow);
+}
+
+fn linux_apt_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    let Some(policy) = workflow.config.os.linux.updates.as_ref().and_then(|updates| updates.apt) else {
+        return;
+    };
+    linux_apt_metadata_refresh_workflow(workflow);
+    linux_apt_system_upgrade_workflow(workflow, policy);
+}
+
+fn linux_apt_metadata_refresh_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    push_operation(&mut workflow.stages, ExecutionStage::SystemMetadataRefresh, Operation::AptMetadataRefresh);
+}
+
+fn linux_apt_system_upgrade_workflow(workflow: &mut LinuxUpdateWorkflow<'_>, policy: AptUpdate) {
+    push_operation(
+        &mut workflow.stages,
+        ExecutionStage::SystemUpdates,
+        Operation::AptUpgrade {
+            policy: match policy {
+                AptUpdate::Standard => AptUpgradePolicy::Standard,
+                AptUpdate::Full => AptUpgradePolicy::Full,
             },
-        );
-    }
-    if updates.and_then(|updates| updates.flatpak) == Some(true) {
-        prerequisites.insert("flatpak");
-        push_operation(&mut stages, ExecutionStage::ApplicationPackages, Operation::FlatpakUpdateApps);
-    }
+        },
+    );
+}
 
-    let tool_updates = Some(&shared_updates.tools);
-    let rust_update = tool_updates.is_some_and(|updates| updates.rust == Some(true));
-    let go_update = tool_updates.is_some_and(|updates| updates.go == Some(true));
-    let node_update = tool_updates.is_some_and(|updates| updates.node == Some(true));
-    let python_update = tool_updates.is_some_and(|updates| updates.python == Some(true));
-    let package_updates = Some(&shared_updates.packages);
-    let cargo_update = package_updates.is_some_and(|updates| updates.cargo == Some(true));
-    let npm_update = package_updates.is_some_and(|updates| updates.npm == Some(true));
-
-    if rust_update {
-        prerequisites.extend(["ca-certificates", "curl"]);
-        managers.insert(ManagerBootstrap::Rustup);
-        let selector = tools.rust.clone();
-        push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
-            Operation::RustToolchain { selector, mode: ToolchainMode::ConvergeLatest },
-        );
+fn linux_flatpak_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.os.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
+        workflow.prerequisites.insert("flatpak");
+        push_operation(&mut workflow.stages, ExecutionStage::ApplicationPackages, Operation::FlatpakUpdateApps);
     }
-    if go_update {
-        prerequisites.extend(["ca-certificates", "curl", "tar"]);
-        let selector = tools.go.as_deref().unwrap_or("latest");
+}
+
+fn linux_shared_tool_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    linux_rust_update_workflow(workflow);
+    linux_go_update_workflow(workflow);
+    linux_node_update_workflow(workflow);
+    linux_python_update_workflow(workflow);
+}
+
+fn linux_rust_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.rust == Some(true) {
+        workflow.prerequisites.extend(["ca-certificates", "curl"]);
+        workflow.managers.insert(ManagerBootstrap::Rustup);
         push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
-            Operation::GoToolchain {
-                selector: go_selector_main(selector),
-                architecture: platform.architecture,
+            &mut workflow.stages,
+            ExecutionStage::RustToolchain,
+            Operation::RustToolchain {
+                selector: workflow.config.shared.tools.rust.clone(),
                 mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
-    if node_update {
-        prerequisites.extend(["ca-certificates", "curl"]);
-        managers.insert(ManagerBootstrap::Fnm);
-        let selector = tools.node.clone().unwrap_or_else(|| "latest".to_owned());
-        push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
-            Operation::NodeToolchain { selector, mode: ToolchainMode::ConvergeLatest },
-        );
-    }
-    if python_update {
-        prerequisites.extend(["ca-certificates", "curl"]);
-        managers.insert(ManagerBootstrap::Uv);
-        let version = tools.python.clone().unwrap_or_else(|| "3".to_owned());
-        push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
-            Operation::PythonToolchain { version, mode: ToolchainMode::ConvergeLatest },
-        );
-    }
-    if cargo_update {
-        push_operation(&mut stages, ExecutionStage::LanguagePackages, Operation::CargoPackageUpdate);
-    }
-    if npm_update {
-        push_operation(&mut stages, ExecutionStage::LanguagePackages, Operation::NpmPackageUpdate);
-    }
-    if shared_updates.fonts == Some(true) {
-        let families = config.shared.fonts.nerd.clone().unwrap_or_default();
-        if !families.is_empty() {
-            prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"]);
-            push_operation(
-                &mut stages,
-                ExecutionStage::Fonts,
-                Operation::NerdFonts { families, mode: NerdFontsMode::Update },
-            );
-        }
-    }
+}
 
-    if managers.contains(&ManagerBootstrap::Flatpak) {
-        prerequisites.insert("flatpak");
-    }
-    if managers.contains(&ManagerBootstrap::Fnm) {
-        prerequisites.insert("unzip");
-    }
-    if !prerequisites.is_empty() {
+fn linux_go_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.go == Some(true) {
+        workflow.prerequisites.extend(["ca-certificates", "curl", "tar"]);
         push_operation(
-            &mut stages,
-            ExecutionStage::SystemPrerequisites,
-            Operation::AptBootstrapPackages {
-                packages: prerequisites.iter().map(|value| (*value).to_owned()).collect(),
+            &mut workflow.stages,
+            ExecutionStage::GoToolchain,
+            Operation::GoToolchain {
+                selector: go_selector_main(workflow.config.shared.tools.go.as_deref().unwrap_or("latest")),
+                architecture: workflow.platform.architecture,
+                mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
-    push_manager_bootstraps(&mut stages, &managers);
-    Ok(flatten_stages(stages))
+}
+
+fn linux_node_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.node == Some(true) {
+        workflow.prerequisites.extend(["ca-certificates", "curl"]);
+        workflow.managers.insert(ManagerBootstrap::Fnm);
+        push_operation(
+            &mut workflow.stages,
+            ExecutionStage::NodeToolchain,
+            Operation::NodeToolchain {
+                selector: workflow.config.shared.tools.node.clone().unwrap_or_else(|| "latest".to_owned()),
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
+    }
+}
+
+fn linux_python_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.python == Some(true) {
+        workflow.prerequisites.extend(["ca-certificates", "curl"]);
+        workflow.managers.insert(ManagerBootstrap::Uv);
+        push_operation(
+            &mut workflow.stages,
+            ExecutionStage::PythonToolchain,
+            Operation::PythonToolchain {
+                version: workflow.config.shared.tools.python.clone().unwrap_or_else(|| "3".to_owned()),
+                mode: ToolchainMode::ConvergeLatest,
+            },
+        );
+    }
+}
+
+fn linux_shared_package_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    linux_cargo_update_workflow(workflow);
+    linux_npm_update_workflow(workflow);
+}
+
+fn linux_cargo_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.packages.cargo == Some(true) {
+        push_operation(&mut workflow.stages, ExecutionStage::CargoPackages, Operation::CargoPackageUpdate);
+    }
+}
+
+fn linux_npm_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.packages.npm == Some(true) {
+        push_operation(&mut workflow.stages, ExecutionStage::NpmPackages, Operation::NpmPackageUpdate);
+    }
+}
+
+fn linux_shared_font_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    linux_nerd_fonts_update_workflow(workflow);
+}
+
+fn linux_nerd_fonts_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.fonts == Some(true)
+        && let Some(families) = workflow.config.shared.fonts.nerd.as_ref().filter(|families| !families.is_empty())
+    {
+        workflow.prerequisites.extend(["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"]);
+        push_operation(
+            &mut workflow.stages,
+            ExecutionStage::Fonts,
+            Operation::NerdFonts { families: families.clone(), mode: NerdFontsMode::Update },
+        );
+    }
+}
+
+fn finish_linux_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
+    if workflow.managers.contains(&ManagerBootstrap::Fnm) {
+        workflow.prerequisites.insert("unzip");
+    }
+    if !workflow.prerequisites.is_empty() {
+        push_operation(
+            &mut workflow.stages,
+            ExecutionStage::SystemPrerequisites,
+            Operation::AptBootstrapPackages {
+                packages: workflow.prerequisites.iter().map(|value| (*value).to_owned()).collect(),
+            },
+        );
+    }
+    push_update_manager_bootstraps(&mut workflow.stages, &workflow.managers);
 }
 
 fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path) -> Result<Vec<Operation>> {
@@ -1002,102 +1021,178 @@ fn macos_trackpad_workflow(config: &Config, settings: &mut Vec<crate::operations
 }
 
 fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<Operation>> {
-    let updates = &config.macos().updates.homebrew;
-    let formulae = updates.formulae == Some(true);
-    let casks = updates.casks == Some(true);
-    let mut stages = [
-        (ExecutionStage::Updates, Vec::new()),
-        (ExecutionStage::LanguageManagerBootstraps, Vec::new()),
-        (ExecutionStage::LanguageToolchains, Vec::new()),
-        (ExecutionStage::LanguagePackages, Vec::new()),
-        (ExecutionStage::Fonts, Vec::new()),
-    ];
-    let mut managers = BTreeSet::new();
+    let mut workflow = MacosUpdateWorkflow {
+        config,
+        architecture,
+        stages: vec![
+            (ExecutionStage::SystemUpdates, Vec::new()),
+            (ExecutionStage::RustManagerBootstrap, Vec::new()),
+            (ExecutionStage::RustToolchain, Vec::new()),
+            (ExecutionStage::GoToolchain, Vec::new()),
+            (ExecutionStage::NodeManagerBootstrap, Vec::new()),
+            (ExecutionStage::NodeToolchain, Vec::new()),
+            (ExecutionStage::PythonManagerBootstrap, Vec::new()),
+            (ExecutionStage::PythonToolchain, Vec::new()),
+            (ExecutionStage::CargoPackages, Vec::new()),
+            (ExecutionStage::NpmPackages, Vec::new()),
+            (ExecutionStage::Fonts, Vec::new()),
+        ],
+        managers: BTreeSet::new(),
+    };
+    macos_update_workflow(&mut workflow);
+    push_update_manager_bootstraps(&mut workflow.stages, &workflow.managers);
+    Ok(flatten_stage_vec(workflow.stages))
+}
+
+struct MacosUpdateWorkflow<'a> {
+    config: &'a Config,
+    architecture: Architecture,
+    stages: Vec<(ExecutionStage, Vec<Operation>)>,
+    managers: BTreeSet<ManagerBootstrap>,
+}
+
+fn macos_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    macos_homebrew_update_workflow(workflow);
+    macos_shared_tool_update_workflow(workflow);
+    macos_shared_package_update_workflow(workflow);
+    macos_shared_font_update_workflow(workflow);
+}
+
+fn macos_homebrew_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    let formulae = macos_homebrew_formulae_update_workflow(workflow);
+    let casks = macos_homebrew_casks_update_workflow(workflow);
     if formulae || casks {
-        push_operation(&mut stages, ExecutionStage::Updates, Operation::HomebrewUpdate { formulae, casks });
-    }
-    let tools = &config.shared.updates.tools;
-    if tools.rust == Some(true) {
-        managers.insert(ManagerBootstrap::Rustup);
         push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
+            &mut workflow.stages,
+            ExecutionStage::SystemUpdates,
+            Operation::HomebrewUpdate { formulae, casks },
+        );
+    }
+}
+
+fn macos_homebrew_formulae_update_workflow(workflow: &MacosUpdateWorkflow<'_>) -> bool {
+    workflow.config.macos().updates.homebrew.formulae == Some(true)
+}
+
+fn macos_homebrew_casks_update_workflow(workflow: &MacosUpdateWorkflow<'_>) -> bool {
+    workflow.config.macos().updates.homebrew.casks == Some(true)
+}
+
+fn macos_shared_tool_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    macos_rust_update_workflow(workflow);
+    macos_go_update_workflow(workflow);
+    macos_node_update_workflow(workflow);
+    macos_python_update_workflow(workflow);
+}
+
+fn macos_rust_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.rust == Some(true) {
+        workflow.managers.insert(ManagerBootstrap::Rustup);
+        push_operation(
+            &mut workflow.stages,
+            ExecutionStage::RustToolchain,
             Operation::RustToolchain {
-                selector: config.shared.tools.rust.clone(),
+                selector: workflow.config.shared.tools.rust.clone(),
                 mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
-    if tools.go == Some(true) {
+}
+
+fn macos_go_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.go == Some(true) {
         push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
+            &mut workflow.stages,
+            ExecutionStage::GoToolchain,
             Operation::GoToolchain {
-                selector: go_selector_main(config.shared.tools.go.as_deref().unwrap_or("latest")),
-                architecture,
+                selector: go_selector_main(workflow.config.shared.tools.go.as_deref().unwrap_or("latest")),
+                architecture: workflow.architecture,
                 mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
-    if tools.node == Some(true) {
-        managers.insert(ManagerBootstrap::Fnm);
+}
+
+fn macos_node_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.node == Some(true) {
+        workflow.managers.insert(ManagerBootstrap::Fnm);
         push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
+            &mut workflow.stages,
+            ExecutionStage::NodeToolchain,
             Operation::NodeToolchain {
-                selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".into()),
+                selector: workflow.config.shared.tools.node.clone().unwrap_or_else(|| "latest".into()),
                 mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
-    if tools.python == Some(true) {
-        managers.insert(ManagerBootstrap::Uv);
+}
+
+fn macos_python_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.tools.python == Some(true) {
+        workflow.managers.insert(ManagerBootstrap::Uv);
         push_operation(
-            &mut stages,
-            ExecutionStage::LanguageToolchains,
+            &mut workflow.stages,
+            ExecutionStage::PythonToolchain,
             Operation::PythonToolchain {
-                version: config.shared.tools.python.clone().unwrap_or_else(|| "latest".into()),
+                version: workflow.config.shared.tools.python.clone().unwrap_or_else(|| "latest".into()),
                 mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
-    let packages = &config.shared.updates.packages;
-    if packages.cargo == Some(true) {
-        push_operation(&mut stages, ExecutionStage::LanguagePackages, Operation::CargoPackageUpdate);
+}
+
+fn macos_shared_package_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    macos_cargo_update_workflow(workflow);
+    macos_npm_update_workflow(workflow);
+}
+
+fn macos_cargo_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.packages.cargo == Some(true) {
+        push_operation(&mut workflow.stages, ExecutionStage::CargoPackages, Operation::CargoPackageUpdate);
     }
-    if packages.npm == Some(true) {
-        managers.insert(ManagerBootstrap::Fnm);
-        push_operation(&mut stages, ExecutionStage::LanguagePackages, Operation::NpmPackageUpdate);
+}
+
+fn macos_npm_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.packages.npm == Some(true) {
+        workflow.managers.insert(ManagerBootstrap::Fnm);
+        push_operation(&mut workflow.stages, ExecutionStage::NpmPackages, Operation::NpmPackageUpdate);
     }
-    if config.shared.updates.fonts == Some(true) {
-        let families = config.shared.fonts.nerd.clone().unwrap_or_default();
-        if !families.is_empty() {
-            push_operation(
-                &mut stages,
-                ExecutionStage::Fonts,
-                Operation::UserNerdFonts { families, mode: NerdFontsMode::Update },
-            );
-        }
+}
+
+fn macos_shared_font_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    macos_nerd_fonts_update_workflow(workflow);
+}
+
+fn macos_nerd_fonts_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
+    if workflow.config.shared.updates.fonts == Some(true)
+        && let Some(families) = workflow.config.shared.fonts.nerd.as_ref().filter(|families| !families.is_empty())
+    {
+        push_operation(
+            &mut workflow.stages,
+            ExecutionStage::Fonts,
+            Operation::UserNerdFonts { families: families.clone(), mode: NerdFontsMode::Update },
+        );
     }
-    push_manager_bootstraps(&mut stages, &managers);
-    Ok(flatten_stages(stages))
 }
 
 fn push_operation(stages: &mut [(ExecutionStage, Vec<Operation>)], stage: ExecutionStage, op: Operation) {
     stages.iter_mut().find(|(p, _)| *p == stage).expect("stage exists").1.push(op);
 }
 
-fn push_manager_bootstraps(stages: &mut [(ExecutionStage, Vec<Operation>)], managers: &BTreeSet<ManagerBootstrap>) {
+fn push_update_manager_bootstraps(
+    stages: &mut [(ExecutionStage, Vec<Operation>)],
+    managers: &BTreeSet<ManagerBootstrap>,
+) {
     for manager in managers {
         let (stage, operation) = match manager {
             ManagerBootstrap::Flatpak => {
                 (ExecutionStage::ApplicationManagerBootstraps, Operation::FlatpakEnsureFlathub)
             }
-            ManagerBootstrap::Rustup => (ExecutionStage::LanguageManagerBootstraps, Operation::RustupBootstrap),
-            ManagerBootstrap::Fnm => (ExecutionStage::LanguageManagerBootstraps, Operation::FnmBootstrap),
-            ManagerBootstrap::Uv => (ExecutionStage::LanguageManagerBootstraps, Operation::UvBootstrap),
+            ManagerBootstrap::Rustup => (ExecutionStage::RustManagerBootstrap, Operation::RustupBootstrap),
+            ManagerBootstrap::Fnm => (ExecutionStage::NodeManagerBootstrap, Operation::FnmBootstrap),
+            ManagerBootstrap::Uv => (ExecutionStage::PythonManagerBootstrap, Operation::UvBootstrap),
             ManagerBootstrap::CargoBinstall => {
-                (ExecutionStage::LanguagePackageManagerBootstrap, Operation::CargoBinstallBootstrap)
+                (ExecutionStage::CargoManagerBootstrap, Operation::CargoBinstallBootstrap)
             }
         };
         push_operation(stages, stage, operation);
@@ -1122,10 +1217,6 @@ fn push_apply_manager_bootstraps(
         };
         push_operation(stages, stage, operation);
     }
-}
-
-fn flatten_stages<const N: usize>(stages: [(ExecutionStage, Vec<Operation>); N]) -> Vec<Operation> {
-    stages.into_iter().flat_map(|(_, operations)| operations).collect()
 }
 
 fn flatten_stage_vec(stages: Vec<(ExecutionStage, Vec<Operation>)>) -> Vec<Operation> {
@@ -1619,17 +1710,15 @@ mod tests {
     }
 
     #[test]
-    fn macos_update_stages_deduplicate_manager_bootstraps() {
+    fn update_workflows_deduplicate_non_apt_manager_bootstraps() {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
-        let operations = plan_update(&config, &macos_platform()).unwrap();
-        assert_eq!(operations.iter().filter(|operation| **operation == Operation::FnmBootstrap).count(), 1);
-
-        let fnm = operations.iter().position(|operation| *operation == Operation::FnmBootstrap).unwrap();
-        let node =
-            operations.iter().position(|operation| matches!(operation, Operation::NodeToolchain { .. })).unwrap();
-        let npm = operations.iter().position(|operation| *operation == Operation::NpmPackageUpdate).unwrap();
-        assert!(fnm < node);
-        assert!(node < npm);
+        for operations in
+            [plan_update(&config, &debian_platform()).unwrap(), plan_update(&config, &macos_platform()).unwrap()]
+        {
+            assert_eq!(operations.iter().filter(|operation| **operation == Operation::RustupBootstrap).count(), 1);
+            assert_eq!(operations.iter().filter(|operation| **operation == Operation::FnmBootstrap).count(), 1);
+            assert_eq!(operations.iter().filter(|operation| **operation == Operation::UvBootstrap).count(), 1);
+        }
     }
 
     #[test]
@@ -1694,22 +1783,106 @@ mod tests {
     }
 
     #[test]
-    fn debian_update_ensures_components_before_refreshing_metadata() {
+    fn linux_update_workflow_preserves_exact_capability_order() {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
         let operations = plan_update(&config, &debian_platform()).unwrap();
-        let components = operations
-            .iter()
-            .position(|operation| matches!(operation, Operation::EnsureDebianAptComponents { .. }))
-            .unwrap();
-        let refresh = operations.iter().position(|operation| *operation == Operation::AptMetadataRefresh).unwrap();
-        assert!(components < refresh);
+
+        assert_eq!(
+            operations,
+            vec![
+                Operation::AptMetadataRefresh,
+                Operation::AptUpgrade { policy: AptUpgradePolicy::Full },
+                Operation::AptBootstrapPackages {
+                    packages: vec![
+                        "ca-certificates".into(),
+                        "curl".into(),
+                        "flatpak".into(),
+                        "fontconfig".into(),
+                        "tar".into(),
+                        "unzip".into(),
+                        "xz-utils".into(),
+                    ],
+                },
+                Operation::FlatpakUpdateApps,
+                Operation::RustupBootstrap,
+                Operation::RustToolchain { selector: Some("stable".into()), mode: ToolchainMode::ConvergeLatest },
+                Operation::GoToolchain {
+                    selector: GoToolchainSelector::Latest,
+                    architecture: Architecture::Amd64,
+                    mode: ToolchainMode::ConvergeLatest,
+                },
+                Operation::FnmBootstrap,
+                Operation::NodeToolchain { selector: "lts".into(), mode: ToolchainMode::ConvergeLatest },
+                Operation::UvBootstrap,
+                Operation::PythonToolchain { version: "3.13".into(), mode: ToolchainMode::ConvergeLatest },
+                Operation::CargoPackageUpdate,
+                Operation::NpmPackageUpdate,
+                Operation::NerdFonts { families: vec!["GeistMono".into()], mode: NerdFontsMode::Update },
+            ]
+        );
     }
 
     #[test]
-    fn package_update_flags_plan_update_all_operations() {
+    fn macos_update_workflow_preserves_exact_capability_order() {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
-        let operations = plan_update(&config, &debian_platform()).unwrap();
-        assert!(operations.contains(&Operation::CargoPackageUpdate));
-        assert!(operations.contains(&Operation::NpmPackageUpdate));
+        let operations = plan_update(&config, &macos_platform()).unwrap();
+
+        assert_eq!(
+            operations,
+            vec![
+                Operation::HomebrewUpdate { formulae: true, casks: true },
+                Operation::RustupBootstrap,
+                Operation::RustToolchain { selector: Some("stable".into()), mode: ToolchainMode::ConvergeLatest },
+                Operation::GoToolchain {
+                    selector: GoToolchainSelector::Latest,
+                    architecture: Architecture::DarwinArm64,
+                    mode: ToolchainMode::ConvergeLatest,
+                },
+                Operation::FnmBootstrap,
+                Operation::NodeToolchain { selector: "lts".into(), mode: ToolchainMode::ConvergeLatest },
+                Operation::UvBootstrap,
+                Operation::PythonToolchain { version: "3.13".into(), mode: ToolchainMode::ConvergeLatest },
+                Operation::CargoPackageUpdate,
+                Operation::NpmPackageUpdate,
+                Operation::UserNerdFonts { families: vec!["GeistMono".into()], mode: NerdFontsMode::Update },
+            ]
+        );
+    }
+
+    #[test]
+    fn apt_update_plan_contains_only_refresh_and_selected_upgrade() {
+        let mut config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        config.os.linux.updates.as_mut().unwrap().apt = Some(AptUpdate::Full);
+        config.os.linux.updates.as_mut().unwrap().flatpak = Some(false);
+        config.shared.updates.tools.rust = Some(false);
+        config.shared.updates.tools.go = Some(false);
+        config.shared.updates.tools.node = Some(false);
+        config.shared.updates.tools.python = Some(false);
+        config.shared.updates.packages.cargo = Some(false);
+        config.shared.updates.packages.npm = Some(false);
+        config.shared.updates.fonts = Some(false);
+
+        assert_eq!(
+            plan_update(&config, &debian_platform()).unwrap(),
+            [Operation::AptMetadataRefresh, Operation::AptUpgrade { policy: AptUpgradePolicy::Full },]
+        );
+    }
+
+    #[test]
+    fn absent_and_false_update_controls_are_no_ops() {
+        let mut config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        config.os.linux.updates = None;
+        config.os.macos.updates.homebrew.formulae = Some(false);
+        config.os.macos.updates.homebrew.casks = Some(false);
+        config.shared.updates.tools.rust = Some(false);
+        config.shared.updates.tools.go = Some(false);
+        config.shared.updates.tools.node = Some(false);
+        config.shared.updates.tools.python = Some(false);
+        config.shared.updates.packages.cargo = Some(false);
+        config.shared.updates.packages.npm = Some(false);
+        config.shared.updates.fonts = Some(false);
+
+        assert!(plan_update(&config, &debian_platform()).unwrap().is_empty());
+        assert!(plan_update(&config, &macos_platform()).unwrap().is_empty());
     }
 }

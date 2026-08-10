@@ -89,7 +89,7 @@ shared:
     python: "3.13"     # Ensure the selected Python toolchain exists.
 ```
 
-Official APT source behavior is not configurable. On pure Debian, `apply` and enabled APT updates append `main`, `contrib`, `non-free`, and `non-free-firmware` to matching Bookworm or Trixie source entries. Existing files, URIs, options, comments, and unrelated repositories remain in place. Ubuntu and derivative official sources are unchanged.
+Official APT source behavior is not configurable. On pure Debian, `apply` appends `main`, `contrib`, `non-free`, and `non-free-firmware` to matching Bookworm or Trixie source entries. Existing files, URIs, options, comments, and unrelated repositories remain in place. Ubuntu and derivative official sources are unchanged.
 
 ### Configuration sources in the repository
 
@@ -260,24 +260,29 @@ Examples include:
 
 An absent, empty, or all-false update policy is a validated no-op.
 
+The Linux APT update capability workflow updates existing APT-managed state only. It emits an APT metadata refresh
+followed by the selected standard or full system upgrade. Repository publication, Debian component convergence,
+repository conflict handling, prerequisite derivation, and configured package installation belong to `apply`. Run
+`cozydot apply` before `cozydot update` after changing APT package or repository configuration.
+
 ## How the planner works
 
 The planner is more than a direct YAML-to-command mapping. It derives hidden dependencies and imposes ordering.
 
 ### Capability workflows and execution stages
 
-The Linux and macOS apply planners are concrete, nested capability workflows. Their top-level functions call system,
-native package, shared tool, shared package, font, dotfile, integration, and desktop workflows in product order. Leaf
-workflows contribute typed `Operation` values.
+The Linux and macOS apply and update planners are concrete, nested capability workflows. Their top-level functions call
+platform and shared capability workflows in product order. Leaf workflows contribute typed `Operation` values.
 
 `ExecutionStage` is the private ordering vocabulary used to place those operations in dependency-safe buckets. Stages
 are not user-facing workflows and do not execute or parallelize work. After every capability has contributed its
 operations, the planner flattens the command's fixed stage list into one sequential `Vec<Operation>`.
 
-Linux stages keep system and APT work before Flatpak, shared tools, shared packages, Debian packages and AppImages,
-fonts, dotfiles, integrations, and desktop operations. macOS stages keep system and Homebrew work before shared tools,
-shared packages, fonts, dotfiles, integrations, and desktop operations. Because these lists are fixed in Rust, YAML
-mapping order cannot change execution order.
+Linux apply stages keep system and APT work before Flatpak, shared tools, shared packages, Debian packages and AppImages,
+fonts, dotfiles, integrations, and desktop operations. Linux update stages keep APT refresh and upgrade before Flatpak,
+shared tools, shared packages, and fonts. macOS stages keep Homebrew work before shared tools, shared packages, fonts,
+dotfiles, integrations, and desktop operations where those capabilities apply. Because these lists are fixed in Rust,
+YAML mapping order cannot change execution order.
 
 For example, the system workflows contribute Debian APT component convergence on Debian and Xcode command line tools
 plus optional Rosetta on macOS. The Homebrew workflow contributes bootstrap and package operations only when formula or
@@ -566,7 +571,7 @@ This file should answer **what host is this?** It should not install or modify a
 The planner translates validated intent into an ordered operation list. It is structured as:
 
 1. Private fixed execution stages for dependency-safe operation order.
-2. Concrete nested Linux and macOS apply capability workflows.
+2. Concrete nested Linux and macOS apply and update capability workflows.
 3. Deduplicated derived prerequisite and manager-bootstrap collection.
 4. Public planners for `apply`, `dotfiles`, and `update`.
 5. Small resolution helpers that convert configuration values into operation inputs.
