@@ -481,6 +481,12 @@ cozydot/
 │   ├── init.rs
 │   └── operations/
 │       ├── mod.rs
+│       ├── host.rs
+│       ├── privileged_file.rs
+│       ├── apt.rs
+│       ├── languages.rs
+│       ├── packages.rs
+│       ├── parsers.rs
 │       ├── repository.rs
 │       ├── binary.rs
 │       ├── appimaged.rs
@@ -652,13 +658,12 @@ This is the operation hub. It contains:
 3. The closed `Operation` enum.
 4. Human-readable operation labels.
 5. The central executor dispatch from each enum variant to its implementation.
-6. `Host`, the wrapper for process execution and environment access.
-7. `TempPath`, the temporary-file wrapper.
-8. Shared privileged-file publication.
-9. Shared APT, language-bootstrap, and package-manager implementations.
-10. Parsers shared by operation modules.
 
 A planner can only request behavior represented by this enum. That closed set is the boundary preventing arbitrary YAML commands.
+
+The hub delegates common execution concerns to focused files: `host.rs` owns process and temporary-path primitives,
+`privileged_file.rs` owns atomic privileged publication, `apt.rs` owns APT convergence, `languages.rs` owns language-manager
+bootstraps, `packages.rs` owns package executors, and `parsers.rs` owns parsers shared by operation modules.
 
 #### `src/operations/repository.rs`
 
