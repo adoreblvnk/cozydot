@@ -586,8 +586,6 @@ packages:
         repository: example/unsupported
         assets:
           riscv64: ^unsupported$
-integrations:
-  appimaged: true
 "#,
     );
 
@@ -630,7 +628,6 @@ fonts:
 dotfiles:
   packages: []
 integrations:
-  appimaged: false
   docker:
     add_user_to_group: false
   virtualbox:
@@ -690,13 +687,10 @@ fn update_flags_do_not_require_apply_targets() {
 
     for (config, message) in [
         (
-            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n          arm64: ^app\\.AppImage$\n          arm32: ^app\\.AppImage$\n",
-            "AppImages require integrations.appimaged: true",
-        ),
-        (
-            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\nintegrations:\n  appimaged: true\n",
+            "version: 1.0.0\npackages:\n  binaries:\n    - name: app\n      format: appimage\n      commands: [app]\n      source:\n        provider: github\n        repository: example/app\n        assets:\n          amd64: ^app\\.AppImage$\n",
             "unknown field `commands`",
         ),
+        ("version: 1.0.0\nintegrations:\n  appimaged: true\n", "unknown field `appimaged`"),
     ] {
         let output = run_config(config, "apply");
         assert!(!output.status.success());
@@ -2085,8 +2079,6 @@ packages:
           amd64: https://example.com/fixed.AppImage
           arm64: https://example.com/fixed.AppImage
           arm32: https://example.com/fixed.AppImage
-integrations:
-  appimaged: true
 "#,
     );
 

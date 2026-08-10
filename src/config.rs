@@ -700,7 +700,6 @@ impl Dotfiles {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Integrations {
-    pub appimaged: Option<bool>,
     pub docker: Option<DockerIntegration>,
     pub virtualbox: Option<VirtualBoxIntegration>,
 }
