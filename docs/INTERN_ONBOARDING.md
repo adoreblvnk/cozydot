@@ -126,7 +126,7 @@ The core flow crosses five modules:
 4. `src/planner.rs`
    - Translates validated configuration into `Vec<Operation>`.
    - Adds prerequisites and manager bootstraps.
-   - Orders operations by dependency-sensitive phases.
+   - Expresses capability ownership through nested workflows and orders operations through fixed execution stages.
    - Keeps `apply`, `dotfiles`, and `update` semantics separate.
 
 5. `src/operations/`
@@ -209,7 +209,8 @@ Before the first side effect, it:
 2. Validates dependencies between capabilities.
 3. Builds the full ordered operation plan.
 
-Linux and macOS both place operations into shared dependency phases. Each platform defines its own ordered subset because APT and Homebrew have different transactions.
+Linux and macOS use platform-specific capability workflows and fixed execution-stage lists because APT and Homebrew
+have different transactions.
 
 Configuring an AppImage implicitly adds the `appimaged` prerequisite when that AppImage supports the current architecture. There is no `integrations.appimaged` field.
 
@@ -263,84 +264,28 @@ An absent, empty, or all-false update policy is a validated no-op.
 
 The planner is more than a direct YAML-to-command mapping. It derives hidden dependencies and imposes ordering.
 
-### Shared phase vocabulary
+### Capability workflows and execution stages
 
-`PlannerPhase` defines the available ordering buckets:
+The Linux and macOS apply planners are concrete, nested capability workflows. Their top-level functions call system,
+native package, shared tool, shared package, font, dotfile, integration, and desktop workflows in product order. Leaf
+workflows contribute typed `Operation` values.
 
-```text
-AdministrativeVerification
-PlatformFoundation
-SystemMetadataRefresh
-SystemState
-SystemPrerequisites
-SystemManagerBootstrap
-SystemPackages
-ThirdPartyRepositories
-RepositoryMetadataRefresh
-RepositoryPackages
-ApplicationManagerBootstraps
-ApplicationPackages
-LanguageManagerBootstraps
-LanguageToolchains
-LanguagePackageManagerBootstrap
-LanguagePackages
-BinaryManagerBootstrap
-BinaryPackages
-Fonts
-Integrations
-Dotfiles
-Desktop
-Updates
-```
+`ExecutionStage` is the private ordering vocabulary used to place those operations in dependency-safe buckets. Stages
+are not user-facing workflows and do not execute or parallelize work. After every capability has contributed its
+operations, the planner flattens the command's fixed stage list into one sequential `Vec<Operation>`.
 
-A phase does not execute or parallelize operations. Each planner discovers operations, places them into buckets, and flattens its ordered phase array into one sequential `Vec<Operation>`.
+Linux stages keep system and APT work before Flatpak, shared tools, shared packages, Debian packages and AppImages,
+fonts, dotfiles, integrations, and desktop operations. macOS stages keep system and Homebrew work before shared tools,
+shared packages, fonts, dotfiles, integrations, and desktop operations. Because these lists are fixed in Rust, YAML
+mapping order cannot change execution order.
 
-Linux `apply` uses this order:
+For example, the system workflows contribute Debian APT component convergence on Debian and Xcode command line tools
+plus optional Rosetta on macOS. The Homebrew workflow contributes bootstrap and package operations only when formula or
+cask intent exists.
 
-```text
-AdministrativeVerification
-PlatformFoundation
-SystemMetadataRefresh
-SystemState
-SystemPrerequisites
-ApplicationManagerBootstraps
-LanguageManagerBootstraps
-LanguageToolchains
-LanguagePackageManagerBootstrap
-SystemPackages
-ThirdPartyRepositories
-RepositoryMetadataRefresh
-RepositoryPackages
-ApplicationPackages
-LanguagePackages
-BinaryManagerBootstrap
-BinaryPackages
-Fonts
-Dotfiles
-Integrations
-Desktop
-```
-
-macOS `apply` uses this order:
-
-```text
-AdministrativeVerification
-PlatformFoundation
-SystemManagerBootstrap
-SystemPackages
-LanguageManagerBootstraps
-LanguageToolchains
-LanguagePackageManagerBootstrap
-LanguagePackages
-Fonts
-Integrations
-Dotfiles
-Desktop
-```
-
-For example, `PlatformFoundation` contains Debian APT component convergence on Debian and Xcode command line tools plus optional Rosetta on macOS. `SystemManagerBootstrap` and `SystemPackages` contain Homebrew bootstrap and Homebrew packages on macOS. Empty phases contribute no operations.
-
-`ManagerBootstrap` deduplicates Flatpak, rustup, FNM, uv, and cargo-binstall requirements before routing each manager to its phase. This prevents shared tool and package intent from scheduling the same bootstrap twice.
+`ManagerBootstrap` deduplicates Flatpak, rustup, FNM, uv, and cargo-binstall requirements before placing each manager in
+its dependency-safe execution stage. This prevents shared tool and package intent from scheduling the same bootstrap
+twice.
 
 Example: configuring Cargo packages can add all of these operations:
 
@@ -354,9 +299,12 @@ Cargo package set
 
 The user describes the desired capability. The planner supplies the prerequisites.
 
-The phase order prevents invalid sequences. Direct APT packages are handled before third-party repository packages. Repository metadata is refreshed after repository publication. During `apply`, dotfiles run after GNU Stow has been ensured.
+The fixed stage order prevents invalid sequences. Direct APT packages are handled before third-party repository
+packages. Repository metadata is refreshed after repository publication. During `apply`, dotfiles run after GNU Stow
+has been ensured.
 
-When adding a capability, first decide which phase owns it and which prerequisites it implies. Do not hide ordering dependencies inside an executor.
+When adding a capability, first decide which workflow owns it, which execution stage its operations require, and which
+prerequisites it implies. Do not hide ordering dependencies inside an executor.
 
 ## Safety invariants
 
@@ -415,7 +363,7 @@ This path shows why `shared` means portable intent, not identical host commands.
 1. YAML supplies the repository name, key URL, constrained key path, distro URL map, suite or path, components, conflicts, and repository packages.
 2. Configuration validation rejects duplicate ownership, unsafe shapes, and repository-package/conflict overlap.
 3. Platform resolution selects exact distro, upstream family, then `default`.
-4. The planner creates an `AptRepositoryOperation`, adds download and GPG prerequisites, and schedules metadata refresh and package installation in later phases.
+4. The planner creates an `AptRepositoryOperation`, adds download and GPG prerequisites, and schedules metadata refresh and package installation in later execution stages.
 5. The repository executor downloads and validates the public key, then publishes the key and source atomically.
 6. Later operations refresh APT metadata, purge installed declared conflicts, and ensure the repository packages.
 
@@ -439,7 +387,7 @@ Use this order:
 4. **Add it to `planner.rs`.**
    - Select the correct scope and platform.
    - Add prerequisites.
-   - Place it in a dependency-correct phase.
+   - Place it in a dependency-correct execution stage.
    - Preserve the boundary between apply and update behavior.
 
 5. **Implement execution under `src/operations/`.**
@@ -617,12 +565,11 @@ This file should answer **what host is this?** It should not install or modify a
 
 The planner translates validated intent into an ordered operation list. It is structured as:
 
-1. `PlannerPhase`, which defines dependency order.
-2. `ManagerBootstrap`, which deduplicates required package managers.
-3. Public planners for `apply`, `dotfiles`, and `update`.
-4. macOS-specific apply and update planning.
-5. Shared planning helpers for tools, system state, repositories, binaries, integrations, and desktop behavior.
-6. Small resolution helpers that convert configuration values into operation inputs.
+1. Private fixed execution stages for dependency-safe operation order.
+2. Concrete nested Linux and macOS apply capability workflows.
+3. Deduplicated derived prerequisite and manager-bootstrap collection.
+4. Public planners for `apply`, `dotfiles`, and `update`.
+5. Small resolution helpers that convert configuration values into operation inputs.
 
 The planner owns **selection, prerequisites, and order**. It does not execute commands or mutate the filesystem.
 
@@ -872,7 +819,7 @@ Before approving a Cozydot change, ask:
 - Can the full configuration fail before any side effect begins?
 - Is the behavior represented by a typed operation?
 - Are prerequisites explicit in the planner?
-- Is the phase order correct?
+- Is the capability workflow and execution-stage order correct?
 - Does the executor inspect state before mutation?
 - Are privileged paths constrained?
 - Are important writes staged, synced, and verified?
