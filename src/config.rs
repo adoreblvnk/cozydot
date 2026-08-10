@@ -36,20 +36,34 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Self> {
+    pub(crate) fn deserialize(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        Self::parse(&text).with_context(|| format!("validate {}", path.display()))
+        Self::deserialize_str(&text)
     }
 
+    pub fn load(path: &Path) -> Result<Self> {
+        let load = || -> Result<Self> {
+            let config = Self::deserialize(path)?;
+            config.validate()?;
+            Ok(config)
+        };
+        load().with_context(|| format!("validate {}", path.display()))
+    }
+
+    #[cfg(test)]
     pub fn parse(text: &str) -> Result<Self> {
+        let config = Self::deserialize_str(text)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn deserialize_str(text: &str) -> Result<Self> {
         let deserializer = yaml_serde::Deserializer::from_str(text);
-        let config: Self = serde_path_to_error::deserialize(deserializer).map_err(|error| {
+        serde_path_to_error::deserialize(deserializer).map_err(|error| {
             let path = error.path().to_string();
             let path = if path == "." { "config" } else { path.as_str() };
             anyhow::anyhow!("{path}: {}", error.inner())
-        })?;
-        config.validate()?;
-        Ok(config)
+        })
     }
 
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
@@ -99,11 +113,12 @@ impl Config {
         Ok(())
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         self.os.linux.packages.validate()?;
         self.shared.fonts.validate()?;
         self.shared.dotfiles.validate("shared.dotfiles")?;
         self.os.linux.dotfiles.validate("os.linux.dotfiles")?;
+        self.os.macos.dotfiles.validate("os.macos.dotfiles")?;
         if let Some(desktop) = &self.os.linux.desktop {
             desktop.validate()?;
         }

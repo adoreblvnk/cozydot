@@ -470,16 +470,34 @@ fn linux_derived_system_prerequisites_workflow(workflow: &mut LinuxApplyWorkflow
     }
 }
 
-pub fn plan_dotfiles(
+pub fn plan_standalone_dotfiles(
     config: &Config,
     platform: &Platform,
     dotfiles_root: &Path,
     replace: bool,
 ) -> Result<Vec<Operation>> {
     config.validate_for_platform(platform)?;
+    let mut packages = Vec::new();
+    standalone_shared_dotfiles_workflow(config, &mut packages);
+    standalone_current_platform_dotfiles_workflow(config, platform, &mut packages);
+    standalone_dotfiles_conflict_and_convergence_workflow(dotfiles_root, packages, replace)
+}
+
+fn standalone_shared_dotfiles_workflow(config: &Config, packages: &mut Vec<String>) {
+    packages.extend(config.shared.dotfiles.packages.iter().cloned());
+}
+
+fn standalone_current_platform_dotfiles_workflow(config: &Config, platform: &Platform, packages: &mut Vec<String>) {
     let platform_packages =
         if platform.is_macos() { &config.os.macos.dotfiles.packages } else { &config.os.linux.dotfiles.packages };
-    let packages = config.shared.dotfiles.packages.iter().chain(platform_packages).cloned().collect::<Vec<_>>();
+    packages.extend(platform_packages.iter().cloned());
+}
+
+fn standalone_dotfiles_conflict_and_convergence_workflow(
+    dotfiles_root: &Path,
+    packages: Vec<String>,
+    replace: bool,
+) -> Result<Vec<Operation>> {
     if packages.is_empty() {
         return Ok(Vec::new());
     }
@@ -1433,7 +1451,7 @@ mod tests {
                 .any(|operation| matches!(operation, Operation::MacDefaults { settings } if settings.len() == 8))
         );
 
-        let dotfiles = plan_dotfiles(&config, &macos_platform(), Path::new("/tmp/dotfiles"), true).unwrap();
+        let dotfiles = plan_standalone_dotfiles(&config, &macos_platform(), Path::new("/tmp/dotfiles"), true).unwrap();
         assert!(matches!(dotfiles.as_slice(), [Operation::Dotfiles { replace: true, .. }]));
     }
 

@@ -30,14 +30,13 @@ impl Preset {
     }
 }
 
-pub fn run(preset_val: Preset) -> Result<PathBuf> {
-    let root = config_root()?;
-    let preset_rec = preset(preset_val.name()).context("embedded preset is missing")?;
-    let mut records_vec = Vec::with_capacity(records().len() + 1);
-    records_vec.push(Record { path: "cozydot.yaml", bytes: preset_rec.bytes, mode: 0o644 });
-    records_vec.extend_from_slice(records());
-    sync(&root, &records_vec)?;
-    Ok(root)
+pub fn initialization_workflow(preset: Preset) -> Result<PathBuf> {
+    let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
+    let preset = select_embedded_preset(preset)?;
+    initialization.synchronize_active_configuration(preset)?;
+    initialization.synchronize_bundled_dotfiles()?;
+    initialization.publish_managed_file_manifest()?;
+    Ok(initialization.root)
 }
 
 pub fn config_root() -> Result<PathBuf> {
@@ -70,31 +69,56 @@ pub fn preset(name: &str) -> Option<&'static PresetRecord> {
     PRESETS.iter().find(|preset| preset.name == name)
 }
 
-fn sync(root: &Path, records: &[Record]) -> Result<()> {
-    ensure_directory_path(root, Path::new(""))?;
-    let manifest_path = root.join(".managed-files");
-    let mut managed = read_manifest(&manifest_path)?;
+struct Initialization {
+    root: PathBuf,
+    managed: BTreeMap<PathBuf, String>,
+}
 
-    for record in records {
+impl Initialization {
+    fn resolve_and_validate_configuration_root() -> Result<Self> {
+        let root = config_root()?;
+        ensure_directory_path(&root, Path::new(""))?;
+        let managed = read_manifest(&root.join(".managed-files"))?;
+        Ok(Self { root, managed })
+    }
+
+    fn synchronize_active_configuration(&mut self, preset: &PresetRecord) -> Result<()> {
+        self.synchronize_record(&Record { path: "cozydot.yaml", bytes: preset.bytes, mode: 0o644 })
+    }
+
+    fn synchronize_bundled_dotfiles(&mut self) -> Result<()> {
+        for record in records() {
+            self.synchronize_record(record)?;
+        }
+        Ok(())
+    }
+
+    fn synchronize_record(&mut self, record: &Record) -> Result<()> {
         let relative = PathBuf::from(record.path);
         validate_relative(&relative)?;
-        let destination = root.join(&relative);
+        let destination = self.root.join(&relative);
         let new_hash = hash_bytes(record.bytes);
-        let old_hash = managed.get(&relative).cloned();
+        let old_hash = self.managed.get(&relative);
         let install = match fs::symlink_metadata(&destination) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => true,
             Err(e) => return Err(e.into()),
             Ok(metadata) if !metadata.file_type().is_file() => false,
-            Ok(_) => old_hash.as_ref().is_some_and(|hash| hash_file(&destination).ok().as_ref() == Some(hash)),
+            Ok(_) => old_hash.is_some_and(|hash| hash_file(&destination).ok().as_ref() == Some(hash)),
         };
-        if !install {
-            continue;
+        if install {
+            install_file(&self.root, record, &relative)?;
+            self.managed.insert(relative, new_hash);
         }
-        install_file(root, record, &relative)?;
-        managed.insert(relative.clone(), new_hash);
+        Ok(())
     }
-    write_manifest(&manifest_path, &managed)?;
-    Ok(())
+
+    fn publish_managed_file_manifest(&self) -> Result<()> {
+        write_manifest(&self.root.join(".managed-files"), &self.managed)
+    }
+}
+
+fn select_embedded_preset(preset: Preset) -> Result<&'static PresetRecord> {
+    self::preset(preset.name()).context("embedded preset is missing")
 }
 
 fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
