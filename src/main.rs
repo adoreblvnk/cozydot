@@ -52,7 +52,7 @@ fn main() -> Result<()> {
         CliCommand::Check => {
             let path = init::config_root()?.join("cozydot.yaml");
             config::Config::load(&path)
-                .with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
+                .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
             println!("Checked {}", path.display());
         }
         CliCommand::Dotfiles { replace } => run("Applying", |config, platform, root| {
@@ -69,8 +69,8 @@ fn run(
 ) -> Result<()> {
     let root = init::config_root()?;
     let path = root.join("cozydot.yaml");
-    let config =
-        config::Config::load(&path).with_context(|| "active config is missing or invalid; run 'cozydot init' first")?;
+    let config = config::Config::load(&path)
+        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
     let platform = platform::Platform::detect()?;
     let operations = plan(&config, &platform, &root)?;
     for operation in operations {

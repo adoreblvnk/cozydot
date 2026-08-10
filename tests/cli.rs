@@ -161,7 +161,7 @@ fn missing_config_fails_apply() {
         .arg("apply")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("active config is missing or invalid"));
+        .stderr(predicate::str::contains("active configuration is missing or invalid"));
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn check_rejects_invalid_yaml() {
         .arg("check")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("active config is missing or invalid"));
+        .stderr(predicate::str::contains("active configuration is missing or invalid"));
 }
 
 #[test]
@@ -1726,7 +1726,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .success()
         .stdout(concat!(
             "Applying APT bootstrap packages\n",
-            "Applying Rustup bootstrap\n",
+            "Applying rustup bootstrap\n",
             "Applying FNM bootstrap\n",
             "Applying uv bootstrap\n",
             "Applying Rust toolchain\n",
@@ -1761,7 +1761,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .success()
         .stdout(concat!(
             "Updating APT bootstrap packages\n",
-            "Updating Rustup bootstrap\n",
+            "Updating rustup bootstrap\n",
             "Updating FNM bootstrap\n",
             "Updating uv bootstrap\n",
             "Updating Rust toolchain\n",
