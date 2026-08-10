@@ -55,7 +55,6 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
     if platform.is_macos() {
         return plan_macos_apply(config, platform.architecture, dotfiles_root);
     }
-    validate_binary_integrations(config, platform.architecture)?;
     let identity = resolve_platform_identity(platform)?;
     let mut phases = [
         (PlannerPhase::AdministrativeVerification, Vec::new()),
@@ -171,8 +170,7 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         );
     }
 
-    plan_appimaged(config, platform, &mut phases, &mut prerequisites);
-
+    let mut needs_appimaged = false;
     if let Some(binaries) = linux.packages.binaries.as_ref().filter(|values| !values.is_empty()) {
         for binary in binaries {
             let Some(planned) = plan_binary(binary, platform.architecture) else {
@@ -180,11 +178,19 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
             };
             prerequisites.insert("ca-certificates");
             prerequisites.insert("curl");
-            if binary.format == BinaryFormat::Deb {
-                needs_direct_apt_refresh = true;
+            match binary.format {
+                BinaryFormat::Deb => needs_direct_apt_refresh = true,
+                BinaryFormat::Appimage => needs_appimaged = true,
             }
             push_operation(&mut phases, PlannerPhase::BinaryPackages, Operation::BinaryPackage(planned));
         }
+    }
+    if needs_appimaged {
+        push_operation(
+            &mut phases,
+            PlannerPhase::AppImageManager,
+            Operation::Appimaged { architecture: platform.architecture },
+        );
     }
 
     if let Some(fonts) = config.shared.fonts.nerd.as_ref().filter(|values| !values.is_empty()) {
@@ -277,7 +283,6 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     if platform.is_macos() {
         return plan_macos_update(config, platform.architecture);
     }
-    validate_binary_integrations(config, platform.architecture)?;
     let linux = &config.os.linux;
     let updates = linux.updates.as_ref();
     let shared_updates = &config.shared.updates;
@@ -629,18 +634,6 @@ fn push_operation(phases: &mut [(PlannerPhase, Vec<Operation>)], phase: PlannerP
     phases.iter_mut().find(|(p, _)| *p == phase).expect("phase exists").1.push(op);
 }
 
-fn validate_binary_integrations(config: &Config, architecture: Architecture) -> Result<()> {
-    let has_appimage = config.os.linux.packages.binaries.as_ref().is_some_and(|binaries| {
-        binaries
-            .iter()
-            .any(|binary| binary.format == BinaryFormat::Appimage && plan_binary(binary, architecture).is_some())
-    });
-    if has_appimage && config.os.linux.integrations.appimaged != Some(true) {
-        anyhow::bail!("packages.binaries: AppImages require integrations.appimaged: true");
-    }
-    Ok(())
-}
-
 fn plan_system_states(
     config: &Config,
     platform: &Platform,
@@ -769,22 +762,6 @@ fn selected_repository_conflicts(
         .as_ref()
         .and_then(|conflicts| select_distro_map(conflicts, identity.distro, identity.upstream))
         .map(|(_, packages)| packages.clone())
-}
-
-fn plan_appimaged(
-    config: &Config,
-    platform: &Platform,
-    phases: &mut [(PlannerPhase, Vec<Operation>)],
-    prerequisites: &mut BTreeSet<&'static str>,
-) {
-    if config.os.linux.integrations.appimaged == Some(true) {
-        prerequisites.extend(["ca-certificates", "curl"]);
-        push_operation(
-            phases,
-            PlannerPhase::AppImageManager,
-            Operation::Appimaged { architecture: platform.architecture },
-        );
-    }
 }
 
 fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
@@ -921,6 +898,18 @@ mod tests {
         .unwrap()
     }
 
+    fn headless_ubuntu_platform() -> Platform {
+        Platform::from_release_parts(
+            "ubuntu".into(),
+            "ubuntu".into(),
+            "noble".into(),
+            "noble".into(),
+            "none".into(),
+            "amd64",
+        )
+        .unwrap()
+    }
+
     #[test]
     fn full_example_parses_macos_configuration() {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
@@ -953,5 +942,11 @@ mod tests {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
         let operations = plan_apply(&config, &debian_platform(), Path::new("/tmp/dotfiles")).unwrap();
         assert!(operations.contains(&Operation::EnsureDebianAptComponents { release: "bookworm".into() }));
+    }
+
+    #[test]
+    fn cli_preset_plans_on_a_headless_host() {
+        let config = Config::parse(include_str!("../configs/cli.yaml")).unwrap();
+        plan_apply(&config, &headless_ubuntu_platform(), Path::new("/tmp/dotfiles")).unwrap();
     }
 }

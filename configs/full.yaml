@@ -264,7 +264,6 @@ os:
         - bash
 
     integrations:
-      appimaged: true
       docker:
         add_user_to_group: true
         logging:

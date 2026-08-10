@@ -20,12 +20,13 @@ generate_full() {
 generate_cli() {
   yq '
     del(
+      .os.linux.system.require.desktops,
       .os.linux.system.ubuntu.codecs,
       .os.linux.packages.flatpak,
       .os.linux.desktop,
       .os.linux.updates.flatpak
     ) |
-    .os.linux.integrations = {"appimaged": false} |
+    .os.linux.integrations = {} |
     .os.linux.packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
     .os.linux.packages.apt.repositories |= map(select(.name == "github-cli")) |
     .shared.packages.npm = ["opencode-ai"] |
@@ -46,7 +47,6 @@ generate_vm() {
       .os.linux.integrations.docker,
       .os.linux.integrations.virtualbox
     ) |
-    .os.linux.integrations.appimaged = false |
     .os.linux.packages.apt.repositories |= map(select(.name == "vscode" or .name == "wezterm")) |
     .os.linux.packages.flatpak = ["com.bitwarden.desktop"] |
     .shared.packages.cargo = ["bat", "fd-find", "starship", "tealdeer"] |

@@ -126,8 +126,7 @@ os:
     dotfiles:
       packages:
         - bash
-    integrations:
-      appimaged: false
+    integrations: {}
     desktop:
       theme: dark
       terminal: wezterm

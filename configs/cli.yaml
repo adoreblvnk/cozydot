@@ -74,9 +74,6 @@ os:
           - debian
           - pop
           - linuxmint
-        desktops:
-          - gnome
-          - cinnamon
       apt:
         unattended_upgrades: disabled
       ubuntu:
@@ -134,8 +131,7 @@ os:
     dotfiles:
       packages:
         - bash
-    integrations:
-      appimaged: false
+    integrations: {}
     updates:
       apt: full
   macos:
