@@ -188,6 +188,27 @@ fn help_and_version() {
 }
 
 #[test]
+fn installer_rejects_intel_macos_before_download() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake_bin = temp.path().join("bin");
+    let download = temp.path().join("download-attempted");
+    write_executable(
+        &fake_bin.join("uname"),
+        "#!/bin/sh\ncase \"$1\" in\n  -s) printf 'Darwin\\n' ;;\n  -m) printf 'x86_64\\n' ;;\nesac\n",
+    );
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\n: > \"$COZYDOT_TEST_DOWNLOAD\"\nexit 99\n");
+
+    Command::new("bash")
+        .arg("install.sh")
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("COZYDOT_TEST_DOWNLOAD", &download)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cozydot: unsupported platform"));
+    assert!(!download.exists());
+}
+
+#[test]
 fn missing_config_fails_apply() {
     let temp = tempfile::tempdir().unwrap();
     Command::cargo_bin("cozydot")

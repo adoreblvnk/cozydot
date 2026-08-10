@@ -8,9 +8,7 @@ mod tools;
 
 pub use apt::AptUpgradePolicy;
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
-pub use packages::cargo::CargoPackageMode;
 pub use packages::fonts::NerdFontsMode;
-pub use packages::npm::NpmPackageMode;
 pub use repository::AptRepositoryOperation;
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
 pub use tools::GoToolchainSelector;
@@ -52,8 +50,10 @@ pub enum Operation {
     AptRepository(Box<AptRepositoryOperation>),
     AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
     FlatpakEnsureApps { refs: Vec<String> },
-    CargoPackageSet { packages: Vec<String>, mode: CargoPackageMode },
-    NpmPackageSet { packages: Vec<String>, mode: NpmPackageMode },
+    CargoPackageSet { packages: Vec<String> },
+    CargoPackageUpdate,
+    NpmPackageSet { packages: Vec<String> },
+    NpmPackageUpdate,
     Appimaged { architecture: Architecture },
     BinaryPackage(BinaryPackageOperation),
     NerdFonts { families: Vec<String>, mode: NerdFontsMode },
@@ -106,7 +106,9 @@ impl Operation {
             Self::AptRepositoryPackages { .. } => "APT repository packages",
             Self::FlatpakEnsureApps { .. } => "Flatpak applications",
             Self::CargoPackageSet { .. } => "Cargo packages",
+            Self::CargoPackageUpdate => "Cargo package updates",
             Self::NpmPackageSet { .. } => "npm packages",
+            Self::NpmPackageUpdate => "npm package updates",
             Self::Appimaged { .. } => "appimaged",
             Self::BinaryPackage(_) => "binary package",
             Self::NerdFonts { .. } => "Nerd Fonts",
@@ -178,8 +180,10 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
             completed(apt::repository_packages(&host, conflicts, packages))
         }
         Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
-        Operation::CargoPackageSet { packages, mode } => completed(packages::cargo::execute(&host, packages, *mode)),
-        Operation::NpmPackageSet { packages, mode } => completed(packages::npm::execute(&host, packages, *mode)),
+        Operation::CargoPackageSet { packages } => completed(packages::cargo::ensure(&host, packages)),
+        Operation::CargoPackageUpdate => completed(packages::cargo::update_all(&host)),
+        Operation::NpmPackageSet { packages } => completed(packages::npm::ensure(&host, packages)),
+        Operation::NpmPackageUpdate => completed(packages::npm::update_all(&host)),
         Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
         Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
         Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
@@ -642,56 +646,48 @@ pub(crate) mod packages {
 
         use super::super::Host;
 
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum CargoPackageMode {
-            EnsurePresent,
-            UpdateCurrent,
-        }
-
-        pub(crate) fn execute(host: &Host, packages: &[String], mode: CargoPackageMode) -> Result<()> {
+        pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
             let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
             if !cargo_home.is_absolute() {
                 bail!("Cargo package operation requires an absolute CARGO_HOME");
             }
-            match mode {
-                CargoPackageMode::EnsurePresent => {
-                    let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
-                    let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
-                    let installed = installed_crates(&output.stdout)?;
-                    let missing = packages
-                        .iter()
-                        .filter(|package| !installed.contains(crate_identity(package)))
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    if missing.is_empty() {
-                        return Ok(());
-                    }
-                    let binstall = resolve_binstall(&cargo_home)?
-                        .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
-                    let mut args = vec!["--no-confirm".to_owned(), "--".into()];
-                    args.extend(missing);
-                    host.require("Cargo package mutation", &binstall, args)?;
-                }
-                CargoPackageMode::UpdateCurrent => {
-                    let cargo_path = cargo_home.join("bin/cargo");
-                    if packages.is_empty() && !executable_file(&cargo_path) {
-                        return Ok(());
-                    }
-                    let cargo = path_program(&cargo_path, "managed Cargo executable path")?;
-                    let packages = if packages.is_empty() {
-                        let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
-                        installed_crates(&output.stdout)?.into_iter().collect()
-                    } else {
-                        packages.to_vec()
-                    };
-                    if packages.is_empty() {
-                        return Ok(());
-                    }
-                    let mut args = vec!["install".to_owned(), "--locked".into(), "--".into()];
-                    args.extend(packages);
-                    host.require("Cargo package convergence", &cargo, args)?;
-                }
+            let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
+            let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
+            let installed = installed_crates(&output.stdout)?;
+            let missing = packages
+                .iter()
+                .filter(|package| !installed.contains(crate_identity(package)))
+                .cloned()
+                .collect::<Vec<_>>();
+            if missing.is_empty() {
+                return Ok(());
             }
+            let binstall = resolve_binstall(&cargo_home)?
+                .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
+            let mut args = vec!["--no-confirm".to_owned(), "--".into()];
+            args.extend(missing);
+            host.require("Cargo package mutation", &binstall, args)?;
+            Ok(())
+        }
+
+        pub(crate) fn update_all(host: &Host) -> Result<()> {
+            let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
+            if !cargo_home.is_absolute() {
+                bail!("Cargo package operation requires an absolute CARGO_HOME");
+            }
+            let cargo_path = cargo_home.join("bin/cargo");
+            if !executable_file(&cargo_path) {
+                return Ok(());
+            }
+            let cargo = path_program(&cargo_path, "managed Cargo executable path")?;
+            let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
+            let packages = installed_crates(&output.stdout)?;
+            if packages.is_empty() {
+                return Ok(());
+            }
+            let mut args = vec!["install".to_owned(), "--locked".into(), "--".into()];
+            args.extend(packages);
+            host.require("Cargo package convergence", &cargo, args)?;
             Ok(())
         }
 
@@ -754,46 +750,33 @@ pub(crate) mod packages {
 
         use super::super::Host;
 
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum NpmPackageMode {
-            EnsurePresent,
-            UpdateCurrent,
-        }
-
-        pub(crate) fn execute(host: &Host, packages: &[String], mode: NpmPackageMode) -> Result<()> {
+        pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
             let Some(fnm) = resolve_fnm(host)? else {
-                if mode == NpmPackageMode::UpdateCurrent && packages.is_empty() {
-                    return Ok(());
-                }
                 bail!("npm package operation: managed fnm is unavailable after bootstrap");
             };
-            let selected = match mode {
-                NpmPackageMode::EnsurePresent => {
-                    let mut missing = Vec::new();
-                    for package in packages {
-                        let identity = package_identity(package);
-                        let output = host.run(
-                            &fnm,
-                            ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", identity],
-                        )?;
-                        if !output.status.success() {
-                            missing.push(package.clone());
-                        }
-                    }
-                    missing
+            let mut missing = Vec::new();
+            for package in packages {
+                let identity = package_identity(package);
+                let output = host.run(
+                    &fnm,
+                    ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", identity],
+                )?;
+                if !output.status.success() {
+                    missing.push(package.clone());
                 }
-                NpmPackageMode::UpdateCurrent if packages.is_empty() => {
-                    run_npm_required(host, &fnm, "npm package update", ["update", "--global"])?;
-                    return Ok(());
-                }
-                NpmPackageMode::UpdateCurrent => packages.to_vec(),
-            };
-            if selected.is_empty() {
+            }
+            if missing.is_empty() {
                 return Ok(());
             }
             let mut npm_args = vec!["install".to_owned(), "--global".into(), "--".into()];
-            npm_args.extend(selected);
+            npm_args.extend(missing);
             run_npm_required(host, &fnm, "npm package mutation", npm_args)?;
+            Ok(())
+        }
+
+        pub(crate) fn update_all(host: &Host) -> Result<()> {
+            let Some(fnm) = resolve_fnm(host)? else { return Ok(()) };
+            run_npm_required(host, &fnm, "npm package update", ["update", "--global"])?;
             Ok(())
         }
 

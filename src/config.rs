@@ -55,6 +55,9 @@ impl Config {
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         if platform.is_macos() {
+            if platform.architecture != Architecture::DarwinArm64 {
+                bail!("unsupported macOS architecture; only Apple Silicon (arm64) is supported");
+            }
             if self.macos().system.rosetta == Some(true) && platform.architecture != Architecture::DarwinArm64 {
                 bail!("os.macos.system.rosetta: Rosetta requires Apple Silicon macOS");
             }
