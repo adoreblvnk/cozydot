@@ -98,10 +98,10 @@ makes `cozydot update` a validated silent no-op. `apply` accepts update controls
 but never executes them. Managed Deb and AppImage binaries remain ensure-only
 and have no update category.
 
-`updates.apt: standard|full` converges applicable repositories, installs
-configured missing APT packages, then performs a system-wide APT `upgrade` or
-`full-upgrade`; `full` also runs purge-autoremove. These commands run only from
-`cozydot update`.
+`updates.apt: standard|full` refreshes APT metadata, then performs a system-wide
+APT `upgrade` or `full-upgrade`; `full` also runs purge-autoremove. This updates
+existing APT-managed state only. Run `cozydot apply` first after changing APT
+packages or repositories.
 
 Direct APT packages are ensured before packages owned by third-party
 repositories. A repository may declare distro-selected `conflicts`; after that
@@ -115,11 +115,11 @@ remove list.
 ## Safety model
 
 - `apply`, `dotfiles`, and `update` validate the complete active configuration
-  and resolved platform, then plan their complete ordered typed-operation
-  workflows before starting side effects.
+  and resolved platform, then use capability workflows and fixed execution
+  stages to build a complete ordered operation plan before starting side effects.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
-  execution uses a fixed set of typed operations.
+  execution uses a fixed set of typed `Operation` variants and executors.
 - `init` tracks the files it writes. Later runs refresh missing or unchanged
   init-managed files while preserving user-edited, unmanaged, and obsolete
   files.
