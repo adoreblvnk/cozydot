@@ -1,7 +1,7 @@
 # cozydot
 
 Cozydot provisions packages, development tools, dotfiles, integrations, desktop
-settings, and updates on Linux and macOS from one active YAML configuration.
+settings, and updates on Linux and macOS from one active configuration file.
 
 Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
 `aarch64` (`arm64`), and 32-bit ARMv7 (`arm32`), plus macOS on Apple Silicon
@@ -54,13 +54,13 @@ cozydot update
 
 `init` defaults to the embedded `cozydot` preset. Use
 `cozydot init --preset cozydot|full|cli|vm` to select any bundled preset. It
-writes the active config and bundled dotfiles under
+writes the active configuration and bundled dotfiles under
 `${XDG_CONFIG_HOME:-$HOME/.config}/cozydot` without a checkout or network
 request.
 
 ## Configuration sources
 
-`configs/cozydot.yaml` is the canonical, manually maintained base preset.
+`configs/cozydot.yaml` is the manually maintained base preset.
 `scripts/generate-configs.sh` derives `configs/full.yaml`, `configs/cli.yaml`,
 and `configs/vm.yaml`; do not edit those generated files directly. Builds embed
 snapshots of all four presets.
@@ -72,11 +72,12 @@ validate it without detecting the platform or making changes. `apply` and
 
 ## Apply, dotfiles, and update behavior
 
-`cozydot apply` installs configured missing targets and leaves present or
-unconfigured software unchanged, even when it is outdated.
+`cozydot apply` ensures configured software is present, applies configured
+state, and leaves unconfigured software unchanged. It does not upgrade present
+software merely because a newer release exists.
 
-`cozydot dotfiles` applies only the configured shared and current-platform
-dotfile packages. It reports every unmanaged destination conflict and exits
+`cozydot dotfiles` applies only shared dotfile packages and those configured for
+the current platform. It reports every unmanaged destination conflict and exits
 without changing dotfiles. `cozydot dotfiles --replace` (or `-r`) first backs
 conflicts up under
 `${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups`, then applies
@@ -85,7 +86,7 @@ destination files into Cozydot's source. `apply` uses the same conservative
 conflict behavior.
 
 `cozydot update` runs each enabled update category independently from apply
-targets. Flatpak updates installed user applications; Cargo updates installed
+intent. Flatpak updates installed user applications; Cargo updates installed
 registry crates; npm updates global packages. Rust updates all installed
 rustup toolchains when no selector is configured. Selectorless Go, Node, and
 Python updates use `latest`, `latest`, and `3` respectively. Font updates still
@@ -106,14 +107,14 @@ Direct APT packages are ensured before packages owned by third-party
 repositories. A repository may declare distro-selected `conflicts`; after that
 repository is published and APT metadata is refreshed, Cozydot purges only
 installed conflicts before ensuring the repository's packages. Conflict names
-must differ from repository target names. This makes repository migrations such
+must differ from repository package names. This makes repository migrations such
 as `docker.io` to `docker-ce` no-ops on a second `apply` while keeping all
 destructive removal tied to its replacement repository. There is no global APT
 remove list.
 
 ## Safety model
 
-- `apply` and `update` validate the complete active config and resolved
+- `apply` and `update` validate the complete active configuration and resolved
   platform, then plan their complete ordered typed-operation workflows before
   starting side effects.
 - YAML selects only the documented schema. It cannot provide arbitrary

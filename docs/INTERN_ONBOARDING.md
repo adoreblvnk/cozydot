@@ -170,6 +170,15 @@ Use these terms consistently in documentation, code review, and diagnostics. Res
 | No-op | A successful command or operation that has no work for the current configuration and host state. |
 | Rust target | The compilation triple passed to Cargo, such as `aarch64-apple-darwin`. |
 
+Architecture names vary at system, Cozydot, release, and Rust boundaries:
+
+| Platform | Detected aliases | Cozydot architecture | Release suffix | Rust target |
+| --- | --- | --- | --- | --- |
+| Linux x86-64 | `x86_64`, `amd64` | `amd64` | `linux-amd64` | `x86_64-unknown-linux-gnu` |
+| Linux ARM64 | `aarch64`, `arm64` | `arm64` | `linux-arm64` | `aarch64-unknown-linux-gnu` |
+| Linux ARMv7 | `arm32`, `armv7`, `armv7l`, `armhf` | `arm32` | `linux-arm32` | `armv7-unknown-linux-gnueabihf` |
+| Apple Silicon macOS | `aarch64`, `arm64` | `darwin-arm64` | `macos-arm64` | `aarch64-apple-darwin` |
+
 ## Command semantics
 
 ### `cozydot init`
@@ -258,7 +267,7 @@ Example: configuring Cargo packages can add all of these operations:
 
 ```text
 APT bootstrap packages: ca-certificates, curl
-Rustup bootstrap
+rustup bootstrap
 Rust toolchain
 cargo-binstall bootstrap
 Cargo package set

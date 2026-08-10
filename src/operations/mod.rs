@@ -95,7 +95,7 @@ impl Operation {
             Self::AptPackages { .. } => "APT packages",
             Self::AptBootstrapPackages { .. } => "APT bootstrap packages",
             Self::FlatpakEnsureFlathub => "Flathub remote",
-            Self::RustupBootstrap => "Rustup bootstrap",
+            Self::RustupBootstrap => "rustup bootstrap",
             Self::FnmBootstrap => "FNM bootstrap",
             Self::UvBootstrap => "uv bootstrap",
             Self::RustToolchain { .. } => "Rust toolchain",
@@ -605,7 +605,7 @@ pub(crate) mod languages {
         let install_dir =
             host.value("UV_INSTALL_DIR").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
         if !install_dir.is_absolute() {
-            bail!("UV managed install directory must be absolute");
+            bail!("uv managed install directory must be absolute");
         }
         let installed = install_dir.join("uv");
         if executable_file(&installed) {
@@ -613,13 +613,13 @@ pub(crate) mod languages {
         }
         let installer = TempPath::new(host, "uv-install")?;
         host.require(
-            "UV bootstrap download",
+            "uv bootstrap download",
             "curl",
             ["-LsSf", "-o", &installer.path().to_string_lossy(), "https://astral.sh/uv/install.sh"],
         )?;
-        std::fs::create_dir_all(&install_dir).context("UV bootstrap: create install directory")?;
+        std::fs::create_dir_all(&install_dir).context("uv bootstrap: create install directory")?;
         host.require(
-            "UV bootstrap",
+            "uv bootstrap",
             "env",
             vec![
                 format!("UV_UNMANAGED_INSTALL={}", install_dir.display()),
@@ -628,7 +628,7 @@ pub(crate) mod languages {
             ],
         )?;
         if !executable_file(&installed) {
-            bail!("UV bootstrap did not publish executable {}", installed.display());
+            bail!("uv bootstrap did not publish executable {}", installed.display());
         }
         Ok(())
     }
@@ -1108,14 +1108,14 @@ pub(crate) mod packages {
                     Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
                     Ok(_) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error).context("inspect dotfiles target"),
+                    Err(error) => return Err(error).context("inspect dotfile destination"),
                 }
             } else if source_metadata.file_type().is_file() || source_metadata.file_type().is_symlink() {
                 match fs::symlink_metadata(&target) {
                     Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
                     Ok(_) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error).context("inspect dotfiles target"),
+                    Err(error) => return Err(error).context("inspect dotfile destination"),
                 }
             } else {
                 bail!("unsupported dotfiles source type at {}", source.display());

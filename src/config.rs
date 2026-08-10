@@ -69,10 +69,10 @@ impl Config {
 
         if let Some(require) = self.os.linux.system.require.as_ref() {
             if require.distros.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
-                bail!("system.require.distros: detected distribution {:?} is not allowed", platform.distro);
+                bail!("os.linux.system.require.distros: detected distribution {:?} is not allowed", platform.distro);
             }
             if require.desktops.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
-                bail!("system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
+                bail!("os.linux.system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
             }
         }
 
@@ -85,13 +85,13 @@ impl Config {
         {
             if configured.has_neutral_intent() {
                 bail!(
-                    "desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
+                    "os.linux.desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
                     platform.desktop
                 );
             }
             if configured.gnome.as_ref().is_some_and(Gnome::has_intent) {
                 bail!(
-                    "desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
+                    "os.linux.desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
                 );
             }
@@ -102,20 +102,20 @@ impl Config {
     fn validate(&self) -> Result<()> {
         self.os.linux.packages.validate()?;
         self.shared.fonts.validate()?;
-        self.shared.dotfiles.validate()?;
-        self.os.linux.dotfiles.validate()?;
+        self.shared.dotfiles.validate("shared.dotfiles")?;
+        self.os.linux.dotfiles.validate("os.linux.dotfiles")?;
         if let Some(desktop) = &self.os.linux.desktop {
             desktop.validate()?;
         }
         if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
             && self.shared.tools.rust.is_none()
         {
-            bail!("packages.cargo: requires tools.rust");
+            bail!("shared.packages.cargo: requires shared.tools.rust");
         }
         if self.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty())
             && self.shared.tools.node.is_none()
         {
-            bail!("packages.npm: requires tools.node");
+            bail!("shared.packages.npm: requires shared.tools.node");
         }
         Ok(())
     }
@@ -279,7 +279,7 @@ impl Distro {
             "linuxmint" => Ok(Self::Linuxmint),
             "pop" => Ok(Self::Pop),
             "debian" => Ok(Self::Debian),
-            _ => bail!("system.require.distros: unsupported detected distribution {value:?}"),
+            _ => bail!("os.linux.system.require.distros: unsupported detected distribution {value:?}"),
         }
     }
 }
@@ -301,7 +301,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     let upstream = match platform.upstream.as_str() {
         "ubuntu" => Family::Ubuntu,
         "debian" => Family::Debian,
-        value => bail!("system.require.distros: unsupported platform upstream family {value:?}"),
+        value => bail!("os.linux.system.require.distros: unsupported platform upstream family {value:?}"),
     };
     let valid = match distro {
         Distro::Ubuntu | Distro::Pop => upstream == Family::Ubuntu,
@@ -310,7 +310,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     };
     if !valid {
         bail!(
-            "system.require.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
+            "os.linux.system.require.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
             platform.distro,
             platform.upstream
         );
@@ -332,7 +332,7 @@ impl DesktopKind {
             "none" => Ok(Self::None),
             "gnome" => Ok(Self::Gnome),
             "cinnamon" => Ok(Self::Cinnamon),
-            _ => bail!("system.require.desktops: unsupported detected desktop {value:?}"),
+            _ => bail!("os.linux.system.require.desktops: unsupported detected desktop {value:?}"),
         }
     }
 }
@@ -443,7 +443,7 @@ impl Packages {
             for (index, binary) in binaries.iter().enumerate() {
                 binary.validate(index)?;
                 if !names.insert(binary.name.as_str()) {
-                    bail!("packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
+                    bail!("os.linux.packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
                 }
             }
         }
@@ -466,11 +466,14 @@ impl AptPackages {
             for (index, repository) in repositories.iter().enumerate() {
                 repository.validate(index)?;
                 if !names.insert(repository.name.as_str()) {
-                    bail!("packages.apt.repositories[{index}].name: duplicate repository name {:?}", repository.name);
+                    bail!(
+                        "os.linux.packages.apt.repositories[{index}].name: duplicate repository name {:?}",
+                        repository.name
+                    );
                 }
                 if !key_paths.insert(repository.key_path.as_str()) {
                     bail!(
-                        "packages.apt.repositories[{index}].key_path: destination {:?} collides with an earlier repository",
+                        "os.linux.packages.apt.repositories[{index}].key_path: destination {:?} collides with an earlier repository",
                         repository.key_path
                     );
                 }
@@ -489,14 +492,16 @@ impl AptPackages {
             .enumerate()
             .filter(|(_, repository)| select_distro_map(&repository.urls, distro, upstream).is_some())
             .collect::<Vec<_>>();
-        let targets = applicable
+        let repository_packages = applicable
             .iter()
             .flat_map(|(_, repository)| repository.packages.iter().map(String::as_str))
             .collect::<HashSet<_>>();
 
         for (index, repository) in applicable {
             if let Some(package) = repository.packages.iter().find(|package| direct.contains(package.as_str())) {
-                bail!("packages.apt.repositories[{index}].packages: package {package:?} is also a direct APT target");
+                bail!(
+                    "os.linux.packages.apt.repositories[{index}].packages: package {package:?} is also a direct APT package"
+                );
             }
             let Some((distro_key, conflicts)) =
                 repository.conflicts.as_ref().and_then(|conflicts| select_distro_map(conflicts, distro, upstream))
@@ -505,13 +510,13 @@ impl AptPackages {
             };
             if let Some(package) = conflicts.iter().find(|package| direct.contains(package.as_str())) {
                 bail!(
-                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also a direct APT target",
+                    "os.linux.packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also a direct APT package",
                     distro_key.as_str()
                 );
             }
-            if let Some(package) = conflicts.iter().find(|package| targets.contains(package.as_str())) {
+            if let Some(package) = conflicts.iter().find(|package| repository_packages.contains(package.as_str())) {
                 bail!(
-                    "packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also an applicable repository target",
+                    "os.linux.packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also an applicable repository package",
                     distro_key.as_str()
                 );
             }
@@ -537,7 +542,7 @@ pub struct Repository {
 
 impl Repository {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("packages.apt.repositories[{index}]");
+        let path = format!("os.linux.packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
         match (&self.suite, &self.components, &self.path) {
@@ -578,7 +583,7 @@ pub struct BinaryPackage {
 
 impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("packages.binaries[{index}]");
+        let path = format!("os.linux.packages.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         self.source.validate(&format!("{path}.source"))
     }
@@ -682,7 +687,7 @@ pub struct Fonts {
 
 impl Fonts {
     fn validate(&self) -> Result<()> {
-        validate_string_list(self.nerd.as_deref(), "fonts.nerd", validate_definition_name)
+        validate_string_list(self.nerd.as_deref(), "shared.fonts.nerd", validate_definition_name)
     }
 }
 
@@ -693,8 +698,8 @@ pub struct Dotfiles {
 }
 
 impl Dotfiles {
-    fn validate(&self) -> Result<()> {
-        validate_string_values(&self.packages, "dotfiles.packages", validate_dotfile_package)
+    fn validate(&self, path: &str) -> Result<()> {
+        validate_string_values(&self.packages, &format!("{path}.packages"), validate_dotfile_package)
     }
 }
 
@@ -756,7 +761,7 @@ pub struct Desktop {
 impl Desktop {
     fn validate(&self) -> Result<()> {
         if let Some(terminal) = &self.terminal {
-            validate_executable(terminal, "desktop.terminal")?;
+            validate_executable(terminal, "os.linux.desktop.terminal")?;
         }
         Ok(())
     }
