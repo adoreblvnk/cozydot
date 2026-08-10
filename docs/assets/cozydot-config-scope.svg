@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Cozydot configuration scope</title>
+  <desc id="desc">The root configuration branches into portable shared intent, Linux-specific intent, and macOS-specific intent.</desc>
+  <rect x="0" y="0" width="1200" height="560" rx="24" fill="#f7f8fa"/>
+  <text x="60" y="62" fill="#17212b" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="700">Configuration scope</text>
+  <text x="60" y="96" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18">Place intent where an implementation exists, not where the YAML looks convenient.</text>
+
+  <rect x="445" y="126" width="310" height="84" rx="16" fill="#17212b"/>
+  <text x="600" y="161" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="22" font-weight="700">cozydot.yaml</text>
+  <text x="600" y="188" text-anchor="middle" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">version: 1.0.0</text>
+
+  <path d="M600 210 V250 H220 V286" fill="none" stroke="#52606d" stroke-width="3"/>
+  <path d="M600 210 V286" fill="none" stroke="#52606d" stroke-width="3"/>
+  <path d="M600 250 H980 V286" fill="none" stroke="#52606d" stroke-width="3"/>
+  <circle cx="220" cy="286" r="5" fill="#52606d"/>
+  <circle cx="600" cy="286" r="5" fill="#52606d"/>
+  <circle cx="980" cy="286" r="5" fill="#52606d"/>
+
+  <rect x="60" y="286" width="320" height="214" rx="18" fill="#eaf2ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="88" y="330" fill="#1e40af" font-family="ui-monospace, monospace" font-size="23" font-weight="700">shared</text>
+  <text x="88" y="362" fill="#17212b" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Portable intent</text>
+  <text x="88" y="400" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Tools + language packages</text>
+  <text x="88" y="430" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Fonts + shared dotfiles</text>
+  <text x="88" y="460" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">VS Code + update controls</text>
+  <text x="88" y="487" fill="#1e40af" font-family="ui-monospace, monospace" font-size="14">Linux + macOS planners</text>
+
+  <rect x="440" y="286" width="320" height="214" rx="18" fill="#fff7e6" stroke="#b7791f" stroke-width="2"/>
+  <text x="468" y="330" fill="#8a4b08" font-family="ui-monospace, monospace" font-size="23" font-weight="700">os.linux</text>
+  <text x="468" y="362" fill="#17212b" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Linux-only intent</text>
+  <text x="468" y="400" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">APT + Flatpak + binaries</text>
+  <text x="468" y="430" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Integrations + desktop</text>
+  <text x="468" y="460" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Linux dotfiles + updates</text>
+  <text x="468" y="487" fill="#8a4b08" font-family="ui-monospace, monospace" font-size="14">Linux planner only</text>
+
+  <rect x="820" y="286" width="320" height="214" rx="18" fill="#edf8f2" stroke="#2f855a" stroke-width="2"/>
+  <text x="848" y="330" fill="#276749" font-family="ui-monospace, monospace" font-size="23" font-weight="700">os.macos</text>
+  <text x="848" y="362" fill="#17212b" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">macOS-only intent</text>
+  <text x="848" y="400" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Homebrew + Xcode + Rosetta</text>
+  <text x="848" y="430" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">macOS defaults</text>
+  <text x="848" y="460" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">macOS dotfiles + updates</text>
+  <text x="848" y="487" fill="#276749" font-family="ui-monospace, monospace" font-size="14">macOS planner only</text>
+</svg>

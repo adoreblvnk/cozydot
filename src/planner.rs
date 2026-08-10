@@ -4,9 +4,8 @@ use crate::{
         select_distro_map, selected_repository_codename,
     },
     operations::{
-        AptRepositoryOperation, AptUpgradePolicy, BinaryPackageOperation, BinarySourceOperation, CargoPackageMode,
-        DesktopEnvironment, DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, NpmPackageMode,
-        Operation, ToolchainMode,
+        AptRepositoryOperation, AptUpgradePolicy, BinaryPackageOperation, BinarySourceOperation, DesktopEnvironment,
+        DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, Operation, ToolchainMode,
     },
     platform::{Architecture, Platform},
 };
@@ -156,18 +155,14 @@ pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) ->
         push_operation(
             &mut phases,
             PlannerPhase::LanguagePackages,
-            Operation::CargoPackageSet { packages: cargo.clone(), mode: CargoPackageMode::EnsurePresent },
+            Operation::CargoPackageSet { packages: cargo.clone() },
         );
     }
     if let Some(npm) = config.shared.packages.npm.as_ref().filter(|values| !values.is_empty()) {
         prerequisites.insert("ca-certificates");
         prerequisites.insert("curl");
         managers.insert(ManagerBootstrap::Fnm);
-        push_operation(
-            &mut phases,
-            PlannerPhase::LanguagePackages,
-            Operation::NpmPackageSet { packages: npm.clone(), mode: NpmPackageMode::EnsurePresent },
-        );
+        push_operation(&mut phases, PlannerPhase::LanguagePackages, Operation::NpmPackageSet { packages: npm.clone() });
     }
 
     let mut needs_appimaged = false;
@@ -421,18 +416,10 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
         );
     }
     if cargo_update {
-        push_operation(
-            &mut phases,
-            PlannerPhase::LanguagePackages,
-            Operation::CargoPackageSet { packages: Vec::new(), mode: CargoPackageMode::UpdateCurrent },
-        );
+        push_operation(&mut phases, PlannerPhase::LanguagePackages, Operation::CargoPackageUpdate);
     }
     if npm_update {
-        push_operation(
-            &mut phases,
-            PlannerPhase::LanguagePackages,
-            Operation::NpmPackageSet { packages: Vec::new(), mode: NpmPackageMode::UpdateCurrent },
-        );
+        push_operation(&mut phases, PlannerPhase::LanguagePackages, Operation::NpmPackageUpdate);
     }
     if shared_updates.fonts == Some(true) {
         let families = config.shared.fonts.nerd.clone().unwrap_or_default();
@@ -567,14 +554,13 @@ fn plan_shared_portable(config: &Config, architecture: Architecture, operations:
         if !packages.is_empty() {
             operations.push(Operation::CargoBinstallBootstrap);
         }
-        operations
-            .push(Operation::CargoPackageSet { packages: packages.clone(), mode: CargoPackageMode::EnsurePresent });
+        operations.push(Operation::CargoPackageSet { packages: packages.clone() });
     }
     if let Some(packages) = &config.shared.packages.npm {
         if !packages.is_empty() {
             operations.push(Operation::FnmBootstrap);
         }
-        operations.push(Operation::NpmPackageSet { packages: packages.clone(), mode: NpmPackageMode::EnsurePresent });
+        operations.push(Operation::NpmPackageSet { packages: packages.clone() });
     }
     if !config.shared.fonts.nerd.as_deref().unwrap_or_default().is_empty() {
         operations.push(Operation::UserNerdFonts {
@@ -623,11 +609,11 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
     }
     let packages = &config.shared.updates.packages;
     if packages.cargo == Some(true) {
-        operations.push(Operation::CargoPackageSet { packages: Vec::new(), mode: CargoPackageMode::UpdateCurrent });
+        operations.push(Operation::CargoPackageUpdate);
     }
     if packages.npm == Some(true) {
         operations.push(Operation::FnmBootstrap);
-        operations.push(Operation::NpmPackageSet { packages: Vec::new(), mode: NpmPackageMode::UpdateCurrent });
+        operations.push(Operation::NpmPackageUpdate);
     }
     if config.shared.updates.fonts == Some(true) {
         operations.push(Operation::UserNerdFonts {
@@ -968,5 +954,13 @@ mod tests {
             .unwrap();
         let refresh = operations.iter().position(|operation| *operation == Operation::AptMetadataRefresh).unwrap();
         assert!(components < refresh);
+    }
+
+    #[test]
+    fn package_update_flags_plan_update_all_operations() {
+        let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        let operations = plan_update(&config, &debian_platform()).unwrap();
+        assert!(operations.contains(&Operation::CargoPackageUpdate));
+        assert!(operations.contains(&Operation::NpmPackageUpdate));
     }
 }

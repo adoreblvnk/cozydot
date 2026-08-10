@@ -46,8 +46,11 @@ impl Platform {
         desktop: String,
         arch: &str,
     ) -> Result<Self> {
-        let architecture = if distro == "macos" && matches!(arch, "aarch64" | "arm64") {
-            Architecture::DarwinArm64
+        let architecture = if distro == "macos" {
+            match arch {
+                "aarch64" | "arm64" => Architecture::DarwinArm64,
+                _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
+            }
         } else {
             Architecture::normalize(arch)?
         };

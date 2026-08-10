@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Cozydot lifecycle</title>
+  <desc id="desc">A six-step flow from YAML intent through validation, platform detection, planning, execution, and converged host state.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#52606d"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1200" height="420" rx="24" fill="#f7f8fa"/>
+  <text x="60" y="64" fill="#17212b" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="700">Intent becomes an ordered, typed host change</text>
+  <text x="60" y="98" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18">The complete plan exists before the first operation executes.</text>
+
+  <line x1="220" y1="225" x2="252" y2="225" stroke="#52606d" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="402" y1="225" x2="434" y2="225" stroke="#52606d" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="584" y1="225" x2="616" y2="225" stroke="#52606d" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="766" y1="225" x2="798" y2="225" stroke="#52606d" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="948" y1="225" x2="980" y2="225" stroke="#52606d" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="50" y="150" width="170" height="150" rx="16" fill="#ffffff" stroke="#9aa5b1" stroke-width="2"/>
+  <circle cx="82" cy="182" r="16" fill="#2563eb"/>
+  <text x="82" y="188" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="16" font-weight="700">1</text>
+  <text x="78" y="230" fill="#17212b" font-family="ui-monospace, monospace" font-size="21" font-weight="700">YAML</text>
+  <text x="78" y="260" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Desired state</text>
+
+  <rect x="232" y="150" width="170" height="150" rx="16" fill="#ffffff" stroke="#9aa5b1" stroke-width="2"/>
+  <circle cx="264" cy="182" r="16" fill="#2563eb"/>
+  <text x="264" y="188" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="16" font-weight="700">2</text>
+  <text x="260" y="230" fill="#17212b" font-family="ui-monospace, monospace" font-size="21" font-weight="700">Config</text>
+  <text x="260" y="260" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Parse + validate</text>
+
+  <rect x="414" y="150" width="170" height="150" rx="16" fill="#ffffff" stroke="#9aa5b1" stroke-width="2"/>
+  <circle cx="446" cy="182" r="16" fill="#2563eb"/>
+  <text x="446" y="188" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="16" font-weight="700">3</text>
+  <text x="442" y="230" fill="#17212b" font-family="ui-monospace, monospace" font-size="21" font-weight="700">Platform</text>
+  <text x="442" y="260" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Detect + resolve</text>
+
+  <rect x="596" y="150" width="170" height="150" rx="16" fill="#ffffff" stroke="#9aa5b1" stroke-width="2"/>
+  <circle cx="628" cy="182" r="16" fill="#2563eb"/>
+  <text x="628" y="188" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="16" font-weight="700">4</text>
+  <text x="624" y="230" fill="#17212b" font-family="ui-monospace, monospace" font-size="21" font-weight="700">Planner</text>
+  <text x="624" y="260" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Order operations</text>
+
+  <rect x="778" y="150" width="170" height="150" rx="16" fill="#ffffff" stroke="#9aa5b1" stroke-width="2"/>
+  <circle cx="810" cy="182" r="16" fill="#2563eb"/>
+  <text x="810" y="188" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="16" font-weight="700">5</text>
+  <text x="806" y="230" fill="#17212b" font-family="ui-monospace, monospace" font-size="21" font-weight="700">Executor</text>
+  <text x="806" y="260" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Inspect + apply</text>
+
+  <rect x="960" y="150" width="190" height="150" rx="16" fill="#e8f5ee" stroke="#2f855a" stroke-width="2"/>
+  <circle cx="992" cy="182" r="16" fill="#2f855a"/>
+  <text x="992" y="188" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="16" font-weight="700">6</text>
+  <text x="988" y="230" fill="#17212b" font-family="ui-monospace, monospace" font-size="21" font-weight="700">Host state</text>
+  <text x="988" y="260" fill="#52606d" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">Target satisfied</text>
+
+  <rect x="424" y="340" width="352" height="44" rx="22" fill="#17212b"/>
+  <text x="600" y="368" text-anchor="middle" fill="#ffffff" font-family="ui-monospace, monospace" font-size="17">Vec&lt;Operation&gt; is the safety boundary</text>
+</svg>
