@@ -441,7 +441,7 @@ fn finish_linux_apply_workflow(workflow: &mut LinuxApplyWorkflow<'_>) {
     }
 
     linux_derived_system_prerequisites_workflow(workflow);
-    push_apply_manager_bootstraps(&mut workflow.stages, &workflow.managers);
+    push_manager_bootstraps(&mut workflow.stages, &workflow.managers);
 
     if workflow.needs_repository_refresh {
         push_operation(&mut workflow.stages, ExecutionStage::RepositoryMetadataRefresh, Operation::AptMetadataRefresh);
@@ -527,7 +527,6 @@ fn plan_linux_update(config: &Config, platform: &Platform) -> Result<Vec<Operati
             (ExecutionStage::SystemMetadataRefresh, Vec::new()),
             (ExecutionStage::SystemUpdates, Vec::new()),
             (ExecutionStage::SystemPrerequisites, Vec::new()),
-            (ExecutionStage::ApplicationManagerBootstraps, Vec::new()),
             (ExecutionStage::ApplicationPackages, Vec::new()),
             (ExecutionStage::RustManagerBootstrap, Vec::new()),
             (ExecutionStage::RustToolchain, Vec::new()),
@@ -702,7 +701,7 @@ fn finish_linux_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
             },
         );
     }
-    push_update_manager_bootstraps(&mut workflow.stages, &workflow.managers);
+    push_manager_bootstraps(&mut workflow.stages, &workflow.managers);
 }
 
 fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path) -> Result<Vec<Operation>> {
@@ -728,7 +727,7 @@ fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: 
     ];
     let mut managers = BTreeSet::new();
     macos_apply_workflow(config, architecture, dotfiles_root, &mut stages, &mut managers);
-    push_apply_manager_bootstraps(&mut stages, &managers);
+    push_manager_bootstraps(&mut stages, &managers);
     Ok(flatten_stage_vec(stages))
 }
 
@@ -1040,7 +1039,7 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
         managers: BTreeSet::new(),
     };
     macos_update_workflow(&mut workflow);
-    push_update_manager_bootstraps(&mut workflow.stages, &workflow.managers);
+    push_manager_bootstraps(&mut workflow.stages, &workflow.managers);
     Ok(flatten_stage_vec(workflow.stages))
 }
 
@@ -1179,30 +1178,7 @@ fn push_operation(stages: &mut [(ExecutionStage, Vec<Operation>)], stage: Execut
     stages.iter_mut().find(|(p, _)| *p == stage).expect("stage exists").1.push(op);
 }
 
-fn push_update_manager_bootstraps(
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-    managers: &BTreeSet<ManagerBootstrap>,
-) {
-    for manager in managers {
-        let (stage, operation) = match manager {
-            ManagerBootstrap::Flatpak => {
-                (ExecutionStage::ApplicationManagerBootstraps, Operation::FlatpakEnsureFlathub)
-            }
-            ManagerBootstrap::Rustup => (ExecutionStage::RustManagerBootstrap, Operation::RustupBootstrap),
-            ManagerBootstrap::Fnm => (ExecutionStage::NodeManagerBootstrap, Operation::FnmBootstrap),
-            ManagerBootstrap::Uv => (ExecutionStage::PythonManagerBootstrap, Operation::UvBootstrap),
-            ManagerBootstrap::CargoBinstall => {
-                (ExecutionStage::CargoManagerBootstrap, Operation::CargoBinstallBootstrap)
-            }
-        };
-        push_operation(stages, stage, operation);
-    }
-}
-
-fn push_apply_manager_bootstraps(
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-    managers: &BTreeSet<ManagerBootstrap>,
-) {
+fn push_manager_bootstraps(stages: &mut [(ExecutionStage, Vec<Operation>)], managers: &BTreeSet<ManagerBootstrap>) {
     for manager in managers {
         let (stage, operation) = match manager {
             ManagerBootstrap::Flatpak => {
@@ -1514,6 +1490,133 @@ mod tests {
         }
     }
 
+    fn apply_order_config() -> Config {
+        Config::parse(
+            r#"
+version: 1.0.0
+shared:
+  tools:
+    rust: stable
+    go: latest
+    node: lts
+    python: "3.13"
+  packages:
+    cargo: [cargo-first, cargo-second]
+    npm: [npm-first, npm-second]
+  fonts:
+    nerd: [OrderFont]
+  dotfiles:
+    packages: [shared-dotfiles]
+  integrations:
+    vscode:
+      extensions: [publisher.first, publisher.second]
+  updates:
+    tools: {}
+    packages: {}
+os:
+  linux:
+    system:
+      ensure_admin: true
+      apt:
+        unattended_upgrades: disabled
+    packages:
+      apt:
+        install: [apt-first, apt-second]
+        repositories:
+          - name: repo-first
+            key: https://example.com/first.asc
+            key_path: /etc/apt/keyrings/first.asc
+            urls:
+              default: https://example.com/first
+            suite: stable
+            components: [main]
+            conflicts:
+              default: [old-first]
+            packages: [repo-package-first]
+          - name: repo-second
+            key: https://example.com/second.asc
+            key_path: /etc/apt/keyrings/second.asc
+            urls:
+              default: https://example.com/second
+            path: ./
+            packages: [repo-package-second]
+      flatpak: [flatpak.first, flatpak.second]
+      binaries:
+        - name: appimage-first
+          format: appimage
+          source:
+            provider: url
+            urls:
+              amd64: https://example.com/appimage-first.AppImage
+        - name: deb-first
+          format: deb
+          source:
+            provider: url
+            urls:
+              amd64: https://example.com/deb-first.deb
+        - name: appimage-second
+          format: appimage
+          source:
+            provider: url
+            urls:
+              amd64: https://example.com/appimage-second.AppImage
+        - name: deb-second
+          format: deb
+          source:
+            provider: url
+            urls:
+              amd64: https://example.com/deb-second.deb
+    dotfiles:
+      packages: [linux-dotfiles]
+    integrations:
+      docker:
+        add_user_to_group: true
+        logging:
+          driver: local
+          max_size: 5m
+      virtualbox:
+        add_user_to_group: true
+    desktop:
+      theme: dark
+      terminal: workflow-terminal
+      idle:
+        timeout: 5m
+        dim: false
+      gnome:
+        extensions: [extension-first, extension-second]
+        dock: true
+        rounded_corners: true
+  macos:
+    system:
+      ensure_admin: true
+      xcode:
+        command_line_tools: true
+      rosetta: true
+    homebrew:
+      formulae: [formula-first, formula-second]
+      casks: [cask-first, cask-second]
+    dotfiles:
+      packages: [macos-dotfiles]
+    desktop:
+      appearance: dark
+      dock:
+        autohide: true
+        show_recent_applications: false
+      finder:
+        show_filename_extensions: true
+        show_hidden_files: false
+      keyboard:
+        key_repeat: 2
+        initial_key_repeat: 15
+      trackpad:
+        tap_to_click: true
+    updates:
+      homebrew: {}
+"#,
+        )
+        .unwrap()
+    }
+
     #[test]
     fn full_example_parses_macos_configuration() {
         let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
@@ -1547,116 +1650,194 @@ mod tests {
     }
 
     #[test]
-    fn macos_apply_workflow_preserves_capability_order() {
-        let mut config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
-        config.os.macos.system.rosetta = Some(true);
+    fn macos_apply_workflow_preserves_exact_typed_capability_order() {
+        let config = apply_order_config();
         let operations = plan_apply(&config, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap();
-        let position = |predicate: fn(&Operation) -> bool| operations.iter().position(predicate).unwrap();
 
-        let admin = position(|operation| matches!(operation, Operation::MacEnsureAdmin));
-        let xcode = position(|operation| matches!(operation, Operation::XcodeCommandLineTools));
-        let rosetta = position(|operation| matches!(operation, Operation::Rosetta));
-        let homebrew_bootstrap = position(|operation| matches!(operation, Operation::HomebrewBootstrap));
-        let homebrew_packages = position(|operation| matches!(operation, Operation::HomebrewPackages { .. }));
-        let rustup = position(|operation| matches!(operation, Operation::RustupBootstrap));
-        let rust = position(|operation| matches!(operation, Operation::RustToolchain { .. }));
-        let fnm = position(|operation| matches!(operation, Operation::FnmBootstrap));
-        let node = position(|operation| matches!(operation, Operation::NodeToolchain { .. }));
-        let uv = position(|operation| matches!(operation, Operation::UvBootstrap));
-        let python = position(|operation| matches!(operation, Operation::PythonToolchain { .. }));
-        let cargo_binstall = position(|operation| matches!(operation, Operation::CargoBinstallBootstrap));
-        let cargo = position(|operation| matches!(operation, Operation::CargoPackageSet { .. }));
-        let dotfiles = position(|operation| matches!(operation, Operation::Dotfiles { .. }));
-        let vscode = position(|operation| matches!(operation, Operation::VsCodeExtensionSet { .. }));
-        let desktop = position(|operation| matches!(operation, Operation::MacDefaults { .. }));
-
-        assert!(admin < xcode);
-        assert!(xcode < rosetta);
-        assert!(rosetta < homebrew_bootstrap);
-        assert!(homebrew_bootstrap < homebrew_packages);
-        assert!(homebrew_packages < rustup);
-        assert!(rustup < rust);
-        let go = position(|operation| matches!(operation, Operation::GoToolchain { .. }));
-        assert!(rust < go);
-        assert!(go < fnm);
-        assert!(fnm < node);
-        assert!(node < uv);
-        assert!(uv < python);
-        assert!(python < cargo_binstall);
-        assert!(cargo_binstall < cargo);
-        assert!(cargo < dotfiles);
-        assert!(dotfiles < vscode);
-        assert!(dotfiles < desktop);
+        assert_eq!(
+            operations,
+            vec![
+                Operation::MacEnsureAdmin,
+                Operation::XcodeCommandLineTools,
+                Operation::Rosetta,
+                Operation::HomebrewBootstrap,
+                Operation::HomebrewPackages {
+                    formulae: vec!["formula-first".into(), "formula-second".into(), "stow".into()],
+                    casks: vec!["cask-first".into(), "cask-second".into()],
+                },
+                Operation::RustupBootstrap,
+                Operation::RustToolchain { selector: Some("stable".into()), mode: ToolchainMode::EnsurePresent },
+                Operation::GoToolchain {
+                    selector: GoToolchainSelector::Latest,
+                    architecture: Architecture::DarwinArm64,
+                    mode: ToolchainMode::EnsurePresent,
+                },
+                Operation::FnmBootstrap,
+                Operation::NodeToolchain { selector: "lts".into(), mode: ToolchainMode::EnsurePresent },
+                Operation::UvBootstrap,
+                Operation::PythonToolchain { version: "3.13".into(), mode: ToolchainMode::EnsurePresent },
+                Operation::CargoBinstallBootstrap,
+                Operation::CargoPackageSet { packages: vec!["cargo-first".into(), "cargo-second".into()] },
+                Operation::NpmPackageSet { packages: vec!["npm-first".into(), "npm-second".into()] },
+                Operation::UserNerdFonts { families: vec!["OrderFont".into()], mode: NerdFontsMode::EnsurePresent },
+                Operation::Dotfiles {
+                    root: PathBuf::from("/tmp/dotfiles"),
+                    packages: vec!["shared-dotfiles".into(), "macos-dotfiles".into()],
+                    replace: false,
+                },
+                Operation::VsCodeExtensionSet { extensions: vec!["publisher.first".into(), "publisher.second".into()] },
+                Operation::MacDefaults {
+                    settings: vec![
+                        crate::operations::macos::MacDefault::Appearance(true),
+                        crate::operations::macos::MacDefault::DockAutohide(true),
+                        crate::operations::macos::MacDefault::DockRecentApplications(false),
+                        crate::operations::macos::MacDefault::FinderExtensions(true),
+                        crate::operations::macos::MacDefault::FinderHiddenFiles(false),
+                        crate::operations::macos::MacDefault::KeyRepeat(2),
+                        crate::operations::macos::MacDefault::InitialKeyRepeat(15),
+                        crate::operations::macos::MacDefault::TrackpadTapToClick(true),
+                    ],
+                },
+            ]
+        );
     }
 
     #[test]
-    fn linux_apply_workflow_preserves_capability_order() {
-        let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+    fn linux_apply_workflow_preserves_exact_typed_capability_order() {
+        let config = apply_order_config();
         let operations = plan_apply(&config, &debian_platform(), Path::new("/tmp/dotfiles")).unwrap();
-        let position = |predicate: fn(&Operation) -> bool| operations.iter().position(predicate).unwrap();
-        let last_position = |predicate: fn(&Operation) -> bool| operations.iter().rposition(predicate).unwrap();
 
-        let admin = position(|operation| matches!(operation, Operation::EnsureAdmin));
-        let platform = position(|operation| matches!(operation, Operation::EnsureDebianAptComponents { .. }));
-        let refresh = position(|operation| matches!(operation, Operation::AptMetadataRefresh));
-        let state = position(|operation| matches!(operation, Operation::UnattendedUpgrades { .. }));
-        let prerequisites = position(|operation| matches!(operation, Operation::AptBootstrapPackages { .. }));
-        let direct_packages =
-            position(|operation| matches!(operation, Operation::AptPackages { packages } if packages.len() > 1));
-        let repository = position(|operation| matches!(operation, Operation::AptRepository(_)));
-        let repository_refresh = last_position(|operation| matches!(operation, Operation::AptMetadataRefresh));
-        let repository_packages = position(|operation| matches!(operation, Operation::AptRepositoryPackages { .. }));
-        let flatpak_bootstrap = position(|operation| matches!(operation, Operation::FlatpakEnsureFlathub));
-        let flatpak_packages = position(|operation| matches!(operation, Operation::FlatpakEnsureApps { .. }));
-        let rustup = position(|operation| matches!(operation, Operation::RustupBootstrap));
-        let rust = position(|operation| matches!(operation, Operation::RustToolchain { .. }));
-        let go = position(|operation| matches!(operation, Operation::GoToolchain { .. }));
-        let fnm = position(|operation| matches!(operation, Operation::FnmBootstrap));
-        let node = position(|operation| matches!(operation, Operation::NodeToolchain { .. }));
-        let uv = position(|operation| matches!(operation, Operation::UvBootstrap));
-        let python = position(|operation| matches!(operation, Operation::PythonToolchain { .. }));
-        let cargo_binstall = position(|operation| matches!(operation, Operation::CargoBinstallBootstrap));
-        let cargo = position(|operation| matches!(operation, Operation::CargoPackageSet { .. }));
-        let npm = position(|operation| matches!(operation, Operation::NpmPackageSet { .. }));
-        let first_binary = position(|operation| matches!(operation, Operation::BinaryPackage(_)));
-        let appimaged = position(|operation| matches!(operation, Operation::Appimaged { .. }));
-        let last_binary = last_position(|operation| matches!(operation, Operation::BinaryPackage(_)));
-        let fonts = position(|operation| matches!(operation, Operation::NerdFonts { .. }));
-        let dotfiles = position(|operation| matches!(operation, Operation::Dotfiles { .. }));
-        let docker = position(|operation| matches!(operation, Operation::DockerGroup));
-        let virtualbox = position(|operation| matches!(operation, Operation::VirtualBoxGroup));
-        let vscode = position(|operation| matches!(operation, Operation::VsCodeExtensionSet { .. }));
-        let desktop = position(|operation| matches!(operation, Operation::DesktopSetting { .. }));
-
-        assert!(admin < platform);
-        assert!(platform < refresh);
-        assert!(refresh < state);
-        assert!(state < prerequisites);
-        assert!(prerequisites < direct_packages);
-        assert!(direct_packages < repository);
-        assert!(repository < repository_refresh);
-        assert!(repository_refresh < repository_packages);
-        assert!(repository_packages < flatpak_bootstrap);
-        assert!(flatpak_bootstrap < flatpak_packages);
-        assert!(flatpak_packages < rustup);
-        assert!(rustup < rust);
-        assert!(rust < go);
-        assert!(go < fnm);
-        assert!(fnm < node);
-        assert!(node < uv);
-        assert!(uv < python);
-        assert!(python < cargo_binstall);
-        assert!(cargo_binstall < cargo);
-        assert!(cargo < npm);
-        assert!(npm < first_binary);
-        assert!(first_binary < appimaged);
-        assert!(appimaged < last_binary);
-        assert!(last_binary < fonts);
-        assert!(fonts < dotfiles);
-        assert!(dotfiles < docker);
-        assert!(docker < virtualbox);
-        assert!(virtualbox < vscode);
-        assert!(vscode < desktop);
+        assert_eq!(
+            operations,
+            vec![
+                Operation::EnsureAdmin,
+                Operation::EnsureDebianAptComponents { release: "bookworm".into() },
+                Operation::AptMetadataRefresh,
+                Operation::UnattendedUpgrades { enabled: false },
+                Operation::AptBootstrapPackages {
+                    packages: vec![
+                        "ca-certificates".into(),
+                        "curl".into(),
+                        "dconf-cli".into(),
+                        "flatpak".into(),
+                        "fontconfig".into(),
+                        "gnome-shell".into(),
+                        "gnupg".into(),
+                        "libglib2.0-bin".into(),
+                        "stow".into(),
+                        "tar".into(),
+                        "unzip".into(),
+                        "xz-utils".into(),
+                    ],
+                },
+                Operation::AptPackages { packages: vec!["apt-first".into(), "apt-second".into()] },
+                Operation::AptRepository(Box::new(
+                    AptRepositoryOperation::new(
+                        "repo-first",
+                        "https://example.com/first.asc".into(),
+                        "https://example.com/first".into(),
+                        Architecture::Amd64,
+                        Some("stable".into()),
+                        vec!["main".into()],
+                        None,
+                        PathBuf::from("/etc/apt/keyrings/first.asc"),
+                    )
+                    .unwrap(),
+                )),
+                Operation::AptRepository(Box::new(
+                    AptRepositoryOperation::new(
+                        "repo-second",
+                        "https://example.com/second.asc".into(),
+                        "https://example.com/second".into(),
+                        Architecture::Amd64,
+                        None,
+                        Vec::new(),
+                        Some("./".into()),
+                        PathBuf::from("/etc/apt/keyrings/second.asc"),
+                    )
+                    .unwrap(),
+                )),
+                Operation::AptMetadataRefresh,
+                Operation::AptRepositoryPackages {
+                    conflicts: vec!["old-first".into()],
+                    packages: vec!["repo-package-first".into()],
+                },
+                Operation::AptRepositoryPackages {
+                    conflicts: Vec::new(),
+                    packages: vec!["repo-package-second".into()],
+                },
+                Operation::FlatpakEnsureFlathub,
+                Operation::FlatpakEnsureApps { refs: vec!["flatpak.first".into(), "flatpak.second".into()] },
+                Operation::RustupBootstrap,
+                Operation::RustToolchain { selector: Some("stable".into()), mode: ToolchainMode::EnsurePresent },
+                Operation::GoToolchain {
+                    selector: GoToolchainSelector::Latest,
+                    architecture: Architecture::Amd64,
+                    mode: ToolchainMode::EnsurePresent,
+                },
+                Operation::FnmBootstrap,
+                Operation::NodeToolchain { selector: "lts".into(), mode: ToolchainMode::EnsurePresent },
+                Operation::UvBootstrap,
+                Operation::PythonToolchain { version: "3.13".into(), mode: ToolchainMode::EnsurePresent },
+                Operation::CargoBinstallBootstrap,
+                Operation::CargoPackageSet { packages: vec!["cargo-first".into(), "cargo-second".into()] },
+                Operation::NpmPackageSet { packages: vec!["npm-first".into(), "npm-second".into()] },
+                Operation::BinaryPackage(BinaryPackageOperation::new(
+                    "deb-first".into(),
+                    BinaryFormat::Deb,
+                    Architecture::Amd64,
+                    BinarySourceOperation::Url { url: "https://example.com/deb-first.deb".into() },
+                )),
+                Operation::BinaryPackage(BinaryPackageOperation::new(
+                    "deb-second".into(),
+                    BinaryFormat::Deb,
+                    Architecture::Amd64,
+                    BinarySourceOperation::Url { url: "https://example.com/deb-second.deb".into() },
+                )),
+                Operation::Appimaged { architecture: Architecture::Amd64 },
+                Operation::BinaryPackage(BinaryPackageOperation::new(
+                    "appimage-first".into(),
+                    BinaryFormat::Appimage,
+                    Architecture::Amd64,
+                    BinarySourceOperation::Url { url: "https://example.com/appimage-first.AppImage".into() },
+                )),
+                Operation::BinaryPackage(BinaryPackageOperation::new(
+                    "appimage-second".into(),
+                    BinaryFormat::Appimage,
+                    Architecture::Amd64,
+                    BinarySourceOperation::Url { url: "https://example.com/appimage-second.AppImage".into() },
+                )),
+                Operation::NerdFonts { families: vec!["OrderFont".into()], mode: NerdFontsMode::EnsurePresent },
+                Operation::Dotfiles {
+                    root: PathBuf::from("/tmp/dotfiles"),
+                    packages: vec!["shared-dotfiles".into(), "linux-dotfiles".into()],
+                    replace: false,
+                },
+                Operation::DockerGroup,
+                Operation::DockerLocalLog { max_size: Some("5m".into()) },
+                Operation::VirtualBoxGroup,
+                Operation::VsCodeExtensionSet { extensions: vec!["publisher.first".into(), "publisher.second".into()] },
+                Operation::DesktopSetting {
+                    target: DesktopEnvironment::Gnome,
+                    setting: DesktopSetting::Theme(DesktopTheme::Dark),
+                },
+                Operation::DesktopSetting {
+                    target: DesktopEnvironment::Gnome,
+                    setting: DesktopSetting::Terminal("workflow-terminal".into()),
+                },
+                Operation::DesktopSetting {
+                    target: DesktopEnvironment::Gnome,
+                    setting: DesktopSetting::IdleTimeoutSeconds(300),
+                },
+                Operation::DesktopSetting {
+                    target: DesktopEnvironment::Gnome,
+                    setting: DesktopSetting::IdleDim(false),
+                },
+                Operation::GnomeExtensions { extensions: vec!["extension-first".into(), "extension-second".into()] },
+                Operation::GnomeDock,
+                Operation::GnomeRoundedCorners,
+            ]
+        );
     }
 
     #[test]
@@ -1691,7 +1872,7 @@ mod tests {
     }
 
     #[test]
-    fn yaml_mapping_order_does_not_change_apply_order() {
+    fn yaml_mapping_order_does_not_change_apply_or_update_order() {
         let source = include_str!("../configs/full.yaml");
         let shared = source.find("\nshared:").unwrap();
         let os = source.find("\nos:\n").unwrap();
@@ -1706,6 +1887,14 @@ mod tests {
         assert_eq!(
             plan_apply(&original, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap(),
             plan_apply(&reordered, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap()
+        );
+        assert_eq!(
+            plan_update(&original, &debian_platform()).unwrap(),
+            plan_update(&reordered, &debian_platform()).unwrap()
+        );
+        assert_eq!(
+            plan_update(&original, &macos_platform()).unwrap(),
+            plan_update(&reordered, &macos_platform()).unwrap()
         );
     }
 
