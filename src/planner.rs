@@ -287,6 +287,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     let updates = linux.updates.as_ref();
     let shared_updates = &config.shared.updates;
     let mut phases = [
+        (PlannerPhase::DebianAptComponents, Vec::new()),
         (PlannerPhase::SystemPrerequisites, Vec::new()),
         (PlannerPhase::ManagerBootstraps, Vec::new()),
         (PlannerPhase::ThirdPartyRepositories, Vec::new()),
@@ -305,6 +306,13 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
     let mut managers = BTreeSet::new();
 
     if let Some(policy) = updates.and_then(|updates| updates.apt) {
+        if platform.distro == "debian" {
+            push_operation(
+                &mut phases,
+                PlannerPhase::DebianAptComponents,
+                Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() },
+            );
+        }
         let identity = resolve_platform_identity(platform)?;
         let apt = packages.apt.as_ref();
         let mut direct =
@@ -948,5 +956,17 @@ mod tests {
     fn cli_preset_plans_on_a_headless_host() {
         let config = Config::parse(include_str!("../configs/cli.yaml")).unwrap();
         plan_apply(&config, &headless_ubuntu_platform(), Path::new("/tmp/dotfiles")).unwrap();
+    }
+
+    #[test]
+    fn debian_update_ensures_components_before_refreshing_metadata() {
+        let config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        let operations = plan_update(&config, &debian_platform()).unwrap();
+        let components = operations
+            .iter()
+            .position(|operation| matches!(operation, Operation::EnsureDebianAptComponents { .. }))
+            .unwrap();
+        let refresh = operations.iter().position(|operation| *operation == Operation::AptMetadataRefresh).unwrap();
+        assert!(components < refresh);
     }
 }
