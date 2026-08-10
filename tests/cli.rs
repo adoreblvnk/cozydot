@@ -1727,10 +1727,10 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .stdout(concat!(
             "Applying APT bootstrap packages\n",
             "Applying rustup bootstrap\n",
-            "Applying FNM bootstrap\n",
-            "Applying uv bootstrap\n",
             "Applying Rust toolchain\n",
+            "Applying FNM bootstrap\n",
             "Applying Node.js toolchain\n",
+            "Applying uv bootstrap\n",
             "Applying Python toolchain\n",
         ));
 
