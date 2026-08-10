@@ -465,7 +465,7 @@ fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: 
     let mac = config.macos();
     let mut operations = Vec::new();
     if mac.system.ensure_admin == Some(true) {
-        operations.push(Operation::EnsureAdmin);
+        operations.push(Operation::MacEnsureAdmin);
     }
     if mac.system.xcode.command_line_tools == Some(true) {
         operations.push(Operation::XcodeCommandLineTools);
@@ -473,20 +473,21 @@ fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: 
     if mac.system.rosetta == Some(true) {
         operations.push(Operation::Rosetta);
     }
-    if !mac.homebrew.formulae.is_empty() || !mac.homebrew.casks.is_empty() {
+    let packages =
+        config.shared.dotfiles.packages.iter().chain(mac.dotfiles.packages.iter()).cloned().collect::<Vec<_>>();
+    let mut formulae = mac.homebrew.formulae.clone();
+    if !packages.is_empty() && !formulae.iter().any(|formula| formula == "stow") {
+        formulae.push("stow".into());
+    }
+    if !formulae.is_empty() || !mac.homebrew.casks.is_empty() {
         operations.push(Operation::HomebrewBootstrap);
-        operations.push(Operation::HomebrewPackages {
-            formulae: mac.homebrew.formulae.clone(),
-            casks: mac.homebrew.casks.clone(),
-        });
+        operations.push(Operation::HomebrewPackages { formulae, casks: mac.homebrew.casks.clone() });
     }
     plan_shared_portable(config, architecture, &mut operations);
     if !config.shared.integrations.vscode.extensions.is_empty() {
         operations
             .push(Operation::VsCodeExtensionSet { extensions: config.shared.integrations.vscode.extensions.clone() });
     }
-    let packages =
-        config.shared.dotfiles.packages.iter().chain(mac.dotfiles.packages.iter()).cloned().collect::<Vec<_>>();
     if !packages.is_empty() {
         operations.push(Operation::Dotfiles { root: dotfiles_root.to_path_buf(), packages, replace: false });
     }
@@ -550,16 +551,11 @@ fn plan_shared_portable(config: &Config, architecture: Architecture, operations:
         operations.push(Operation::UvBootstrap);
         operations.push(Operation::PythonToolchain { version: selector.clone(), mode: ToolchainMode::EnsurePresent });
     }
-    if let Some(packages) = &config.shared.packages.cargo {
-        if !packages.is_empty() {
-            operations.push(Operation::CargoBinstallBootstrap);
-        }
+    if let Some(packages) = config.shared.packages.cargo.as_ref().filter(|packages| !packages.is_empty()) {
+        operations.push(Operation::CargoBinstallBootstrap);
         operations.push(Operation::CargoPackageSet { packages: packages.clone() });
     }
-    if let Some(packages) = &config.shared.packages.npm {
-        if !packages.is_empty() {
-            operations.push(Operation::FnmBootstrap);
-        }
+    if let Some(packages) = config.shared.packages.npm.as_ref().filter(|packages| !packages.is_empty()) {
         operations.push(Operation::NpmPackageSet { packages: packages.clone() });
     }
     if !config.shared.fonts.nerd.as_deref().unwrap_or_default().is_empty() {
@@ -616,10 +612,10 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
         operations.push(Operation::NpmPackageUpdate);
     }
     if config.shared.updates.fonts == Some(true) {
-        operations.push(Operation::UserNerdFonts {
-            families: config.shared.fonts.nerd.clone().unwrap_or_default(),
-            mode: NerdFontsMode::Update,
-        });
+        let families = config.shared.fonts.nerd.clone().unwrap_or_default();
+        if !families.is_empty() {
+            operations.push(Operation::UserNerdFonts { families, mode: NerdFontsMode::Update });
+        }
     }
     Ok(operations)
 }
@@ -918,8 +914,13 @@ mod tests {
         let operations = plan_apply(&config, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap();
 
         assert!(operations.contains(&Operation::HomebrewBootstrap));
+        assert!(operations.contains(&Operation::MacEnsureAdmin));
         assert!(operations.contains(&Operation::XcodeCommandLineTools));
         assert!(operations.contains(&Operation::Rosetta));
+        assert!(operations.iter().any(
+            |operation| matches!(operation, Operation::HomebrewPackages { formulae, .. } if formulae.iter().any(|formula| formula == "stow"))
+        ));
+        assert_eq!(operations.iter().filter(|operation| **operation == Operation::FnmBootstrap).count(), 1);
         assert!(operations.iter().any(|operation| matches!(operation, Operation::Dotfiles { replace: false, .. })));
         assert!(
             operations
@@ -941,7 +942,23 @@ mod tests {
     #[test]
     fn cli_preset_plans_on_a_headless_host() {
         let config = Config::parse(include_str!("../configs/cli.yaml")).unwrap();
-        plan_apply(&config, &headless_ubuntu_platform(), Path::new("/tmp/dotfiles")).unwrap();
+        let operations = plan_apply(&config, &headless_ubuntu_platform(), Path::new("/tmp/dotfiles")).unwrap();
+        assert!(!operations.iter().any(|operation| matches!(operation, Operation::VsCodeExtensionSet { .. })));
+    }
+
+    #[test]
+    fn macos_planner_skips_empty_portable_package_and_font_sets() {
+        let mut config = Config::parse(include_str!("../configs/full.yaml")).unwrap();
+        config.shared.packages.cargo = Some(Vec::new());
+        config.shared.packages.npm = Some(Vec::new());
+        config.shared.fonts.nerd = Some(Vec::new());
+
+        let apply = plan_apply(&config, &macos_platform(), Path::new("/tmp/dotfiles")).unwrap();
+        assert!(!apply.iter().any(|operation| matches!(operation, Operation::CargoPackageSet { .. })));
+        assert!(!apply.iter().any(|operation| matches!(operation, Operation::NpmPackageSet { .. })));
+
+        let update = plan_update(&config, &macos_platform()).unwrap();
+        assert!(!update.iter().any(|operation| matches!(operation, Operation::UserNerdFonts { .. })));
     }
 
     #[test]

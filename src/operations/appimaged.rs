@@ -1,4 +1,4 @@
-use super::{Host, TempPath};
+use super::{Host, TempPath, apt};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -68,16 +68,7 @@ pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
 fn ensure_fuse(host: &Host) -> Result<()> {
     let package =
         if host.run("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
-    if !package_is_installed(host, package)? {
-        host.require("refresh APT for appimaged", "sudo", ["apt-get", "update", "-qq"])?;
-        host.require("install appimaged FUSE support", "sudo", ["apt-get", "install", "-y", "-qq", "--", package])?;
-    }
-    Ok(())
-}
-
-fn package_is_installed(host: &Host, package: &str) -> Result<bool> {
-    let output = host.run("dpkg-query", ["--show", "--showformat=${db:Status-Abbrev}", package])?;
-    Ok(output.status.success() && output.stdout == b"ii ")
+    apt::bootstrap_packages(host, &[package.to_owned()])
 }
 
 fn wait_until_active(host: &Host) -> Result<()> {

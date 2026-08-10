@@ -70,6 +70,7 @@ pub enum Operation {
     FlatpakUpdateApps,
     HomebrewBootstrap,
     HomebrewPackages { formulae: Vec<String>, casks: Vec<String> },
+    MacEnsureAdmin,
     XcodeCommandLineTools,
     Rosetta,
     UserNerdFonts { families: Vec<String>, mode: packages::fonts::NerdFontsMode },
@@ -125,6 +126,7 @@ impl Operation {
             Self::FlatpakUpdateApps => "Flatpak application updates",
             Self::HomebrewBootstrap => "Homebrew bootstrap",
             Self::HomebrewPackages { .. } => "Homebrew packages",
+            Self::MacEnsureAdmin => "macOS administrator access",
             Self::XcodeCommandLineTools => "Xcode command line tools",
             Self::Rosetta => "Rosetta",
             Self::UserNerdFonts { .. } => "user Nerd Fonts",
@@ -143,6 +145,7 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         operation,
         Operation::HomebrewBootstrap
             | Operation::HomebrewPackages { .. }
+            | Operation::MacEnsureAdmin
             | Operation::XcodeCommandLineTools
             | Operation::Rosetta
             | Operation::UserNerdFonts { .. }
@@ -202,6 +205,7 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
         Operation::HomebrewBootstrap => completed(macos::bootstrap(&host)),
         Operation::HomebrewPackages { formulae, casks } => completed(macos::packages(&host, formulae, casks)),
+        Operation::MacEnsureAdmin => completed(macos::ensure_admin(&host)),
         Operation::XcodeCommandLineTools => completed(macos::xcode_command_line_tools(&host)),
         Operation::Rosetta => completed(macos::rosetta(&host)),
         Operation::UserNerdFonts { families, mode } => completed(packages::fonts::execute_user(&host, families, *mode)),
@@ -859,14 +863,7 @@ pub(crate) mod packages {
             let mut missing = Vec::new();
             for app_id in refs {
                 let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
-                if output.status.success() {
-                    let state = std::str::from_utf8(&output.stdout)?;
-                    let state = state.strip_suffix('\n').unwrap_or(state);
-                    let parts = state.split('/').collect::<Vec<_>>();
-                    if parts.len() != 4 || parts[0] != "app" || parts[1] != app_id {
-                        anyhow::bail!("Flatpak returned malformed state for {app_id:?}");
-                    }
-                } else {
+                if !output.status.success() {
                     missing.push(app_id.clone());
                 }
             }

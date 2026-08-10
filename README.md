@@ -30,7 +30,7 @@ These environment variables override the defaults:
 
 | Variable | Purpose |
 | --- | --- |
-| `COZYDOT_VERSION` | Release version; defaults to `0.0.1` |
+| `COZYDOT_VERSION` | Release version; defaults to `1.0.0` |
 | `COZYDOT_RELEASE_BASE_URL` | Release or mirror base URL; defaults to the GitHub releases page |
 | `XDG_BIN_HOME` | Install directory; defaults to `~/.local/bin` |
 
@@ -38,7 +38,7 @@ Pass overrides to the shell running the installer, for example:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh \
-  | COZYDOT_VERSION=0.0.1 COZYDOT_RELEASE_BASE_URL=https://mirror.example/cozydot bash
+  | COZYDOT_VERSION=1.0.0 COZYDOT_RELEASE_BASE_URL=https://mirror.example/cozydot bash
 ```
 
 ## First run

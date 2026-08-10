@@ -13,6 +13,11 @@ pub enum MacDefault {
     TrackpadTapToClick(bool),
 }
 
+pub fn ensure_admin(host: &Host) -> Result<()> {
+    host.require("macOS administrator access", "sudo", ["-v"])?;
+    Ok(())
+}
+
 pub fn bootstrap(host: &Host) -> Result<()> {
     if brew_program(host).is_ok() {
         return Ok(());
@@ -132,9 +137,6 @@ fn write_bool(host: &Host, domain: &str, key: &str, value: bool) -> Result<()> {
 }
 
 fn write_int(host: &Host, domain: &str, key: &str, value: i32) -> Result<()> {
-    if value < 0 {
-        bail!("macOS defaults integer must not be negative")
-    }
     host.require("macOS defaults", "defaults", ["write", domain, key, "-int", &value.to_string()])?;
     Ok(())
 }
