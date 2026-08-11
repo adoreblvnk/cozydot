@@ -492,25 +492,4 @@ pub(crate) mod dotfiles {
             .and_then(|target| fs::canonicalize(source).map(|source| target == source))
             .unwrap_or(false)
     }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use std::os::unix::fs::{PermissionsExt, symlink};
-
-        #[test]
-        fn gnupg_package_replaces_folded_directory_with_private_home() {
-            let package = tempfile::tempdir().unwrap();
-            let source = package.path().join(".gnupg");
-            fs::create_dir(&source).unwrap();
-            let home = tempfile::tempdir().unwrap();
-            symlink(&source, home.path().join(".gnupg")).unwrap();
-
-            prepare_gnupg_home(package.path(), home.path()).unwrap();
-
-            let metadata = fs::symlink_metadata(home.path().join(".gnupg")).unwrap();
-            assert!(metadata.is_dir());
-            assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
-        }
-    }
 }

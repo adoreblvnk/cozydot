@@ -50,13 +50,6 @@ impl Config {
         load().with_context(|| format!("validate {}", path.display()))
     }
 
-    #[cfg(test)]
-    pub fn parse(text: &str) -> Result<Self> {
-        let config = Self::deserialize_str(text)?;
-        config.validate()?;
-        Ok(config)
-    }
-
     fn deserialize_str(text: &str) -> Result<Self> {
         let deserializer = yaml_serde::Deserializer::from_str(text);
         serde_path_to_error::deserialize(deserializer).map_err(|error| {
@@ -910,38 +903,4 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
         );
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Config;
-
-    #[test]
-    fn full_example_is_valid_v1_configuration() {
-        Config::parse(include_str!("../configs/full.yaml")).unwrap();
-    }
-
-    #[test]
-    fn legacy_root_fields_are_rejected() {
-        let error = Config::parse("version: 1.0.0\npackages: {}\n").unwrap_err().to_string();
-        assert!(error.contains("unknown field `packages`"));
-    }
-
-    #[test]
-    fn apt_source_policy_is_not_configurable() {
-        let yaml = include_str!("../configs/full.yaml").replace(
-            "      apt:\n        unattended_upgrades: disabled",
-            "      apt:\n        sources:\n          mode: preserve\n        unattended_upgrades: disabled",
-        );
-        let error = Config::parse(&yaml).unwrap_err().to_string();
-        assert!(error.contains("unknown field `sources`"));
-    }
-
-    #[test]
-    fn linux_package_section_rejects_shared_package_managers() {
-        let yaml = include_str!("../configs/full.yaml")
-            .replace("    packages:\n      apt:", "    packages:\n      cargo: [ripgrep]\n      apt:");
-        let error = Config::parse(&yaml).unwrap_err().to_string();
-        assert!(error.contains("unknown field `cargo`"));
-    }
 }

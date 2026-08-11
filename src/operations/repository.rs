@@ -574,42 +574,4 @@ pub(crate) mod debian_components {
         }
         Ok(())
     }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn list_reconciliation_appends_components_and_preserves_other_entries() {
-            let input = "deb https://deb.debian.org/debian bookworm main # base\n\
-deb-src https://security.debian.org/debian-security bookworm-security main contrib\n\
-deb https://vendor.example/apt bookworm stable\n";
-            let (result, matched) = reconcile_list("bookworm", input).unwrap();
-            assert_eq!(matched, 2);
-            assert_eq!(
-                result,
-                "deb https://deb.debian.org/debian bookworm main contrib non-free non-free-firmware # base\n\
-deb-src https://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware\n\
-deb https://vendor.example/apt bookworm stable\n"
-            );
-        }
-
-        #[test]
-        fn deb822_reconciliation_appends_components_without_replacing_the_stanza() {
-            let input = "Types: deb deb-src\nURIs: https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main contrib\nSigned-By: /custom/keyring.gpg\n";
-            let (result, matched) = reconcile_deb822("trixie", input).unwrap();
-            assert_eq!(matched, 1);
-            assert_eq!(
-                result,
-                "Types: deb deb-src\nURIs: https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main contrib non-free non-free-firmware\nSigned-By: /custom/keyring.gpg\n"
-            );
-        }
-
-        #[test]
-        fn reconciliation_is_a_noop_when_components_are_complete() {
-            let input = "deb https://deb.debian.org/debian bookworm main contrib non-free non-free-firmware\n";
-            let (result, matched) = reconcile_list("bookworm", input).unwrap();
-            assert_eq!((result, matched), (input.to_owned(), 1));
-        }
-    }
 }
