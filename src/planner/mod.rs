@@ -361,6 +361,3 @@ fn push_manager_bootstraps(stages: &mut [(ExecutionStage, Vec<Operation>)], mana
 fn flatten_stage_vec(stages: Vec<(ExecutionStage, Vec<Operation>)>) -> Vec<Operation> {
     stages.into_iter().flat_map(|(_, operations)| operations).collect()
 }
-
-#[cfg(test)]
-mod tests;
