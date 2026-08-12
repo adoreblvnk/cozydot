@@ -824,6 +824,10 @@ fn rust_update_without_apply_selector_updates_installed_toolchains() {
         &cargo_home.join("bin/rustup"),
         "#!/bin/sh\nprintf 'rustup %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
     );
+    write_executable(
+        &cargo_home.join("bin/cargo-install-update"),
+        "#!/bin/sh\nprintf 'cargo-install-update %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
+    );
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
 
@@ -845,7 +849,12 @@ fn rust_update_without_apply_selector_updates_installed_toolchains() {
             .assert()
             .success();
 
-        assert_eq!(fs::read_to_string(&log).unwrap(), "rustup update --no-self-update\n");
+        let expected = if shared_config.contains("cargo: true") {
+            "rustup update\ncargo-install-update -a\n"
+        } else {
+            "rustup update\n"
+        };
+        assert_eq!(fs::read_to_string(&log).unwrap(), expected);
     }
 }
 
@@ -1717,6 +1726,10 @@ fi
         "#!/bin/sh\nprintf 'cargo-binstall %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
     );
     write_executable(
+        &cargo_home.join("bin/cargo-install-update"),
+        "#!/bin/sh\nprintf 'cargo-install-update %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
+    );
+    write_executable(
         &data_home.join("fnm/fnm"),
         r#"#!/bin/sh
 printf 'fnm %s\n' "$*" >> "$COZYDOT_TEST_LOG"
@@ -1791,10 +1804,7 @@ esac
         .success();
 
     let update = fs::read_to_string(&log).unwrap();
-    assert!(
-        update.contains("cargo install --locked -- eza ripgrep\n"),
-        "Cargo update was not ecosystem-wide: {update}"
-    );
+    assert!(update.contains("cargo-install-update -a\n"), "Cargo update did not use cargo-update: {update}");
     assert!(
         update.contains("fnm exec --using=default -- npm update --global\n"),
         "npm update was not ecosystem-wide through managed FNM: {update}"
@@ -1931,8 +1941,7 @@ fn python_update_control_validates_and_apply_uses_local_state() {
         .success();
 
     let log = fs::read_to_string(log).unwrap();
-    assert!(log.contains("python find --no-config --managed-python --no-python-downloads --show-version -- 3.13"));
-    assert!(!log.contains("python install"));
+    assert_eq!(log, "uv python install --no-config --managed-python --no-progress --default -- 3.13\n");
 }
 
 #[test]
@@ -1951,6 +1960,9 @@ fn toolchains_delegate_convergence_to_native_managers() {
 
     let recorder = "#!/bin/sh\nprintf '%s %s\\n' \"${0##*/}\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\n";
     write_executable(&home.join(".cargo/bin/rustup"), recorder);
+    write_executable(&home.join(".cargo/bin/cargo"), recorder);
+    write_executable(&home.join(".cargo/bin/cargo-binstall"), recorder);
+    write_executable(&home.join(".cargo/bin/cargo-install-update"), recorder);
     write_executable(&home.join(".local/share/fnm/fnm"), recorder);
     write_executable(&home.join(".local/bin/uv"), recorder);
     let fake_bin = temp.path().join("bin");
@@ -1977,16 +1989,18 @@ fn toolchains_delegate_convergence_to_native_managers() {
             "Applying Node.js toolchain\n",
             "Applying uv bootstrap\n",
             "Applying Python toolchain\n",
+            "Applying cargo-binstall bootstrap\n",
+            "Applying cargo-update bootstrap\n",
         ));
 
     assert_eq!(
         fs::read_to_string(&log).unwrap(),
         concat!(
-            "rustup toolchain install --profile minimal --no-self-update --no-update -- stable\n",
+            "rustup toolchain install --profile minimal --no-self-update -- stable\n",
             "rustup default -- stable\n",
-            "fnm exec --using latest -- node --version\n",
+            "fnm install --progress never -- latest\n",
             "fnm default -- latest\n",
-            "uv python find --no-config --managed-python --no-python-downloads --show-version -- 3.13\n",
+            "uv python install --no-config --managed-python --no-progress --default -- 3.13\n",
         )
     );
 
@@ -2007,20 +2021,20 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .stdout(concat!(
             "Updating APT bootstrap packages\n",
             "Updating rustup bootstrap\n",
-            "Updating Rust toolchain\n",
+            "Updating Rust toolchain updates\n",
             "Updating FNM bootstrap\n",
-            "Updating Node.js toolchain\n",
+            "Updating Node.js toolchain updates\n",
             "Updating uv bootstrap\n",
-            "Updating Python toolchain\n",
+            "Updating Python toolchain updates\n",
         ));
     assert_eq!(
         fs::read_to_string(&log).unwrap(),
         concat!(
-            "rustup update --no-self-update -- stable\n",
-            "rustup default -- stable\n",
+            "rustup update\n",
             "fnm install --progress never -- latest\n",
             "fnm default -- latest\n",
-            "uv python install --no-config --managed-python --no-progress --upgrade --default -- 3.13\n",
+            "uv self update\n",
+            "uv python upgrade --no-config --managed-python --no-progress\n",
         )
     );
 
@@ -2037,10 +2051,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .arg("apply")
         .assert()
         .success();
-    assert_eq!(
-        fs::read_to_string(&log).unwrap(),
-        "fnm exec --using lts-latest -- node --version\nfnm default -- lts-latest\n"
-    );
+    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never --lts\nfnm default -- lts-latest\n");
 
     write_config(
         &config_dir.join("cozydot.yaml"),
@@ -2059,7 +2070,7 @@ fn toolchains_delegate_convergence_to_native_managers() {
         .arg("apply")
         .assert()
         .success();
-    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm exec --using 20 -- node --version\nfnm default -- 20\n");
+    assert_eq!(fs::read_to_string(&log).unwrap(), "fnm install --progress never -- 20\nfnm default -- 20\n");
 }
 
 #[test]
@@ -2099,7 +2110,7 @@ fn nerd_fonts_install_system_wide_after_download() {
 }
 
 #[test]
-fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
+fn go_exact_selector_extracts_directly() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let config_home = temp.path().join("config");
@@ -2107,7 +2118,7 @@ fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("go.log");
     fs::create_dir_all(&config_dir).unwrap();
-    write_config(&config_dir.join("cozydot.yaml"), "tools:\n  go: \"99.88\"\n", "{}");
+    write_config(&config_dir.join("cozydot.yaml"), "tools:\n  go: \"99.88.5\"\n", "{}");
 
     let archive_arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -2117,9 +2128,9 @@ fn go_minor_selector_tracks_its_latest_patch_and_extracts_directly() {
     };
     let metadata = format!(
         r#"[
-  {{"version":"go99.89.1","stable":true,"files":[{{"filename":"go99.89.1.linux-{archive_arch}.tar.gz"}}]}},
-  {{"version":"go99.88.5","stable":true,"files":[{{"filename":"go99.88.5.linux-{archive_arch}.tar.gz"}}]}},
-  {{"version":"go99.88.4","stable":true,"files":[{{"filename":"go99.88.4.linux-{archive_arch}.tar.gz"}}]}}
+  {{"version":"go99.89.1","stable":true,"files":[{{"filename":"go99.89.1.linux-{archive_arch}.tar.gz","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}]}},
+  {{"version":"go99.88.5","stable":true,"files":[{{"filename":"go99.88.5.linux-{archive_arch}.tar.gz","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}]}},
+  {{"version":"go99.88.4","stable":true,"files":[{{"filename":"go99.88.4.linux-{archive_arch}.tar.gz","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}]}}
 ]"#,
     );
     write_executable(

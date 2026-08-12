@@ -5,7 +5,7 @@ use crate::{
     },
     operations::{
         AptRepositoryOperation, AptUpgradePolicy, BinaryPackageOperation, BinarySourceOperation, DesktopEnvironment,
-        DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, Operation, ToolchainMode,
+        DesktopSetting, DesktopTheme, GoToolchainSelector, NerdFontsMode, Operation,
     },
     platform::{Architecture, Platform},
 };
@@ -66,6 +66,7 @@ enum ManagerBootstrap {
     Fnm,
     Uv,
     CargoBinstall,
+    CargoUpdate,
 }
 
 pub fn plan_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<Vec<Operation>> {
@@ -275,6 +276,7 @@ fn push_manager_bootstraps(stages: &mut Stages, managers: &BTreeSet<ManagerBoots
             ManagerBootstrap::CargoBinstall => {
                 (ExecutionStage::CargoManagerBootstrap, Operation::CargoBinstallBootstrap)
             }
+            ManagerBootstrap::CargoUpdate => (ExecutionStage::CargoManagerBootstrap, Operation::CargoUpdateBootstrap),
         };
         push_operation(stages, stage, operation);
     }

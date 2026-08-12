@@ -28,8 +28,10 @@ pub(crate) mod cargo_binstall {
     use anyhow::{Context, Result};
 
     pub(crate) fn execute(host: &Host) -> Result<()> {
-        let cargo_home =
-            host.managed_dir("CARGO_HOME", ".cargo", "cargo-binstall managed CARGO_HOME must be absolute")?;
+        if cfg!(target_os = "macos") {
+            return super::super::macos::install_formula(host, "cargo-binstall");
+        }
+        let cargo_home = host.home().join(".cargo");
         let installed = cargo_home.join("bin/cargo-binstall");
         if executable_file(&installed) {
             return Ok(());
@@ -40,6 +42,24 @@ pub(crate) mod cargo_binstall {
             .with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo_bin.display()))?;
 
         host.require("cargo-binstall-bootstrap", program, ["install", "cargo-binstall", "--locked"])?;
+        Ok(())
+    }
+
+    pub(crate) fn ensure_cargo_update(host: &Host) -> Result<()> {
+        let cargo_home = host.home().join(".cargo");
+        if executable_file(&cargo_home.join("bin/cargo-install-update")) {
+            return Ok(());
+        }
+        let binstall = cargo_home.join("bin/cargo-binstall");
+        let program = if cfg!(target_os = "macos") {
+            super::super::macos::formula_program(host, "cargo-binstall", "cargo-binstall")?
+        } else {
+            binstall
+                .to_str()
+                .with_context(|| format!("cargo-binstall executable path is not UTF-8: {}", binstall.display()))?
+                .to_owned()
+        };
+        host.require("cargo-update bootstrap", &program, ["--no-confirm", "--", "cargo-update"])?;
         Ok(())
     }
 }

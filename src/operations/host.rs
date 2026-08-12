@@ -56,14 +56,6 @@ impl Host {
         std::env::var_os(name)
     }
 
-    pub fn managed_dir(&self, variable: &str, default: &str, absolute_error: &str) -> Result<PathBuf> {
-        let directory = self.value(variable).map(PathBuf::from).unwrap_or_else(|| self.home.join(default));
-        if !directory.is_absolute() {
-            bail!("{absolute_error}");
-        }
-        Ok(directory)
-    }
-
     pub fn executable_on_path(&self, name: &str) -> bool {
         self.value("PATH")
             .is_some_and(|path| std::env::split_paths(&path).any(|directory| executable_file(&directory.join(name))))

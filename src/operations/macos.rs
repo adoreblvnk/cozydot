@@ -63,6 +63,23 @@ fn installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
     Ok(host.run(brew, ["list", kind, name])?.status.success())
 }
 
+pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
+    bootstrap(host)?;
+    let brew = brew_program(host)?;
+    if !installed(host, &brew, "--formula", formula)? {
+        host.require("Homebrew formula install", &brew, ["install", formula])?;
+    }
+    Ok(())
+}
+
+pub(crate) fn formula_program(host: &Host, formula: &str, executable: &str) -> Result<String> {
+    let brew = brew_program(host)?;
+    let output = host.require("Homebrew formula prefix", &brew, ["--prefix", formula])?;
+    let prefix = std::str::from_utf8(&output.stdout)?.trim();
+    let program = std::path::Path::new(prefix).join("bin").join(executable);
+    program.to_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("Homebrew executable path is not UTF-8"))
+}
+
 fn brew_program(host: &Host) -> Result<String> {
     for candidate in ["brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
         if host.run(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {

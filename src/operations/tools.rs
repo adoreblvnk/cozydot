@@ -1,8 +1,9 @@
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
-use std::path::Path;
+use sha2::{Digest, Sha256};
+use std::{fs, path::Path};
 
-use super::{Host, TempPath, ToolchainMode, path_program, real_executable_file};
+use super::{Host, TempPath, path_program, real_executable_file};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
@@ -14,56 +15,35 @@ pub enum GoToolchainSelector {
 struct GoRelease {
     version: String,
     filename: String,
+    sha256: String,
 }
 
-pub(crate) fn execute_rust(host: &Host, selector: Option<&str>, mode: ToolchainMode) -> Result<()> {
-    let rustup = resolve_managed(host, "CARGO_HOME", ".cargo", "bin/rustup")?
-        .context("Rust toolchain operation: rustup is unavailable after bootstrap")?;
-    match mode {
-        ToolchainMode::EnsurePresent => {
-            let selector = selector.context("Rust apply operation requires a configured selector")?;
-            host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
-            host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
-        }
-        ToolchainMode::ConvergeLatest => {
-            let mut args = vec!["update", "--no-self-update"];
-            if let Some(selector) = selector {
-                args.extend(["--", selector]);
-            }
-            host.require("Rust toolchain update", &rustup, args)?;
-            if let Some(selector) = selector {
-                host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
-            }
-        }
-    }
+pub(crate) fn apply_rust(host: &Host, selector: &str) -> Result<()> {
+    let rustup =
+        managed_program(host, ".cargo/bin/rustup", "Rust toolchain operation: rustup is unavailable after bootstrap")?;
+    host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
+    host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
     Ok(())
 }
 
-pub(crate) fn execute_go(
-    host: &Host,
-    selector: &GoToolchainSelector,
-    architecture: Architecture,
-    mode: ToolchainMode,
-) -> Result<()> {
+pub(crate) fn update_rust(host: &Host) -> Result<()> {
+    let rustup =
+        managed_program(host, ".cargo/bin/rustup", "Rust toolchain update: rustup is unavailable after bootstrap")?;
+    host.require("Rust toolchain update", &rustup, ["update"])?;
+    Ok(())
+}
+
+pub(crate) fn execute_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+    super::languages::go_profile(host)?;
     let expected_arch = architecture.go();
-    let current = inspect_go(host, "/usr/local/go/bin/go")?;
     let requested = match selector {
         GoToolchainSelector::Latest => "latest",
         GoToolchainSelector::Version(version) => version,
     };
-    if current.as_ref().is_some_and(|state| {
-        state.architecture == expected_arch
-            && match mode {
-                ToolchainMode::EnsurePresent => go_selector_matches(requested, &state.version),
-                ToolchainMode::ConvergeLatest => numeric_version(requested, 3, 3) && state.version == requested,
-            }
-    }) {
-        return Ok(());
-    }
-
-    let GoRelease { version, filename } = resolve_go_release(host, requested, architecture)?;
-
-    if current.as_ref().is_some_and(|state| state.version == version && state.architecture == expected_arch) {
+    let GoRelease { version, filename, sha256 } = resolve_go_release(host, requested, architecture)?;
+    if inspect_go(host, "/usr/local/go/bin/go")?
+        .is_some_and(|state| state.version == version && state.architecture == expected_arch)
+    {
         return Ok(());
     }
 
@@ -88,6 +68,10 @@ pub(crate) fn execute_go(
             url.as_ref(),
         ],
     )?;
+    let actual = format!("{:x}", Sha256::digest(fs::read(archive.path()).context("read downloaded Go archive")?));
+    if actual != sha256 {
+        bail!("downloaded Go archive checksum mismatch");
+    }
     host.require("Go toolchain publication", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
     host.require(
         "Go toolchain publication",
@@ -97,53 +81,61 @@ pub(crate) fn execute_go(
     Ok(())
 }
 
-pub(crate) fn execute_node(host: &Host, selector: &str, mode: ToolchainMode) -> Result<()> {
-    let fnm = resolve_fnm(host)?;
-    let default = node_alias(selector);
-    let present = mode == ToolchainMode::EnsurePresent
-        && host.run(&fnm, ["exec", "--using", default, "--", "node", "--version"])?.status.success();
-    if !present {
-        if selector == "lts" {
-            host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--lts"])?;
-        } else {
-            host.require("Node toolchain mutation", &fnm, ["install", "--progress", "never", "--", selector])?;
-        }
+pub(crate) fn update_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+    if matches!(selector, GoToolchainSelector::Version(_)) {
+        eprintln!("warning: Go update skipped because shared.tools.go is pinned to an exact version");
+        return Ok(());
     }
-    host.require("Node default toolchain mutation", &fnm, ["default", "--", default])?;
+    execute_go(host, selector, architecture)
+}
+
+pub(crate) fn apply_node(host: &Host, selector: &str) -> Result<()> {
+    let fnm = resolve_fnm(host)?;
+    install_node(host, &fnm, selector)?;
+    host.require("Node default toolchain mutation", &fnm, ["default", "--", node_alias(selector)])?;
     Ok(())
 }
 
-pub(crate) fn execute_python(host: &Host, version: &str, mode: ToolchainMode) -> Result<()> {
-    let uv = resolve_managed(host, "UV_INSTALL_DIR", ".local/bin", "uv")?
-        .context("Python toolchain operation: uv is unavailable after bootstrap")?;
+pub(crate) fn update_node(host: &Host, selector: &str) -> Result<()> {
+    apply_node(host, selector)
+}
 
-    if mode == ToolchainMode::EnsurePresent
-        && host
-            .run(
-                &uv,
-                [
-                    "python",
-                    "find",
-                    "--no-config",
-                    "--managed-python",
-                    "--no-python-downloads",
-                    "--show-version",
-                    "--",
-                    version,
-                ],
-            )?
-            .status
-            .success()
-    {
-        return Ok(());
+fn install_node(host: &Host, fnm: &str, selector: &str) -> Result<()> {
+    if selector == "lts" {
+        host.require("Node toolchain mutation", fnm, ["install", "--progress", "never", "--lts"])?;
+    } else {
+        host.require("Node toolchain mutation", fnm, ["install", "--progress", "never", "--", selector])?;
     }
-    let mut args = vec!["python", "install", "--no-config", "--managed-python", "--no-progress"];
-    if mode == ToolchainMode::ConvergeLatest {
-        args.push("--upgrade");
-    }
-    args.extend(["--default", "--", version]);
-    host.require("Python toolchain mutation", &uv, args)?;
     Ok(())
+}
+
+pub(crate) fn apply_python(host: &Host, version: &str) -> Result<()> {
+    let uv = managed_program(host, ".local/bin/uv", "Python toolchain operation: uv is unavailable after bootstrap")?;
+    host.require(
+        "Python toolchain mutation",
+        &uv,
+        ["python", "install", "--no-config", "--managed-python", "--no-progress", "--default", "--", version],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn update_python(host: &Host) -> Result<()> {
+    let uv = managed_program(host, ".local/bin/uv", "Python toolchain update: uv is unavailable after bootstrap")?;
+    host.require("uv self update", &uv, ["self", "update"])?;
+    host.require(
+        "Python toolchain update",
+        &uv,
+        ["python", "upgrade", "--no-config", "--managed-python", "--no-progress"],
+    )?;
+    Ok(())
+}
+
+fn managed_program(host: &Host, relative: &str, message: &str) -> Result<String> {
+    let path = host.home().join(relative);
+    if real_executable_file(&path) {
+        return path_program(&path, "managed tool executable path");
+    }
+    bail!("{message}")
 }
 
 mod resolution {
@@ -168,13 +160,13 @@ mod resolution {
             ],
         )?;
         let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
-        let (version, filename) = super::super::latest_go(
+        let (version, filename, sha256) = super::super::latest_go(
             std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,
             requested,
             architecture.go_archive(),
             target_os,
         )?;
-        Ok(GoRelease { version, filename })
+        Ok(GoRelease { version, filename, sha256 })
     }
 }
 
@@ -231,36 +223,23 @@ mod state {
     }
 
     pub(super) fn resolve_fnm(host: &Host) -> Result<String> {
-        let data_home =
-            host.managed_dir("XDG_DATA_HOME", ".local/share", "managed FNM data directory must be absolute")?;
+        if cfg!(target_os = "macos") {
+            return super::super::macos::formula_program(host, "fnm", "fnm");
+        }
+        let data_home = host.home().join(".local/share");
         let managed = data_home.join("fnm/fnm");
         if real_executable_file(&managed) {
             return path_program(&managed, "managed fnm executable path");
         }
         bail!("Node toolchain operation: fnm is unavailable after bootstrap")
     }
-
-    pub(super) fn resolve_managed(
-        host: &Host,
-        directory_variable: &str,
-        default_directory: &str,
-        relative_program: &str,
-    ) -> Result<Option<String>> {
-        let base =
-            host.managed_dir(directory_variable, default_directory, "managed tool directory must be absolute")?;
-        let managed = base.join(relative_program);
-        if real_executable_file(&managed) {
-            return path_program(&managed, "managed tool executable path").map(Some);
-        }
-        Ok(None)
-    }
 }
 
 use resolution::*;
 use state::*;
 
-fn rust_install_args(toolchain: &str) -> [&str; 8] {
-    ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--no-update", "--", toolchain]
+fn rust_install_args(toolchain: &str) -> [&str; 7] {
+    ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
 }
 
 fn node_alias(selector: &str) -> &str {
@@ -268,18 +247,6 @@ fn node_alias(selector: &str) -> &str {
         "lts" => "lts-latest",
         value => value,
     }
-}
-
-fn go_selector_matches(selector: &str, version: &str) -> bool {
-    if selector == "latest" {
-        return numeric_version(version, 2, 3);
-    }
-    if !numeric_version(selector, 1, 3) || !numeric_version(version, 2, 3) {
-        return false;
-    }
-    let requested = selector.split('.').collect::<Vec<_>>();
-    let installed = version.split('.').collect::<Vec<_>>();
-    requested.len() <= installed.len() && requested.iter().zip(installed).all(|(left, right)| *left == right)
 }
 
 fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {

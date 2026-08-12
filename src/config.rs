@@ -125,6 +125,13 @@ impl Config {
         {
             bail!("shared.packages.npm: requires shared.tools.node");
         }
+        if let Some(go) = self.shared.tools.go.as_deref() {
+            let exact = go.split('.').count() == 3
+                && go.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+            if go != "latest" && !exact {
+                bail!("shared.tools.go: expected `latest` or an exact version such as `1.24.6`");
+            }
+        }
         Ok(())
     }
 

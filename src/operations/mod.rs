@@ -26,12 +26,6 @@ use crate::platform::Architecture;
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolchainMode {
-    EnsurePresent,
-    ConvergeLatest,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     EnsureAdmin,
@@ -45,11 +39,16 @@ pub enum Operation {
     RustupBootstrap,
     FnmBootstrap,
     UvBootstrap,
-    RustToolchain { selector: Option<String>, mode: ToolchainMode },
-    GoToolchain { selector: GoToolchainSelector, architecture: Architecture, mode: ToolchainMode },
-    NodeToolchain { selector: String, mode: ToolchainMode },
-    PythonToolchain { version: String, mode: ToolchainMode },
+    RustToolchain { selector: String },
+    RustToolchainUpdate,
+    GoToolchain { selector: GoToolchainSelector, architecture: Architecture },
+    GoToolchainUpdate { selector: GoToolchainSelector, architecture: Architecture },
+    NodeToolchain { selector: String },
+    NodeToolchainUpdate { selector: String },
+    PythonToolchain { version: String },
+    PythonToolchainUpdate,
     CargoBinstallBootstrap,
+    CargoUpdateBootstrap,
     AptRepository(Box<AptRepositoryOperation>),
     AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
     FlatpakEnsureApps { refs: Vec<String> },
@@ -102,10 +101,15 @@ impl Operation {
             Self::FnmBootstrap => "FNM bootstrap",
             Self::UvBootstrap => "uv bootstrap",
             Self::RustToolchain { .. } => "Rust toolchain",
+            Self::RustToolchainUpdate => "Rust toolchain updates",
             Self::GoToolchain { .. } => "Go toolchain",
+            Self::GoToolchainUpdate { .. } => "Go toolchain updates",
             Self::NodeToolchain { .. } => "Node.js toolchain",
+            Self::NodeToolchainUpdate { .. } => "Node.js toolchain updates",
             Self::PythonToolchain { .. } => "Python toolchain",
+            Self::PythonToolchainUpdate => "Python toolchain updates",
             Self::CargoBinstallBootstrap => "cargo-binstall bootstrap",
+            Self::CargoUpdateBootstrap => "cargo-update bootstrap",
             Self::AptRepository(_) => "APT repository",
             Self::AptRepositoryPackages { .. } => "APT repository packages",
             Self::FlatpakEnsureApps { .. } => "Flatpak applications",
@@ -172,15 +176,20 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::RustupBootstrap => completed(languages::rustup(&host)),
         Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
         Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::RustToolchain { selector, mode } => {
-            completed(tools::execute_rust(&host, selector.as_deref(), *mode))
+        Operation::RustToolchain { selector } => completed(tools::apply_rust(&host, selector)),
+        Operation::RustToolchainUpdate => completed(tools::update_rust(&host)),
+        Operation::GoToolchain { selector, architecture } => {
+            completed(tools::execute_go(&host, selector, *architecture))
         }
-        Operation::GoToolchain { selector, architecture, mode } => {
-            completed(tools::execute_go(&host, selector, *architecture, *mode))
+        Operation::GoToolchainUpdate { selector, architecture } => {
+            completed(tools::update_go(&host, selector, *architecture))
         }
-        Operation::NodeToolchain { selector, mode } => completed(tools::execute_node(&host, selector, *mode)),
-        Operation::PythonToolchain { version, mode } => completed(tools::execute_python(&host, version, *mode)),
+        Operation::NodeToolchain { selector } => completed(tools::apply_node(&host, selector)),
+        Operation::NodeToolchainUpdate { selector } => completed(tools::update_node(&host, selector)),
+        Operation::PythonToolchain { version } => completed(tools::apply_python(&host, version)),
+        Operation::PythonToolchainUpdate => completed(tools::update_python(&host)),
         Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
+        Operation::CargoUpdateBootstrap => completed(binary::cargo_binstall::ensure_cargo_update(&host)),
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
         Operation::AptRepositoryPackages { conflicts, packages } => {
             completed(apt::repository_packages(&host, conflicts, packages))
