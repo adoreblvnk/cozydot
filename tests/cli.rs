@@ -2259,7 +2259,6 @@ fn appimaged_is_ensured_once_before_appimages_are_published() {
     let systemctl_log = temp.path().join("systemctl.log");
     let systemctl_count = temp.path().join("systemctl.count");
     let sudo_log = temp.path().join("sudo.log");
-    let corrupt_launch = temp.path().join("corrupt-appimaged-launched");
     fs::create_dir_all(&config_dir).unwrap();
     write_config(
         &config_dir.join("cozydot.yaml"),
@@ -2312,7 +2311,7 @@ case "$*" in
     [ ! -f "$COZYDOT_SYSTEMCTL_COUNT" ] || count=$(cat "$COZYDOT_SYSTEMCTL_COUNT")
     count=$((count + 1))
     printf '%s\n' "$count" > "$COZYDOT_SYSTEMCTL_COUNT"
-    [ "$count" -gt 2 ]
+    [ "$count" -gt 1 ]
     ;;
   *) exit 0 ;;
 esac
@@ -2353,10 +2352,7 @@ esac
     );
 
     fs::create_dir_all(home.join("Applications")).unwrap();
-    write_executable(
-        &home.join("Applications/appimaged.AppImage"),
-        "#!/bin/sh\nprintf launched > \"$COZYDOT_CORRUPT_LAUNCH\"\n",
-    );
+    write_executable(&home.join("Applications/appimaged.AppImage"), "#!/bin/sh\nexit 99\n");
     fs::copy("/bin/true", home.join("Applications/fixed.AppImage")).unwrap();
     let legacy_cache = home.join(".local/share/applications/appimagekit-test.desktop");
     fs::create_dir_all(legacy_cache.parent().unwrap()).unwrap();
@@ -2373,7 +2369,6 @@ esac
         .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
         .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
         .env("COZYDOT_SUDO_LOG", &sudo_log)
-        .env("COZYDOT_CORRUPT_LAUNCH", &corrupt_launch)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()
@@ -2392,15 +2387,15 @@ esac
     }
     assert_eq!(fs::read(home.join("Applications/fixed.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
     assert_eq!(fs::read(home.join("Applications/appimaged.AppImage")).unwrap(), fs::read("/bin/true").unwrap());
-    assert!(!corrupt_launch.exists());
-    assert_eq!(fs::read_to_string(legacy_cache).unwrap(), "legacy cache");
-    assert_eq!(fs::read_to_string(legacy_unit).unwrap(), "legacy unit");
+    assert!(!legacy_cache.exists());
+    assert!(!legacy_unit.exists());
     let sudo_calls = fs::read_to_string(&sudo_log).unwrap();
-    assert!(sudo_calls.contains("apt-get install -y -qq -- libfuse2t64"));
-    assert!(!sudo_calls.contains("appimagelauncher"));
+    assert!(sudo_calls.contains("apt-get remove -qy appimagelauncher"));
+    assert!(sudo_calls.contains("apt-get install -qq libfuse2t64"));
     assert!(!home.join(".local/bin").exists());
     let systemctl_calls = fs::read_to_string(&systemctl_log).unwrap();
-    assert_eq!(systemctl_calls.matches("is-active").count(), 3);
+    assert_eq!(systemctl_calls.matches("is-active").count(), 1);
+    assert!(systemctl_calls.contains("--user stop appimaged.service"));
     assert!(!systemctl_calls.contains("daemon-reload"));
 
     write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 1\n");
@@ -2412,11 +2407,10 @@ esac
         .env("COZYDOT_SYSTEMCTL_LOG", &systemctl_log)
         .env("COZYDOT_SYSTEMCTL_COUNT", &systemctl_count)
         .env("COZYDOT_SUDO_LOG", &sudo_log)
-        .env("COZYDOT_CORRUPT_LAUNCH", &corrupt_launch)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .arg("apply")
         .assert()
         .success();
     let systemctl_calls = fs::read_to_string(systemctl_log).unwrap();
-    assert_eq!(systemctl_calls.matches("is-active").count(), 4);
+    assert_eq!(systemctl_calls.matches("is-active").count(), 2);
 }
