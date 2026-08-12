@@ -178,9 +178,8 @@ pub(crate) mod debian_components {
     use std::{
         collections::{BTreeMap, BTreeSet},
         ffi::OsStr,
-        path::{Path, PathBuf},
+        path::PathBuf,
     };
-    use url::Url;
 
     const APT_ROOT: &str = "/etc/apt";
     const REQUIRED_COMPONENTS: [&str; 4] = ["main", "contrib", "non-free", "non-free-firmware"];
@@ -238,53 +237,30 @@ pub(crate) mod debian_components {
         for directory in [APT_ROOT, "/etc/apt/sources.list.d"] {
             host.require("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
         }
-        let output = host.require(
-            "Debian APT source discovery",
-            "sudo",
-            [
-                "find",
-                APT_ROOT,
-                "-xdev",
-                "-maxdepth",
-                "2",
-                "(",
-                "-path",
-                "/etc/apt/sources.list",
-                "-o",
-                "-path",
-                "/etc/apt/sources.list.d/*.list",
-                "-o",
-                "-path",
-                "/etc/apt/sources.list.d/*.sources",
-                ")",
-                "-print0",
-            ],
-        )?;
-        let mut paths = BTreeSet::new();
-        for raw in output.stdout.split(|byte| *byte == 0) {
-            if raw.is_empty() {
+
+        let candidates = ["/etc/apt/sources.list", "/etc/apt/sources.list.d/debian.sources"];
+        let mut files = Vec::new();
+        for candidate in candidates {
+            let path = PathBuf::from(candidate);
+            let symlink = host.run("sudo", ["test", "-L", candidate])?;
+            if symlink.status.success() {
+                bail!("Debian APT source path is a symlink: {candidate}");
+            }
+            if symlink.status.code() != Some(1) {
+                bail!(
+                    "Debian APT source symlink inspection failed for {candidate}: {}",
+                    String::from_utf8_lossy(&symlink.stderr).trim()
+                );
+            }
+            let regular = host.run("sudo", ["test", "-f", candidate])?;
+            if regular.status.code() == Some(1) {
                 continue;
             }
-            let path = std::str::from_utf8(raw).context("Debian APT source discovery returned a non-UTF-8 path")?;
-            let path = validate_source_path(path)?;
-            if !paths.insert(path) {
-                bail!("Debian APT source discovery returned a duplicate path");
-            }
-        }
-
-        let mut files = Vec::new();
-        for path in paths {
-            let state = host.require(
-                "Debian APT source inspection",
-                "sudo",
-                [OsStr::new("stat"), OsStr::new("--format=%f"), OsStr::new("--"), path.as_os_str()],
-            )?;
-            let mode = std::str::from_utf8(&state.stdout)
-                .context("Debian APT source stat returned non-UTF-8 output")?
-                .trim_end();
-            let mode = u32::from_str_radix(mode, 16).context("Debian APT source stat returned malformed mode")?;
-            if mode & 0o170000 != 0o100000 {
-                bail!("Debian APT source path is not a regular file: {}", path.display());
+            if !regular.status.success() {
+                bail!(
+                    "Debian APT source file inspection failed for {candidate}: {}",
+                    String::from_utf8_lossy(&regular.stderr).trim()
+                );
             }
             let bytes = host
                 .require(
@@ -297,26 +273,15 @@ pub(crate) mod debian_components {
                 .with_context(|| format!("Debian APT source is not UTF-8: {}", path.display()))?;
             files.push(SourceFile { path, bytes });
         }
-        Ok(files)
-    }
-
-    fn validate_source_path(value: &str) -> Result<PathBuf> {
-        let path = Path::new(value);
-        if path == Path::new("/etc/apt/sources.list") {
-            return Ok(path.to_owned());
+        match files.len() {
+            0 => bail!(
+                "neither supported Debian APT source file exists; expected exactly one of /etc/apt/sources.list or /etc/apt/sources.list.d/debian.sources"
+            ),
+            1 => Ok(files),
+            _ => bail!(
+                "both supported Debian APT source files exist; expected exactly one authoritative Debian APT source file"
+            ),
         }
-        if path.parent() != Some(Path::new("/etc/apt/sources.list.d")) {
-            bail!("Debian APT discovery returned a path outside the source directories");
-        }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            bail!("Debian APT discovery returned an invalid source filename");
-        };
-        if !name.ends_with(".list") && !name.ends_with(".sources")
-            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-        {
-            bail!("Debian APT discovery returned an invalid source filename");
-        }
-        Ok(path.to_owned())
     }
 
     fn reconcile(release: &str, files: &[SourceFile]) -> Result<Reconciliation> {
@@ -347,26 +312,38 @@ pub(crate) mod debian_components {
         for line in text.split_inclusive('\n') {
             let body = line.strip_suffix('\n').unwrap_or(line);
             let comment_start = body.find('#').unwrap_or(body.len());
-            let active = body[..comment_start].trim();
-            if !matches!(active.split_ascii_whitespace().next(), Some("deb" | "deb-src")) {
+            let before_comment = &body[..comment_start];
+            let active = before_comment.trim();
+            let active_start = before_comment.len() - before_comment.trim_start().len();
+            if !matches!(active.split_ascii_whitespace().next(), Some("deb")) {
                 output.push_str(line);
                 continue;
             }
-            let entry = parse_list_entry(active).context("parse active one-line APT source")?;
+            let entry = match parse_list_entry(active) {
+                Ok(entry) => entry,
+                Err(error)
+                    if active.split_ascii_whitespace().any(|field| official_uri(field.trim_end_matches('/'))) =>
+                {
+                    return Err(error).context("parse active official one-line APT source");
+                }
+                Err(_) => {
+                    output.push_str(line);
+                    continue;
+                }
+            };
             if !official_uri(&entry.uri) || !supported_suite(release, entry.suite) {
                 output.push_str(line);
                 continue;
             }
             matched += 1;
-            let missing = missing_components(entry.components.iter().copied());
-            if missing.is_empty() {
+            let desired = desired_components(entry.components.iter().copied());
+            if desired == entry.components {
                 output.push_str(line);
                 continue;
             }
             let active_end = body[..comment_start].trim_end().len();
-            output.push_str(&body[..active_end]);
-            output.push(' ');
-            output.push_str(&missing.join(" "));
+            output.push_str(&body[..active_start + entry.components_start]);
+            output.push_str(&desired.join(" "));
             output.push_str(&body[active_end..]);
             if line.ends_with('\n') {
                 output.push('\n');
@@ -380,14 +357,11 @@ pub(crate) mod debian_components {
         uri: String,
         suite: &'a str,
         components: Vec<&'a str>,
+        components_start: usize,
     }
 
     fn parse_list_entry(line: &str) -> Result<ListEntry<'_>> {
-        let mut rest = line
-            .strip_prefix("deb-src")
-            .or_else(|| line.strip_prefix("deb"))
-            .context("APT source does not start with deb or deb-src")?
-            .trim_start();
+        let mut rest = line.strip_prefix("deb").context("APT source does not start with deb")?.trim_start();
         if rest.starts_with('[') {
             let end = rest.find(']').context("APT source has unterminated options")?;
             rest = rest[end + 1..].trim_start();
@@ -396,7 +370,14 @@ pub(crate) mod debian_components {
         if fields.len() < 3 {
             bail!("APT source is missing URI, suite, or components");
         }
-        Ok(ListEntry { uri: normalized_uri(fields[0])?, suite: fields[1], components: fields[2..].to_vec() })
+        let components = fields[2..].to_vec();
+        let components_start = components[0].as_ptr() as usize - line.as_ptr() as usize;
+        Ok(ListEntry {
+            uri: fields[0].trim_end_matches('/').to_owned(),
+            suite: fields[1],
+            components,
+            components_start,
+        })
     }
 
     fn reconcile_deb822(release: &str, text: &str) -> Result<(String, usize)> {
@@ -408,6 +389,10 @@ pub(crate) mod debian_components {
                 output.push(paragraph.to_owned());
                 continue;
             }
+            if !mentions_official_uri(paragraph) {
+                output.push(paragraph.to_owned());
+                continue;
+            }
             let fields = parse_deb822_fields(paragraph)?;
             let enabled = match fields.get("enabled").map(String::as_str) {
                 None => true,
@@ -415,18 +400,25 @@ pub(crate) mod debian_components {
                 Some(value) if value.eq_ignore_ascii_case("no") => false,
                 Some(_) => bail!("deb822 source has an invalid Enabled value"),
             };
-            let types =
-                fields.get("types").map(|value| value.split_ascii_whitespace().collect::<Vec<_>>()).unwrap_or_default();
-            if !enabled || !types.iter().any(|value| matches!(*value, "deb" | "deb-src")) {
+            if !enabled {
+                output.push(paragraph.to_owned());
+                continue;
+            }
+            let types = fields
+                .get("types")
+                .context("official deb822 APT source is missing Types")?
+                .split_ascii_whitespace()
+                .collect::<Vec<_>>();
+            if !types.contains(&"deb") {
                 output.push(paragraph.to_owned());
                 continue;
             }
             let uris = fields
                 .get("uris")
-                .context("active deb822 APT source is missing URIs")?
+                .context("deb822 APT source is missing URIs")?
                 .split_ascii_whitespace()
-                .map(normalized_uri)
-                .collect::<Result<Vec<_>>>()?;
+                .map(|uri| uri.trim_end_matches('/'))
+                .collect::<Vec<_>>();
             let official = uris.iter().filter(|uri| official_uri(uri)).count();
             if official == 0 {
                 output.push(paragraph.to_owned());
@@ -449,20 +441,36 @@ pub(crate) mod debian_components {
             }
             matched += 1;
             let components = fields.get("components").context("active deb822 APT source is missing Components")?;
-            let mut values = components.split_ascii_whitespace().collect::<Vec<_>>();
-            let missing = missing_components(values.iter().copied());
-            if missing.is_empty() {
+            let values = components.split_ascii_whitespace().collect::<Vec<_>>();
+            let desired = desired_components(values.iter().copied());
+            if desired == values {
                 output.push(paragraph.to_owned());
                 continue;
             }
-            values.extend(missing);
-            output.push(replace_deb822_field(paragraph, "Components", &values.join(" "))?);
+            output.push(replace_deb822_field(paragraph, "Components", &desired.join(" "))?);
         }
         let mut result = output.join("\n\n");
         if trailing_newline && !result.ends_with('\n') {
             result.push('\n');
         }
         Ok((result, matched))
+    }
+
+    fn mentions_official_uri(paragraph: &str) -> bool {
+        let mut uris = false;
+        paragraph.lines().any(|line| {
+            let value = if line.starts_with([' ', '\t']) {
+                uris.then_some(line.trim())
+            } else {
+                let Some((name, value)) = line.split_once(':') else {
+                    uris = false;
+                    return false;
+                };
+                uris = name.eq_ignore_ascii_case("uris");
+                uris.then_some(value)
+            };
+            value.is_some_and(|value| value.split_ascii_whitespace().any(|uri| official_uri(uri.trim_end_matches('/'))))
+        })
     }
 
     fn parse_deb822_fields(paragraph: &str) -> Result<BTreeMap<String, String>> {
@@ -520,9 +528,11 @@ pub(crate) mod debian_components {
         Ok(result.join("\n"))
     }
 
-    fn missing_components<'a>(existing: impl Iterator<Item = &'a str>) -> Vec<&'static str> {
-        let existing = existing.collect::<BTreeSet<_>>();
-        REQUIRED_COMPONENTS.into_iter().filter(|component| !existing.contains(component)).collect()
+    fn desired_components<'a>(existing: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
+        let mut seen = BTreeSet::new();
+        let mut desired = existing.filter(|component| seen.insert(*component)).collect::<Vec<_>>();
+        desired.extend(REQUIRED_COMPONENTS.into_iter().filter(|component| seen.insert(component)));
+        desired
     }
 
     fn supported_suite(release: &str, suite: &str) -> bool {
@@ -530,25 +540,6 @@ pub(crate) mod debian_components {
             || suite == format!("{release}-updates")
             || suite == format!("{release}-backports")
             || suite == format!("{release}-security")
-    }
-
-    fn normalized_uri(value: &str) -> Result<String> {
-        if !value.starts_with("http://") && !value.starts_with("https://") {
-            return Ok(value.to_owned());
-        }
-        let mut url = Url::parse(value).context("APT source URI is malformed")?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            bail!("APT source URI is unsupported");
-        }
-        let path = url.path().trim_end_matches('/').to_owned();
-        url.set_path(if path.is_empty() { "/" } else { &path });
-        Ok(url.to_string().trim_end_matches('/').to_owned())
     }
 
     fn official_uri(uri: &str) -> bool {
