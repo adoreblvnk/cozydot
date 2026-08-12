@@ -1379,10 +1379,15 @@ case "$1" in
   test)
     case "$*" in
       *" ! -L "*|*" ! -d "*) exit 0;;
+      *" -L "*) exit 1;;
+      *" -f "*) [ -f "$COZYDOT_TEST_STATE/files/$name" ]; exit;;
       *" ! -e "*) [ ! -f "$COZYDOT_TEST_STATE/files/$name" ]; exit;;
     esac
     ;;
-  stat|cat) exit 99 ;;
+  cat)
+    cat "$COZYDOT_TEST_STATE/files/$name"
+    ;;
+  stat) exit 99 ;;
   *) exit 0 ;;
 esac
 "#,
@@ -1401,6 +1406,151 @@ fn run_apt_command(command: &str, config_home: &Path, fake_bin: &Path, state: &P
         .arg(command)
         .assert()
         .success();
+}
+
+fn run_debian_apt_apply(
+    release: &str,
+    config_home: &Path,
+    fake_bin: &Path,
+    state: &Path,
+    log: &Path,
+) -> std::process::Output {
+    let os_release = state.join("os-release");
+    fs::write(&os_release, format!("ID=debian\nVERSION_CODENAME={release}\n")).unwrap();
+    let mut command = Command::new("bwrap");
+    command.args(["--dev-bind", "/", "/", "--ro-bind"]).arg(&os_release).arg("/etc/os-release");
+    for program in ["curl", "dpkg-query", "gpg", "sudo"] {
+        command.arg("--ro-bind").arg(fake_bin.join(program)).arg(format!("/usr/bin/{program}"));
+    }
+    command
+        .arg("--")
+        .arg(assert_cmd::cargo::cargo_bin!("cozydot"))
+        .env("XDG_CONFIG_HOME", config_home)
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", log)
+        .env("COZYDOT_TEST_STATE", state)
+        .env("PATH", "/usr/bin:/bin")
+        .arg("apply")
+        .output()
+        .unwrap()
+}
+
+fn setup_debian_apt_test()
+-> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let temp = tempfile::tempdir().unwrap();
+    let mut permissions = fs::metadata(temp.path()).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(temp.path(), permissions).unwrap();
+    let config_home = temp.path().join("config");
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    let log = temp.path().join("apt.log");
+    fs::create_dir_all(config_home.join("cozydot")).unwrap();
+    fs::create_dir_all(state.join("files")).unwrap();
+    fs::create_dir_all(state.join("packages")).unwrap();
+    fs::write(config_home.join("cozydot/cozydot.yaml"), config("{}", "{}")).unwrap();
+    write_apt_repository_fakes(&fake_bin);
+    (temp, config_home, fake_bin, state, log)
+}
+
+fn debian_source_was_published(log: &str, destination: &str) -> bool {
+    log.lines().any(|line| line.contains("sudo mv -fT -- ") && line.ends_with(destination))
+}
+
+#[test]
+fn debian_12_sources_list_components_are_narrow_and_idempotent() {
+    let (_temp, config_home, fake_bin, state, log) = setup_debian_apt_test();
+    let source = concat!(
+        "# Debian repositories\n",
+        "  deb [arch=amd64] https://deb.debian.org/debian bookworm main main contrib # archive\n",
+        "deb http://security.debian.org/debian-security bookworm-security main\n",
+        "deb-src https://deb.debian.org/debian bookworm main\n",
+        "deb https://example.com/debian bookworm main\n",
+        "# deb https://deb.debian.org/debian bookworm main\n",
+    );
+    fs::write(state.join("files/sources.list"), source).unwrap();
+
+    let first = run_debian_apt_apply("bookworm", &config_home, &fake_bin, &state, &log);
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    assert!(debian_source_was_published(&fs::read_to_string(&log).unwrap(), "/etc/apt/sources.list"));
+    let actual = fs::read_to_string(state.join("files/sources.list")).unwrap();
+    assert!(actual.contains("bookworm main contrib non-free non-free-firmware # archive"));
+    assert!(actual.contains("bookworm-security main contrib non-free non-free-firmware\n"));
+    assert!(actual.contains("deb-src https://deb.debian.org/debian bookworm main\n"));
+    assert!(actual.contains("deb https://example.com/debian bookworm main\n"));
+    assert_eq!(actual.matches("contrib").count(), 2);
+
+    fs::write(&log, "").unwrap();
+    let second = run_debian_apt_apply("bookworm", &config_home, &fake_bin, &state, &log);
+    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
+    assert!(!debian_source_was_published(&fs::read_to_string(&log).unwrap(), "/etc/apt/sources.list"));
+}
+
+#[test]
+fn debian_13_debian_sources_components_are_narrow_and_idempotent() {
+    let (_temp, config_home, fake_bin, state, log) = setup_debian_apt_test();
+    let source = concat!(
+        "Types: deb deb-src\nURIs:\n https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main main contrib\n\n",
+        "Types: deb\nURIs: https://security.debian.org/debian-security\nSuites: trixie-security\nComponents: main\n\n",
+        "Types: deb\nURIs: https://example.com/debian\nSuites: stable\nComponents: main\n",
+    );
+    fs::write(state.join("files/debian.sources"), source).unwrap();
+
+    let first = run_debian_apt_apply("trixie", &config_home, &fake_bin, &state, &log);
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    assert!(debian_source_was_published(&fs::read_to_string(&log).unwrap(), "/etc/apt/sources.list.d/debian.sources"));
+    let actual = fs::read_to_string(state.join("files/debian.sources")).unwrap();
+    assert_eq!(actual.matches("Components: main contrib non-free non-free-firmware").count(), 2);
+    assert!(actual.contains("URIs: https://example.com/debian\nSuites: stable\nComponents: main\n"));
+
+    fs::write(&log, "").unwrap();
+    let second = run_debian_apt_apply("trixie", &config_home, &fake_bin, &state, &log);
+    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
+    assert!(!debian_source_was_published(&fs::read_to_string(&log).unwrap(), "/etc/apt/sources.list.d/debian.sources"));
+}
+
+#[test]
+fn debian_apt_authoritative_path_must_be_unambiguous() {
+    for both in [false, true] {
+        let (_temp, config_home, fake_bin, state, log) = setup_debian_apt_test();
+        if both {
+            fs::write(state.join("files/sources.list"), "deb https://deb.debian.org/debian bookworm main\n").unwrap();
+            fs::write(
+                state.join("files/debian.sources"),
+                "Types: deb\nURIs: https://deb.debian.org/debian\nSuites: bookworm\nComponents: main\n",
+            )
+            .unwrap();
+        }
+        let output = run_debian_apt_apply("bookworm", &config_home, &fake_bin, &state, &log);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(if both {
+            "both supported Debian APT source files exist"
+        } else {
+            "neither supported Debian APT source file exists"
+        }));
+        let log = fs::read_to_string(&log).unwrap();
+        assert!(!debian_source_was_published(&log, "/etc/apt/sources.list"));
+        assert!(!debian_source_was_published(&log, "/etc/apt/sources.list.d/debian.sources"));
+    }
+}
+
+#[test]
+fn debian_apt_rejects_malformed_active_official_sources() {
+    let cases = [
+        ("sources.list", "deb [arch=amd64 https://deb.debian.org/debian bookworm main\n"),
+        ("debian.sources", "Types: deb\nURIs: https://deb.debian.org/debian\nSuites: bookworm\n"),
+    ];
+    for (name, source) in cases {
+        let (_temp, config_home, fake_bin, state, log) = setup_debian_apt_test();
+        let path = state.join("files").join(name);
+        fs::write(&path, source).unwrap();
+        let output = run_debian_apt_apply("bookworm", &config_home, &fake_bin, &state, &log);
+        assert!(!output.status.success(), "malformed {name} unexpectedly succeeded");
+        let log = fs::read_to_string(&log).unwrap();
+        assert!(!debian_source_was_published(&log, "/etc/apt/sources.list"));
+        assert!(!debian_source_was_published(&log, "/etc/apt/sources.list.d/debian.sources"));
+        assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
 }
 
 #[test]

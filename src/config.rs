@@ -59,11 +59,6 @@ impl Config {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn parse(text: &str) -> Result<Self> {
-        Self::deserialize_str(text)
-    }
-
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         if platform.is_macos() {

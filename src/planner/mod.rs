@@ -23,9 +23,6 @@ mod packages;
 mod system;
 mod tools;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ExecutionStage {
     AdministrativeVerification,
