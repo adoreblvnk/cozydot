@@ -6,8 +6,7 @@ pub(crate) mod cargo {
     use super::super::{Host, executable_file, path_program};
 
     pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
-        let cargo_home =
-            host.managed_dir("CARGO_HOME", ".cargo", "Cargo package operation requires an absolute CARGO_HOME")?;
+        let cargo_home = host.home().join(".cargo");
         let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
         let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
         let installed = installed_crates(&output.stdout)?;
@@ -25,21 +24,12 @@ pub(crate) mod cargo {
     }
 
     pub(crate) fn update_all(host: &Host) -> Result<()> {
-        let cargo_home =
-            host.managed_dir("CARGO_HOME", ".cargo", "Cargo package operation requires an absolute CARGO_HOME")?;
-        let cargo_path = cargo_home.join("bin/cargo");
-        if !executable_file(&cargo_path) {
+        let program = host.home().join(".cargo/bin/cargo-install-update");
+        if !executable_file(&program) {
             return Ok(());
         }
-        let cargo = path_program(&cargo_path, "managed Cargo executable path")?;
-        let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
-        let packages = installed_crates(&output.stdout)?;
-        if packages.is_empty() {
-            return Ok(());
-        }
-        let mut args = vec!["install".to_owned(), "--locked".into(), "--".into()];
-        args.extend(packages);
-        host.require("Cargo package convergence", &cargo, args)?;
+        let program = path_program(&program, "managed cargo-install-update executable path")?;
+        host.require("Cargo package update", &program, ["-a"])?;
         Ok(())
     }
 
@@ -125,11 +115,10 @@ pub(crate) mod npm {
     }
 
     fn resolve_fnm(host: &Host) -> Result<Option<String>> {
-        let data_home = host.managed_dir(
-            "XDG_DATA_HOME",
-            ".local/share",
-            "npm package operation requires an absolute managed FNM data directory",
-        )?;
+        if cfg!(target_os = "macos") {
+            return super::super::macos::formula_program(host, "fnm", "fnm").map(Some);
+        }
+        let data_home = host.home().join(".local/share");
         let managed = data_home.join("fnm/fnm");
         if executable_file(&managed) {
             return managed.to_str().map(str::to_owned).map(Some).context("managed fnm executable path is not UTF-8");

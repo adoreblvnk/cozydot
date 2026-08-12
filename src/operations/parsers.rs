@@ -1,4 +1,9 @@
-pub(crate) fn latest_go(input: &str, requested: &str, arch: &str, target_os: &str) -> anyhow::Result<(String, String)> {
+pub(crate) fn latest_go(
+    input: &str,
+    requested: &str,
+    arch: &str,
+    target_os: &str,
+) -> anyhow::Result<(String, String, String)> {
     use anyhow::Context;
     let value: serde_json::Value = serde_json::from_str(input).context("parse Go release JSON")?;
     let releases = value.as_array().context("Go metadata must be an array")?;
@@ -14,13 +19,14 @@ pub(crate) fn latest_go(input: &str, requested: &str, arch: &str, target_os: &st
         })
         .context("Go metadata has no matching stable release")?;
     let filename = format!("go{version}.{target_os}-{arch}.tar.gz");
-    releases
+    let file = releases
         .iter()
         .find(|release| release["version"].as_str() == Some(&format!("go{version}")))
         .and_then(|release| release["files"].as_array())
         .and_then(|files| files.iter().find(|file| file["filename"].as_str() == Some(&filename)))
         .context("Go metadata has no matching architecture archive")?;
-    Ok((version.to_owned(), filename))
+    let sha256 = file["sha256"].as_str().context("Go archive metadata has no SHA-256 checksum")?;
+    Ok((version.to_owned(), filename, sha256.to_owned()))
 }
 
 pub(crate) fn gnome_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {

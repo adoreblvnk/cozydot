@@ -8,12 +8,7 @@ pub(super) fn linux_shared_tools_workflow(workflow: &mut LinuxApplyWorkflow<'_>)
     if tools.go.is_some() {
         workflow.prerequisites.extend(["ca-certificates", "curl", "tar"]);
     }
-    shared_tools_workflow(
-        workflow.config,
-        workflow.platform.architecture,
-        &mut workflow.stages,
-        &mut workflow.managers,
-    );
+    shared_tools_apply(workflow.config, workflow.platform.architecture, &mut workflow.stages, &mut workflow.managers);
 }
 
 pub(super) fn macos_shared_tools_workflow(
@@ -22,32 +17,28 @@ pub(super) fn macos_shared_tools_workflow(
     stages: &mut Stages,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) {
-    shared_tools_workflow(config, architecture, stages, managers);
+    shared_tools_apply(config, architecture, stages, managers);
 }
 
-fn shared_tools_workflow(
+fn shared_tools_apply(
     config: &Config,
     architecture: Architecture,
     stages: &mut Stages,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) {
     if let Some(selector) = config.shared.tools.rust.as_deref() {
-        managers.insert(ManagerBootstrap::Rustup);
+        managers.extend([ManagerBootstrap::Rustup, ManagerBootstrap::CargoBinstall, ManagerBootstrap::CargoUpdate]);
         push_operation(
             stages,
             ExecutionStage::RustToolchain,
-            Operation::RustToolchain { selector: Some(selector.to_owned()), mode: ToolchainMode::EnsurePresent },
+            Operation::RustToolchain { selector: selector.to_owned() },
         );
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
         push_operation(
             stages,
             ExecutionStage::GoToolchain,
-            Operation::GoToolchain {
-                selector: go_selector_main(selector),
-                architecture,
-                mode: ToolchainMode::EnsurePresent,
-            },
+            Operation::GoToolchain { selector: go_selector(selector), architecture },
         );
     }
     if let Some(selector) = config.shared.tools.node.as_deref() {
@@ -55,7 +46,7 @@ fn shared_tools_workflow(
         push_operation(
             stages,
             ExecutionStage::NodeToolchain,
-            Operation::NodeToolchain { selector: selector.to_owned(), mode: ToolchainMode::EnsurePresent },
+            Operation::NodeToolchain { selector: selector.to_owned() },
         );
     }
     if let Some(version) = &config.shared.tools.python {
@@ -63,7 +54,7 @@ fn shared_tools_workflow(
         push_operation(
             stages,
             ExecutionStage::PythonToolchain,
-            Operation::PythonToolchain { version: version.clone(), mode: ToolchainMode::EnsurePresent },
+            Operation::PythonToolchain { version: version.clone() },
         );
     }
 }
@@ -81,7 +72,7 @@ pub(super) fn linux_shared_package_workflow(workflow: &mut LinuxApplyWorkflow<'_
     if npm {
         workflow.managers.insert(ManagerBootstrap::Fnm);
     }
-    shared_package_workflow(workflow.config, &mut workflow.stages);
+    shared_packages_apply(workflow.config, &mut workflow.stages);
 }
 
 pub(super) fn macos_shared_package_workflow(
@@ -92,10 +83,10 @@ pub(super) fn macos_shared_package_workflow(
     if config.shared.packages.cargo.as_ref().is_some_and(|packages| !packages.is_empty()) {
         managers.extend([ManagerBootstrap::Rustup, ManagerBootstrap::CargoBinstall]);
     }
-    shared_package_workflow(config, stages);
+    shared_packages_apply(config, stages);
 }
 
-fn shared_package_workflow(config: &Config, stages: &mut Stages) {
+fn shared_packages_apply(config: &Config, stages: &mut Stages) {
     if let Some(packages) = config.shared.packages.cargo.as_ref().filter(|packages| !packages.is_empty()) {
         push_operation(
             stages,
@@ -116,53 +107,30 @@ pub(super) fn linux_shared_tool_update_workflow(workflow: &mut LinuxUpdateWorkfl
     if updates.go == Some(true) {
         workflow.prerequisites.extend(["ca-certificates", "curl", "tar"]);
     }
-    shared_tool_update_workflow(
-        workflow.config,
-        workflow.platform.architecture,
-        "3",
-        &mut workflow.stages,
-        &mut workflow.managers,
-    );
+    shared_tool_updates(workflow.config, workflow.platform.architecture, &mut workflow.stages, &mut workflow.managers);
 }
 
 pub(super) fn macos_shared_tool_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
-    shared_tool_update_workflow(
-        workflow.config,
-        workflow.architecture,
-        "latest",
-        &mut workflow.stages,
-        &mut workflow.managers,
-    );
+    shared_tool_updates(workflow.config, workflow.architecture, &mut workflow.stages, &mut workflow.managers);
 }
 
-fn shared_tool_update_workflow(
+fn shared_tool_updates(
     config: &Config,
     architecture: Architecture,
-    python_default: &str,
     stages: &mut Stages,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) {
     let updates = &config.shared.updates.tools;
     if updates.rust == Some(true) {
         managers.insert(ManagerBootstrap::Rustup);
-        push_operation(
-            stages,
-            ExecutionStage::RustToolchain,
-            Operation::RustToolchain {
-                selector: config.shared.tools.rust.clone(),
-                mode: ToolchainMode::ConvergeLatest,
-            },
-        );
+        push_operation(stages, ExecutionStage::RustToolchain, Operation::RustToolchainUpdate);
     }
     if updates.go == Some(true) {
+        let selector = config.shared.tools.go.as_deref().unwrap_or("latest");
         push_operation(
             stages,
             ExecutionStage::GoToolchain,
-            Operation::GoToolchain {
-                selector: go_selector_main(config.shared.tools.go.as_deref().unwrap_or("latest")),
-                architecture,
-                mode: ToolchainMode::ConvergeLatest,
-            },
+            Operation::GoToolchainUpdate { selector: go_selector(selector), architecture },
         );
     }
     if updates.node == Some(true) {
@@ -170,37 +138,29 @@ fn shared_tool_update_workflow(
         push_operation(
             stages,
             ExecutionStage::NodeToolchain,
-            Operation::NodeToolchain {
+            Operation::NodeToolchainUpdate {
                 selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".to_owned()),
-                mode: ToolchainMode::ConvergeLatest,
             },
         );
     }
     if updates.python == Some(true) {
         managers.insert(ManagerBootstrap::Uv);
-        push_operation(
-            stages,
-            ExecutionStage::PythonToolchain,
-            Operation::PythonToolchain {
-                version: config.shared.tools.python.clone().unwrap_or_else(|| python_default.to_owned()),
-                mode: ToolchainMode::ConvergeLatest,
-            },
-        );
+        push_operation(stages, ExecutionStage::PythonToolchain, Operation::PythonToolchainUpdate);
     }
 }
 
 pub(super) fn linux_shared_package_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
-    shared_package_update_workflow(workflow.config, &mut workflow.stages);
+    shared_package_updates(workflow.config, &mut workflow.stages);
 }
 
 pub(super) fn macos_shared_package_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
     if workflow.config.shared.updates.packages.npm == Some(true) {
         workflow.managers.insert(ManagerBootstrap::Fnm);
     }
-    shared_package_update_workflow(workflow.config, &mut workflow.stages);
+    shared_package_updates(workflow.config, &mut workflow.stages);
 }
 
-fn shared_package_update_workflow(config: &Config, stages: &mut Stages) {
+fn shared_package_updates(config: &Config, stages: &mut Stages) {
     if config.shared.updates.packages.cargo == Some(true) {
         push_operation(stages, ExecutionStage::CargoPackages, Operation::CargoPackageUpdate);
     }
@@ -209,6 +169,6 @@ fn shared_package_update_workflow(config: &Config, stages: &mut Stages) {
     }
 }
 
-fn go_selector_main(value: &str) -> GoToolchainSelector {
+fn go_selector(value: &str) -> GoToolchainSelector {
     if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
 }
