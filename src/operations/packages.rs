@@ -15,7 +15,7 @@ pub(crate) mod cargo {
         if missing.is_empty() {
             return Ok(());
         }
-        let binstall = resolve_binstall(&cargo_home)?
+        let binstall = resolve_binstall(host, &cargo_home)?
             .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
         let mut args = vec!["--no-confirm".to_owned(), "--".into()];
         args.extend(missing);
@@ -63,7 +63,10 @@ pub(crate) mod cargo {
         package.split_once('@').map_or(package, |(name, _)| name)
     }
 
-    fn resolve_binstall(cargo_home: &Path) -> Result<Option<String>> {
+    fn resolve_binstall(host: &Host, cargo_home: &Path) -> Result<Option<String>> {
+        if cfg!(target_os = "macos") {
+            return super::super::macos::formula_program(host, "cargo-binstall", "cargo-binstall").map(Some);
+        }
         let managed = cargo_home.join("bin/cargo-binstall");
         if executable_file(&managed) {
             return path_program(&managed, "cargo-binstall executable path").map(Some);
