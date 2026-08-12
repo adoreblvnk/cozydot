@@ -291,7 +291,7 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
             },
         ),
         DesktopSetting::Terminal(executable) => {
-            if !command_is_executable(host, executable) {
+            if !host.executable_on_path(executable) {
                 bail!("desktop terminal executable {executable:?} is unavailable");
             }
             let schema = format!("{prefix}.desktop.default-applications.terminal");
@@ -394,16 +394,6 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
         ["install", "--force", &archive.path().to_string_lossy()],
     )?;
     Ok(())
-}
-
-fn command_is_executable(host: &Host, executable: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    host.value("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|directory| {
-            std::fs::metadata(directory.join(executable))
-                .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        })
-    })
 }
 
 fn validate_extension(value: &str) -> Result<()> {

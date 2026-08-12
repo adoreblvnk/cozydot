@@ -24,19 +24,14 @@ pub struct BinaryPackageOperation {
 }
 
 pub(crate) mod cargo_binstall {
-    use super::super::Host;
-    use anyhow::{Context, Result, bail};
-    use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+    use super::super::{Host, executable_file};
+    use anyhow::{Context, Result};
 
     pub(crate) fn execute(host: &Host) -> Result<()> {
-        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
-        if !cargo_home.is_absolute() {
-            bail!("cargo-binstall managed CARGO_HOME must be absolute");
-        }
+        let cargo_home =
+            host.managed_dir("CARGO_HOME", ".cargo", "cargo-binstall managed CARGO_HOME must be absolute")?;
         let installed = cargo_home.join("bin/cargo-binstall");
-        if std::fs::metadata(&installed)
-            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        {
+        if executable_file(&installed) {
             return Ok(());
         }
         let cargo_bin = cargo_home.join("bin/cargo");
@@ -69,20 +64,9 @@ pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result
 
 fn installed(host: &Host, operation: &BinaryPackageOperation) -> bool {
     match operation.format {
-        BinaryFormat::Deb => executable_on_path(host, &operation.name),
+        BinaryFormat::Deb => host.executable_on_path(&operation.name),
         BinaryFormat::Appimage => appimage_destination(host, operation).exists(),
     }
-}
-
-fn executable_on_path(host: &Host, name: &str) -> bool {
-    host.value("PATH")
-        .and_then(|path| {
-            std::env::split_paths(&path).find(|dir| {
-                fs::metadata(dir.join(name))
-                    .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-            })
-        })
-        .is_some()
 }
 
 fn appimage_destination(host: &Host, operation: &BinaryPackageOperation) -> PathBuf {

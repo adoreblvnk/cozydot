@@ -19,7 +19,7 @@ pub use repository::AptRepositoryOperation;
 pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
 pub use tools::GoToolchainSelector;
 
-pub(crate) use host::{Host, TempPath};
+pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file};
 pub(super) use parsers::{gnome_shell_version, gnome_version, latest_go};
 
 use crate::platform::Architecture;

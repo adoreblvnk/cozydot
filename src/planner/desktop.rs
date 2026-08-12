@@ -9,7 +9,7 @@ pub(super) fn linux_desktop_workflow(workflow: &mut LinuxApplyWorkflow<'_>) {
     );
 }
 
-pub(super) fn macos_desktop_workflow(config: &Config, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+pub(super) fn macos_desktop_workflow(config: &Config, stages: &mut Stages) {
     let mut settings = Vec::new();
     macos_appearance_workflow(config, &mut settings);
     macos_dock_workflow(config, &mut settings);
@@ -71,7 +71,7 @@ fn macos_trackpad_workflow(config: &Config, settings: &mut Vec<crate::operations
 fn linux_desktop_settings_workflow(
     config: &Config,
     platform: &Platform,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
+    stages: &mut Stages,
     prerequisites: &mut BTreeSet<&'static str>,
 ) {
     let Some(desktop) = config.os.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
@@ -87,11 +87,7 @@ fn linux_desktop_settings_workflow(
     linux_gnome_workflow(desktop, target, stages, prerequisites);
 }
 
-fn linux_theme_workflow(
-    desktop: &crate::config::Desktop,
-    target: DesktopEnvironment,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-) {
+fn linux_theme_workflow(desktop: &crate::config::Desktop, target: DesktopEnvironment, stages: &mut Stages) {
     if let Some(theme) = desktop.theme {
         push_operation(
             stages,
@@ -107,11 +103,7 @@ fn linux_theme_workflow(
     }
 }
 
-fn linux_terminal_workflow(
-    desktop: &crate::config::Desktop,
-    target: DesktopEnvironment,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-) {
+fn linux_terminal_workflow(desktop: &crate::config::Desktop, target: DesktopEnvironment, stages: &mut Stages) {
     if let Some(executable) = &desktop.terminal {
         push_operation(
             stages,
@@ -121,11 +113,7 @@ fn linux_terminal_workflow(
     }
 }
 
-fn linux_idle_workflow(
-    desktop: &crate::config::Desktop,
-    target: DesktopEnvironment,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-) {
+fn linux_idle_workflow(desktop: &crate::config::Desktop, target: DesktopEnvironment, stages: &mut Stages) {
     if let Some(idle) = &desktop.idle {
         if let Some(timeout) = &idle.timeout {
             push_operation(
@@ -147,7 +135,7 @@ fn linux_idle_workflow(
 fn linux_gnome_workflow(
     desktop: &crate::config::Desktop,
     target: DesktopEnvironment,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
+    stages: &mut Stages,
     prerequisites: &mut BTreeSet<&'static str>,
 ) {
     if target == DesktopEnvironment::Gnome
