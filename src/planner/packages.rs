@@ -121,15 +121,7 @@ pub(super) fn linux_apt_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) 
     let Some(policy) = workflow.config.os.linux.updates.as_ref().and_then(|updates| updates.apt) else {
         return;
     };
-    linux_apt_metadata_refresh_workflow(workflow);
-    linux_apt_system_upgrade_workflow(workflow, policy);
-}
-
-fn linux_apt_metadata_refresh_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
     push_operation(&mut workflow.stages, ExecutionStage::SystemMetadataRefresh, Operation::AptMetadataRefresh);
-}
-
-fn linux_apt_system_upgrade_workflow(workflow: &mut LinuxUpdateWorkflow<'_>, policy: AptUpdate) {
     push_operation(
         &mut workflow.stages,
         ExecutionStage::SystemUpdates,
@@ -149,7 +141,7 @@ pub(super) fn linux_flatpak_update_workflow(workflow: &mut LinuxUpdateWorkflow<'
     }
 }
 
-pub(super) fn macos_homebrew_workflow(config: &Config, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+pub(super) fn macos_homebrew_workflow(config: &Config, stages: &mut Stages) {
     let mac = config.macos();
     let dotfiles = config.shared.dotfiles.packages.iter().chain(mac.dotfiles.packages.iter()).next().is_some();
     let has_packages = dotfiles || !mac.homebrew.formulae.is_empty() || !mac.homebrew.casks.is_empty();
@@ -159,7 +151,7 @@ pub(super) fn macos_homebrew_workflow(config: &Config, stages: &mut [(ExecutionS
     macos_homebrew_packages_operation(formulae, casks, stages);
 }
 
-fn macos_homebrew_availability_workflow(has_packages: bool, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+fn macos_homebrew_availability_workflow(has_packages: bool, stages: &mut Stages) {
     if has_packages {
         push_operation(stages, ExecutionStage::SystemManagerBootstrap, Operation::HomebrewBootstrap);
     }
@@ -177,19 +169,15 @@ fn macos_homebrew_casks_workflow(config: &Config) -> Vec<String> {
     config.macos().homebrew.casks.clone()
 }
 
-fn macos_homebrew_packages_operation(
-    formulae: Vec<String>,
-    casks: Vec<String>,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-) {
+fn macos_homebrew_packages_operation(formulae: Vec<String>, casks: Vec<String>, stages: &mut Stages) {
     if !formulae.is_empty() || !casks.is_empty() {
         push_operation(stages, ExecutionStage::SystemPackages, Operation::HomebrewPackages { formulae, casks });
     }
 }
 
 pub(super) fn macos_homebrew_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
-    let formulae = macos_homebrew_formulae_update_workflow(workflow);
-    let casks = macos_homebrew_casks_update_workflow(workflow);
+    let formulae = workflow.config.macos().updates.homebrew.formulae == Some(true);
+    let casks = workflow.config.macos().updates.homebrew.casks == Some(true);
     if formulae || casks {
         push_operation(
             &mut workflow.stages,
@@ -197,14 +185,6 @@ pub(super) fn macos_homebrew_update_workflow(workflow: &mut MacosUpdateWorkflow<
             Operation::HomebrewUpdate { formulae, casks },
         );
     }
-}
-
-fn macos_homebrew_formulae_update_workflow(workflow: &MacosUpdateWorkflow<'_>) -> bool {
-    workflow.config.macos().updates.homebrew.formulae == Some(true)
-}
-
-fn macos_homebrew_casks_update_workflow(workflow: &MacosUpdateWorkflow<'_>) -> bool {
-    workflow.config.macos().updates.homebrew.casks == Some(true)
 }
 
 fn plan_repository(

@@ -1,16 +1,13 @@
 use anyhow::{Context, Result, bail};
-use std::{ffi::OsStr, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::ffi::OsStr;
 
-use super::{Host, TempPath};
+use super::{Host, TempPath, real_executable_file};
 
 const RUSTUP_BOOTSTRAP_FLAGS: [&str; 3] = ["-y", "--default-toolchain", "none"];
 
 pub fn rustup(host: &Host) -> Result<()> {
-    let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
-    if !cargo_home.is_absolute() {
-        bail!("rustup managed CARGO_HOME must be absolute");
-    }
-    if executable_file(&cargo_home.join("bin/rustup")) {
+    let cargo_home = host.managed_dir("CARGO_HOME", ".cargo", "rustup managed CARGO_HOME must be absolute")?;
+    if real_executable_file(&cargo_home.join("bin/rustup")) {
         return Ok(());
     }
     let installer = TempPath::new(host, "rustup")?;
@@ -24,19 +21,16 @@ pub fn rustup(host: &Host) -> Result<()> {
         "sh",
         std::iter::once(installer.path().as_os_str()).chain(RUSTUP_BOOTSTRAP_FLAGS.map(OsStr::new)),
     )?;
-    if !executable_file(&cargo_home.join("bin/rustup")) {
+    if !real_executable_file(&cargo_home.join("bin/rustup")) {
         bail!("rustup bootstrap did not publish the managed rustup executable");
     }
     Ok(())
 }
 
 pub fn fnm_bootstrap(host: &Host) -> Result<()> {
-    let data_home = host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
-    if !data_home.is_absolute() {
-        bail!("FNM managed data directory must be absolute");
-    }
+    let data_home = host.managed_dir("XDG_DATA_HOME", ".local/share", "FNM managed data directory must be absolute")?;
     let installed = data_home.join("fnm/fnm");
-    if executable_file(&installed) {
+    if real_executable_file(&installed) {
         return Ok(());
     }
     let installer = TempPath::new(host, "fnm-install")?;
@@ -46,19 +40,17 @@ pub fn fnm_bootstrap(host: &Host) -> Result<()> {
         ["-fsSL", "-o", &installer.path().to_string_lossy(), "https://fnm.vercel.app/install"],
     )?;
     host.require("FNM bootstrap", "bash", [&installer.path().to_string_lossy(), "--skip-shell"])?;
-    if !executable_file(&installed) {
+    if !real_executable_file(&installed) {
         bail!("FNM bootstrap did not publish executable {}", installed.display());
     }
     Ok(())
 }
 
 pub fn uv_bootstrap(host: &Host) -> Result<()> {
-    let install_dir = host.value("UV_INSTALL_DIR").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/bin"));
-    if !install_dir.is_absolute() {
-        bail!("uv managed install directory must be absolute");
-    }
+    let install_dir =
+        host.managed_dir("UV_INSTALL_DIR", ".local/bin", "uv managed install directory must be absolute")?;
     let installed = install_dir.join("uv");
-    if executable_file(&installed) {
+    if real_executable_file(&installed) {
         return Ok(());
     }
     let installer = TempPath::new(host, "uv-install")?;
@@ -77,13 +69,8 @@ pub fn uv_bootstrap(host: &Host) -> Result<()> {
             installer.path().to_string_lossy().into_owned(),
         ],
     )?;
-    if !executable_file(&installed) {
+    if !real_executable_file(&installed) {
         bail!("uv bootstrap did not publish executable {}", installed.display());
     }
     Ok(())
-}
-
-fn executable_file(path: &std::path::Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
 }

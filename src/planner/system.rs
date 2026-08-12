@@ -38,36 +38,31 @@ fn linux_system_state_workflow(workflow: &mut LinuxApplyWorkflow<'_>) {
     );
 }
 
-pub(super) fn macos_system_workflow(config: &Config, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+pub(super) fn macos_system_workflow(config: &Config, stages: &mut Stages) {
     macos_administrative_access_workflow(config, stages);
     macos_xcode_command_line_tools_workflow(config, stages);
     macos_rosetta_workflow(config, stages);
 }
 
-fn macos_administrative_access_workflow(config: &Config, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+fn macos_administrative_access_workflow(config: &Config, stages: &mut Stages) {
     if config.macos().system.ensure_admin == Some(true) {
         push_operation(stages, ExecutionStage::AdministrativeVerification, Operation::MacEnsureAdmin);
     }
 }
 
-fn macos_xcode_command_line_tools_workflow(config: &Config, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+fn macos_xcode_command_line_tools_workflow(config: &Config, stages: &mut Stages) {
     if config.macos().system.xcode.command_line_tools == Some(true) {
         push_operation(stages, ExecutionStage::PlatformFoundation, Operation::XcodeCommandLineTools);
     }
 }
 
-fn macos_rosetta_workflow(config: &Config, stages: &mut [(ExecutionStage, Vec<Operation>)]) {
+fn macos_rosetta_workflow(config: &Config, stages: &mut Stages) {
     if config.macos().system.rosetta == Some(true) {
         push_operation(stages, ExecutionStage::PlatformFoundation, Operation::Rosetta);
     }
 }
 
-fn plan_system_states(
-    config: &Config,
-    platform: &Platform,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-    needs_apt_refresh: &mut bool,
-) {
+fn plan_system_states(config: &Config, platform: &Platform, stages: &mut Stages, needs_apt_refresh: &mut bool) {
     let system = &config.os.linux.system;
     if let Some(state) = system.apt.as_ref().and_then(|apt| apt.unattended_upgrades) {
         push_operation(stages, ExecutionStage::SystemState, Operation::UnattendedUpgrades { enabled: enabled(state) });

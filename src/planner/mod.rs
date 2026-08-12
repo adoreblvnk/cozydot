@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::Result;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -22,6 +22,9 @@ mod integrations;
 mod packages;
 mod system;
 mod tools;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ExecutionStage {
@@ -38,11 +41,6 @@ enum ExecutionStage {
     RepositoryPackages,
     ApplicationManagerBootstraps,
     ApplicationPackages,
-    BinaryManagerBootstrap,
-    Fonts,
-    Integrations,
-    Dotfiles,
-    Desktop,
     RustManagerBootstrap,
     RustToolchain,
     GoToolchain,
@@ -54,8 +52,15 @@ enum ExecutionStage {
     CargoPackages,
     NpmPackages,
     DebBinaryPackages,
+    BinaryManagerBootstrap,
     AppImageBinaryPackages,
+    Fonts,
+    Dotfiles,
+    Integrations,
+    Desktop,
 }
+
+type Stages = BTreeMap<ExecutionStage, Vec<Operation>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ManagerBootstrap {
@@ -79,7 +84,7 @@ struct LinuxApplyWorkflow<'a> {
     platform: &'a Platform,
     identity: Option<crate::config::PlatformIdentity>,
     dotfiles_root: &'a Path,
-    stages: Vec<(ExecutionStage, Vec<Operation>)>,
+    stages: Stages,
     prerequisites: BTreeSet<&'static str>,
     managers: BTreeSet<ManagerBootstrap>,
     needs_direct_apt_refresh: bool,
@@ -92,36 +97,7 @@ fn plan_linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) 
         platform,
         identity: None,
         dotfiles_root,
-        stages: vec![
-            (ExecutionStage::AdministrativeVerification, Vec::new()),
-            (ExecutionStage::PlatformFoundation, Vec::new()),
-            (ExecutionStage::SystemMetadataRefresh, Vec::new()),
-            (ExecutionStage::SystemState, Vec::new()),
-            (ExecutionStage::SystemPrerequisites, Vec::new()),
-            (ExecutionStage::SystemPackages, Vec::new()),
-            (ExecutionStage::ThirdPartyRepositories, Vec::new()),
-            (ExecutionStage::RepositoryMetadataRefresh, Vec::new()),
-            (ExecutionStage::RepositoryPackages, Vec::new()),
-            (ExecutionStage::ApplicationManagerBootstraps, Vec::new()),
-            (ExecutionStage::ApplicationPackages, Vec::new()),
-            (ExecutionStage::RustManagerBootstrap, Vec::new()),
-            (ExecutionStage::RustToolchain, Vec::new()),
-            (ExecutionStage::GoToolchain, Vec::new()),
-            (ExecutionStage::NodeManagerBootstrap, Vec::new()),
-            (ExecutionStage::NodeToolchain, Vec::new()),
-            (ExecutionStage::PythonManagerBootstrap, Vec::new()),
-            (ExecutionStage::PythonToolchain, Vec::new()),
-            (ExecutionStage::CargoManagerBootstrap, Vec::new()),
-            (ExecutionStage::CargoPackages, Vec::new()),
-            (ExecutionStage::NpmPackages, Vec::new()),
-            (ExecutionStage::DebBinaryPackages, Vec::new()),
-            (ExecutionStage::BinaryManagerBootstrap, Vec::new()),
-            (ExecutionStage::AppImageBinaryPackages, Vec::new()),
-            (ExecutionStage::Fonts, Vec::new()),
-            (ExecutionStage::Dotfiles, Vec::new()),
-            (ExecutionStage::Integrations, Vec::new()),
-            (ExecutionStage::Desktop, Vec::new()),
-        ],
+        stages: Stages::new(),
         prerequisites: BTreeSet::new(),
         managers: BTreeSet::new(),
         needs_direct_apt_refresh: false,
@@ -197,7 +173,7 @@ pub fn plan_update(config: &Config, platform: &Platform) -> Result<Vec<Operation
 struct LinuxUpdateWorkflow<'a> {
     config: &'a Config,
     platform: &'a Platform,
-    stages: Vec<(ExecutionStage, Vec<Operation>)>,
+    stages: Stages,
     prerequisites: BTreeSet<&'static str>,
     managers: BTreeSet<ManagerBootstrap>,
 }
@@ -206,22 +182,7 @@ fn plan_linux_update(config: &Config, platform: &Platform) -> Result<Vec<Operati
     let mut workflow = LinuxUpdateWorkflow {
         config,
         platform,
-        stages: vec![
-            (ExecutionStage::SystemMetadataRefresh, Vec::new()),
-            (ExecutionStage::SystemUpdates, Vec::new()),
-            (ExecutionStage::SystemPrerequisites, Vec::new()),
-            (ExecutionStage::ApplicationPackages, Vec::new()),
-            (ExecutionStage::RustManagerBootstrap, Vec::new()),
-            (ExecutionStage::RustToolchain, Vec::new()),
-            (ExecutionStage::GoToolchain, Vec::new()),
-            (ExecutionStage::NodeManagerBootstrap, Vec::new()),
-            (ExecutionStage::NodeToolchain, Vec::new()),
-            (ExecutionStage::PythonManagerBootstrap, Vec::new()),
-            (ExecutionStage::PythonToolchain, Vec::new()),
-            (ExecutionStage::CargoPackages, Vec::new()),
-            (ExecutionStage::NpmPackages, Vec::new()),
-            (ExecutionStage::Fonts, Vec::new()),
-        ],
+        stages: Stages::new(),
         prerequisites: BTreeSet::new(),
         managers: BTreeSet::new(),
     };
@@ -255,26 +216,7 @@ fn finish_linux_update_workflow(workflow: &mut LinuxUpdateWorkflow<'_>) {
 }
 
 fn plan_macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path) -> Result<Vec<Operation>> {
-    let mut stages = vec![
-        (ExecutionStage::AdministrativeVerification, Vec::new()),
-        (ExecutionStage::PlatformFoundation, Vec::new()),
-        (ExecutionStage::SystemManagerBootstrap, Vec::new()),
-        (ExecutionStage::SystemPackages, Vec::new()),
-        (ExecutionStage::RustManagerBootstrap, Vec::new()),
-        (ExecutionStage::RustToolchain, Vec::new()),
-        (ExecutionStage::GoToolchain, Vec::new()),
-        (ExecutionStage::NodeManagerBootstrap, Vec::new()),
-        (ExecutionStage::NodeToolchain, Vec::new()),
-        (ExecutionStage::PythonManagerBootstrap, Vec::new()),
-        (ExecutionStage::PythonToolchain, Vec::new()),
-        (ExecutionStage::CargoManagerBootstrap, Vec::new()),
-        (ExecutionStage::CargoPackages, Vec::new()),
-        (ExecutionStage::NpmPackages, Vec::new()),
-        (ExecutionStage::Fonts, Vec::new()),
-        (ExecutionStage::Dotfiles, Vec::new()),
-        (ExecutionStage::Integrations, Vec::new()),
-        (ExecutionStage::Desktop, Vec::new()),
-    ];
+    let mut stages = Stages::new();
     let mut managers = BTreeSet::new();
     macos_apply_workflow(config, architecture, dotfiles_root, &mut stages, &mut managers)?;
     push_manager_bootstraps(&mut stages, &managers);
@@ -285,7 +227,7 @@ fn macos_apply_workflow(
     config: &Config,
     architecture: Architecture,
     dotfiles_root: &Path,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
+    stages: &mut Stages,
     managers: &mut BTreeSet<ManagerBootstrap>,
 ) -> Result<()> {
     system::macos_system_workflow(config, stages);
@@ -300,24 +242,7 @@ fn macos_apply_workflow(
 }
 
 fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<Operation>> {
-    let mut workflow = MacosUpdateWorkflow {
-        config,
-        architecture,
-        stages: vec![
-            (ExecutionStage::SystemUpdates, Vec::new()),
-            (ExecutionStage::RustManagerBootstrap, Vec::new()),
-            (ExecutionStage::RustToolchain, Vec::new()),
-            (ExecutionStage::GoToolchain, Vec::new()),
-            (ExecutionStage::NodeManagerBootstrap, Vec::new()),
-            (ExecutionStage::NodeToolchain, Vec::new()),
-            (ExecutionStage::PythonManagerBootstrap, Vec::new()),
-            (ExecutionStage::PythonToolchain, Vec::new()),
-            (ExecutionStage::CargoPackages, Vec::new()),
-            (ExecutionStage::NpmPackages, Vec::new()),
-            (ExecutionStage::Fonts, Vec::new()),
-        ],
-        managers: BTreeSet::new(),
-    };
+    let mut workflow = MacosUpdateWorkflow { config, architecture, stages: Stages::new(), managers: BTreeSet::new() };
     macos_update_workflow(&mut workflow);
     push_manager_bootstraps(&mut workflow.stages, &workflow.managers);
     Ok(flatten_stage_vec(workflow.stages))
@@ -326,7 +251,7 @@ fn plan_macos_update(config: &Config, architecture: Architecture) -> Result<Vec<
 struct MacosUpdateWorkflow<'a> {
     config: &'a Config,
     architecture: Architecture,
-    stages: Vec<(ExecutionStage, Vec<Operation>)>,
+    stages: Stages,
     managers: BTreeSet<ManagerBootstrap>,
 }
 
@@ -337,11 +262,11 @@ fn macos_update_workflow(workflow: &mut MacosUpdateWorkflow<'_>) {
     fonts::macos_shared_font_update_workflow(workflow);
 }
 
-fn push_operation(stages: &mut [(ExecutionStage, Vec<Operation>)], stage: ExecutionStage, op: Operation) {
-    stages.iter_mut().find(|(p, _)| *p == stage).expect("stage exists").1.push(op);
+fn push_operation(stages: &mut Stages, stage: ExecutionStage, op: Operation) {
+    stages.entry(stage).or_default().push(op);
 }
 
-fn push_manager_bootstraps(stages: &mut [(ExecutionStage, Vec<Operation>)], managers: &BTreeSet<ManagerBootstrap>) {
+fn push_manager_bootstraps(stages: &mut Stages, managers: &BTreeSet<ManagerBootstrap>) {
     for manager in managers {
         let (stage, operation) = match manager {
             ManagerBootstrap::Flatpak => {
@@ -358,6 +283,6 @@ fn push_manager_bootstraps(stages: &mut [(ExecutionStage, Vec<Operation>)], mana
     }
 }
 
-fn flatten_stage_vec(stages: Vec<(ExecutionStage, Vec<Operation>)>) -> Vec<Operation> {
-    stages.into_iter().flat_map(|(_, operations)| operations).collect()
+fn flatten_stage_vec(stages: Stages) -> Vec<Operation> {
+    stages.into_values().flatten().collect()
 }

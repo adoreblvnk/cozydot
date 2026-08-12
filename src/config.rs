@@ -59,6 +59,11 @@ impl Config {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn parse(text: &str) -> Result<Self> {
+        Self::deserialize_str(text)
+    }
+
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         if platform.is_macos() {
@@ -600,37 +605,33 @@ impl BinaryPackage {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
-    Github { repository: String, assets: AssetMap },
-    Url { urls: Box<ArchitectureUrls> },
+    Github { repository: String, assets: ArchitectureMap },
+    Url { urls: Box<ArchitectureMap> },
 }
 
 impl BinarySource {
     fn validate(&self, path: &str) -> Result<()> {
         match self {
-            Self::Github { assets, .. } => assets.validate(&format!("{path}.assets")),
-            Self::Url { urls } => urls.validate(&format!("{path}.urls")),
+            Self::Github { assets, .. } => assets.validate(&format!("{path}.assets"), "selector"),
+            Self::Url { urls } => urls.validate(&format!("{path}.urls"), "URL"),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AssetMap {
+pub struct ArchitectureMap {
     pub amd64: Option<String>,
     pub arm64: Option<String>,
     pub arm32: Option<String>,
 }
 
-impl AssetMap {
-    fn validate(&self, path: &str) -> Result<()> {
-        if self.values().iter().all(|(_, value)| value.is_none()) {
-            bail!("{path}: must contain at least one canonical architecture selector");
+impl ArchitectureMap {
+    fn validate(&self, path: &str, value_kind: &str) -> Result<()> {
+        if self.amd64.is_none() && self.arm64.is_none() && self.arm32.is_none() {
+            bail!("{path}: must contain at least one canonical architecture {value_kind}");
         }
         Ok(())
-    }
-
-    fn values(&self) -> [(&'static str, Option<&String>); 3] {
-        [("amd64", self.amd64.as_ref()), ("arm64", self.arm64.as_ref()), ("arm32", self.arm32.as_ref())]
     }
 
     pub fn get(&self, architecture: Architecture) -> Option<&str> {
@@ -640,42 +641,6 @@ impl AssetMap {
             Architecture::Arm32 => self.arm32.as_deref(),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ArchitectureUrls {
-    pub amd64: Option<String>,
-    pub arm64: Option<String>,
-    pub arm32: Option<String>,
-}
-
-impl ArchitectureUrls {
-    fn validate(&self, path: &str) -> Result<()> {
-        if self.keys().is_empty() {
-            bail!("{path}: must contain at least one canonical architecture URL");
-        }
-        Ok(())
-    }
-
-    fn keys(&self) -> Vec<Architecture> {
-        architecture_keys(self.amd64.is_some(), self.arm64.is_some(), self.arm32.is_some())
-    }
-
-    pub fn get(&self, architecture: Architecture) -> Option<&str> {
-        match architecture {
-            Architecture::Amd64 => self.amd64.as_deref(),
-            Architecture::Arm64 | Architecture::DarwinArm64 => self.arm64.as_deref(),
-            Architecture::Arm32 => self.arm32.as_deref(),
-        }
-    }
-}
-
-fn architecture_keys(amd64: bool, arm64: bool, arm32: bool) -> Vec<Architecture> {
-    [(Architecture::Amd64, amd64), (Architecture::Arm64, arm64), (Architecture::Arm32, arm32)]
-        .into_iter()
-        .filter_map(|(architecture, present)| present.then_some(architecture))
-        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

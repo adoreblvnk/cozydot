@@ -1,17 +1,13 @@
 pub(crate) mod cargo {
     use anyhow::{Context, Result, bail};
-    use std::{
-        os::unix::fs::PermissionsExt,
-        path::{Path, PathBuf},
-    };
 
-    use super::super::Host;
+    use std::path::Path;
+
+    use super::super::{Host, executable_file, path_program};
 
     pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
-        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
-        if !cargo_home.is_absolute() {
-            bail!("Cargo package operation requires an absolute CARGO_HOME");
-        }
+        let cargo_home =
+            host.managed_dir("CARGO_HOME", ".cargo", "Cargo package operation requires an absolute CARGO_HOME")?;
         let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
         let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
         let installed = installed_crates(&output.stdout)?;
@@ -29,10 +25,8 @@ pub(crate) mod cargo {
     }
 
     pub(crate) fn update_all(host: &Host) -> Result<()> {
-        let cargo_home = host.value("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".cargo"));
-        if !cargo_home.is_absolute() {
-            bail!("Cargo package operation requires an absolute CARGO_HOME");
-        }
+        let cargo_home =
+            host.managed_dir("CARGO_HOME", ".cargo", "Cargo package operation requires an absolute CARGO_HOME")?;
         let cargo_path = cargo_home.join("bin/cargo");
         if !executable_file(&cargo_path) {
             return Ok(());
@@ -86,24 +80,12 @@ pub(crate) mod cargo {
         }
         Ok(None)
     }
-
-    fn executable_file(path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-    }
-
-    fn path_program(path: &Path, description: &str) -> Result<String> {
-        path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
-    }
 }
 
 pub(crate) mod npm {
     use anyhow::{Context, Result, bail};
-    use std::{
-        os::unix::fs::PermissionsExt,
-        path::{Path, PathBuf},
-    };
 
-    use super::super::Host;
+    use super::super::{Host, executable_file};
 
     pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
         let Some(fnm) = resolve_fnm(host)? else {
@@ -143,11 +125,11 @@ pub(crate) mod npm {
     }
 
     fn resolve_fnm(host: &Host) -> Result<Option<String>> {
-        let data_home =
-            host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
-        if !data_home.is_absolute() {
-            bail!("npm package operation requires an absolute managed FNM data directory");
-        }
+        let data_home = host.managed_dir(
+            "XDG_DATA_HOME",
+            ".local/share",
+            "npm package operation requires an absolute managed FNM data directory",
+        )?;
         let managed = data_home.join("fnm/fnm");
         if executable_file(&managed) {
             return managed.to_str().map(str::to_owned).map(Some).context("managed fnm executable path is not UTF-8");
@@ -163,10 +145,6 @@ pub(crate) mod npm {
         let mut args = vec!["exec".to_owned(), "--using=default".into(), "--".into(), "npm".into()];
         args.extend(npm_args.into_iter().map(|arg| arg.as_ref().to_owned()));
         host.require(operation, fnm, args)
-    }
-
-    fn executable_file(path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
     }
 }
 

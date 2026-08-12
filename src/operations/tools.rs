@@ -1,11 +1,8 @@
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
-use std::{
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
-use super::{Host, TempPath, ToolchainMode};
+use super::{Host, TempPath, ToolchainMode, path_program, real_executable_file};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
@@ -191,7 +188,7 @@ mod state {
     }
 
     pub(super) fn inspect_go(host: &Host, program: &str) -> Result<Option<GoState>> {
-        if program.starts_with('/') && !executable_file(Path::new(program)) {
+        if program.starts_with('/') && !real_executable_file(Path::new(program)) {
             return Ok(None);
         }
         let output = match host.run(program, ["version"]) {
@@ -235,13 +232,10 @@ mod state {
 
     pub(super) fn resolve_fnm(host: &Host) -> Result<String> {
         let data_home =
-            host.value("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/share"));
-        if !data_home.is_absolute() {
-            bail!("managed FNM data directory must be absolute");
-        }
+            host.managed_dir("XDG_DATA_HOME", ".local/share", "managed FNM data directory must be absolute")?;
         let managed = data_home.join("fnm/fnm");
-        if executable_file(&managed) {
-            return path_program(&managed, "managed fnm executable");
+        if real_executable_file(&managed) {
+            return path_program(&managed, "managed fnm executable path");
         }
         bail!("Node toolchain operation: fnm is unavailable after bootstrap")
     }
@@ -253,24 +247,12 @@ mod state {
         relative_program: &str,
     ) -> Result<Option<String>> {
         let base =
-            host.value(directory_variable).map(PathBuf::from).unwrap_or_else(|| host.home().join(default_directory));
-        if !base.is_absolute() {
-            bail!("managed tool directory must be absolute");
-        }
+            host.managed_dir(directory_variable, default_directory, "managed tool directory must be absolute")?;
         let managed = base.join(relative_program);
-        if executable_file(&managed) {
-            return path_program(&managed, "managed tool executable").map(Some);
+        if real_executable_file(&managed) {
+            return path_program(&managed, "managed tool executable path").map(Some);
         }
         Ok(None)
-    }
-
-    fn executable_file(path: &Path) -> bool {
-        std::fs::symlink_metadata(path)
-            .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
-    }
-
-    pub(super) fn path_program(path: &Path, description: &str) -> Result<String> {
-        path.to_str().map(str::to_owned).with_context(|| format!("{description} path is not UTF-8: {}", path.display()))
     }
 }
 

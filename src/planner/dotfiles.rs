@@ -19,11 +19,7 @@ pub(super) fn linux_dotfiles_workflow(workflow: &mut LinuxApplyWorkflow<'_>) -> 
     Ok(())
 }
 
-pub(super) fn macos_dotfiles_workflow(
-    config: &Config,
-    dotfiles_root: &Path,
-    stages: &mut [(ExecutionStage, Vec<Operation>)],
-) -> Result<()> {
+pub(super) fn macos_dotfiles_workflow(config: &Config, dotfiles_root: &Path, stages: &mut Stages) -> Result<()> {
     if let Some(operation) = operation_for_packages(config, &config.macos().dotfiles.packages, dotfiles_root, false)? {
         push_operation(stages, ExecutionStage::Dotfiles, operation);
     }

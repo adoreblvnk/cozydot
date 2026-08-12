@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use std::{
     ffi::{OsStr, OsString},
+    fs,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
@@ -53,6 +55,32 @@ impl Host {
     pub fn value(&self, name: &str) -> Option<OsString> {
         std::env::var_os(name)
     }
+
+    pub fn managed_dir(&self, variable: &str, default: &str, absolute_error: &str) -> Result<PathBuf> {
+        let directory = self.value(variable).map(PathBuf::from).unwrap_or_else(|| self.home.join(default));
+        if !directory.is_absolute() {
+            bail!("{absolute_error}");
+        }
+        Ok(directory)
+    }
+
+    pub fn executable_on_path(&self, name: &str) -> bool {
+        self.value("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|directory| executable_file(&directory.join(name))))
+    }
+}
+
+pub(crate) fn executable_file(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+pub(crate) fn real_executable_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
+    path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
 }
 
 pub(crate) struct TempPath(tempfile::TempPath);
