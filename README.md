@@ -8,10 +8,9 @@ Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
 (`arm64`). Other architectures are rejected.
 
 Supported Debian releases are Bookworm and Trixie. On pure Debian, every
-`apply` adds `main`, `contrib`, `non-free`, and `non-free-firmware` to matching
-official source entries while preserving their files, URIs, options, and
-unrelated repositories. Official sources on Ubuntu and supported derivatives
-are left unchanged.
+`apply` appends `contrib`, `non-free`, and `non-free-firmware` to the selected
+conventional source file entries that already contain `main`. Official sources
+on Ubuntu and supported derivatives are left unchanged.
 
 ## Install
 

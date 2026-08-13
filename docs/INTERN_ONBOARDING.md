@@ -6,7 +6,8 @@ This guide explains the code you need to change Cozydot safely. Read `README.md`
 
 ## Start here
 
-Run the repository checks before editing:
+Development requires the latest stable Rust toolchain with Rustfmt and Clippy,
+plus `yq` v4. Run the repository checks before editing:
 
 ```bash
 scripts/generate-configs.sh --check
@@ -25,7 +26,9 @@ CLI command
 → execute each operation in order
 ```
 
-Configuration is declarative. YAML selects typed behavior; it cannot inject shell commands. Every host mutation has a fixed Rust executor.
+Configuration is declarative. YAML selects typed Rust operations; it cannot
+inject shell commands. Some fixed operations invoke native package managers or
+downloaded upstream installers.
 
 ## Commands
 
@@ -185,7 +188,10 @@ administrator checks
 
 Do not rely on function call order alone. `ExecutionStage` controls the final order.
 
-The planner also derives prerequisites. A repository requires curl, CA certificates, and GPG; npm requires FNM; Cargo packages require Rust and cargo-binstall. Add such dependencies in the planner rather than asking users to repeat them in YAML.
+The planner also derives prerequisites. A repository requires curl, CA
+certificates, and GPG; Linux npm apply requires FNM; Cargo packages require
+Rust and cargo-binstall. Add such dependencies in the planner rather than
+asking users to repeat them in YAML.
 
 The entire plan is created before execution. A planning or platform-validation error must therefore happen before host mutation.
 
@@ -256,7 +262,10 @@ All applicable repository conflicts and packages are aggregated. Purging happens
 
 ### Debian official sources
 
-Pure Debian converges official source components separately. It supports conventional Bookworm and Trixie `.list` / deb822 `.sources` files while preserving unrelated entries and options. This is not the third-party repository path.
+Pure Debian converges official source components separately. It selects the
+conventional Bookworm or Trixie source file and appends the required components
+to entries that already contain `main`. This is not the third-party repository
+path.
 
 ## Privileged publication
 
