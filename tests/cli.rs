@@ -893,6 +893,14 @@ fn apt_repository_validation_uses_required_suite_components_and_optional_arch() 
         (repository("        arch: []\n"), "arch: must not be empty"),
         (repository("        arch: [arm32]\n"), "unknown variant `arm32`"),
         (
+            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        components: [main]\n".to_owned(),
+            "missing field `suite`",
+        ),
+        (
+            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n".to_owned(),
+            "missing field `components`",
+        ),
+        (
             "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: \"\"\n        components: [main]\n".to_owned(),
             "suite: must not be empty",
         ),
@@ -995,57 +1003,57 @@ done
 
 #[test]
 fn inapplicable_repository_skips_its_packages_and_side_effects() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_home = temp.path().join("config");
-    let config_dir = config_home.join("cozydot");
-    let fake_bin = temp.path().join("bin");
-    let log = temp.path().join("side-effects.log");
-    let excluded_arch = match std::env::consts::ARCH {
-        "x86_64" => "arm64",
-        "aarch64" | "arm" => "amd64",
-        architecture => panic!("unsupported test architecture: {architecture}"),
-    };
-    fs::create_dir_all(&config_dir).unwrap();
-    write_config(
-        &config_dir.join("cozydot.yaml"),
-        "{}",
-        &format!(
-            r#"packages:
+    let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
+    for applicability in [
+        "          default: https://example.com/repository\n        arch: [arm64]".to_owned(),
+        format!("          {inapplicable_distro}: https://example.com/repository"),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("config");
+        let config_dir = config_home.join("cozydot");
+        let fake_bin = temp.path().join("bin");
+        let log = temp.path().join("side-effects.log");
+        fs::create_dir_all(&config_dir).unwrap();
+        write_config(
+            &config_dir.join("cozydot.yaml"),
+            "{}",
+            &format!(
+                r#"packages:
   apt:
     repositories:
       - name: inapplicable
         key: https://example.com/key.gpg
         key_path: /etc/apt/keyrings/inapplicable.gpg
         urls:
-          default: https://example.com/repository
+{applicability}
         suite: "APT-owned suite/value"
         components: ["component/value", "component/value"]
-        arch: [{excluded_arch}]
         conflicts: [must-not-purge]
         packages: [must-not-install]
 "#
-        ),
-    );
-    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
-    for command in ["curl", "gpg", "sudo", "dpkg-query"] {
-        write_executable(
-            &fake_bin.join(command),
-            "#!/bin/sh\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\nexit 1\n",
+            ),
         );
+        write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+        for command in ["curl", "gpg", "sudo", "dpkg-query"] {
+            write_executable(
+                &fake_bin.join(command),
+                "#!/bin/sh\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$COZYDOT_TEST_LOG\"\nexit 1\n",
+            );
+        }
+
+        Command::cargo_bin("cozydot")
+            .unwrap()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("XDG_CURRENT_DESKTOP", "gnome")
+            .env("COZYDOT_TEST_LOG", &log)
+            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+            .arg("apply")
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty());
+
+        assert!(!log.exists(), "inapplicable repository unexpectedly executed a side effect");
     }
-
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_CURRENT_DESKTOP", "gnome")
-        .env("COZYDOT_TEST_LOG", &log)
-        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
-        .arg("apply")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
-
-    assert!(!log.exists(), "inapplicable repository unexpectedly executed a side effect");
 }
 
 #[test]
