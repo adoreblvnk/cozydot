@@ -1,10 +1,7 @@
 use super::{Host, TempPath};
-use crate::platform::Architecture;
+use crate::{config::validate_repository_key_path, platform::Architecture};
 use anyhow::{Context, Result, bail};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
@@ -14,9 +11,8 @@ pub struct AptRepositoryOperation {
     key_url: String,
     source_url: String,
     architecture: Architecture,
-    suite: Option<String>,
+    suite: String,
     components: Vec<String>,
-    path: Option<String>,
     keyring_path: PathBuf,
     source_list_path: PathBuf,
 }
@@ -28,24 +24,22 @@ impl AptRepositoryOperation {
         key_url: String,
         source_url: String,
         architecture: Architecture,
-        suite: Option<String>,
+        suite: String,
         components: Vec<String>,
-        path: Option<String>,
         keyring_path: PathBuf,
     ) -> Result<Self> {
         let name = name.into();
-        validate_keyring_path(&keyring_path)?;
+        validate_repository_key_path(&keyring_path)?;
         for value in std::iter::once(source_url.as_str())
-            .chain(suite.as_deref())
+            .chain(std::iter::once(suite.as_str()))
             .chain(components.iter().map(String::as_str))
-            .chain(path.as_deref())
         {
             if value.chars().any(char::is_control) {
                 bail!("APT repository source values must fit on one line and contain no control characters");
             }
         }
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Ok(Self { name, key_url, source_url, architecture, suite, components, path, keyring_path, source_list_path })
+        Ok(Self { name, key_url, source_url, architecture, suite, components, keyring_path, source_list_path })
     }
 
     pub fn render_source(&self) -> String {
@@ -55,29 +49,8 @@ impl AptRepositoryOperation {
             self.keyring_path.display(),
             self.source_url
         );
-        match &self.path {
-            None => format!(
-                "{prefix}{} {}\n",
-                self.suite.as_deref().expect("validated suite/components repository"),
-                self.components.join(" ")
-            ),
-            Some(path) => format!("{prefix}{path}\n"),
-        }
+        format!("{prefix}{} {}\n", self.suite, self.components.join(" "))
     }
-}
-
-fn validate_keyring_path(path: &Path) -> Result<()> {
-    let parent = path.parent().context("APT repository key path has no parent")?;
-    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
-        bail!("APT repository key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
-    }
-    let name = path.file_name().and_then(|name| name.to_str()).context("APT repository key path has no filename")?;
-    if !matches!(path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
-        || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-    {
-        bail!("APT repository key path must name a safe .asc or .gpg file");
-    }
-    Ok(())
 }
 
 pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result<()> {

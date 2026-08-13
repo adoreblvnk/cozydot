@@ -130,14 +130,13 @@ os:
             components:
               - stable
             conflicts:
-              default:
-                - docker.io
-                - docker-compose
-                - docker-compose-v2
-                - docker-doc
-                - podman-docker
-                - containerd
-                - runc
+              - docker.io
+              - docker-compose
+              - docker-compose-v2
+              - docker-doc
+              - podman-docker
+              - containerd
+              - runc
             packages:
               - docker-ce
               - docker-ce-cli
@@ -162,6 +161,9 @@ os:
             suite: stable
             components:
               - main
+            arch:
+              - amd64
+              - arm64
             packages:
               - helium-bin
           - name: onlyoffice
@@ -172,6 +174,9 @@ os:
             suite: squeeze
             components:
               - main
+            arch:
+              - amd64
+              - arm64
             packages:
               - onlyoffice-desktopeditors
           - name: virtualbox
@@ -182,6 +187,8 @@ os:
             suite: system
             components:
               - contrib
+            arch:
+              - amd64
             packages:
               - virtualbox-7.1
           - name: vscode

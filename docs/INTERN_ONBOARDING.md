@@ -347,7 +347,7 @@ An ensure operation should inspect first and return successfully when the reques
 
 ### Keep destructive behavior scoped
 
-APT conflicts belong to the replacement repository that owns the migration. Cozydot purges only installed conflicts after publishing that repository and refreshing metadata. There is no global package-removal list.
+APT conflicts remain attached to their replacement repository. Cozydot publishes every applicable repository, refreshes metadata once, then purges all installed conflicts and installs all missing repository packages in one operation.
 
 ## Tracing one feature end to end
 
@@ -367,12 +367,12 @@ This path shows why `shared` means portable intent, not identical host commands.
 
 ### Example: a third-party APT repository
 
-1. YAML supplies the repository name, key URL, constrained key path, distro URL map, suite or path, components, conflicts, and repository packages.
-2. Configuration validation rejects duplicate ownership, unsafe shapes, and repository-package/conflict overlap.
-3. Platform resolution selects exact distro, upstream family, then `default`.
-4. The planner creates an `AptRepositoryOperation`, adds download and GPG prerequisites, and schedules metadata refresh and package installation in later execution stages.
-5. The repository executor downloads and validates the public key, then publishes the key and source atomically.
-6. Later operations refresh APT metadata, purge installed declared conflicts, and ensure the repository packages.
+1. YAML supplies the repository name, key URL, constrained key path, distro URL map, suite, components, optional APT-native architectures, conflicts, and packages.
+2. Configuration validation rejects unsafe names, empty URL maps or components, and unsupported architecture names.
+3. Platform resolution skips excluded architectures, then selects exact distro, upstream family, or `default`.
+4. The planner creates each `AptRepositoryOperation`, adds download and GPG prerequisites, and aggregates applicable conflicts and packages.
+5. Each repository executor downloads and validates its public key, then publishes its key and source atomically.
+6. Later operations refresh APT metadata once, purge all installed conflicts, and install all missing repository packages once.
 
 ## Adding a capability
 

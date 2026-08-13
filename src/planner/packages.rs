@@ -30,7 +30,12 @@ fn linux_third_party_repository_workflows(workflow: &mut LinuxApplyWorkflow<'_>)
     let identity =
         workflow.identity.ok_or_else(|| anyhow::anyhow!("Linux platform requirements workflow did not run"))?;
     if let Some(repositories) = apt.and_then(|apt| apt.repositories.as_ref()).filter(|values| !values.is_empty()) {
+        let mut conflicts = Vec::new();
+        let mut packages = Vec::new();
         for repository in repositories {
+            if !repository.applies_to(identity.distro, identity.upstream, workflow.platform.architecture) {
+                continue;
+            }
             let Some(operation) = plan_repository(repository, workflow.platform, identity)? else {
                 continue;
             };
@@ -40,28 +45,19 @@ fn linux_third_party_repository_workflows(workflow: &mut LinuxApplyWorkflow<'_>)
                 ExecutionStage::ThirdPartyRepositories,
                 Operation::AptRepository(Box::new(operation)),
             );
-            linux_repository_packages_workflow(workflow, repository, identity);
+            conflicts.extend(repository.conflicts.iter().cloned());
+            packages.extend(repository.packages.iter().cloned());
             workflow.needs_repository_refresh = true;
+        }
+        if !conflicts.is_empty() || !packages.is_empty() {
+            push_operation(
+                &mut workflow.stages,
+                ExecutionStage::RepositoryPackages,
+                Operation::AptRepositoryPackages { conflicts, packages },
+            );
         }
     }
     Ok(())
-}
-
-fn linux_repository_packages_workflow(
-    workflow: &mut LinuxApplyWorkflow<'_>,
-    repository: &crate::config::Repository,
-    identity: crate::config::PlatformIdentity,
-) {
-    if !repository.packages.is_empty() {
-        push_operation(
-            &mut workflow.stages,
-            ExecutionStage::RepositoryPackages,
-            Operation::AptRepositoryPackages {
-                conflicts: selected_repository_conflicts(repository, identity).unwrap_or_default(),
-                packages: repository.packages.clone(),
-            },
-        );
-    }
 }
 
 fn linux_flatpak_workflow(workflow: &mut LinuxApplyWorkflow<'_>) {
@@ -195,35 +191,21 @@ fn plan_repository(
     let Some((key, source_url)) = select_distro_map(&repository.urls, identity.distro, identity.upstream) else {
         return Ok(None);
     };
-    let suite = repository.suite.as_ref().map(|suite| {
-        if suite == "system" {
-            selected_repository_codename(key, platform, identity.distro).to_owned()
-        } else {
-            suite.clone()
-        }
-    });
+    let suite = if repository.suite == "system" {
+        selected_repository_codename(key, platform, identity.distro).to_owned()
+    } else {
+        repository.suite.clone()
+    };
     AptRepositoryOperation::new(
         repository.name.clone(),
         repository.key.clone(),
         source_url.clone(),
         platform.architecture,
         suite,
-        repository.components.clone().unwrap_or_default(),
-        repository.path.clone(),
+        repository.components.clone(),
         PathBuf::from(&repository.key_path),
     )
     .map(Some)
-}
-
-fn selected_repository_conflicts(
-    repository: &crate::config::Repository,
-    identity: crate::config::PlatformIdentity,
-) -> Option<Vec<String>> {
-    repository
-        .conflicts
-        .as_ref()
-        .and_then(|conflicts| select_distro_map(conflicts, identity.distro, identity.upstream))
-        .map(|(_, packages)| packages.clone())
 }
 
 fn plan_binary(binary: &crate::config::BinaryPackage, architecture: Architecture) -> Option<BinaryPackageOperation> {
