@@ -1,812 +1,344 @@
 # Cozydot intern onboarding
 
-Cozydot turns one YAML file into a safe, repeatable setup for supported Linux and macOS hosts. It manages packages, language toolchains, dotfiles, integrations, desktop settings, and explicit updates without allowing arbitrary shell commands in the configuration.
+Cozydot is a Rust CLI that provisions a workstation from one typed YAML file. It supports Debian, Ubuntu, Pop!_OS, Linux Mint, and Apple Silicon macOS.
 
-This guide explains how to reason about Cozydot before changing it.
+This guide explains the code you need to change Cozydot safely. Read `README.md` first for the user-facing contract.
 
-## The problem Cozydot solves
+## Start here
 
-A workstation normally accumulates setup steps across package managers, install scripts, copied dotfiles, and manual desktop settings. Those steps are difficult to reproduce and risky to rerun.
+Run the repository checks before editing:
 
-Cozydot gives them one lifecycle:
+```bash
+scripts/generate-configs.sh --check
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+```
 
-1. Describe the intended host state in `cozydot.yaml`.
-2. Parse and validate the complete configuration.
-3. Detect and validate the current platform.
-4. Plan a complete ordered list of typed operations.
-5. Execute each operation through its dedicated executor.
-6. Leave already-satisfied state unchanged where the operation is ensure-only.
-
-![Cozydot lifecycle](assets/cozydot-lifecycle.svg)
-
-The important design choice is the boundary between intent and execution. YAML selects supported behavior. It cannot inject commands, shell fragments, plugins, interpolation, or arbitrary paths into the executor.
-
-## Supported hosts
-
-Linux:
-
-- Debian, Ubuntu, Pop!_OS, and Linux Mint
-- Debian Bookworm and Trixie; older and untested Debian releases are rejected
-- `amd64`, `arm64`, and 32-bit `arm32`
-- GNOME and Cinnamon for configured desktop behavior
-
-macOS:
-
-- Apple Silicon (`arm64`)
-
-Unsupported distributions and architectures are rejected instead of being handled through a best-effort fallback.
-
-## The configuration model
-
-The active configuration lives at:
+The main command path is:
 
 ```text
-${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml
+CLI command
+→ load and validate cozydot.yaml
+→ detect the host when required
+→ build a complete ordered Vec<Operation>
+→ execute each operation in order
 ```
 
-Its top-level shape is:
+Configuration is declarative. YAML selects typed behavior; it cannot inject shell commands. Every host mutation has a fixed Rust executor.
 
-```yaml
-version: 1.0.0
+## Commands
 
-shared:
-  # Portable behavior used by Linux and macOS.
+`src/main.rs` owns the public CLI.
 
-os:
-  linux:
-    # Linux-only behavior.
-  macos:
-    # macOS-only behavior.
+### `init`
+
+Creates or safely refreshes the active configuration and bundled dotfiles under:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/cozydot
 ```
 
-![Configuration scope](assets/cozydot-config-scope.svg)
+It embeds four presets:
 
-Use `shared` only for behavior with Linux and macOS implementations. Examples include Rust, Go, Node.js, Python, Cargo and npm packages, Nerd Fonts, shared dotfile packages, VS Code extensions, and their update controls.
+```text
+cozydot
+full
+cli
+vm
+```
 
-Use `os.linux` for APT, Flatpak, Deb and AppImage binaries, Linux integrations, Linux desktop settings, and Linux update policy.
+`init` updates files that are missing or still match the last managed hash. It preserves user-edited files. `.managed-files` stores that ownership state.
 
-Use `os.macos` for Homebrew, Xcode command line tools, Rosetta, macOS defaults, platform dotfiles, and Homebrew updates.
+### `check`
 
-### Absence, `false`, and active intent
+Loads and validates the active configuration. It does not detect the platform and does not mutate the host. Use it for schema and cross-field validation.
 
-Many controls use `Option<T>` in Rust. For those controls:
+### `apply`
 
-- An absent field means Cozydot has no instruction for that state.
-- `false` normally means the optional action is disabled or skipped.
-- `true` requests the documented action.
-- An empty optional list normally plans no work.
+Loads the configuration, detects the host, validates platform constraints, builds the complete apply plan, and executes it sequentially.
 
-Do not generalize this to every field. Some mappings and lists are required by schema. Check the Rust type and its validation before deciding whether omission is valid.
+Apply means ensure configured state. It should avoid reinstalling software that is already present.
+
+### `dotfiles`
+
+Plans only shared and current-platform dotfiles. GNU Stow applies packages in configured order.
+
+The default is conservative:
+
+```text
+unmanaged destination conflict
+→ report every conflict
+→ change nothing
+```
+
+`--replace` moves conflicts into the XDG state directory before applying links.
+
+### `update`
+
+Runs only enabled update policies. It does not replay apply behavior. Empty or all-false update configuration is a valid no-op.
+
+## Repository map
+
+```text
+src/main.rs                 CLI and command lifecycles
+src/config.rs               typed YAML schema and validation
+src/platform.rs             host detection and normalization
+src/planner/                configuration → ordered operations
+src/operations/mod.rs       Operation enum, labels, dispatch
+src/operations/             host-side executors
+src/init.rs                 embedded preset/dotfile synchronization
+build.rs                    embeds presets and dotfiles
+configs/cozydot.yaml        manually maintained base preset
+configs/{full,cli,vm}.yaml  generated presets
+dotfiles/                   GNU Stow packages
+tests/cli.rs                compact external behavior suite
+install.sh                  release installer
+scripts/                    generation and packaging
+```
+
+## Configuration
+
+`Config::load` in `src/config.rs` performs typed deserialization and semantic validation.
+
+The root scopes are:
+
+```text
+shared
+os.linux
+os.macos
+```
+
+`shared` describes portable intent such as toolchains, Cargo/npm packages, fonts, VS Code extensions, and dotfiles. Platform scopes describe native package managers, system settings, integrations, desktop behavior, and updates.
+
+The schema uses `deny_unknown_fields`. Removing or renaming a field is therefore an intentional breaking change. Cozydot does not carry compatibility adapters for obsolete schemas.
+
+Empty optional sections and false enable-only flags are no-ops. Values interpreted by native tools should use the native tool's terminology unless Cozydot needs a typed selector for platform planning.
+
+### Presets
+
+Edit only:
+
+```text
+configs/cozydot.yaml
+```
+
+Then regenerate:
+
+```bash
+scripts/generate-configs.sh
+```
+
+The script derives `full`, `cli`, and `vm`. CI checks that generated files are current.
+
+## Platform detection
+
+`src/platform.rs` normalizes:
+
+- distro and upstream family;
+- distro and base codenames;
+- desktop environment;
+- architecture.
+
+Linux architecture names inside Cozydot are:
+
+```text
+amd64
+arm64
+arm32
+```
+
+APT repository `arch` uses Debian names:
+
+```text
+amd64
+arm64
+armhf
+```
+
+Supported Debian releases are Bookworm and Trixie. Unsupported distributions, releases, architectures, and configured desktop requirements fail before a plan executes.
+
+`check` intentionally skips platform detection. `apply`, `dotfiles`, and `update` require it.
+
+## Planning
+
+`src/planner/mod.rs` owns ordering. Leaf modules contribute typed `Operation` values to private execution stages. The stages are implementation-only dependency buckets, not user-visible actions.
+
+Important ordering rules include:
+
+```text
+administrator checks
+→ platform foundation
+→ direct APT metadata and packages
+→ derived prerequisites and manager bootstraps
+→ third-party repositories
+→ repository metadata refresh
+→ repository conflicts and packages
+→ language managers and toolchains
+→ ecosystem packages
+→ binaries
+→ fonts
+→ dotfiles
+→ integrations
+→ desktop settings
+```
+
+Do not rely on function call order alone. `ExecutionStage` controls the final order.
+
+The planner also derives prerequisites. A repository requires curl, CA certificates, and GPG; npm requires FNM; Cargo packages require Rust and cargo-binstall. Add such dependencies in the planner rather than asking users to repeat them in YAML.
+
+The entire plan is created before execution. A planning or platform-validation error must therefore happen before host mutation.
+
+## Operations
+
+`src/operations/mod.rs` is the execution boundary.
+
+Each `Operation` variant contains already planned data. Dispatch is explicit. Executors should:
+
+1. inspect live state;
+2. return success when the requested state already exists;
+3. mutate through fixed argument vectors;
+4. stop on an unexpected command status;
+5. provide context that identifies the failed action.
+
+There is no general shell-script operation and no YAML-to-shell interpolation.
+
+`Host` in `src/operations/host.rs` centralizes command execution and environment/path access. Keep command arguments separate. Do not build shell strings for ordinary execution.
+
+## APT lifecycle
+
+Direct APT packages run before third-party repository packages:
+
+```text
+refresh distro metadata
+→ install missing direct packages
+→ publish applicable third-party repositories
+→ refresh metadata once for those repositories
+→ purge installed declared conflicts once
+→ install all missing repository packages once
+```
+
+The two refresh points serve different source sets. Do not collapse them unless direct packages are deliberately moved after repository publication.
+
+### Third-party repositories
+
+Every declaration is validated before platform filtering or mutation:
+
+- safe `sources.list.d` name;
+- non-empty distro URL map;
+- key path directly under `/etc/apt/keyrings` or `/usr/share/keyrings`;
+- safe `.asc` or `.gpg` key filename;
+- required non-empty suite and components;
+- supported APT architecture names;
+- no control characters in source values.
+
+Applicability is:
+
+```text
+matching exact distro, upstream family, or default URL
+AND
+current architecture included by optional arch
+```
+
+An inapplicable repository contributes no source, conflict, package, prerequisite, or metadata refresh.
+
+Applicable repositories follow this path:
+
+```text
+download key to an unprivileged temporary file
+→ reject empty content
+→ dearmor and require at least one public key
+→ keep armored bytes for .asc or binary bytes for .gpg
+→ atomically publish the key and source file
+```
+
+All applicable repository conflicts and packages are aggregated. Purging happens only after repository publication and a successful metadata refresh.
+
+### Debian official sources
+
+Pure Debian converges official source components separately. It supports conventional Bookworm and Trixie `.list` / deb822 `.sources` files while preserving unrelated entries and options. This is not the third-party repository path.
+
+## Privileged publication
+
+`src/operations/privileged_file.rs` publishes root-owned files through staged writes:
+
+```text
+write and fsync an unprivileged temporary file
+→ sudo install into a temporary file beside the destination
+→ sync the staged file
+→ reject directory destinations
+→ atomic mv over the destination
+→ sync the parent directory
+```
+
+Do not replace this with streamed writes into `/etc` or `/usr`. Download and parsing failures must leave privileged destinations untouched.
+
+## Init ownership
+
+`src/init.rs` embeds presets and dotfiles at build time and tracks managed hashes.
+
+The update policy is:
+
+```text
+missing file              → install
+known and unchanged file  → refresh
+modified or unmanaged     → preserve
+```
+
+Paths must remain relative, normal, UTF-8-compatible, and free of tabs/newlines. The configuration root and managed directory chain must not traverse symlinks.
+
+The manifest is published only after all selected files synchronize successfully.
+
+## Dotfiles
+
+A dotfile package is a real directory below the embedded `dotfiles/` root. The source tree is authoritative. Cozydot never copies a destination file back into the repository.
+
+Before replacement, Cozydot validates every configured package and checks GNU Stow. This prevents a later bad package or missing executable from moving earlier conflicts and leaving the operation half-complete.
+
+GnuPG dotfiles receive special handling because `~/.gnupg` must remain a real directory with mode `0700`.
+
+## Apply and update semantics
+
+Keep ensure and update behavior separate.
 
 Examples:
 
-```yaml
-shared:
-  tools:
-    rust: stable       # Ensure a stable Rust toolchain exists.
-    go: latest         # Ensure the selected Go toolchain exists.
-    node: lts          # Ensure the selected Node.js toolchain exists.
-    python: "3.13"     # Ensure the selected Python toolchain exists.
-```
+- `apply` installs a missing configured Cargo package;
+- `update` runs cargo-update only when enabled;
+- `apply` ensures the selected toolchain;
+- `update` asks the native manager to update according to policy;
+- managed Deb/AppImage binaries are ensure-only.
 
-Official APT source behavior is not configurable. On pure Debian, `apply` appends `main`, `contrib`, `non-free`, and `non-free-firmware` to matching Bookworm or Trixie source entries. Existing files, URIs, options, comments, and unrelated repositories remain in place. Ubuntu and derivative official sources are unchanged.
+A native manager owns native value parsing where possible. Cozydot should not duplicate upstream grammars without a planning or safety reason.
 
-### Configuration sources in the repository
+## Integration tests
 
-- `configs/cozydot.yaml` is the manually maintained base preset.
-- `configs/full.yaml`, `configs/cli.yaml`, and `configs/vm.yaml` are generated by `scripts/generate-configs.sh`.
-- `build.rs` embeds the presets and bundled dotfiles into the binary.
-- `cozydot init` materializes a selected preset and bundled dotfiles without requiring a repository checkout.
-- The active file created by `init` is user configuration. It is not regenerated by the repository script.
+`tests/cli.rs` is intentionally small and external. It tests command contracts and high-risk boundaries through the compiled CLI:
 
-Edit `configs/cozydot.yaml`, then regenerate derived presets. Do not manually edit generated presets.
+- help, version, missing configuration, and installer rejection;
+- init ownership and preset materialization;
+- validation before platform detection or mutation;
+- silent no-op apply/update;
+- dotfile conflict and replacement behavior;
+- repository schema, applicability, key validation, publication, ordering, and idempotence;
+- APT update policy.
 
-## The runtime architecture
+Do not add a test for every enum field, command spelling, or upstream manager output. Add integration coverage when a failure would violate a public command contract, mutation ordering, idempotence, or a security boundary.
 
-The core flow crosses five modules:
+Prefer one end-to-end case that proves a lifecycle over several narrow tests that repeat the same setup. Fake executables should record fixed argv and model only the state needed by the contract.
 
-1. `src/main.rs`
-   - Parses the CLI.
-   - Loads the active configuration.
-   - Detects the platform for host-changing commands.
-   - Requests a plan.
-   - Executes each operation in order.
+## Making a change
 
-2. `src/config.rs`
-   - Defines the Serde schema.
-   - Rejects unknown fields.
-   - Produces path-aware YAML errors.
-   - Enforces cross-field and platform-specific invariants.
+1. Read the relevant config type, planner leaf, operation variant, and executor.
+2. Write the intended lifecycle and identify prerequisites and ordering.
+3. Update the base preset if the schema or defaults change.
+4. Regenerate derived presets.
+5. Update the external behavior test only when the public contract changes.
+6. Run all checks.
+7. Search for obsolete names and documentation.
+8. Review the complete diff for unrelated changes.
 
-3. `src/platform.rs`
-   - Reads the Linux release identity or macOS architecture.
-   - Normalizes distro family, codename, desktop, and architecture.
-   - Rejects unsupported Debian releases and host architectures.
-
-4. `src/planner.rs`
-   - Translates validated configuration into `Vec<Operation>`.
-   - Adds prerequisites and manager bootstraps.
-   - Expresses capability ownership through nested workflows and orders operations through fixed execution stages.
-   - Keeps `apply`, `dotfiles`, and `update` semantics separate.
-
-5. `src/operations/`
-   - Defines the closed `Operation` enum.
-   - Dispatches each variant to a dedicated executor.
-   - Inspects current host state and performs the smallest required mutation.
-   - Owns filesystem, package-manager, download, and command safety.
-
-A useful summary is:
-
-```text
-YAML -> Config -> Platform -> Planner -> Vec<Operation> -> Executor -> Host
-```
-
-The planner decides **what runs and in which order**. Each operation's executor decides **how to inspect and change the host safely**.
-
-## Glossary
-
-Use these terms consistently in documentation, code review, and diagnostics. Reserve *target* for a Rust compilation target or an explicit domain type such as `DesktopEnvironment`; use *state*, *resource*, *package*, or the concrete noun for configured behavior.
-
-| Term | Meaning |
-| --- | --- |
-| Active configuration | The user-owned `cozydot.yaml` loaded by `check`, `apply`, `dotfiles`, and `update`. |
-| Preset | A repository YAML snapshot embedded at build time and copied by `init`. After copying, the file is the active configuration, not a preset. |
-| Base preset | `configs/cozydot.yaml`, the only preset edited by hand. The generator derives `full`, `cli`, and `vm` from it. |
-| Scope | The configuration boundary that owns intent: `shared`, `os.linux`, or `os.macos`. |
-| Portable | Intent in `shared` with Linux and macOS implementations. Portable intent does not imply identical host commands. |
-| Intent | A validated configuration request. Intent describes desired behavior without supplying commands. |
-| Platform | The detected operating system, distribution identity, release, desktop, and architecture used for validation and planning. |
-| Plan | The complete ordered `Vec<Operation>` produced before host mutation begins. |
-| Capability workflow | One concrete, readable sequence that composes child capability workflows and contributes operations for a command. |
-| Operation | One typed unit of host behavior represented by an `Operation` enum variant. |
-| Executor | The fixed Rust implementation that inspects state and performs one operation. |
-| Execution stage | An internal dependency-ordering bucket that is flattened into the complete sequential operation plan. |
-| Prerequisite | A package or capability derived by the planner because another operation needs it. |
-| Bootstrap | An ensure operation that makes a required package manager or tool manager available. |
-| Ensure | Bring configured state into existence or into the requested setting without selecting a newer release merely because one exists. |
-| Converge | Inspect current state and move it to the configured selector or setting. Depending on the operation, this may change existing state. |
-| Update | Explicitly enabled behavior run by `cozydot update` that may move installed state to a newer release. |
-| Managed | State whose source or prior content Cozydot records or owns, such as embedded dotfiles, `.managed-files` entries, or a managed tool directory. |
-| Publication | Replace a destination with staged content, then sync it as required by that operation. |
-| Applicable | Selected for the detected distribution or architecture. An inapplicable repository or binary definition plans no operation. |
-| No-op | A successful command or operation that has no work for the current configuration and host state. |
-| Rust target | The compilation triple passed to Cargo, such as `aarch64-apple-darwin`. |
-
-Architecture names vary at system, Cozydot, release, and Rust boundaries:
-
-| Platform | Detected aliases | Cozydot architecture | Release suffix | Rust target |
-| --- | --- | --- | --- | --- |
-| Linux x86-64 | `x86_64`, `amd64` | `amd64` | `linux-amd64` | `x86_64-unknown-linux-gnu` |
-| Linux ARM64 | `aarch64`, `arm64` | `arm64` | `linux-arm64` | `aarch64-unknown-linux-gnu` |
-| Linux ARMv7 | `arm32`, `armv7`, `armv7l`, `armhf` | `arm32` | `linux-arm32` | `armv7-unknown-linux-gnueabihf` |
-| Apple Silicon macOS | `aarch64`, `arm64` | `darwin-arm64` | `macos-arm64` | `aarch64-apple-darwin` |
-
-## Command semantics
-
-### `cozydot init`
-
-Creates or safely refreshes the active configuration from a selected preset, along with the bundled dotfiles.
-
-It tracks files through `.managed-files` with SHA-256 hashes. On a later run, it refreshes a file only when the file is missing or still matches the previously managed content. User-edited, unmanaged, and obsolete files are preserved.
-
-Writes use temporary files, `sync_all`, and publication into the destination. Symlinked configuration roots and intermediate directories are rejected. An existing leaf symlink is treated as a non-regular destination and preserved.
-
-### `cozydot check`
-
-Parses and validates the active configuration without platform detection or host changes.
-
-Use it for fast schema feedback:
-
-```bash
-cozydot check
-```
-
-### `cozydot apply`
-
-Ensures configured software is present and applies configured state. It does not execute update controls and generally leaves present software unchanged even if a newer release exists.
-
-Before the first side effect, it:
-
-1. Validates the complete configuration for the detected platform.
-2. Validates dependencies between capabilities.
-3. Builds the full ordered operation plan.
-
-Linux and macOS use platform-specific capability workflows and fixed execution-stage lists because APT and Homebrew
-have different transactions.
-
-Configuring an AppImage implicitly adds the `appimaged` prerequisite when that AppImage supports the current architecture. There is no `integrations.appimaged` field.
-
-### `cozydot dotfiles`
-
-Applies only shared dotfile packages and those for the current platform through GNU Stow.
-
-The standalone command requires GNU Stow to be installed. During `apply`, the planner ensures Stow before running the dotfile operation.
-
-Default behavior is conservative:
-
-```bash
-cozydot dotfiles
-```
-
-If any unmanaged destination conflicts exist, Cozydot reports all of them and changes no dotfiles.
-
-Replacement must be explicit:
-
-```bash
-cozydot dotfiles --replace
-```
-
-Conflicts are first moved under:
-
-```text
-${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups
-```
-
-Cozydot never adopts files from the home directory into its source. The bundled dotfiles remain authoritative.
-
-GnuPG is handled specially. `~/.gnupg` remains a real directory with mode `0700`; files inside it can be stowed. This avoids replacing the security-sensitive directory itself with a symlink.
-
-### `cozydot update`
-
-Runs only explicitly enabled update categories. It is separate from `apply` because ensuring presence and moving installed software to newer versions have different risk and intent.
-
-Examples include:
-
-- APT `standard` or `full` system upgrades
-- Flatpak application updates
-- rustup toolchain updates
-- Go, Node.js, and Python convergence
-- installed Cargo and npm package updates
-- Nerd Font redownloads
-- selected Homebrew formula and cask updates on macOS
-
-An absent, empty, or all-false update policy is a validated no-op.
-
-The Linux APT update capability workflow updates existing APT-managed state only. It emits an APT metadata refresh
-followed by the selected standard or full system upgrade. Repository publication, Debian component convergence,
-repository conflict handling, prerequisite derivation, and configured package installation belong to `apply`. Run
-`cozydot apply` before `cozydot update` after changing APT package or repository configuration.
-
-## How the planner works
-
-The planner is more than a direct YAML-to-command mapping. It derives hidden dependencies and imposes ordering.
-
-### Capability workflows and execution stages
-
-The Linux and macOS apply and update planners are concrete, nested capability workflows. Their top-level functions call
-platform and shared capability workflows in product order. Leaf workflows contribute typed `Operation` values.
-
-`ExecutionStage` is the private ordering vocabulary used to place those operations in dependency-safe buckets. Stages
-are not user-facing workflows and do not execute or parallelize work. After every capability has contributed its
-operations, the planner flattens the command's fixed stage list into one sequential `Vec<Operation>`.
-
-Linux apply stages keep system and APT work before Flatpak, shared tools, shared packages, Debian packages and AppImages,
-fonts, dotfiles, integrations, and desktop operations. Linux update stages keep APT refresh and upgrade before Flatpak,
-shared tools, shared packages, and fonts. macOS stages keep Homebrew work before shared tools, shared packages, fonts,
-dotfiles, integrations, and desktop operations where those capabilities apply. Because these lists are fixed in Rust,
-YAML mapping order cannot change execution order.
-
-For example, the system workflows contribute Debian APT component convergence on Debian and Xcode command line tools
-plus optional Rosetta on macOS. The Homebrew workflow contributes bootstrap and package operations only when formula or
-cask intent exists.
-
-`ManagerBootstrap` deduplicates Flatpak, rustup, FNM, uv, and cargo-binstall requirements before placing each manager in
-its dependency-safe execution stage. This prevents shared tool and package intent from scheduling the same bootstrap
-twice.
-
-Example: configuring Cargo packages can add all of these operations:
-
-```text
-APT bootstrap packages: ca-certificates, curl
-rustup bootstrap
-Rust toolchain
-cargo-binstall bootstrap
-Cargo package set
-```
-
-The user describes the desired capability. The planner supplies the prerequisites.
-
-The fixed stage order prevents invalid sequences. Direct APT packages are handled before third-party repository
-packages. Repository metadata is refreshed after repository publication. During `apply`, dotfiles run after GNU Stow
-has been ensured.
-
-When adding a capability, first decide which workflow owns it, which execution stage its operations require, and which
-prerequisites it implies. Do not hide ordering dependencies inside an executor.
-
-## Safety invariants
-
-Treat these as product behavior, not incidental implementation details.
-
-### Validate before mutation
-
-`apply` and `update` validate the complete configuration and build the full plan before executing its first operation. A late configuration error should not leave a partially configured host.
-
-### Keep operations typed
-
-Every host-changing capability must map to an `Operation` variant with a fixed executor. Do not introduce arbitrary shell from YAML.
-
-### Restrict privileged paths
-
-Privileged publication validates destinations and stages content before replacement. APT keyrings are limited to direct children of `/etc/apt/keyrings` or `/usr/share/keyrings` with safe `.asc` or `.gpg` names.
-
-### Publish important files atomically
-
-Privileged files are written to a staging file, synced, moved into place, and followed by a parent-directory sync. Failed publication attempts clean up staging files.
-
-### Preserve recoverability
-
-Dotfile conflicts are moved to a state-directory backup before replacement. Debian APT component edits do not create persistent backups; parsing and staging failures leave the original file unchanged.
-
-### Recheck mutable state
-
-Debian APT component convergence compares current bytes with inspected bytes immediately before publication. It fails if another process changed the source concurrently.
-
-### Prefer convergent operations
-
-An ensure operation should inspect first and return successfully when the requested state is already satisfied. Repeated `apply` runs should not perform unnecessary work.
-
-### Keep destructive behavior scoped
-
-APT conflicts remain attached to their replacement repository. Cozydot publishes every applicable repository, refreshes metadata once, then purges all installed conflicts and installs all missing repository packages in one operation.
-
-## Tracing one feature end to end
-
-Use this sequence when learning or reviewing a capability.
-
-### Example: `shared.tools.node`
-
-1. YAML declares `shared.tools.node: lts`.
-2. `config.rs` deserializes it into `Tools.node: Option<String>`.
-3. `planner.rs` sees `Some("lts")`.
-4. The Linux planner adds `ca-certificates` and `curl`, requests the FNM bootstrap, then plans `Operation::NodeToolchain`.
-5. The macOS planner produces the equivalent portable bootstrap and toolchain operations without Linux APT prerequisites.
-6. `operations::execute` dispatches the operation to `tools::execute_node`.
-7. The executor inspects managed FNM state and ensures the selected Node.js version.
-
-This path shows why `shared` means portable intent, not identical host commands.
-
-### Example: a third-party APT repository
-
-1. YAML supplies the repository name, key URL, constrained key path, distro URL map, suite, components, optional APT-native architectures, conflicts, and packages.
-2. Configuration validation rejects unsafe names, empty URL maps or components, and unsupported architecture names.
-3. Platform resolution skips excluded architectures, then selects exact distro, upstream family, or `default`.
-4. The planner creates each `AptRepositoryOperation`, adds download and GPG prerequisites, and aggregates applicable conflicts and packages.
-5. Each repository executor downloads and validates its public key, then publishes its key and source atomically.
-6. Later operations refresh APT metadata once, purge all installed conflicts, and install all missing repository packages once.
-
-## Adding a capability
-
-Use this order:
-
-1. **Define intent in `config.rs`.**
-   - Use a precise type rather than a free-form string when values are closed.
-   - Add `deny_unknown_fields` to mappings.
-   - Make omission semantics deliberate.
-
-2. **Add validation.**
-   - Reject invalid combinations and ownership conflicts before they reach the planner.
-   - Put host-independent checks in general validation.
-   - Put detected-host constraints in platform validation.
-
-3. **Add or reuse a typed `Operation`.**
-   - Keep the variant data limited to validated execution inputs.
-
-4. **Add it to `planner.rs`.**
-   - Select the correct scope and platform.
-   - Add prerequisites.
-   - Place it in a dependency-correct execution stage.
-   - Preserve the boundary between apply and update behavior.
-
-5. **Implement execution under `src/operations/`.**
-   - Inspect current state first.
-   - Reject malformed command output.
-   - Use argument arrays and `--` boundaries where supported.
-   - Stage important file writes.
-   - Verify the expected postcondition.
-
-6. **Update the base preset and regenerate the derived presets.**
-
-7. **Update user documentation.**
-   - Explain intent, omission behavior, side effects, and any destructive path.
-
-8. **Run all quality gates.**
-
-## Repository and file structure
-
-Start with this simplified tree:
-
-```text
-cozydot/
-├── Cargo.toml
-├── Cargo.lock
-├── build.rs
-├── install.sh
-├── README.md
-├── AGENTS.md
-├── configs/
-│   ├── cozydot.yaml
-│   ├── full.yaml
-│   ├── cli.yaml
-│   └── vm.yaml
-├── src/
-│   ├── main.rs
-│   ├── config.rs
-│   ├── platform.rs
-│   ├── planner.rs
-│   ├── init.rs
-│   └── operations/
-│       ├── mod.rs
-│       ├── host.rs
-│       ├── privileged_file.rs
-│       ├── apt.rs
-│       ├── languages.rs
-│       ├── packages.rs
-│       ├── parsers.rs
-│       ├── repository.rs
-│       ├── binary.rs
-│       ├── appimaged.rs
-│       ├── tools.rs
-│       ├── system.rs
-│       └── macos.rs
-├── tests/
-│   └── cli.rs
-├── scripts/
-│   ├── generate-configs.sh
-│   └── package-release.sh
-├── dotfiles/
-│   └── <stow package>/<path relative to home>
-├── docs/
-│   ├── INTERN_ONBOARDING.md
-│   └── assets/
-└── .github/workflows/
-    ├── rust.yml
-    └── audit.yml
-```
-
-### Root files
-
-#### `Cargo.toml`
-
-The Rust package manifest is organized into:
-
-1. Package identity, version, edition, license, and repository metadata.
-2. Project-wide Rust lints, including forbidden unsafe code.
-3. Runtime dependencies used by the CLI.
-4. Development dependencies used by integration tests.
-
-A dependency belongs here only when it reduces the total implementation complexity. `Cargo.lock` records the exact resolved dependency graph and is committed for reproducible application builds.
-
-#### `build.rs`
-
-The build script creates the data embedded in the final binary. Its structure is:
-
-1. Find the repository root through `CARGO_MANIFEST_DIR`.
-2. Walk `dotfiles/` and collect regular files with safe relative paths and modes.
-3. Read the four YAML presets from `configs/`.
-4. Generate `bundle.rs` under Cargo's `OUT_DIR`.
-5. Emit `RECORDS` for dotfiles and `PRESETS` for YAML snapshots.
-
-The walker rejects symlinks, special files, unsafe destinations, and duplicate embedded paths. `src/init.rs` includes the generated `bundle.rs` at compile time.
-
-#### `install.sh`
-
-The public installer has four sections:
-
-1. Resolve the requested version, release base URL, and install directory.
-2. Detect a supported OS and architecture and select the matching release name.
-3. Download and verify the archive and its SHA-256 file.
-4. Validate the archive shape, extract one regular `cozydot` binary, and atomically replace the installed binary.
-
-It supports Linux on `amd64`, `arm64`, and `arm32`, plus Apple Silicon macOS. It rejects unsupported platforms before downloading anything.
-
-#### `README.md`
-
-The README is user documentation. It explains installation, first run, configuration sources, command behavior, safety guarantees, and development checks. Keep detailed contributor architecture in this intern guide instead of duplicating it in the README.
-
-#### `AGENTS.md`
-
-This file defines repository rules for coding agents and contributors. It records implementation principles, project conventions, and supported platforms. It constrains how changes are made; it is not runtime configuration.
-
-#### `.gitignore`, `rustfmt.toml`, and `.shellcheckrc`
-
-- `.gitignore` keeps Cargo build output out of Git.
-- `rustfmt.toml` defines Rust formatting width and heuristics.
-- `.shellcheckrc` contains the deliberate ShellCheck exceptions used by repository scripts.
-
-#### `bash.sh`
-
-This is a standalone Bash reference template. It is not part of the Rust CLI execution path. Historical shell code may illustrate readable command organization, but current architecture and behavior come from the Rust implementation.
-
-#### `assets/`
-
-This directory contains repository imagery such as the Cozydot cover and activity overview. These images are presentation assets, not runtime inputs.
-
-### `src/`: the Rust application
-
-Rust files generally follow this order:
-
-1. Imports.
-2. Constants and domain types.
-3. Public or crate-visible entry points.
-4. Private execution and validation helpers.
-5. Tests where they already exist.
-
-Keep public surfaces small. If only one operation module needs a helper, keep it private to that module.
-
-#### `src/main.rs`
-
-This is the CLI boundary. It is structured as:
-
-1. Module declarations for `config`, `init`, `operations`, `planner`, and `platform`.
-2. Clap types defining the CLI and its subcommands.
-3. `main()`, which routes each subcommand.
-4. Concrete command workflows for `init`, `check`, `apply`, `dotfiles`, and `update`.
-5. Sequential execution of complete operation plans through the typed dispatcher.
-
-Each config-driven host-changing command workflow (`apply`, `dotfiles`, and `update`) validates the active configuration
-before platform detection, asks the planner for a complete `Vec<Operation>`, and only then executes each operation in
-order. Keep capability and executor logic out of this file.
-
-#### `src/config.rs`
-
-This file owns the YAML contract. It is structured as:
-
-1. Top-level `Config` and configuration-version parsing.
-2. General and platform-aware validation entry points.
-3. Nested Serde types matching `shared`, `os.linux`, and `os.macos`.
-4. Closed enums for values such as distro, binary format, theme, and update policy.
-5. Resolution helpers for distro-keyed mappings and binary architecture selectors.
-6. Field validators for names, lists, repository ownership, durations, and cross-field dependencies.
-
-Most mappings use `#[serde(deny_unknown_fields)]`. A new YAML field starts here, but adding the field alone does not make it operational. The planner must translate it into a typed operation.
-
-#### `src/platform.rs`
-
-This file turns host facts into Cozydot's platform model. It is structured as:
-
-1. `Platform::detect()` for OS release, desktop, and machine architecture detection.
-2. `Platform::from_release_parts()` for normalized construction and support rejection.
-3. `Architecture` and canonical package-manager mappings.
-4. Private parsers for `uname`, distro family, and desktop identity.
-
-This file should answer **what host is this?** It should not install or modify anything.
-
-#### `src/planner.rs`
-
-The planner translates validated intent into an ordered operation list. It is structured as:
-
-1. Private fixed execution stages for dependency-safe operation order.
-2. Concrete nested Linux and macOS apply and update capability workflows.
-3. Deduplicated derived prerequisite and manager-bootstrap collection.
-4. Public planners for `apply`, `dotfiles`, and `update`.
-5. Small resolution helpers that convert configuration values into operation inputs.
-
-The planner owns **selection, prerequisites, and order**. It does not execute commands or mutate the filesystem.
-
-#### `src/init.rs`
-
-This file materializes the embedded configuration bundle. It is structured as:
-
-1. The `Preset` CLI enum.
-2. `initialization_workflow()` and config-root resolution.
-3. Record types matching the data generated by `build.rs`.
-4. The generated `bundle.rs` inclusion.
-5. Synchronization logic for managed files.
-6. Safe path, hash, temporary-file, and directory-sync helpers.
-
-The `.managed-files` manifest stores the last managed hash for each path. A later `init` refreshes missing or unchanged files while preserving user-edited and unmanaged files.
-
-### `src/operations/`: host execution
-
-Every file in this directory executes already-planned typed operations. The common pattern is:
-
-1. Inspect current host state.
-2. Return successfully if the requested state is already satisfied.
-3. Validate external data and command output.
-4. Perform the narrow mutation.
-5. Verify the expected result when possible.
-
-#### `src/operations/mod.rs`
-
-This is the operation hub. It contains:
-
-1. Child-module declarations and selected type re-exports.
-2. Shared modes such as `ToolchainMode`.
-3. The closed `Operation` enum.
-4. Human-readable operation labels.
-5. The central executor dispatch from each enum variant to its implementation.
-
-A planner can only request behavior represented by this enum. That closed set is the boundary preventing arbitrary YAML commands.
-
-The hub delegates common execution concerns to focused files: `host.rs` owns process and temporary-path primitives,
-`privileged_file.rs` owns atomic privileged publication, `apt.rs` owns APT convergence, `languages.rs` owns language-manager
-bootstraps, `packages.rs` owns package executors, and `parsers.rs` owns parsers shared by operation modules.
-
-#### `src/operations/repository.rs`
-
-This file handles third-party APT repositories and Debian source-component convergence. It is split into:
-
-1. `AptRepositoryOperation`, the validated input for one third-party repository.
-2. Keyring-path and source-value validation.
-3. Public-key download, GPG conversion, and public-key inspection.
-4. Atomic key and source publication.
-5. The `debian_components` module for inspecting, editing, publishing, and verifying official Debian source components.
-
-Debian source convergence is intentionally self-contained because it mutates privileged package-manager configuration.
-
-#### `src/operations/binary.rs`
-
-This file installs managed Deb and AppImage releases. It is structured as:
-
-1. Typed binary source and package operation data.
-2. The `cargo_binstall` bootstrap submodule.
-3. Presence detection.
-4. GitHub release or direct-URL resolution.
-5. Exact-one asset selector validation.
-6. Temporary download.
-7. Format-specific Deb or AppImage publication.
-
-These binaries are ensure-only. Presence stops the operation; update behavior is not inferred.
-
-#### `src/operations/appimaged.rs`
-
-This file ensures `appimaged` is available before configured AppImages are published. The planner adds it implicitly when an applicable AppImage is present. Its flow is:
-
-1. Resolve the architecture-specific release asset.
-2. Ensure the required FUSE package exists.
-3. Download and validate the executable as the expected ELF architecture.
-4. Install and start the user service.
-5. Wait for the service to become active.
-
-#### `src/operations/tools.rs`
-
-This file converges language toolchains. It is organized into:
-
-1. Toolchain selector and release types.
-2. Rust, Go, Node.js, and Python execution entry points.
-3. A `resolution` module for finding releases and managed executables.
-4. A `state` module for inspecting installed toolchains.
-5. Selector, version, alias, and command-output helpers.
-
-Tool installation uses the manager Cozydot owns, such as rustup, FNM, or uv. Those installers must not edit shell startup files.
-
-#### `src/operations/system.rs`
-
-This file owns Linux system, integration, and desktop state, plus the portable VS Code extension executor. Its sections cover:
-
-1. Administrator-access verification.
-2. Unattended-upgrade and Ubuntu Snap state.
-3. Docker and VirtualBox integration.
-4. VS Code extension state.
-5. Desktop types and GNOME / Cinnamon settings.
-6. GNOME extension installation and postcondition checks.
-7. dconf, gsettings, executable, UUID, user, and service helpers.
-
-Keep Linux system, integration, and desktop behavior here. VS Code extension convergence remains here because both platform planners emit the same operation, which dispatches to one executor. Package installation itself belongs to the shared APT or package operation code.
-
-#### `src/operations/macos.rs`
-
-This file owns Apple Silicon macOS execution. It is structured as:
-
-1. `MacDefault`, the typed set of supported desktop preferences.
-2. Administrator-access verification through `sudo -v`.
-3. Homebrew bootstrap and package presence convergence.
-4. Xcode command line tools and Rosetta installation.
-5. Homebrew update behavior.
-6. macOS `defaults` writes and Dock / Finder refreshes.
-
-### `configs/`: desired-state presets
-
-#### `configs/cozydot.yaml`
-
-This is the only manually maintained base preset. Its internal order follows the schema:
-
-1. `version`
-2. `shared`
-   - tools
-   - packages
-   - fonts
-   - dotfiles
-   - integrations
-   - updates
-3. `os.linux`
-   - system
-   - packages
-   - dotfiles
-   - integrations
-   - desktop
-   - updates
-4. `os.macos`
-   - system
-   - Homebrew
-   - dotfiles
-   - desktop
-   - updates
-
-Keep fields in this order so the YAML mirrors `config.rs` and remains easy to trace.
-
-#### `configs/full.yaml`, `configs/cli.yaml`, and `configs/vm.yaml`
-
-These are generated snapshots:
-
-- `full.yaml` copies the complete base preset.
-- `cli.yaml` removes desktop requirements and desktop-heavy applications, then narrows packages and integrations for headless use.
-- `vm.yaml` narrows the preset for a GNOME virtual machine.
-
-Never edit them directly. Change `cozydot.yaml`, update `scripts/generate-configs.sh` when derivation rules change, then regenerate all three.
-
-### `dotfiles/`: GNU Stow packages
-
-Every direct child of `dotfiles/` is one Stow package. Its contents mirror paths relative to the user's home directory.
-
-For example:
-
-```text
-dotfiles/git/.gitconfig
-             └──────── becomes ~/.gitconfig
-
-dotfiles/yazi/.config/yazi/yazi.toml
-              └──────────────────── becomes ~/.config/yazi/yazi.toml
-```
-
-The package name is what appears under `shared.dotfiles.packages` or the current OS dotfile list. Current packages include shell configuration, Git, GnuPG, terminal tools, editors, OpenCode, VS Code, WezTerm, Yazi, and user scripts.
-
-Do not copy a home file into this tree automatically. The repository copy is authoritative. Unmanaged destination conflicts fail safely unless the user explicitly requests replacement and backup.
-
-### `tests/cli.rs`
-
-This is the integration-test suite. It is structured as:
-
-1. Fixture builders that wrap focused test YAML in the complete v1 schema.
-2. Helpers for temporary homes, fake executables, platform state, and command logs.
-3. CLI tests grouped broadly by initialization, validation, planning, execution ordering, idempotence, and failure handling.
-
-Tests execute the compiled binary with isolated temporary state. Fake host commands make side effects observable without changing the real machine.
-
-### `scripts/`
-
-#### `scripts/generate-configs.sh`
-
-The generator:
-
-1. Treats `configs/cozydot.yaml` as the base.
-2. Produces `full`, `cli`, and `vm` in a temporary directory.
-3. Uses `yq` transformations for the reduced presets.
-4. Either publishes the generated files or compares them with committed snapshots under `--check`.
-
-#### `scripts/package-release.sh`
-
-The release packager:
-
-1. Resolves the package version, host operating system, and architecture.
-2. Performs a locked release build for the corresponding Rust target.
-3. Stages exactly one executable.
-4. Normalizes timestamps, ownership, ordering, and gzip metadata.
-5. Emits the deterministic archive and SHA-256 file.
-
-### `docs/` and `.github/`
-
-- `docs/INTERN_ONBOARDING.md` is this contributor-oriented architecture guide.
-- `docs/assets/` contains the SVG diagrams linked by the guide.
-- `.github/workflows/rust.yml` runs formatting, linting, tests, documentation, packaging, and install smoke checks.
-- `.github/workflows/audit.yml` runs the RustSec dependency audit.
-
-## Recommended reading order
-
-1. `README.md` for the product contract.
-2. `configs/cozydot.yaml` for the configuration vocabulary.
-3. `src/main.rs` for the command lifecycle.
-4. `src/config.rs` for schema and validation.
-5. `src/platform.rs` for host normalization.
-6. `src/planner.rs` for selection, prerequisites, and order.
-7. `src/operations/mod.rs` for the typed execution boundary.
-8. The relevant operation file for host-side behavior.
-9. `src/init.rs` and `build.rs` for embedded presets and dotfiles.
-10. `tests/cli.rs` for executable behavior examples.
-
-## Development checks
-
-Run these before handing over a change:
+## Required checks
 
 ```bash
 scripts/generate-configs.sh --check
@@ -816,25 +348,20 @@ cargo test --locked --all-targets --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 scripts/package-release.sh
 bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
+git diff --check
 ```
 
-Use the committed lockfile. Keep dependencies direct and prefer an existing project dependency when it already provides the needed behavior.
+The release script builds with `--locked` and writes the archive and checksum under `target/`.
 
-## Review questions
+## Review checklist
 
-Before approving a Cozydot change, ask:
+Before committing, answer these directly:
 
-- Is the configuration field in the correct `shared` or OS-specific scope?
-- Is omission distinct from requested convergence?
-- Can the full configuration fail before any side effect begins?
-- Is the behavior represented by a typed operation?
-- Are prerequisites explicit in the planner?
-- Is the capability workflow and execution-stage order correct?
-- Does the executor inspect state before mutation?
-- Are privileged paths constrained?
-- Are important writes staged, synced, and verified?
-- Is destructive behavior explicit, narrow, and recoverable?
-- Does a second run become a no-op when the requested state is already satisfied?
-- Are `apply` and `update` semantics still separate?
-
-If those answers are clear, the implementation usually fits Cozydot's architecture.
+- Does the complete configuration fail before mutation?
+- Is platform applicability resolved before adding operations?
+- Is dependency order encoded by the correct execution stage?
+- Does the executor inspect state before changing it?
+- Are privileged destinations constrained and atomically published?
+- Is repeated apply a no-op where the native state is already correct?
+- Did generated presets and public docs change with the schema?
+- Does the compact integration suite still cover the changed public boundary?
