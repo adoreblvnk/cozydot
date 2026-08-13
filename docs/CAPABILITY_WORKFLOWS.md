@@ -204,8 +204,8 @@ all discovered conflicts before applying either platform's combined dotfile pack
 2. Linux package workflow
    2.1. APT workflow
         2.1.1. Direct packages
-        2.1.2. Third-party repository workflows
-        2.1.3. Repository packages
+        2.1.2. Applicable third-party repositories
+        2.1.3. Aggregated repository conflicts and packages
    2.2. Flatpak workflow
 
 3. Shared tools workflow

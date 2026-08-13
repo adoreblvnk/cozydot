@@ -859,28 +859,28 @@ fn rust_update_without_apply_selector_updates_installed_toolchains() {
 }
 
 #[test]
-fn apt_repository_validation_keeps_structure_and_allows_optional_values() {
-    let repository = |conflicts: &str, packages: &str| {
+fn apt_repository_validation_uses_required_suite_components_and_optional_arch() {
+    let repository = |extra: &str| {
         format!(
             r#"packages:
   apt:
     repositories:
       - name: vendor
         key: not-validated-during-config-loading
-        key_path: not-validated-during-config-loading
+        key_path: /etc/apt/keyrings/vendor.gpg
         urls:
           default: not-validated-during-config-loading
         suite: stable
         components: [main]
-        conflicts: {conflicts}
-{packages}"#
+{extra}"#
         )
     };
 
     for config in [
-        repository("{}", "        packages: []\n"),
-        repository("{default: []}", "        packages: [vendor-package]\n"),
-        repository("{default: [obsolete]}", ""),
+        repository("        conflicts: []\n        packages: []\n"),
+        repository(
+            "        arch: [amd64, arm64, armhf]\n        conflicts: [obsolete]\n        packages: [vendor-package]\n",
+        ),
     ] {
         let output = run_config("{}", &config, "update");
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -889,10 +889,16 @@ fn apt_repository_validation_keeps_structure_and_allows_optional_values() {
 
     for (config, message) in [
         ("packages:\n  apt:\n    remove: [obsolete]\n".to_owned(), "unknown field `remove`"),
-        (repository("{default: obsolete}", ""), "invalid type"),
+        (repository("        path: /\n"), "unknown field `path`"),
+        (repository("        arch: []\n"), "arch: must not be empty"),
+        (repository("        arch: [arm32]\n"), "unknown variant `arm32`"),
         (
-            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: path\n        urls: {default: source}\n        suite: stable\n        packages: []\n".to_owned(),
-            "requires exactly suite with non-empty components, or path",
+            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: \"\"\n        components: [main]\n".to_owned(),
+            "suite: must not be empty",
+        ),
+        (
+            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n        components: []\n".to_owned(),
+            "components: must contain only non-empty values",
         ),
     ] {
         let output = run_config("{}", &config, "update");
@@ -900,7 +906,8 @@ fn apt_repository_validation_keeps_structure_and_allows_optional_values() {
         assert!(String::from_utf8_lossy(&output.stderr).contains(message));
     }
 
-    let output = run_config("{}", &repository("{}", ""), "apply");
+    let invalid_key_path = repository("").replace("/etc/apt/keyrings/vendor.gpg", "not-validated");
+    let output = run_config("{}", &invalid_key_path, "update");
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("key path must be a direct child"));
@@ -930,81 +937,6 @@ fn binary_validation_uses_tagged_structure_and_defers_native_values() {
     );
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(output.stdout.is_empty());
-}
-
-#[test]
-fn apt_repository_ownership_validation_is_platform_aware() {
-    let unrelated = match os_release_value("ID").as_str() {
-        "ubuntu" | "pop" => "debian",
-        "debian" => "ubuntu",
-        "linuxmint" => "pop",
-        distro => panic!("unsupported test distro: {distro}"),
-    };
-    let repository = |urls: &str, conflicts: &str, packages: &str| {
-        format!(
-            r#"      - name: vendor
-        key: https://example.com/key.gpg
-        key_path: /etc/apt/keyrings/vendor.gpg
-        urls: {urls}
-        suite: stable
-        components: [main]
-        conflicts: {conflicts}
-        packages: {packages}
-"#
-        )
-    };
-    let accepted = [
-        format!(
-            "packages:\n  apt:\n    install: [shared]\n    repositories:\n{}",
-            repository("{default: https://example.com/repository}", &format!("{{{unrelated}: [shared]}}"), "[vendor]")
-        ),
-        format!(
-            "packages:\n  apt:\n    install: [shared]\n    repositories:\n{}",
-            repository(&format!("{{{unrelated}: https://example.com/repository}}"), "{default: [shared]}", "[vendor]")
-        ),
-    ];
-    for linux_config in accepted {
-        let temp = tempfile::tempdir().unwrap();
-        let config_dir = temp.path().join("cozydot");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("cozydot.yaml"), config("{}", &linux_config)).unwrap();
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .env("XDG_CONFIG_HOME", temp.path())
-            .env("XDG_CURRENT_DESKTOP", "gnome")
-            .arg("update")
-            .assert()
-            .success()
-            .stdout(predicate::str::is_empty());
-    }
-
-    let rejected = [
-        format!(
-            "packages:\n  apt:\n    install: [shared]\n    repositories:\n{}",
-            repository("{default: https://example.com/repository}", "{default: [shared]}", "[vendor]")
-        ),
-        format!(
-            "packages:\n  apt:\n    repositories:\n{}{}",
-            repository("{default: https://example.com/one}", "{default: [old-one]}", "[shared]"),
-            repository("{default: https://example.com/two}", "{default: [shared]}", "[replacement]")
-                .replace("name: vendor", "name: vendor-two")
-                .replace("vendor.gpg", "vendor-two.gpg")
-        ),
-    ];
-    for linux_config in rejected {
-        let temp = tempfile::tempdir().unwrap();
-        let config_dir = temp.path().join("cozydot");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("cozydot.yaml"), config("{}", &linux_config)).unwrap();
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .env("XDG_CONFIG_HOME", temp.path())
-            .env("XDG_CURRENT_DESKTOP", "gnome")
-            .arg("update")
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("package \"shared\""));
-    }
 }
 
 #[test]
@@ -1068,8 +1000,12 @@ fn inapplicable_repository_skips_its_packages_and_side_effects() {
     let config_dir = config_home.join("cozydot");
     let fake_bin = temp.path().join("bin");
     let log = temp.path().join("side-effects.log");
+    let excluded_arch = match std::env::consts::ARCH {
+        "x86_64" => "arm64",
+        "aarch64" | "arm" => "amd64",
+        architecture => panic!("unsupported test architecture: {architecture}"),
+    };
     fs::create_dir_all(&config_dir).unwrap();
-    let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
     write_config(
         &config_dir.join("cozydot.yaml"),
         "{}",
@@ -1081,11 +1017,11 @@ fn inapplicable_repository_skips_its_packages_and_side_effects() {
         key: https://example.com/key.gpg
         key_path: /etc/apt/keyrings/inapplicable.gpg
         urls:
-          {inapplicable_distro}: https://example.com/repository
+          default: https://example.com/repository
         suite: "APT-owned suite/value"
         components: ["component/value", "component/value"]
-        conflicts:
-          default: [must-not-purge]
+        arch: [{excluded_arch}]
+        conflicts: [must-not-purge]
         packages: [must-not-install]
 "#
         ),
@@ -1280,12 +1216,6 @@ esac
 }
 
 fn apt_repository_conflict_config(with_updates: bool) -> String {
-    let unrelated_distro = match os_release_value("ID").as_str() {
-        "ubuntu" | "pop" => "debian",
-        "debian" => "ubuntu",
-        "linuxmint" => "pop",
-        distro => panic!("unsupported test distro: {distro}"),
-    };
     config(
         "{}",
         &format!(
@@ -1300,10 +1230,16 @@ fn apt_repository_conflict_config(with_updates: bool) -> String {
           default: https://example.com/vendor
         suite: stable
         components: [main]
-        conflicts:
-          default: [selected-conflict, absent-selected-conflict]
-          {unrelated_distro}: [unrelated-conflict]
+        conflicts: [selected-conflict, absent-selected-conflict]
         packages: [vendor-package]
+      - name: vendor-two
+        key: https://example.com/vendor-two.gpg
+        key_path: /etc/apt/keyrings/vendor-two.gpg
+        urls:
+          default: https://example.com/vendor-two
+        suite: stable
+        components: [main]
+        packages: [vendor-package-two]
 {}
 "#,
             if with_updates { "updates:\n  apt: standard" } else { "" }
@@ -1549,7 +1485,7 @@ fn apt_apply_orders_repository_migration_and_is_idempotent() {
     fs::create_dir_all(state.join("files")).unwrap();
     fs::create_dir_all(state.join("packages")).unwrap();
     fs::write(config_dir.join("cozydot.yaml"), apt_repository_conflict_config(false)).unwrap();
-    for package in ["ca-certificates", "curl", "gnupg", "selected-conflict", "unrelated-conflict"] {
+    for package in ["ca-certificates", "curl", "gnupg", "selected-conflict"] {
         fs::write(state.join("packages").join(package), "").unwrap();
     }
     write_apt_repository_fakes(&fake_bin);
@@ -1572,14 +1508,15 @@ fn apt_apply_orders_repository_migration_and_is_idempotent() {
         .map(|(index, _)| index)
         .unwrap();
     let purge = lines.iter().position(|line| line.ends_with("apt-get purge -y -qq -- selected-conflict")).unwrap();
-    let vendor_install =
-        lines.iter().position(|line| line.ends_with("apt-get install -y -qq -- vendor-package+")).unwrap();
+    let vendor_install = lines
+        .iter()
+        .position(|line| line.ends_with("apt-get install -y -qq -- vendor-package+ vendor-package-two+"))
+        .unwrap();
     assert!(direct_refresh < direct_install && direct_install < repository_download);
     assert!(repository_download < publication && publication < repository_refresh);
     assert!(repository_refresh < purge && purge < vendor_install, "unexpected apply order: {first}");
     assert!(first.contains("dpkg-query -W -f=${db:Status-Status}\\n -- absent-selected-conflict"));
     assert!(!lines[purge].contains("absent-selected-conflict"), "apply purged an absent selected conflict: {first}");
-    assert!(!first.contains("unrelated-conflict"), "apply inspected or purged an unselected distro conflict: {first}");
 
     run_apt_command("apply", &config_home, &fake_bin, &state, &log);
     let second = fs::read_to_string(&log).unwrap();
@@ -1591,7 +1528,6 @@ fn apt_apply_orders_repository_migration_and_is_idempotent() {
     assert!(!second.contains(" apt-get install "), "second apply reinstalled a package: {second}");
     assert!(!second.contains(" apt-get purge "), "second apply repurged a conflict: {second}");
     assert!(second.contains("curl "), "second apply did not inspect/converge the repository: {second}");
-    assert!(!second.contains("unrelated-conflict"), "second apply inspected an unselected distro conflict: {second}");
 }
 
 #[test]

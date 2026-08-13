@@ -71,7 +71,7 @@ impl Config {
             return Ok(());
         }
         let identity = resolve_platform_identity(platform)?;
-        let (distro, upstream) = (identity.distro, identity.upstream);
+        let distro = identity.distro;
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
         if let Some(require) = self.os.linux.system.require.as_ref() {
@@ -81,10 +81,6 @@ impl Config {
             if require.desktops.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
                 bail!("os.linux.system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
             }
-        }
-
-        if let Some(apt) = self.os.linux.packages.apt.as_ref() {
-            apt.validate_ownership(distro, upstream)?;
         }
 
         if let Some(configured) = &self.os.linux.desktop
@@ -363,16 +359,6 @@ pub enum DistroMapKey {
 }
 
 impl DistroMapKey {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Ubuntu => "ubuntu",
-            Self::Linuxmint => "linuxmint",
-            Self::Pop => "pop",
-            Self::Debian => "debian",
-        }
-    }
-
     fn from_distro(distro: Distro) -> Self {
         match distro {
             Distro::Ubuntu => Self::Ubuntu,
@@ -496,48 +482,6 @@ impl AptPackages {
         }
         Ok(())
     }
-
-    fn validate_ownership(&self, distro: Distro, upstream: Family) -> Result<()> {
-        let Some(repositories) = self.repositories.as_ref() else {
-            return Ok(());
-        };
-        let direct = self.install.as_deref().unwrap_or_default().iter().map(String::as_str).collect::<HashSet<_>>();
-        let applicable = repositories
-            .iter()
-            .enumerate()
-            .filter(|(_, repository)| select_distro_map(&repository.urls, distro, upstream).is_some())
-            .collect::<Vec<_>>();
-        let repository_packages = applicable
-            .iter()
-            .flat_map(|(_, repository)| repository.packages.iter().map(String::as_str))
-            .collect::<HashSet<_>>();
-
-        for (index, repository) in applicable {
-            if let Some(package) = repository.packages.iter().find(|package| direct.contains(package.as_str())) {
-                bail!(
-                    "os.linux.packages.apt.repositories[{index}].packages: package {package:?} is also a direct APT package"
-                );
-            }
-            let Some((distro_key, conflicts)) =
-                repository.conflicts.as_ref().and_then(|conflicts| select_distro_map(conflicts, distro, upstream))
-            else {
-                continue;
-            };
-            if let Some(package) = conflicts.iter().find(|package| direct.contains(package.as_str())) {
-                bail!(
-                    "os.linux.packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also a direct APT package",
-                    distro_key.as_str()
-                );
-            }
-            if let Some(package) = conflicts.iter().find(|package| repository_packages.contains(package.as_str())) {
-                bail!(
-                    "os.linux.packages.apt.repositories[{index}].conflicts.{}: package {package:?} is also an applicable repository package",
-                    distro_key.as_str()
-                );
-            }
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -547,10 +491,11 @@ pub struct Repository {
     pub key: String,
     pub key_path: String,
     pub urls: BTreeMap<DistroMapKey, String>,
-    pub suite: Option<String>,
-    pub components: Option<Vec<String>>,
-    pub path: Option<String>,
-    pub conflicts: Option<BTreeMap<DistroMapKey, Vec<String>>>,
+    pub suite: String,
+    pub components: Vec<String>,
+    pub arch: Option<Vec<AptArchitecture>>,
+    #[serde(default)]
+    pub conflicts: Vec<String>,
     #[serde(default)]
     pub packages: Vec<String>,
 }
@@ -560,16 +505,68 @@ impl Repository {
         let path = format!("os.linux.packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
-        match (&self.suite, &self.components, &self.path) {
-            (Some(_), Some(components), None) => {
-                if components.is_empty() {
-                    bail!("{path}.components: required with suite");
-                }
-            }
-            (None, None, Some(_)) => {}
-            _ => bail!("{path}: requires exactly suite with non-empty components, or path"),
+        if self.key.chars().any(char::is_control) {
+            bail!("{path}.key: must contain no control characters");
+        }
+        validate_repository_key_path(Path::new(&self.key_path))?;
+        if self.suite.is_empty() {
+            bail!("{path}.suite: must not be empty");
+        }
+        if self.components.is_empty() || self.components.iter().any(String::is_empty) {
+            bail!("{path}.components: must contain only non-empty values");
+        }
+        if self.arch.as_ref().is_some_and(Vec::is_empty) {
+            bail!("{path}.arch: must not be empty when present");
+        }
+        if self
+            .urls
+            .values()
+            .map(String::as_str)
+            .chain(std::iter::once(self.suite.as_str()))
+            .chain(self.components.iter().map(String::as_str))
+            .any(|value| value.chars().any(char::is_control))
+        {
+            bail!("{path}: source values must fit on one line and contain no control characters");
         }
         Ok(())
+    }
+
+    pub fn applies_to(&self, distro: Distro, upstream: Family, architecture: Architecture) -> bool {
+        select_distro_map(&self.urls, distro, upstream).is_some()
+            && self.arch.as_ref().is_none_or(|values| values.iter().any(|value| value.matches(architecture)))
+    }
+}
+
+pub(crate) fn validate_repository_key_path(path: &Path) -> Result<()> {
+    let parent = path.parent().context("APT repository key path has no parent")?;
+    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
+        bail!("APT repository key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
+    }
+    let name = path.file_name().and_then(|name| name.to_str()).context("APT repository key path has no filename")?;
+    if !matches!(path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
+        || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        bail!("APT repository key path must name a safe .asc or .gpg file");
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AptArchitecture {
+    Amd64,
+    Arm64,
+    Armhf,
+}
+
+impl AptArchitecture {
+    fn matches(self, architecture: Architecture) -> bool {
+        matches!(
+            (self, architecture),
+            (Self::Amd64, Architecture::Amd64)
+                | (Self::Arm64, Architecture::Arm64)
+                | (Self::Armhf, Architecture::Arm32)
+        )
     }
 }
 
