@@ -126,6 +126,41 @@ fn installer_rejects_unsupported_platform_before_download() {
 }
 
 #[test]
+fn installer_checksum_failure_preserves_existing_binary() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake_bin = temp.path().join("bin");
+    let install_dir = temp.path().join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    fs::write(install_dir.join("cozydot"), "existing\n").unwrap();
+    write_executable(
+        &fake_bin.join("uname"),
+        "#!/bin/sh\ncase \"$1\" in -s) printf 'Linux\\n' ;; -m) printf 'x86_64\\n' ;; esac\n",
+    );
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  [ "$1" != "-o" ] || { shift; output=$1; }
+  shift
+done
+case "$output" in
+  *.sha256) printf '%064d  release.tar.gz\n' 0 > "$output" ;;
+  *) printf 'not the published archive' > "$output" ;;
+esac
+"#,
+    );
+
+    Command::new("bash")
+        .arg("install.sh")
+        .env("XDG_BIN_HOME", &install_dir)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cozydot: checksum verification failed"));
+    assert_eq!(fs::read_to_string(install_dir.join("cozydot")).unwrap(), "existing\n");
+}
+
+#[test]
 fn init_materializes_presets_and_preserves_user_edits() {
     for preset in ["cozydot", "full", "cli", "vm"] {
         let temp = tempfile::tempdir().unwrap();
@@ -150,23 +185,31 @@ fn init_materializes_presets_and_preserves_user_edits() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn validation_happens_before_platform_detection_or_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
     let probe = temp.path().join("platform-probe");
+    let mutation = temp.path().join("mutation");
     fs::write(root.join("cozydot.yaml"), "version: [\n").unwrap();
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\n: > \"$COZYDOT_TEST_PROBE\"\nprintf 'x86_64\\n'\n");
+    for command in ["sudo", "curl", "gpg", "stow", "systemctl", "gsettings", "code"] {
+        write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
+    }
 
     Command::cargo_bin("cozydot")
         .unwrap()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
         .env("COZYDOT_TEST_PROBE", &probe)
+        .env("COZYDOT_TEST_MUTATION", &mutation)
         .env("PATH", &fake_bin)
         .arg("apply")
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains("active configuration is missing or invalid"));
     assert!(!probe.exists());
+    assert!(!mutation.exists());
 
     let repository = |extra: &str| {
         format!(
@@ -199,6 +242,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn empty_apply_and_update_are_silent_noops() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
@@ -216,7 +260,7 @@ fn empty_apply_and_update_are_silent_noops() {
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
             .env("COZYDOT_TEST_MUTATION", &mutation)
-            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+            .env("PATH", &fake_bin)
             .arg(command)
             .assert()
             .success()
@@ -226,6 +270,7 @@ fn empty_apply_and_update_are_silent_noops() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn dotfiles_refuse_conflicts_and_replace_only_when_explicit() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
@@ -237,7 +282,7 @@ fn dotfiles_refuse_conflicts_and_replace_only_when_explicit() {
     fs::create_dir_all(&home).unwrap();
     fs::write(&source, "managed\n").unwrap();
     fs::write(home.join(".bashrc"), "existing\n").unwrap();
-    write_config(&root, "dotfiles:\n  packages: [bash]\n", "{}");
+    write_config(&root, "dotfiles:\n  packages: [bash, missing]\n", "{}");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(
         &fake_bin.join("stow"),
@@ -265,6 +310,15 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
             .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()));
         command
     };
+    command()
+        .args(["dotfiles", "--replace"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("dotfiles package \"missing\" does not exist"));
+    assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
+    assert!(!state.exists());
+
+    write_config(&root, "dotfiles:\n  packages: [bash]\n", "{}");
     command()
         .arg("dotfiles")
         .assert()
@@ -409,6 +463,7 @@ fn run_apt(
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn repository_key_validation_precedes_publication() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
@@ -435,7 +490,8 @@ fn repository_key_validation_precedes_publication() {
 }
 
 #[test]
-fn repository_apply_is_ordered_aggregated_and_idempotent() {
+#[cfg(target_os = "linux")]
+fn repository_apply_is_ordered_and_packages_converge() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -489,6 +545,7 @@ fn repository_apply_is_ordered_aggregated_and_idempotent() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn inapplicable_repositories_have_no_side_effects() {
     let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
     for applicability in [
@@ -515,7 +572,7 @@ fn inapplicable_repositories_have_no_side_effects() {
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
             .env("COZYDOT_TEST_MUTATION", &mutation)
-            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+            .env("PATH", &fake_bin)
             .arg("apply")
             .assert()
             .success()
@@ -525,6 +582,7 @@ fn inapplicable_repositories_have_no_side_effects() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn apt_update_runs_only_the_selected_policy() {
     for (policy, expected) in [
         ("standard", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --\n"),
