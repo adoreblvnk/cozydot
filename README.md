@@ -113,8 +113,8 @@ and `armhf`.
 ## Safety model
 
 - `apply`, `dotfiles`, and `update` validate the complete active configuration
-  and resolved platform, then use capability workflows and fixed execution
-  stages to build a complete ordered operation plan before starting side effects.
+  and resolved platform, then build a complete ordered operation plan before
+  starting side effects.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
   execution uses a fixed set of typed `Operation` variants and executors.
