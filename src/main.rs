@@ -4,8 +4,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 mod config;
 mod init;
 mod operations;
-mod planner;
 mod platform;
+mod workflow;
 
 #[derive(Debug, Parser)]
 #[command(name = "cozydot", version, about = "Provision Linux and macOS from one active configuration")]
@@ -66,48 +66,37 @@ fn check_command_workflow() -> Result<()> {
 }
 
 fn apply_command_workflow() -> Result<()> {
-    let root = init::config_root()?;
-    let path = root.join("cozydot.yaml");
-    let config = config::Config::load(&path)
-        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
-    let platform = platform::Platform::detect()?;
-    let operations = planner::plan_apply(&config, &platform, &root.join("dotfiles"))?;
-    execute_operation_plan("Applying", operations)
+    let host = ActiveHost::load()?;
+    workflow::apply(&host.config, &host.platform, &host.root.join("dotfiles"))
 }
 
 fn dotfiles_command_workflow(replace: bool) -> Result<()> {
-    let root = init::config_root()?;
-    let path = root.join("cozydot.yaml");
-    let config = config::Config::load(&path)
-        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
-    let platform = platform::Platform::detect()?;
-    let operations = planner::plan_standalone_dotfiles(&config, &platform, &root.join("dotfiles"), replace)?;
-    execute_operation_plan("Applying", operations)
+    let host = ActiveHost::load()?;
+    workflow::dotfiles(&host.config, &host.platform, &host.root.join("dotfiles"), replace)
 }
 
 fn update_command_workflow() -> Result<()> {
-    let path = active_configuration_path()?;
-    let config = config::Config::load(&path)
-        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
-    let platform = platform::Platform::detect()?;
-    let operations = planner::plan_update(&config, &platform)?;
-    execute_operation_plan("Updating", operations)
+    let host = ActiveHost::load()?;
+    workflow::update(&host.config, &host.platform)
+}
+
+struct ActiveHost {
+    root: std::path::PathBuf,
+    config: config::Config,
+    platform: platform::Platform,
+}
+
+impl ActiveHost {
+    fn load() -> Result<Self> {
+        let root = init::config_root()?;
+        let config = config::Config::load(&root.join("cozydot.yaml"))
+            .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+        let platform = platform::Platform::detect()?;
+        config.validate_for_platform(&platform)?;
+        Ok(Self { root, config, platform })
+    }
 }
 
 fn active_configuration_path() -> Result<std::path::PathBuf> {
     Ok(init::config_root()?.join("cozydot.yaml"))
-}
-
-fn execute_operation_plan(progress: &str, operations: Vec<operations::Operation>) -> Result<()> {
-    for operation in operations {
-        let label = operation.label();
-        println!("{progress} {label}");
-        if matches!(
-            operations::execute(&operation).with_context(|| format!("{} {label}", progress.to_lowercase()))?,
-            operations::OperationOutcome::LoginRequired
-        ) {
-            println!("Login required to finish {label}");
-        }
-    }
-    Ok(())
 }
