@@ -1,13 +1,10 @@
 # Cozydot intern onboarding
 
-Cozydot is a Rust CLI that provisions a workstation from one typed YAML file. It supports Debian, Ubuntu, Pop!_OS, Linux Mint, and Apple Silicon macOS.
+Cozydot is a Rust CLI that provisions Debian-family Linux and Apple Silicon macOS from one typed YAML configuration. Read `README.md` for the user contract; use this guide to preserve lifecycle order and safety boundaries while changing the implementation.
 
-This guide explains the code you need to change Cozydot safely. Read `README.md` first for the user-facing contract.
+## Development setup
 
-## Start here
-
-Development requires the latest stable Rust toolchain with Rustfmt and Clippy,
-plus `yq` v4. Run the repository checks before editing:
+Install the latest stable Rust toolchain with Rustfmt and Clippy, plus `yq` v4. Run:
 
 ```bash
 scripts/generate-configs.sh --check
@@ -16,361 +13,228 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 ```
 
-The main command path is:
+## Runtime architecture
+
+The binary exposes `init`, `check`, `apply`, `dotfiles`, and `update`.
+
+Host-changing commands follow this boundary:
 
 ```text
-CLI command
-→ load and validate cozydot.yaml
-→ detect the host when required
-→ build a complete ordered Vec<Operation>
-→ execute each operation in order
+resolve the active Cozydot root
+-> deserialize and validate the complete configuration
+-> detect and normalize the current platform
+-> validate the complete configuration against that platform
+-> derive cross-cutting prerequisites and perform static preflight
+-> enter the explicit Linux or macOS workflow
+-> construct and execute each typed operation in dependency order
+-> stop immediately on failure
 ```
 
-Configuration is declarative. YAML selects typed Rust operations; it cannot
-inject shell commands. Some fixed operations invoke native package managers or
-downloaded upstream installers.
+There is no stage map or complete operation vector. The root workflows in `src/workflow/mod.rs` make lifecycle order visible top-to-bottom. They may perform pure derivation before their first executor call when later ordering depends on aggregate facts, but each operation is otherwise built immediately before execution.
 
-## Commands
-
-`src/main.rs` owns the public CLI.
-
-### `init`
-
-Creates or safely refreshes the active configuration and bundled dotfiles under:
+The implementation layers are:
 
 ```text
-${XDG_CONFIG_HOME:-$HOME/.config}/cozydot
+src/main.rs            command entry points and active-host loading
+src/init.rs            config root, presets, bundled files, managed hashes
+src/config.rs          typed YAML schema and config/platform checking
+src/platform.rs        host detection and normalized platform facts
+src/workflow/mod.rs    explicit Linux/macOS command workflows
+src/operations/mod.rs  operation types, labels, and typed dispatch
+src/operations/        live-state checks and host mutations
+tests/cli.rs           external lifecycle and safety contracts
 ```
 
-It embeds four presets:
+## Validation boundary
 
-```text
-cozydot
-full
-cli
-vm
-```
+`Config::load` performs typed deserialization and platform-independent semantic validation. The schema uses `deny_unknown_fields`; unknown keys fail rather than being ignored. Empty optional sections, empty lists, absent values, and false enable-only flags are no-ops unless a field has a stricter contract.
 
-`init` updates files that are missing or still match the last managed hash. It preserves user-edited files. `.managed-files` stores that ownership state.
+`ActiveHost::load` then detects the platform and calls `Config::validate_for_platform`. No host-changing workflow starts before that complete config/platform check succeeds. This rejects unsupported distribution, architecture, desktop, and platform-specific intent before mutation.
 
-### `check`
+Repository declarations receive static validation before applicability filtering. Linux apply also constructs every applicable repository payload during its pure preflight, before its first executor call. This catches malformed source facts before an earlier operation can mutate the host without recreating a hidden complete operation plan. Network key retrieval, public-key validation, and publication remain live executor checks.
 
-Loads and validates the active configuration. It does not detect the platform and does not mutate the host. Use it for schema and cross-field validation.
+`cozydot check` deliberately preserves its public semantics: it validates the active YAML without platform detection or mutation.
 
-### `apply`
+## Platform facts
 
-Loads the configuration, detects the host, validates platform constraints, builds the complete apply plan, and executes it sequentially.
+`src/platform.rs` detects the operating system, Linux distribution and upstream family, distro and base codenames, desktop environment, and architecture. Cozydot Linux architecture names are `amd64`, `arm64`, and `arm32`; APT uses `amd64`, `arm64`, and `armhf`. macOS supports Apple Silicon only.
 
-Apply means ensure configured state. It should avoid reinstalling software that is already present.
+Linux repository applicability is resolved from `PlatformIdentity`, distro/upstream URL selection, and optional APT architecture filters. An inapplicable repository contributes no prerequisite, source, conflict, package, or metadata refresh.
 
-### `dotfiles`
+## Apply workflow
 
-Plans only shared and current-platform dotfiles. GNU Stow applies packages in configured order.
+`apply` is ensure-only. It accepts update controls as part of the complete configuration but never executes them. Existing executors inspect live state and avoid reinstalling state that is already correct.
 
-The default is conservative:
+Before Linux apply mutates the host, `linux_apply_facts` derives the normalized identity, applicable repository facts, aggregate conflicts and packages, direct and repository refresh requirements, manager bootstraps, architecture-specific binary applicability, and the deduplicated APT prerequisite set.
 
-```text
-unmanaged destination conflict
-→ report every conflict
-→ change nothing
-```
+Linux apply executes the following order, skipping absent capabilities:
 
-`--replace` moves conflicts into the XDG state directory before applying links.
+1. Verify administrator access.
+2. Converge Debian official components.
+3. Refresh distro APT metadata when required.
+4. Apply unattended-upgrade state.
+5. Apply Ubuntu Snap state.
+6. Install Ubuntu restricted codecs.
+7. Install derived APT prerequisites.
+8. Install configured direct APT packages.
+9. Publish applicable third-party repositories.
+10. Refresh repository metadata once after publication.
+11. Purge aggregate repository conflicts and install aggregate repository packages.
+12. Ensure Flathub availability.
+13. Install configured Flatpak applications.
+14. Bootstrap rustup.
+15. Ensure the Rust toolchain.
+16. Ensure the Go toolchain.
+17. Bootstrap FNM.
+18. Ensure the Node.js toolchain.
+19. Bootstrap uv.
+20. Ensure the Python toolchain.
+21. Bootstrap cargo-binstall.
+22. Bootstrap cargo-update.
+23. Converge configured Cargo packages.
+24. Converge configured npm packages.
+25. Converge configured Deb binaries.
+26. Converge appimaged.
+27. Converge configured AppImages.
+28. Converge configured Nerd Fonts.
+29. Apply shared and Linux dotfiles.
+30. Apply Docker integration.
+31. Apply VirtualBox integration.
+32. Converge VS Code extensions.
+33. Apply Linux desktop settings.
 
-### `update`
+`AptBootstrapPackages` performs its own metadata refresh immediately before installing missing prerequisites. A transcript can therefore contain that refresh in addition to the explicit distro or repository refreshes.
 
-Runs only enabled update policies. It does not replay apply behavior. Empty or all-false update configuration is a valid no-op.
+macOS apply derives Homebrew need from configured formulae, casks, dotfiles, FNM, and cargo-binstall. It adds `stow` to formulae for apply dotfile intent.
 
-## Repository map
+macOS apply executes the following order:
 
-```text
-src/main.rs                 CLI and command lifecycles
-src/config.rs               typed YAML schema and validation
-src/platform.rs             host detection and normalization
-src/planner/                configuration → ordered operations
-src/operations/mod.rs       Operation enum, labels, dispatch
-src/operations/             host-side executors
-src/init.rs                 embedded preset/dotfile synchronization
-build.rs                    embeds presets and dotfiles
-configs/cozydot.yaml        manually maintained base preset
-configs/{full,cli,vm}.yaml  generated presets
-dotfiles/                   GNU Stow packages
-tests/cli.rs                compact external behavior suite
-install.sh                  release installer
-scripts/                    generation and packaging
-```
+1. Verify administrator access.
+2. Install Xcode Command Line Tools.
+3. Install Rosetta.
+4. Bootstrap Homebrew when required.
+5. Install configured Homebrew formulae and casks.
+6. Bootstrap rustup.
+7. Ensure the Rust toolchain.
+8. Ensure the Go toolchain.
+9. Bootstrap FNM.
+10. Ensure the Node.js toolchain.
+11. Bootstrap uv.
+12. Ensure the Python toolchain.
+13. Bootstrap cargo-binstall.
+14. Bootstrap cargo-update.
+15. Converge configured Cargo packages.
+16. Converge configured npm packages.
+17. Install configured user Nerd Fonts.
+18. Apply shared and macOS dotfiles.
+19. Converge VS Code extensions.
+20. Apply macOS defaults.
 
-## Configuration
+Homebrew must precede FNM and cargo-binstall because those bootstraps use Homebrew on macOS.
 
-`Config::load` in `src/config.rs` performs typed deserialization and semantic validation.
+## Dotfiles workflow
 
-The root scopes are:
+Standalone `dotfiles` combines shared packages with packages for the detected platform, preserves declaration order, and executes one typed dotfiles operation when the list is non-empty. It does not bootstrap Stow; apply owns platform-specific Stow prerequisites.
 
-```text
-shared
-os.linux
-os.macos
-```
+The dotfiles executor performs complete preflight before changing destinations:
 
-`shared` describes portable intent such as toolchains, Cargo/npm packages, fonts, VS Code extensions, and dotfiles. Platform scopes describe native package managers, system settings, integrations, desktop behavior, and updates.
+1. Verify the dotfiles root and every selected package directory.
+2. Verify Stow availability.
+3. Resolve every intended link and destination.
+4. Collect all unmanaged destination conflicts.
+5. Report all conflicts and change nothing when `--replace` is absent.
+6. Prepare the backup destination when replacement is enabled.
+7. Move conflicts under `${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups`.
+8. Invoke Stow and stop on the first failed mutation.
 
-The schema uses `deny_unknown_fields`. Removing or renaming a field is therefore an intentional breaking change. Cozydot does not carry compatibility adapters for obsolete schemas.
+Cozydot never adopts destination files into its dotfile source.
 
-Empty optional sections and false enable-only flags are no-ops. Values interpreted by native tools should use the native tool's terminology unless Cozydot needs a typed selector for platform planning.
+## Update workflow
 
-### Presets
+`update` executes only explicitly enabled controls and does not replay apply intent. An absent, empty, or all-false update section is a validated silent no-op. Managed Deb and AppImage declarations are ensure-only and have no update category.
 
-Edit only:
+Linux update executes:
 
-```text
-configs/cozydot.yaml
-```
+1. Refresh APT metadata when an APT policy is enabled.
+2. Run the selected standard or full APT upgrade.
+3. Install deduplicated prerequisites for enabled updates.
+4. Update installed Flatpak applications.
+5. Bootstrap rustup.
+6. Update Rust toolchains.
+7. Update the Go toolchain.
+8. Bootstrap FNM.
+9. Update the Node.js toolchain.
+10. Bootstrap uv.
+11. Update the Python toolchain.
+12. Update installed Cargo packages.
+13. Update global npm packages.
+14. Redownload configured Nerd Fonts.
 
-Then regenerate:
+Linux npm package update remains independent from Node toolchain update: npm-only update does not add FNM or APT prerequisites. Flatpak update installs the native `flatpak` prerequisite when needed but does not configure Flathub.
+
+macOS update executes:
+
+1. Bootstrap Homebrew when required by FNM.
+2. Update selected Homebrew formulae and casks.
+3. Bootstrap rustup.
+4. Update Rust toolchains.
+5. Update the Go toolchain.
+6. Bootstrap FNM.
+7. Update the Node.js toolchain.
+8. Bootstrap uv.
+9. Update the Python toolchain.
+10. Update installed Cargo packages.
+11. Update global npm packages.
+12. Redownload configured user Nerd Fonts.
+
+npm update on macOS derives FNM and therefore Homebrew. Selectorless Go and Node updates use `latest`; Python updates use major line `3`; Rust updates all installed rustup toolchains.
+
+## Operation execution
+
+The small workflow `execute` helper obtains the operation label, prints `Applying <label>` or `Updating <label>`, dispatches through `operations::execute`, adds action context to failures, reports `LoginRequired`, and returns immediately on failure. A workflow with no enabled operations prints nothing.
+
+`Operation` remains Cozydot's safe typed execution boundary. There is no YAML-to-shell path. Executors invoke fixed programs with separate argument vectors, inspect live state, reject unexpected status, and return success when requested state is already correct.
+
+## Repository safety
+
+Direct distro packages intentionally precede third-party repository publication. Applicable repositories are published sequentially, followed by one metadata refresh and one aggregate conflict/package operation.
+
+Repository config validation covers safe names, bounded keyring destinations, `.asc` or `.gpg` suffixes, non-empty URL maps, suite and component requirements, supported APT architectures, collisions, and control characters.
+
+The executor downloads each key to an unprivileged temporary file, rejects empty content, validates that GPG finds a public key, prepares armored or binary bytes, and only then publishes through `src/operations/privileged_file.rs`. Privileged publication stages and fsyncs content beside the bounded destination, rejects directory destinations, atomically renames, and syncs the parent. Do not replace this with streamed writes into `/etc` or `/usr`.
+
+## Other lifecycles
+
+Architecture-specific binary declarations are derived immediately before their execution section. Missing mappings contribute no operation. Appimaged is converged before individual AppImages.
+
+Linux desktop intent is checked against the detected desktop before mutation. The workflow derives `dconf-cli` and `libglib2.0-bin`, plus `gnome-shell` for GNOME extension capabilities. Desktop settings execute last. macOS defaults are collected into one typed operation and also execute last.
+
+`init` owns its separate managed-file lifecycle: validate managed paths and symlink boundaries, preserve user-edited or unmanaged files, atomically synchronize selected files, and publish the managed hash manifest only after successful synchronization.
+
+## Tests and changes
+
+`tests/cli.rs` is the authoritative compact integration suite. It covers validation before platform detection or mutation, init ownership, silent no-ops, dotfile preflight and replacement, repository applicability and key safety, repository/package ordering, APT policy, and installer safety. Do not add unit tests under `src/`.
+
+When changing orchestration:
+
+1. Read the relevant config type, root workflow, typed operation, and executor.
+2. State the required dependency order and no-op behavior.
+3. Keep complete config/platform checking before mutation.
+4. Keep Linux and macOS policy differences explicit.
+5. Keep lifecycle order visible in the root workflow.
+6. Derive prerequisites once and preserve manager-before-consumer order.
+7. Preserve repository filtering, aggregation, and post-publication refresh.
+8. Preserve fixed arguments, bounded paths, public-key validation, and atomic publication.
+9. Add integration coverage only for a meaningful public or safety boundary.
+10. Search for obsolete architecture terms, inspect the complete diff, and run all required checks.
+
+Required checks:
 
 ```bash
-scripts/generate-configs.sh
-```
-
-The script derives `full`, `cli`, and `vm`. CI checks that generated files are current.
-
-## Platform detection
-
-`src/platform.rs` normalizes:
-
-- distro and upstream family;
-- distro and base codenames;
-- desktop environment;
-- architecture.
-
-Linux architecture names inside Cozydot are:
-
-```text
-amd64
-arm64
-arm32
-```
-
-APT repository `arch` uses Debian names:
-
-```text
-amd64
-arm64
-armhf
-```
-
-Supported Debian releases are Bookworm and Trixie. Unsupported distributions, releases, architectures, and configured desktop requirements fail before a plan executes.
-
-`check` intentionally skips platform detection. `apply`, `dotfiles`, and `update` require it.
-
-## Planning
-
-`src/planner/mod.rs` owns ordering. Leaf modules contribute typed `Operation` values to private execution stages. The stages are implementation-only dependency buckets, not user-visible actions.
-
-Important ordering rules include:
-
-```text
-administrator checks
-→ platform foundation
-→ direct APT metadata and packages
-→ derived prerequisites and manager bootstraps
-→ third-party repositories
-→ repository metadata refresh
-→ repository conflicts and packages
-→ language managers and toolchains
-→ ecosystem packages
-→ binaries
-→ fonts
-→ dotfiles
-→ integrations
-→ desktop settings
-```
-
-Do not rely on function call order alone. `ExecutionStage` controls the final order.
-
-The planner also derives prerequisites. A repository requires curl, CA
-certificates, and GPG; Linux npm apply requires FNM; Cargo packages require
-Rust and cargo-binstall. Add such dependencies in the planner rather than
-asking users to repeat them in YAML.
-
-The entire plan is created before execution. A planning or platform-validation error must therefore happen before host mutation.
-
-## Operations
-
-`src/operations/mod.rs` is the execution boundary.
-
-Each `Operation` variant contains already planned data. Dispatch is explicit. Executors should:
-
-1. inspect live state;
-2. return success when the requested state already exists;
-3. mutate through fixed argument vectors;
-4. stop on an unexpected command status;
-5. provide context that identifies the failed action.
-
-There is no general shell-script operation and no YAML-to-shell interpolation.
-
-`Host` in `src/operations/host.rs` centralizes command execution and environment/path access. Keep command arguments separate. Do not build shell strings for ordinary execution.
-
-## APT lifecycle
-
-Direct APT packages run before third-party repository packages:
-
-```text
-refresh distro metadata
-→ install missing direct packages
-→ publish applicable third-party repositories
-→ refresh metadata once for those repositories
-→ purge installed declared conflicts once
-→ install all missing repository packages once
-```
-
-The two refresh points serve different source sets. Do not collapse them unless direct packages are deliberately moved after repository publication.
-
-### Third-party repositories
-
-Every declaration is validated before platform filtering or mutation:
-
-- safe `sources.list.d` name;
-- non-empty distro URL map;
-- key path directly under `/etc/apt/keyrings` or `/usr/share/keyrings`;
-- safe `.asc` or `.gpg` key filename;
-- required non-empty suite and components;
-- supported APT architecture names;
-- no control characters in source values.
-
-Applicability is:
-
-```text
-matching exact distro, upstream family, or default URL
-AND
-current architecture included by optional arch
-```
-
-An inapplicable repository contributes no source, conflict, package, prerequisite, or metadata refresh.
-
-Applicable repositories follow this path:
-
-```text
-download key to an unprivileged temporary file
-→ reject empty content
-→ dearmor and require at least one public key
-→ keep armored bytes for .asc or binary bytes for .gpg
-→ atomically publish the key and source file
-```
-
-All applicable repository conflicts and packages are aggregated. Purging happens only after repository publication and a successful metadata refresh.
-
-### Debian official sources
-
-Pure Debian converges official source components separately. It selects the
-conventional Bookworm or Trixie source file and appends the required components
-to entries that already contain `main`. This is not the third-party repository
-path.
-
-## Privileged publication
-
-`src/operations/privileged_file.rs` publishes root-owned files through staged writes:
-
-```text
-write and fsync an unprivileged temporary file
-→ sudo install into a temporary file beside the destination
-→ sync the staged file
-→ reject directory destinations
-→ atomic mv over the destination
-→ sync the parent directory
-```
-
-Do not replace this with streamed writes into `/etc` or `/usr`. Download and parsing failures must leave privileged destinations untouched.
-
-## Init ownership
-
-`src/init.rs` embeds presets and dotfiles at build time and tracks managed hashes.
-
-The update policy is:
-
-```text
-missing file              → install
-known and unchanged file  → refresh
-modified or unmanaged     → preserve
-```
-
-Paths must remain relative, normal, UTF-8-compatible, and free of tabs/newlines. The configuration root and managed directory chain must not traverse symlinks.
-
-The manifest is published only after all selected files synchronize successfully.
-
-## Dotfiles
-
-A dotfile package is a real directory below the embedded `dotfiles/` root. The source tree is authoritative. Cozydot never copies a destination file back into the repository.
-
-Before replacement, Cozydot validates every configured package and checks GNU Stow. This prevents a later bad package or missing executable from moving earlier conflicts and leaving the operation half-complete.
-
-GnuPG dotfiles receive special handling because `~/.gnupg` must remain a real directory with mode `0700`.
-
-## Apply and update semantics
-
-Keep ensure and update behavior separate.
-
-Examples:
-
-- `apply` installs a missing configured Cargo package;
-- `update` runs cargo-update only when enabled;
-- `apply` ensures the selected toolchain;
-- `update` asks the native manager to update according to policy;
-- managed Deb/AppImage binaries are ensure-only.
-
-A native manager owns native value parsing where possible. Cozydot should not duplicate upstream grammars without a planning or safety reason.
-
-## Integration tests
-
-`tests/cli.rs` is intentionally small and external. It tests command contracts and high-risk boundaries through the compiled CLI:
-
-- help, version, missing configuration, and installer rejection;
-- init ownership and preset materialization;
-- validation before platform detection or mutation;
-- silent no-op apply/update;
-- dotfile conflict and replacement behavior;
-- repository schema, applicability, key validation, publication, ordering, and idempotence;
-- APT update policy.
-
-Do not add a test for every enum field, command spelling, or upstream manager output. Add integration coverage when a failure would violate a public command contract, mutation ordering, idempotence, or a security boundary.
-
-Prefer one end-to-end case that proves a lifecycle over several narrow tests that repeat the same setup. Fake executables should record fixed argv and model only the state needed by the contract.
-
-## Making a change
-
-1. Read the relevant config type, planner leaf, operation variant, and executor.
-2. Write the intended lifecycle and identify prerequisites and ordering.
-3. Update the base preset if the schema or defaults change.
-4. Regenerate derived presets.
-5. Update the external behavior test only when the public contract changes.
-6. Run all checks.
-7. Search for obsolete names and documentation.
-8. Review the complete diff for unrelated changes.
-
-## Required checks
-
-```bash
-scripts/generate-configs.sh --check
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
-RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
-scripts/package-release.sh
-bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
+cargo build --locked --release
+scripts/generate-configs.sh --check
 git diff --check
 ```
-
-The release script builds with `--locked` and writes the archive and checksum under `target/`.
-
-## Review checklist
-
-Before committing, answer these directly:
-
-- Does the complete configuration fail before mutation?
-- Is platform applicability resolved before adding operations?
-- Is dependency order encoded by the correct execution stage?
-- Does the executor inspect state before changing it?
-- Are privileged destinations constrained and atomically published?
-- Is repeated apply a no-op where the native state is already correct?
-- Did generated presets and public docs change with the schema?
-- Does the compact integration suite still cover the changed public boundary?

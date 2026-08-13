@@ -112,8 +112,9 @@ and `armhf`.
 ## Safety model
 
 - `apply`, `dotfiles`, and `update` validate the complete active configuration
-  and resolved platform, then build a complete ordered operation plan before
-  starting side effects.
+  against the detected platform before starting side effects. Explicit Linux
+  and macOS workflows then execute typed operations sequentially in dependency
+  order and stop on the first failure.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
   execution uses a fixed set of typed `Operation` variants and executors.
