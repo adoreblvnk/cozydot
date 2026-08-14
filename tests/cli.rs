@@ -269,6 +269,32 @@ fn empty_apply_and_update_are_silent_noops() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn ensure_admin_is_not_applied_on_a_non_debian_host() {
+    if os_release_value("ID") == "debian" {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let root = config_root(&temp);
+    let fake_bin = temp.path().join("bin");
+    let mutation = temp.path().join("mutation");
+    write_config(&root, "{}", "system:\n  ensure_admin: true\n");
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
+
+    Command::cargo_bin("cozydot")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", temp.path().join("config"))
+        .env("COZYDOT_TEST_MUTATION", &mutation)
+        .env("PATH", &fake_bin)
+        .arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+    assert!(!mutation.exists());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn dotfiles_refuse_conflicts_and_replace_only_when_explicit() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");

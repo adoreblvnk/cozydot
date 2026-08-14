@@ -61,10 +61,10 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
 fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     let facts = linux_apply_facts(config, platform)?;
 
-    if config.linux.system.ensure_admin == Some(true) {
-        execute("Applying", Operation::EnsureAdmin)?;
-    }
     if platform.distro == "debian" {
+        if config.linux.system.ensure_admin == Some(true) {
+            execute("Applying", Operation::EnsureAdmin)?;
+        }
         execute("Applying", Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() })?;
     }
     if platform.distro == "ubuntu"

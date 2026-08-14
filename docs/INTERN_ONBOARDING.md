@@ -69,28 +69,27 @@ Before Linux apply mutates the host, `linux_apply_facts` derives the normalized 
 
 Linux apply executes the following order, skipping absent configuration:
 
-1. If administrator verification is enabled:
-   1. Verify administrator access.
-2. On Debian:
-   1. Converge official Debian APT components.
-3. On Ubuntu:
+1. On Debian:
+   1. If administrator verification is enabled, verify administrator access.
+   2. Converge official Debian APT components.
+2. On Ubuntu:
    1. If unattended upgrades are configured, apply their state.
    2. If Snap is configured, apply its state.
    3. If codecs are enabled, install Ubuntu restricted codecs.
-4. If distro APT metadata is required:
+3. If distro APT metadata is required:
    1. Refresh APT metadata.
-5. If derived APT prerequisites are required:
+4. If derived APT prerequisites are required:
    1. Install the prerequisites.
-6. If direct APT packages are configured:
+5. If direct APT packages are configured:
    1. Install the packages.
-7. If applicable third-party repositories are configured:
+6. If applicable third-party repositories are configured:
    1. Publish each repository.
    2. Refresh repository metadata once.
    3. Purge aggregate conflicts and install aggregate repository packages.
-8. If Flatpak applications are configured:
+7. If Flatpak applications are configured:
    1. Ensure Flathub availability.
    2. Install the configured applications.
-9. Apply required tools:
+8. Apply required tools:
    1. Bootstrap rustup.
    2. Ensure the Rust toolchain.
    3. Bootstrap FNM.
@@ -100,22 +99,22 @@ Linux apply executes the following order, skipping absent configuration:
    7. Ensure the Go toolchain.
    8. Bootstrap cargo-binstall.
    9. Bootstrap cargo-update.
-10. Apply configured language packages:
-    1. Converge Cargo packages.
-    2. Converge npm packages.
-11. Converge each applicable Deb binary.
-12. If applicable AppImages are configured:
+9. Apply configured language packages:
+   1. Converge Cargo packages.
+   2. Converge npm packages.
+10. Converge each applicable Deb binary.
+11. If applicable AppImages are configured:
     1. Converge appimaged.
     2. Converge each AppImage.
-13. If Nerd Fonts are configured:
+12. If Nerd Fonts are configured:
     1. Converge the configured font families.
-14. If dotfiles are configured:
+13. If dotfiles are configured:
     1. Apply shared and Linux dotfiles.
-15. Apply configured integrations:
+14. Apply configured integrations:
     1. Apply Docker group membership and logging.
     2. Apply VirtualBox group membership.
     3. Converge VS Code extensions.
-16. If Linux desktop settings are configured:
+15. If Linux desktop settings are configured:
     1. Apply the settings.
 
 `AptBootstrapPackages` performs its own metadata refresh immediately before installing missing prerequisites. A transcript can therefore contain that refresh in addition to the explicit distro or repository refreshes.
