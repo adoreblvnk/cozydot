@@ -14,28 +14,26 @@ fn config(shared: &str, linux: &str) -> String {
             "integrations": {"vscode": {"extensions": []}},
             "updates": {"tools": {}, "packages": {}, "fonts": null}
         },
-        "os": {
-            "linux": {
-                "system": {},
-                "packages": {},
-                "dotfiles": {"packages": []},
-                "integrations": {},
-                "desktop": null,
-                "updates": null
-            },
-            "macos": {
-                "system": {"xcode": {}},
-                "homebrew": {"formulae": [], "casks": []},
-                "dotfiles": {"packages": []},
-                "desktop": {},
-                "updates": {"homebrew": {}}
-            }
+        "linux": {
+            "system": {},
+            "packages": {},
+            "dotfiles": {"packages": []},
+            "integrations": {},
+            "desktop": null,
+            "updates": null
+        },
+        "macos": {
+            "system": {"xcode": {}},
+            "homebrew": {"formulae": [], "casks": []},
+            "dotfiles": {"packages": []},
+            "desktop": {},
+            "updates": {"homebrew": {}}
         }
     });
     let shared: Value = yaml_serde::from_str(shared).unwrap();
     let linux: Value = yaml_serde::from_str(linux).unwrap();
     value["shared"].as_object_mut().unwrap().extend(shared.as_object().unwrap().clone());
-    value["os"]["linux"].as_object_mut().unwrap().extend(linux.as_object().unwrap().clone());
+    value["linux"].as_object_mut().unwrap().extend(linux.as_object().unwrap().clone());
     serde_json::to_string(&value).unwrap()
 }
 

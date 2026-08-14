@@ -32,7 +32,8 @@ impl<'de> Deserialize<'de> for ConfigVersion {
 pub struct Config {
     pub version: ConfigVersion,
     pub shared: SharedConfig,
-    pub os: OsConfig,
+    pub linux: LinuxConfig,
+    pub macos: MacOsConfig,
 }
 
 impl Config {
@@ -65,8 +66,8 @@ impl Config {
             if platform.architecture != Architecture::DarwinArm64 {
                 bail!("unsupported macOS architecture; only Apple Silicon (arm64) is supported");
             }
-            if self.macos().system.rosetta == Some(true) && platform.architecture != Architecture::DarwinArm64 {
-                bail!("os.macos.system.rosetta: Rosetta requires Apple Silicon macOS");
+            if self.macos.system.rosetta == Some(true) && platform.architecture != Architecture::DarwinArm64 {
+                bail!("macos.system.rosetta: Rosetta requires Apple Silicon macOS");
             }
             return Ok(());
         }
@@ -74,27 +75,27 @@ impl Config {
         let distro = identity.distro;
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
-        if let Some(require) = self.os.linux.system.require.as_ref() {
+        if let Some(require) = self.linux.system.require.as_ref() {
             if require.distros.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
-                bail!("os.linux.system.require.distros: detected distribution {:?} is not allowed", platform.distro);
+                bail!("linux.system.require.distros: detected distribution {:?} is not allowed", platform.distro);
             }
             if require.desktops.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
-                bail!("os.linux.system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
+                bail!("linux.system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
             }
         }
 
-        if let Some(configured) = &self.os.linux.desktop
+        if let Some(configured) = &self.linux.desktop
             && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
         {
             if configured.has_neutral_intent() {
                 bail!(
-                    "os.linux.desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
+                    "linux.desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
                     platform.desktop
                 );
             }
             if configured.gnome.as_ref().is_some_and(Gnome::has_intent) {
                 bail!(
-                    "os.linux.desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
+                    "linux.desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     platform.desktop
                 );
             }
@@ -103,12 +104,12 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
-        self.os.linux.packages.validate()?;
+        self.linux.packages.validate()?;
         self.shared.fonts.validate()?;
         self.shared.dotfiles.validate("shared.dotfiles")?;
-        self.os.linux.dotfiles.validate("os.linux.dotfiles")?;
-        self.os.macos.dotfiles.validate("os.macos.dotfiles")?;
-        if let Some(desktop) = &self.os.linux.desktop {
+        self.linux.dotfiles.validate("linux.dotfiles")?;
+        self.macos.dotfiles.validate("macos.dotfiles")?;
+        if let Some(desktop) = &self.linux.desktop {
             desktop.validate()?;
         }
         if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
@@ -129,10 +130,6 @@ impl Config {
             }
         }
         Ok(())
-    }
-
-    pub fn macos(&self) -> &MacOsConfig {
-        &self.os.macos
     }
 }
 
@@ -166,13 +163,6 @@ pub struct SharedUpdates {
     pub tools: ToolUpdates,
     pub packages: PackageUpdates,
     pub fonts: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OsConfig {
-    pub linux: LinuxConfig,
-    pub macos: MacOsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -290,7 +280,7 @@ impl Distro {
             "linuxmint" => Ok(Self::Linuxmint),
             "pop" => Ok(Self::Pop),
             "debian" => Ok(Self::Debian),
-            _ => bail!("os.linux.system.require.distros: unsupported detected distribution {value:?}"),
+            _ => bail!("linux.system.require.distros: unsupported detected distribution {value:?}"),
         }
     }
 }
@@ -312,7 +302,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     let upstream = match platform.upstream.as_str() {
         "ubuntu" => Family::Ubuntu,
         "debian" => Family::Debian,
-        value => bail!("os.linux.system.require.distros: unsupported platform upstream family {value:?}"),
+        value => bail!("linux.system.require.distros: unsupported platform upstream family {value:?}"),
     };
     let valid = match distro {
         Distro::Ubuntu | Distro::Pop => upstream == Family::Ubuntu,
@@ -321,7 +311,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     };
     if !valid {
         bail!(
-            "os.linux.system.require.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
+            "linux.system.require.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
             platform.distro,
             platform.upstream
         );
@@ -343,7 +333,7 @@ impl DesktopKind {
             "none" => Ok(Self::None),
             "gnome" => Ok(Self::Gnome),
             "cinnamon" => Ok(Self::Cinnamon),
-            _ => bail!("os.linux.system.require.desktops: unsupported detected desktop {value:?}"),
+            _ => bail!("linux.system.require.desktops: unsupported detected desktop {value:?}"),
         }
     }
 }
@@ -394,7 +384,6 @@ pub fn select_distro_map<T>(
 pub struct System {
     pub require: Option<PlatformRequirements>,
     pub ensure_admin: Option<bool>,
-    pub apt: Option<SystemApt>,
     pub ubuntu: Option<UbuntuSystem>,
 }
 
@@ -403,12 +392,6 @@ pub struct System {
 pub struct PlatformRequirements {
     pub distros: Option<Vec<Distro>>,
     pub desktops: Option<Vec<DesktopKind>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SystemApt {
-    pub unattended_upgrades: Option<EnabledDisabled>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -421,6 +404,7 @@ pub enum EnabledDisabled {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UbuntuSystem {
+    pub unattended_upgrades: Option<EnabledDisabled>,
     pub snap: Option<EnabledDisabled>,
     #[serde(default)]
     pub codecs: bool,
@@ -444,7 +428,7 @@ impl Packages {
             for (index, binary) in binaries.iter().enumerate() {
                 binary.validate(index)?;
                 if !names.insert(binary.name.as_str()) {
-                    bail!("os.linux.packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
+                    bail!("linux.packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
                 }
             }
         }
@@ -468,13 +452,13 @@ impl AptPackages {
                 repository.validate(index)?;
                 if !names.insert(repository.name.as_str()) {
                     bail!(
-                        "os.linux.packages.apt.repositories[{index}].name: duplicate repository name {:?}",
+                        "linux.packages.apt.repositories[{index}].name: duplicate repository name {:?}",
                         repository.name
                     );
                 }
                 if !key_paths.insert(repository.key_path.as_str()) {
                     bail!(
-                        "os.linux.packages.apt.repositories[{index}].key_path: destination {:?} collides with an earlier repository",
+                        "linux.packages.apt.repositories[{index}].key_path: destination {:?} collides with an earlier repository",
                         repository.key_path
                     );
                 }
@@ -502,7 +486,7 @@ pub struct Repository {
 
 impl Repository {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("os.linux.packages.apt.repositories[{index}]");
+        let path = format!("linux.packages.apt.repositories[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
         if self.key.chars().any(char::is_control) {
@@ -595,7 +579,7 @@ pub struct BinaryPackage {
 
 impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("os.linux.packages.binaries[{index}]");
+        let path = format!("linux.packages.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         self.source.validate(&format!("{path}.source"))
     }
@@ -733,7 +717,7 @@ pub struct Desktop {
 impl Desktop {
     fn validate(&self) -> Result<()> {
         if let Some(terminal) = &self.terminal {
-            validate_executable(terminal, "os.linux.desktop.terminal")?;
+            validate_executable(terminal, "linux.desktop.terminal")?;
         }
         Ok(())
     }
