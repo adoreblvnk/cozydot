@@ -67,68 +67,94 @@ Linux repository applicability is resolved from `PlatformIdentity`, distro/upstr
 
 Before Linux apply mutates the host, `linux_apply_facts` derives the normalized identity, applicable repository facts, aggregate conflicts and packages, direct and repository refresh requirements, manager bootstraps, architecture-specific binary applicability, and the deduplicated APT prerequisite set.
 
-Linux apply executes the following order, skipping absent capabilities:
+Linux apply executes the following order, skipping absent configuration:
 
-1. Verify administrator access.
-2. Converge Debian official components.
-3. Refresh distro APT metadata when required.
-4. Apply unattended-upgrade state.
-5. Apply Ubuntu Snap state.
-6. Install Ubuntu restricted codecs.
-7. Install derived APT prerequisites.
-8. Install configured direct APT packages.
-9. Publish applicable third-party repositories.
-10. Refresh repository metadata once after publication.
-11. Purge aggregate repository conflicts and install aggregate repository packages.
-12. Ensure Flathub availability.
-13. Install configured Flatpak applications.
-14. Bootstrap rustup.
-15. Ensure the Rust toolchain.
-16. Ensure the Go toolchain.
-17. Bootstrap FNM.
-18. Ensure the Node.js toolchain.
-19. Bootstrap uv.
-20. Ensure the Python toolchain.
-21. Bootstrap cargo-binstall.
-22. Bootstrap cargo-update.
-23. Converge configured Cargo packages.
-24. Converge configured npm packages.
-25. Converge configured Deb binaries.
-26. Converge appimaged.
-27. Converge configured AppImages.
-28. Converge configured Nerd Fonts.
-29. Apply shared and Linux dotfiles.
-30. Apply Docker integration.
-31. Apply VirtualBox integration.
-32. Converge VS Code extensions.
-33. Apply Linux desktop settings.
+1. If administrator verification is enabled:
+   1. Verify administrator access.
+2. On Debian:
+   1. Converge official Debian APT components.
+3. On Ubuntu:
+   1. If unattended upgrades are configured, apply their state.
+   2. If Snap is configured, apply its state.
+   3. If codecs are enabled, install Ubuntu restricted codecs.
+4. If distro APT metadata is required:
+   1. Refresh APT metadata.
+5. If derived APT prerequisites are required:
+   1. Install the prerequisites.
+6. If direct APT packages are configured:
+   1. Install the packages.
+7. If applicable third-party repositories are configured:
+   1. Publish each repository.
+   2. Refresh repository metadata once.
+   3. Purge aggregate conflicts and install aggregate repository packages.
+8. If Flatpak applications are configured:
+   1. Ensure Flathub availability.
+   2. Install the configured applications.
+9. Apply required tools:
+   1. Bootstrap rustup.
+   2. Ensure the Rust toolchain.
+   3. Bootstrap FNM.
+   4. Ensure the Node.js toolchain.
+   5. Bootstrap uv.
+   6. Ensure the Python toolchain.
+   7. Ensure the Go toolchain.
+   8. Bootstrap cargo-binstall.
+   9. Bootstrap cargo-update.
+10. Apply configured language packages:
+    1. Converge Cargo packages.
+    2. Converge npm packages.
+11. Converge each applicable Deb binary.
+12. If applicable AppImages are configured:
+    1. Converge appimaged.
+    2. Converge each AppImage.
+13. If Nerd Fonts are configured:
+    1. Converge the configured font families.
+14. If dotfiles are configured:
+    1. Apply shared and Linux dotfiles.
+15. Apply configured integrations:
+    1. Apply Docker group membership and logging.
+    2. Apply VirtualBox group membership.
+    3. Converge VS Code extensions.
+16. If Linux desktop settings are configured:
+    1. Apply the settings.
 
 `AptBootstrapPackages` performs its own metadata refresh immediately before installing missing prerequisites. A transcript can therefore contain that refresh in addition to the explicit distro or repository refreshes.
 
 macOS apply derives Homebrew need from configured formulae, casks, dotfiles, FNM, and cargo-binstall. It adds `stow` to formulae for apply dotfile intent.
 
-macOS apply executes the following order:
+macOS apply executes the following order, skipping absent configuration:
 
-1. Verify administrator access.
-2. Install Xcode Command Line Tools.
-3. Install Rosetta.
-4. Bootstrap Homebrew when required.
-5. Install configured Homebrew formulae and casks.
-6. Bootstrap rustup.
-7. Ensure the Rust toolchain.
-8. Ensure the Go toolchain.
-9. Bootstrap FNM.
-10. Ensure the Node.js toolchain.
-11. Bootstrap uv.
-12. Ensure the Python toolchain.
-13. Bootstrap cargo-binstall.
-14. Bootstrap cargo-update.
-15. Converge configured Cargo packages.
-16. Converge configured npm packages.
-17. Install configured user Nerd Fonts.
-18. Apply shared and macOS dotfiles.
-19. Converge VS Code extensions.
-20. Apply macOS defaults.
+1. If administrator verification is enabled:
+   1. Verify administrator access.
+2. If Xcode Command Line Tools are enabled:
+   1. Install Xcode Command Line Tools.
+3. If Rosetta is enabled:
+   1. Install Rosetta.
+4. If Homebrew is required:
+   1. Bootstrap Homebrew.
+5. If Homebrew packages are required:
+   1. Install configured formulae and casks.
+6. Apply required tools:
+   1. Bootstrap rustup.
+   2. Ensure the Rust toolchain.
+   3. Bootstrap FNM.
+   4. Ensure the Node.js toolchain.
+   5. Bootstrap uv.
+   6. Ensure the Python toolchain.
+   7. Ensure the Go toolchain.
+   8. Bootstrap cargo-binstall.
+   9. Bootstrap cargo-update.
+7. Apply configured language packages:
+   1. Converge Cargo packages.
+   2. Converge npm packages.
+8. If Nerd Fonts are configured:
+   1. Install the configured user font families.
+9. If dotfiles are configured:
+   1. Apply shared and macOS dotfiles.
+10. If VS Code extensions are configured:
+    1. Converge the extensions.
+11. If macOS defaults are configured:
+    1. Apply the defaults.
 
 Homebrew must precede FNM and cargo-binstall because those bootstraps use Homebrew on macOS.
 
