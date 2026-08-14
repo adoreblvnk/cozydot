@@ -179,7 +179,7 @@ pub struct LinuxConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinuxUpdates {
-    pub apt: Option<AptUpdate>,
+    pub apt: Option<AptUpgradeCommand>,
     pub flatpak: Option<bool>,
 }
 
@@ -196,7 +196,7 @@ pub struct MacOsConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacSystem {
-    pub ensure_admin: Option<bool>,
+    pub validate_sudo_access: Option<bool>,
     pub xcode: MacXcode,
     pub rosetta: Option<bool>,
 }
@@ -383,7 +383,7 @@ pub fn select_distro_map<T>(
 #[serde(deny_unknown_fields)]
 pub struct System {
     pub require: Option<PlatformRequirements>,
-    pub ensure_admin: Option<bool>,
+    pub add_user_to_sudo_group: Option<bool>,
     pub ubuntu: Option<UbuntuSystem>,
 }
 
@@ -405,9 +405,9 @@ pub enum EnabledDisabled {
 #[serde(deny_unknown_fields)]
 pub struct UbuntuSystem {
     pub unattended_upgrades: Option<EnabledDisabled>,
-    pub snap: Option<EnabledDisabled>,
+    pub snapd: Option<EnabledDisabled>,
     #[serde(default)]
-    pub codecs: bool,
+    pub restricted_extras: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -769,23 +769,23 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
 #[serde(deny_unknown_fields)]
 pub struct Gnome {
     pub extensions: Option<Vec<String>>,
-    pub dock: Option<bool>,
-    pub rounded_corners: Option<bool>,
+    pub dash_to_dock: Option<bool>,
+    pub rounded_window_corners: Option<bool>,
 }
 
 impl Gnome {
     fn has_intent(&self) -> bool {
         self.extensions.as_ref().is_some_and(|extensions| !extensions.is_empty())
-            || self.dock == Some(true)
-            || self.rounded_corners == Some(true)
+            || self.dash_to_dock == Some(true)
+            || self.rounded_window_corners == Some(true)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AptUpdate {
-    Standard,
-    Full,
+#[serde(rename_all = "kebab-case")]
+pub enum AptUpgradeCommand {
+    Upgrade,
+    FullUpgrade,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

@@ -48,7 +48,7 @@ shared:
     fonts: true
 linux:
   system:
-    ensure_admin: true
+    add_user_to_sudo_group: true
     require:
       distros:
         - ubuntu
@@ -57,7 +57,7 @@ linux:
         - linuxmint
     ubuntu:
       unattended_upgrades: disabled
-      snap: disabled
+      snapd: disabled
   packages:
     apt:
       install:
@@ -113,10 +113,10 @@ linux:
       - bash
   integrations: {}
   updates:
-    apt: full
+    apt: full-upgrade
 macos:
   system:
-    ensure_admin: true
+    validate_sudo_access: true
     xcode:
       command_line_tools: true
     rosetta: false

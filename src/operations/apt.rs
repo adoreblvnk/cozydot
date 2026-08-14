@@ -2,26 +2,26 @@ use super::Host;
 use anyhow::Result;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AptUpgradePolicy {
-    Standard,
-    Full,
+pub enum AptUpgradeCommand {
+    Upgrade,
+    FullUpgrade,
 }
 
-pub fn metadata_refresh(host: &Host) -> Result<()> {
-    host.require("APT metadata refresh", "sudo", ["apt-get", "update", "-qq"])?;
+pub fn update(host: &Host) -> Result<()> {
+    host.require("APT update", "sudo", ["apt-get", "update", "-qq"])?;
     Ok(())
 }
 
-pub fn bootstrap_packages(host: &Host, packages: &[String]) -> Result<()> {
+pub fn update_and_install(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
-        anyhow::bail!("APT bootstrap package sequence must not be empty");
+        anyhow::bail!("APT update-and-install package sequence must not be empty");
     }
     let missing = missing_packages(host, packages)?;
     if missing.is_empty() {
         return Ok(());
     }
-    host.require("APT bootstrap metadata refresh", "sudo", ["apt-get", "update", "-qq"])?;
-    install(host, "APT bootstrap package installation", missing)
+    host.require("APT update before install", "sudo", ["apt-get", "update", "-qq"])?;
+    install(host, "APT package install", missing)
 }
 
 pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
@@ -35,9 +35,9 @@ pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
     install(host, "APT package installation", missing)
 }
 
-pub fn repository_packages(host: &Host, conflicts: &[String], packages: &[String]) -> Result<()> {
-    purge(host, conflicts)?;
-    self::packages(host, packages)
+pub fn purge_then_install(host: &Host, purge_packages: &[String], install_packages: &[String]) -> Result<()> {
+    purge(host, purge_packages)?;
+    self::packages(host, install_packages)
 }
 
 fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
@@ -117,18 +117,18 @@ pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn upgrade(host: &Host, policy: AptUpgradePolicy) -> Result<()> {
-    match policy {
-        AptUpgradePolicy::Standard => {
+pub fn upgrade(host: &Host, command: AptUpgradeCommand) -> Result<()> {
+    match command {
+        AptUpgradeCommand::Upgrade => {
             host.require(
-                "APT standard upgrade",
+                "APT upgrade",
                 "sudo",
                 ["DEBIAN_FRONTEND=noninteractive", "apt-get", "upgrade", "-y", "-qq", "--"],
             )?;
         }
-        AptUpgradePolicy::Full => {
+        AptUpgradeCommand::FullUpgrade => {
             host.require(
-                "APT full upgrade",
+                "APT full-upgrade",
                 "sudo",
                 ["DEBIAN_FRONTEND=noninteractive", "apt-get", "full-upgrade", "-y", "-qq", "--"],
             )?;

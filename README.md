@@ -97,14 +97,14 @@ makes `cozydot update` a validated silent no-op. `apply` accepts update controls
 but never executes them. Managed Deb and AppImage binaries remain ensure-only
 and have no update category.
 
-`updates.apt: standard|full` refreshes APT metadata, then performs a system-wide
-APT `upgrade` or `full-upgrade`; `full` also runs purge-autoremove. This updates
+`updates.apt: upgrade|full-upgrade` runs `apt-get update`, then performs a system-wide
+APT `upgrade` or `full-upgrade`; `full-upgrade` also runs purge-autoremove. This updates
 existing APT-managed state only. Run `cozydot apply` first after changing APT
 packages or repositories.
 
 Direct APT packages are ensured before third-party repositories. Cozydot publishes
 every repository applicable to the detected distribution and optional APT-native
-`arch` list, refreshes metadata once, purges all installed repository conflicts,
+`arch` list, runs `apt-get update` once, purges all installed repository conflicts,
 then installs all missing repository packages in one operation. An omitted `arch`
 supports every Cozydot Linux architecture; supported values are `amd64`, `arm64`,
 and `armhf`.

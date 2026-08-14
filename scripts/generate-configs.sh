@@ -21,7 +21,7 @@ generate_cli() {
   yq '
     del(
       .linux.system.require.desktops,
-      .linux.system.ubuntu.codecs,
+      .linux.system.ubuntu.restricted_extras,
       .linux.packages.flatpak,
       .linux.desktop,
       .linux.updates.flatpak
@@ -58,7 +58,7 @@ generate_vm() {
     .shared.tools.node = "latest" |
     .shared.dotfiles.packages -= ["opencode"] |
     .shared.integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
-    .linux.updates.apt = "full"
+    .linux.updates.apt = "full-upgrade"
   ' "$base"
 }
 

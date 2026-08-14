@@ -18,31 +18,31 @@ struct GoRelease {
     sha256: String,
 }
 
-pub(crate) fn apply_rust(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn install_default_rust_toolchain(host: &Host, selector: &str) -> Result<()> {
     let rustup =
-        managed_program(host, ".cargo/bin/rustup", "Rust toolchain operation: rustup is unavailable after bootstrap")?;
-    host.require("Rust toolchain mutation", &rustup, rust_install_args(selector))?;
-    host.require("Rust default toolchain mutation", &rustup, ["default", "--", selector])?;
+        managed_executable(host, ".cargo/bin/rustup", "Rust toolchain operation: rustup is unavailable after install")?;
+    host.require("rustup toolchain install", &rustup, rust_install_args(selector))?;
+    host.require("rustup default", &rustup, ["default", "--", selector])?;
     Ok(())
 }
 
 pub(crate) fn update_rust(host: &Host) -> Result<()> {
     let rustup =
-        managed_program(host, ".cargo/bin/rustup", "Rust toolchain update: rustup is unavailable after bootstrap")?;
+        managed_executable(host, ".cargo/bin/rustup", "Rust toolchain update: rustup is unavailable after install")?;
     host.require("Rust toolchain update", &rustup, ["update"])?;
     Ok(())
 }
 
-pub(crate) fn execute_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
-    super::languages::go_profile(host)?;
+pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+    super::languages::add_go_to_path(host)?;
     let expected_arch = architecture.go();
     let requested = match selector {
         GoToolchainSelector::Latest => "latest",
         GoToolchainSelector::Version(version) => version,
     };
     let GoRelease { version, filename, sha256 } = resolve_go_release(host, requested, architecture)?;
-    if inspect_go(host, "/usr/local/go/bin/go")?
-        .is_some_and(|state| state.version == version && state.architecture == expected_arch)
+    if inspect_go_installation(host, "/usr/local/go/bin/go")?
+        .is_some_and(|installation| installation.version == version && installation.architecture == expected_arch)
     {
         return Ok(());
     }
@@ -72,9 +72,9 @@ pub(crate) fn execute_go(host: &Host, selector: &GoToolchainSelector, architectu
     if actual != sha256 {
         bail!("downloaded Go archive checksum mismatch");
     }
-    host.require("Go toolchain publication", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
+    host.require("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
     host.require(
-        "Go toolchain publication",
+        "Go archive extraction",
         "sudo",
         ["tar", "-xzf", archive.path().to_str().context("Go archive path is not UTF-8")?, "-C", "/usr/local"],
     )?;
@@ -86,33 +86,33 @@ pub(crate) fn update_go(host: &Host, selector: &GoToolchainSelector, architectur
         eprintln!("warning: Go update skipped because shared.tools.go is pinned to an exact version");
         return Ok(());
     }
-    execute_go(host, selector, architecture)
+    install_go(host, selector, architecture)
 }
 
-pub(crate) fn apply_node(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn install_default_node_toolchain(host: &Host, selector: &str) -> Result<()> {
     let fnm = resolve_fnm(host)?;
-    install_node(host, &fnm, selector)?;
-    host.require("Node default toolchain mutation", &fnm, ["default", "--", node_alias(selector)])?;
+    fnm_install(host, &fnm, selector)?;
+    host.require("fnm default", &fnm, ["default", "--", fnm_alias(selector)])?;
     Ok(())
 }
 
 pub(crate) fn update_node(host: &Host, selector: &str) -> Result<()> {
-    apply_node(host, selector)
+    install_default_node_toolchain(host, selector)
 }
 
-fn install_node(host: &Host, fnm: &str, selector: &str) -> Result<()> {
+fn fnm_install(host: &Host, fnm: &str, selector: &str) -> Result<()> {
     if selector == "lts" {
-        host.require("Node toolchain mutation", fnm, ["install", "--progress", "never", "--lts"])?;
+        host.require("fnm install", fnm, ["install", "--progress", "never", "--lts"])?;
     } else {
-        host.require("Node toolchain mutation", fnm, ["install", "--progress", "never", "--", selector])?;
+        host.require("fnm install", fnm, ["install", "--progress", "never", "--", selector])?;
     }
     Ok(())
 }
 
-pub(crate) fn apply_python(host: &Host, version: &str) -> Result<()> {
-    let uv = managed_program(host, ".local/bin/uv", "Python toolchain operation: uv is unavailable after bootstrap")?;
+pub(crate) fn install_default_python(host: &Host, version: &str) -> Result<()> {
+    let uv = managed_executable(host, ".local/bin/uv", "Python toolchain operation: uv is unavailable after install")?;
     host.require(
-        "Python toolchain mutation",
+        "uv python install",
         &uv,
         ["python", "install", "--no-config", "--managed-python", "--no-progress", "--default", "--", version],
     )?;
@@ -120,7 +120,7 @@ pub(crate) fn apply_python(host: &Host, version: &str) -> Result<()> {
 }
 
 pub(crate) fn update_python(host: &Host) -> Result<()> {
-    let uv = managed_program(host, ".local/bin/uv", "Python toolchain update: uv is unavailable after bootstrap")?;
+    let uv = managed_executable(host, ".local/bin/uv", "Python toolchain update: uv is unavailable after install")?;
     host.require("uv self update", &uv, ["self", "update"])?;
     host.require(
         "Python toolchain update",
@@ -130,8 +130,8 @@ pub(crate) fn update_python(host: &Host) -> Result<()> {
     Ok(())
 }
 
-fn managed_program(host: &Host, relative: &str, message: &str) -> Result<String> {
-    let path = host.home().join(relative);
+fn managed_executable(host: &Host, relative_path: &str, message: &str) -> Result<String> {
+    let path = host.home().join(relative_path);
     if real_executable_file(&path) {
         return path_program(&path, "managed tool executable path");
     }
@@ -160,7 +160,7 @@ mod resolution {
             ],
         )?;
         let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
-        let (version, filename, sha256) = super::super::latest_go(
+        let (version, filename, sha256) = super::super::select_go_release(
             std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,
             requested,
             architecture.go_archive(),
@@ -174,12 +174,12 @@ mod state {
     use super::*;
 
     #[derive(Debug, PartialEq, Eq)]
-    pub(super) struct GoState {
+    pub(super) struct GoInstallation {
         pub(super) version: String,
         pub(super) architecture: String,
     }
 
-    pub(super) fn inspect_go(host: &Host, program: &str) -> Result<Option<GoState>> {
+    pub(super) fn inspect_go_installation(host: &Host, program: &str) -> Result<Option<GoInstallation>> {
         if program.starts_with('/') && !real_executable_file(Path::new(program)) {
             return Ok(None);
         }
@@ -197,10 +197,10 @@ mod state {
         if !output.status.success() {
             return Ok(None);
         }
-        parse_go_state(&output.stdout).map(Some)
+        parse_go_version_output(&output.stdout).map(Some)
     }
 
-    pub(super) fn parse_go_state(output: &[u8]) -> Result<GoState> {
+    pub(super) fn parse_go_version_output(output: &[u8]) -> Result<GoInstallation> {
         let output = single_line(output, "go version")?;
         let fields = output.split_whitespace().collect::<Vec<_>>();
         let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
@@ -216,7 +216,7 @@ mod state {
             .strip_prefix("go")
             .filter(|version| numeric_version(version, 2, 3))
             .context("go returned malformed version state")?;
-        Ok(GoState {
+        Ok(GoInstallation {
             version: version.to_owned(),
             architecture: fields[3].trim_start_matches(&format!("{target_os}/")).to_owned(),
         })
@@ -224,14 +224,14 @@ mod state {
 
     pub(super) fn resolve_fnm(host: &Host) -> Result<String> {
         if cfg!(target_os = "macos") {
-            return super::super::macos::formula_program(host, "fnm", "fnm");
+            return super::super::macos::formula_executable(host, "fnm", "fnm");
         }
         let data_home = host.home().join(".local/share");
         let managed = data_home.join("fnm/fnm");
         if real_executable_file(&managed) {
             return path_program(&managed, "managed fnm executable path");
         }
-        bail!("Node toolchain operation: fnm is unavailable after bootstrap")
+        bail!("Node toolchain operation: fnm is unavailable after install")
     }
 }
 
@@ -242,7 +242,7 @@ fn rust_install_args(toolchain: &str) -> [&str; 7] {
     ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
 }
 
-fn node_alias(selector: &str) -> &str {
+fn fnm_alias(selector: &str) -> &str {
     match selector {
         "lts" => "lts-latest",
         value => value,

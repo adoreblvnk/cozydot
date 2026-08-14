@@ -60,13 +60,8 @@ pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result
     let key = processed_key(host, &operation.key_url, preserve_armor)?;
     let source = operation.render_source().into_bytes();
 
-    super::privileged_file::publish_bytes(host, &operation.keyring_path, &key, "APT repository key publication")?;
-    super::privileged_file::publish_bytes(
-        host,
-        &operation.source_list_path,
-        &source,
-        "APT repository source publication",
-    )?;
+    super::privileged_file::write_atomic(host, &operation.keyring_path, &key, "APT repository keyring write")?;
+    super::privileged_file::write_atomic(host, &operation.source_list_path, &source, "APT repository source write")?;
 
     Ok(())
 }
@@ -182,16 +177,11 @@ pub(crate) mod debian_components {
             return Ok(());
         }
         if read(host, source)? != original {
-            bail!("Debian APT source changed concurrently before publication");
+            bail!("Debian APT source changed concurrently before write");
         }
-        privileged_file::publish_bytes(
-            host,
-            Path::new(source),
-            replacement.as_bytes(),
-            "Debian APT component publication",
-        )?;
+        privileged_file::write_atomic(host, Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
         if read(host, source)? != replacement.as_bytes() {
-            bail!("Debian APT component publication did not establish the required postcondition");
+            bail!("Debian APT component write did not establish the required postcondition");
         }
         Ok(())
     }
