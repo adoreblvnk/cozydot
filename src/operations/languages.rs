@@ -3,27 +3,27 @@ use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
 use super::{Host, TempPath, real_executable_file};
 
-const CARGO_ENV: &str = r#"if [ -f "$HOME/.cargo/env" ]; then
+const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then
   . "$HOME/.cargo/env"
 fi"#;
-const UV_ENV: &str = r#"if [ -f "$HOME/.local/bin/env" ]; then
+const UV_INIT: &str = r#"if [ -f "$HOME/.local/bin/env" ]; then
   . "$HOME/.local/bin/env"
 fi"#;
-const FNM_BASH_ENV: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
+const FNM_BASH_INIT: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
 if [ -d "$FNM_PATH" ]; then
   export PATH="$FNM_PATH:$PATH"
   eval "$(fnm env --use-on-cd --shell bash)"
 fi"#;
-const FNM_ZSH_ENV: &str = r#"eval "$(fnm env --use-on-cd --shell zsh)""#;
-const GO_ENV: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
+const FNM_ZSH_INIT: &str = r#"eval "$(fnm env --use-on-cd --shell zsh)""#;
+const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 
-pub fn rustup(host: &Host) -> Result<()> {
+pub fn install_rustup(host: &Host) -> Result<()> {
     let cargo_home = host.home().join(".cargo");
     let installed = cargo_home.join("bin/rustup");
     if !real_executable_file(&installed) {
         let installer = TempPath::new(host, "rustup")?;
         host.require(
-            "rustup bootstrap download",
+            "rustup installer download",
             "curl",
             [
                 "--proto",
@@ -36,7 +36,7 @@ pub fn rustup(host: &Host) -> Result<()> {
             ],
         )?;
         host.require(
-            "rustup bootstrap",
+            "rustup install",
             "env",
             [
                 format!("CARGO_HOME={}", cargo_home.display()),
@@ -48,16 +48,16 @@ pub fn rustup(host: &Host) -> Result<()> {
             ],
         )?;
         if !real_executable_file(&installed) {
-            bail!("rustup bootstrap did not publish the managed rustup executable");
+            bail!("rustup installer did not publish the managed rustup executable");
         }
     }
-    append_profile(host, CARGO_ENV)
+    append_profile(host, CARGO_INIT)
 }
 
-pub fn fnm_bootstrap(host: &Host) -> Result<()> {
+pub fn install_fnm(host: &Host) -> Result<()> {
     if cfg!(target_os = "macos") {
         super::macos::install_formula(host, "fnm")?;
-        return append_shell(host, FNM_ZSH_ENV);
+        return append_shell(host, FNM_ZSH_INIT);
     }
 
     let data_home = host.home().join(".local/share");
@@ -65,12 +65,12 @@ pub fn fnm_bootstrap(host: &Host) -> Result<()> {
     if !real_executable_file(&installed) {
         let installer = TempPath::new(host, "fnm-install")?;
         host.require(
-            "FNM bootstrap download",
+            "FNM installer download",
             "curl",
             ["-fsSL", "-o", &installer.path().to_string_lossy(), "https://fnm.vercel.app/install"],
         )?;
         host.require(
-            "FNM bootstrap",
+            "FNM install",
             "env",
             [
                 format!("XDG_DATA_HOME={}", data_home.display()),
@@ -80,35 +80,35 @@ pub fn fnm_bootstrap(host: &Host) -> Result<()> {
             ],
         )?;
         if !real_executable_file(&installed) {
-            bail!("FNM bootstrap did not publish executable {}", installed.display());
+            bail!("FNM installer did not publish executable {}", installed.display());
         }
     }
-    append_shell(host, FNM_BASH_ENV)
+    append_shell(host, FNM_BASH_INIT)
 }
 
-pub fn uv_bootstrap(host: &Host) -> Result<()> {
+pub fn install_uv(host: &Host) -> Result<()> {
     let installed = host.home().join(".local/bin/uv");
     if !real_executable_file(&installed) {
         let installer = TempPath::new(host, "uv-install")?;
         host.require(
-            "uv bootstrap download",
+            "uv installer download",
             "curl",
             ["-LsSf", "-o", &installer.path().to_string_lossy(), "https://astral.sh/uv/install.sh"],
         )?;
         host.require(
-            "uv bootstrap",
+            "uv install",
             "env",
             ["UV_NO_MODIFY_PATH=1", "sh", installer.path().to_str().context("uv installer path is not UTF-8")?],
         )?;
         if !real_executable_file(&installed) {
-            bail!("uv bootstrap did not publish executable {}", installed.display());
+            bail!("uv installer did not publish executable {}", installed.display());
         }
     }
-    append_profile(host, UV_ENV)
+    append_profile(host, UV_INIT)
 }
 
-pub fn go_profile(host: &Host) -> Result<()> {
-    append_profile(host, GO_ENV)
+pub fn add_go_to_path(host: &Host) -> Result<()> {
+    append_profile(host, GO_PATH_INIT)
 }
 
 fn append_profile(host: &Host, snippet: &str) -> Result<()> {

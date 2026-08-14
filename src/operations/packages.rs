@@ -5,21 +5,21 @@ pub(crate) mod cargo {
 
     use super::super::{Host, executable_file, path_program};
 
-    pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
+    pub(crate) fn install_missing(host: &Host, packages: &[String]) -> Result<()> {
         let cargo_home = host.home().join(".cargo");
         let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
         let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
         let installed = installed_crates(&output.stdout)?;
         let missing =
-            packages.iter().filter(|package| !installed.contains(crate_identity(package))).cloned().collect::<Vec<_>>();
+            packages.iter().filter(|package| !installed.contains(crate_name(package))).cloned().collect::<Vec<_>>();
         if missing.is_empty() {
             return Ok(());
         }
         let binstall = resolve_binstall(host, &cargo_home)?
-            .context("Cargo package operation: managed cargo-binstall is unavailable after bootstrap")?;
+            .context("Cargo package operation: managed cargo-binstall is unavailable after install")?;
         let mut args = vec!["--no-confirm".to_owned(), "--".into()];
         args.extend(missing);
-        host.require("Cargo package mutation", &binstall, args)?;
+        host.require("cargo-binstall install", &binstall, args)?;
         Ok(())
     }
 
@@ -59,13 +59,13 @@ pub(crate) mod cargo {
         Ok(installed)
     }
 
-    fn crate_identity(package: &str) -> &str {
+    fn crate_name(package: &str) -> &str {
         package.split_once('@').map_or(package, |(name, _)| name)
     }
 
     fn resolve_binstall(host: &Host, cargo_home: &Path) -> Result<Option<String>> {
         if cfg!(target_os = "macos") {
-            return super::super::macos::formula_program(host, "cargo-binstall", "cargo-binstall").map(Some);
+            return super::super::macos::formula_executable(host, "cargo-binstall", "cargo-binstall").map(Some);
         }
         let managed = cargo_home.join("bin/cargo-binstall");
         if executable_file(&managed) {
@@ -80,15 +80,15 @@ pub(crate) mod npm {
 
     use super::super::{Host, executable_file};
 
-    pub(crate) fn ensure(host: &Host, packages: &[String]) -> Result<()> {
+    pub(crate) fn install_missing(host: &Host, packages: &[String]) -> Result<()> {
         let Some(fnm) = resolve_fnm(host)? else {
-            bail!("npm package operation: managed fnm is unavailable after bootstrap");
+            bail!("npm package operation: managed fnm is unavailable after install");
         };
         let mut missing = Vec::new();
         for package in packages {
-            let identity = package_identity(package);
-            let output = host
-                .run(&fnm, ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", identity])?;
+            let name = package_name(package);
+            let output =
+                host.run(&fnm, ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name])?;
             if !output.status.success() {
                 missing.push(package.clone());
             }
@@ -98,17 +98,17 @@ pub(crate) mod npm {
         }
         let mut npm_args = vec!["install".to_owned(), "--global".into(), "--".into()];
         npm_args.extend(missing);
-        run_npm_required(host, &fnm, "npm package mutation", npm_args)?;
+        run_npm_checked(host, &fnm, "npm package installation", npm_args)?;
         Ok(())
     }
 
     pub(crate) fn update_all(host: &Host) -> Result<()> {
         let Some(fnm) = resolve_fnm(host)? else { return Ok(()) };
-        run_npm_required(host, &fnm, "npm package update", ["update", "--global"])?;
+        run_npm_checked(host, &fnm, "npm package update", ["update", "--global"])?;
         Ok(())
     }
 
-    fn package_identity(package: &str) -> &str {
+    fn package_name(package: &str) -> &str {
         if package.starts_with('@') {
             let slash = package.find('/').unwrap_or(package.len());
             let version = package[slash..].find('@').map(|index| slash + index);
@@ -119,7 +119,7 @@ pub(crate) mod npm {
 
     fn resolve_fnm(host: &Host) -> Result<Option<String>> {
         if cfg!(target_os = "macos") {
-            return super::super::macos::formula_program(host, "fnm", "fnm").map(Some);
+            return super::super::macos::formula_executable(host, "fnm", "fnm").map(Some);
         }
         let data_home = host.home().join(".local/share");
         let managed = data_home.join("fnm/fnm");
@@ -129,7 +129,7 @@ pub(crate) mod npm {
         Ok(None)
     }
 
-    fn run_npm_required<I, S>(host: &Host, fnm: &str, operation: &str, npm_args: I) -> Result<std::process::Output>
+    fn run_npm_checked<I, S>(host: &Host, fnm: &str, operation: &str, npm_args: I) -> Result<std::process::Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -148,15 +148,15 @@ pub(crate) mod flatpak {
     const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
     const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
 
-    pub fn ensure_flathub(host: &Host) -> Result<()> {
+    pub fn add_flathub_remote(host: &Host) -> Result<()> {
         host.require(
-            "Flathub remote ensure",
+            "Flathub remote add",
             "flatpak",
             ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
         )?;
         let url_arg = format!("--url={FLATHUB_URL}");
         host.require(
-            "Flathub remote security canonicalization",
+            "Flathub remote modify",
             "flatpak",
             [
                 "--user",
@@ -173,12 +173,12 @@ pub(crate) mod flatpak {
         Ok(())
     }
 
-    pub fn ensure_apps(host: &Host, refs: &[String]) -> Result<()> {
+    pub fn install_missing_apps(host: &Host, refs: &[String]) -> Result<()> {
         let mut missing = Vec::new();
-        for app_id in refs {
-            let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", app_id])?;
+        for reference in refs {
+            let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", reference])?;
             if !output.status.success() {
-                missing.push(app_id.clone());
+                missing.push(reference.clone());
             }
         }
         if missing.is_empty() {
@@ -215,7 +215,7 @@ pub(crate) mod fonts {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum NerdFontsMode {
-        EnsurePresent,
+        InstallMissing,
         Update,
     }
 
@@ -364,7 +364,7 @@ pub(crate) mod dotfiles {
     fn apply_package(host: &Host, root: &Path, package: &str, source: &Path) -> Result<()> {
         prepare_gnupg_home(source, &host.home())?;
         host.require(
-            "dotfiles Stow mutation",
+            "stow package install",
             "stow",
             [
                 "--dir".as_ref(),

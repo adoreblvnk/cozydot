@@ -51,7 +51,7 @@ tests/cli.rs           external lifecycle and safety contracts
 
 `ActiveHost::load` then detects the platform and calls `Config::validate_for_platform`. No host-changing workflow starts before that complete config/platform check succeeds. This rejects unsupported distribution, architecture, desktop, and platform-specific intent before mutation.
 
-Repository declarations receive static validation before applicability filtering. Linux apply also constructs every applicable repository payload during its pure preflight, before its first executor call. This catches malformed source facts before an earlier operation can mutate the host without recreating a hidden complete operation plan. Network key retrieval, public-key validation, and publication remain live executor checks.
+Repository declarations receive static validation before applicability filtering. Linux apply also constructs every applicable repository payload during its pure preflight, before its first executor call. This catches malformed source data before an earlier operation can change the host without recreating a hidden complete operation plan. Network key retrieval, public-key validation, and repository file writes remain live executor checks.
 
 `cozydot check` deliberately preserves its public semantics: it validates the active YAML without platform detection or mutation.
 
@@ -59,46 +59,46 @@ Repository declarations receive static validation before applicability filtering
 
 `src/platform.rs` detects the operating system, Linux distribution and upstream family, distro and base codenames, desktop environment, and architecture. Cozydot Linux architecture names are `amd64`, `arm64`, and `arm32`; APT uses `amd64`, `arm64`, and `armhf`. macOS supports Apple Silicon only.
 
-Linux repository applicability is resolved from `PlatformIdentity`, distro/upstream URL selection, and optional APT architecture filters. An inapplicable repository contributes no prerequisite, source, conflict, package, or metadata refresh.
+Linux repository applicability is resolved from `PlatformIdentity`, distro/upstream URL selection, and optional APT architecture filters. An inapplicable repository contributes no prerequisite, source, purge, install, or APT update.
 
 ## Apply workflow
 
 `apply` is ensure-only. It accepts update controls as part of the complete configuration but never executes them. Existing executors inspect live state and avoid reinstalling state that is already correct.
 
-Before Linux apply mutates the host, `linux_apply_facts` derives the normalized identity, applicable repository facts, aggregate conflicts and packages, direct and repository refresh requirements, manager bootstraps, architecture-specific binary applicability, and the deduplicated APT prerequisite set.
+Before Linux apply changes the host, `plan_linux_apply` derives the normalized identity, applicable repositories, aggregate purge/install package lists, APT update requirements, manager installs, architecture-specific binary applicability, and the deduplicated APT prerequisite set.
 
 Linux apply executes the following order, skipping absent configuration:
 
 1. On Debian:
-   1. If administrator verification is enabled, verify administrator access.
+   1. If configured, add the effective user to the `sudo` group.
    2. Converge official Debian APT components.
 2. On Ubuntu:
    1. If unattended upgrades are configured, apply their state.
-   2. If Snap is configured, apply its state.
-   3. If codecs are enabled, install Ubuntu restricted codecs.
-3. If distro APT metadata is required:
-   1. Refresh APT metadata.
+   2. If snapd is configured, enable or disable it.
+   3. If restricted extras are enabled, install `ubuntu-restricted-extras`.
+3. If an early APT update is required:
+   1. Run `apt-get update`.
 4. If derived APT prerequisites are required:
    1. Install the prerequisites.
 5. If direct APT packages are configured:
    1. Install the packages.
 6. If applicable third-party repositories are configured:
    1. Publish each repository.
-   2. Refresh repository metadata once.
+   2. Run `apt-get update` once.
    3. Purge aggregate conflicts and install aggregate repository packages.
 7. If Flatpak applications are configured:
-   1. Ensure Flathub availability.
+   1. Add and configure the Flathub remote.
    2. Install the configured applications.
 8. Apply required tools:
-   1. Bootstrap rustup.
+   1. Install rustup.
    2. Ensure the Rust toolchain.
-   3. Bootstrap FNM.
+   3. Install FNM.
    4. Ensure the Node.js toolchain.
-   5. Bootstrap uv.
+   5. Install uv.
    6. Ensure the Python toolchain.
    7. Ensure the Go toolchain.
-   8. Bootstrap cargo-binstall.
-   9. Bootstrap cargo-update.
+   8. Install cargo-binstall.
+   9. Install cargo-update.
 9. Apply configured language packages:
    1. Converge Cargo packages.
    2. Converge npm packages.
@@ -117,32 +117,32 @@ Linux apply executes the following order, skipping absent configuration:
 15. If Linux desktop settings are configured:
     1. Apply the settings.
 
-`AptBootstrapPackages` performs its own metadata refresh immediately before installing missing prerequisites. A transcript can therefore contain that refresh in addition to the explicit distro or repository refreshes.
+`AptUpdateAndInstall` runs `apt-get update` immediately before installing missing prerequisites. A transcript can therefore contain that update in addition to the explicit distro or repository updates.
 
 macOS apply derives Homebrew need from configured formulae, casks, dotfiles, FNM, and cargo-binstall. It adds `stow` to formulae for apply dotfile intent.
 
 macOS apply executes the following order, skipping absent configuration:
 
-1. If administrator verification is enabled:
-   1. Verify administrator access.
+1. If sudo access validation is enabled:
+   1. Run `sudo -v`.
 2. If Xcode Command Line Tools are enabled:
    1. Install Xcode Command Line Tools.
 3. If Rosetta is enabled:
    1. Install Rosetta.
 4. If Homebrew is required:
-   1. Bootstrap Homebrew.
+   1. Install Homebrew.
 5. If Homebrew packages are required:
    1. Install configured formulae and casks.
 6. Apply required tools:
-   1. Bootstrap rustup.
+   1. Install rustup.
    2. Ensure the Rust toolchain.
-   3. Bootstrap FNM.
+   3. Install FNM.
    4. Ensure the Node.js toolchain.
-   5. Bootstrap uv.
+   5. Install uv.
    6. Ensure the Python toolchain.
    7. Ensure the Go toolchain.
-   8. Bootstrap cargo-binstall.
-   9. Bootstrap cargo-update.
+   8. Install cargo-binstall.
+   9. Install cargo-update.
 7. Apply configured language packages:
    1. Converge Cargo packages.
    2. Converge npm packages.
@@ -155,11 +155,11 @@ macOS apply executes the following order, skipping absent configuration:
 11. If macOS defaults are configured:
     1. Apply the defaults.
 
-Homebrew must precede FNM and cargo-binstall because those bootstraps use Homebrew on macOS.
+Homebrew must precede FNM and cargo-binstall because those installations use Homebrew on macOS.
 
 ## Dotfiles workflow
 
-Standalone `dotfiles` combines shared packages with packages for the detected platform, preserves declaration order, and executes one typed dotfiles operation when the list is non-empty. It does not bootstrap Stow; apply owns platform-specific Stow prerequisites.
+Standalone `dotfiles` combines shared packages with packages for the detected platform, preserves declaration order, and executes one typed dotfiles operation when the list is non-empty. It does not install Stow; apply owns platform-specific Stow prerequisites.
 
 The dotfiles executor performs complete preflight before changing destinations:
 
@@ -181,15 +181,15 @@ Cozydot never adopts destination files into its dotfile source.
 Linux update executes:
 
 1. Refresh APT metadata when an APT policy is enabled.
-2. Run the selected standard or full APT upgrade.
+2. Run the selected `apt-get upgrade` or `apt-get full-upgrade` command.
 3. Install deduplicated prerequisites for enabled updates.
 4. Update installed Flatpak applications.
-5. Bootstrap rustup.
+5. Install rustup.
 6. Update Rust toolchains.
 7. Update the Go toolchain.
-8. Bootstrap FNM.
+8. Install FNM.
 9. Update the Node.js toolchain.
-10. Bootstrap uv.
+10. Install uv.
 11. Update the Python toolchain.
 12. Update installed Cargo packages.
 13. Update global npm packages.
@@ -199,14 +199,14 @@ Linux npm package update remains independent from Node toolchain update: npm-onl
 
 macOS update executes:
 
-1. Bootstrap Homebrew when required by FNM.
+1. Install Homebrew when required by FNM.
 2. Update selected Homebrew formulae and casks.
-3. Bootstrap rustup.
+3. Install rustup.
 4. Update Rust toolchains.
 5. Update the Go toolchain.
-6. Bootstrap FNM.
+6. Install FNM.
 7. Update the Node.js toolchain.
-8. Bootstrap uv.
+8. Install uv.
 9. Update the Python toolchain.
 10. Update installed Cargo packages.
 11. Update global npm packages.
@@ -222,11 +222,11 @@ The small workflow `execute` helper obtains the operation label, prints `Applyin
 
 ## Repository safety
 
-Direct distro packages intentionally precede third-party repository publication. Applicable repositories are published sequentially, followed by one metadata refresh and one aggregate conflict/package operation.
+Direct distribution packages intentionally precede third-party repository writes. Applicable repositories are written sequentially, followed by one APT update and one aggregate purge/install operation.
 
 Repository config validation covers safe names, bounded keyring destinations, `.asc` or `.gpg` suffixes, non-empty URL maps, suite and component requirements, supported APT architectures, collisions, and control characters.
 
-The executor downloads each key to an unprivileged temporary file, rejects empty content, validates that GPG finds a public key, prepares armored or binary bytes, and only then publishes through `src/operations/privileged_file.rs`. Privileged publication stages and fsyncs content beside the bounded destination, rejects directory destinations, atomically renames, and syncs the parent. Do not replace this with streamed writes into `/etc` or `/usr`.
+The executor downloads each key to an unprivileged temporary file, rejects empty content, validates that GPG finds a public key, prepares armored or binary bytes, and only then calls `write_atomic` in `src/operations/privileged_file.rs`. The atomic write stages and fsyncs content beside the bounded destination, rejects directory destinations, renames the staged file, and syncs the parent. Do not replace this with streamed writes into `/etc` or `/usr`.
 
 ## Other lifecycles
 
@@ -248,8 +248,8 @@ When changing orchestration:
 4. Keep Linux and macOS policy differences explicit.
 5. Keep lifecycle order visible in the root workflow.
 6. Derive prerequisites once and preserve manager-before-consumer order.
-7. Preserve repository filtering, aggregation, and post-publication refresh.
-8. Preserve fixed arguments, bounded paths, public-key validation, and atomic publication.
+7. Preserve repository filtering, aggregation, and the APT update after repository writes.
+8. Preserve fixed arguments, bounded paths, public-key validation, and atomic writes.
 9. Add integration coverage only for a meaningful public or safety boundary.
 10. Search for obsolete architecture terms, inspect the complete diff, and run all required checks.
 

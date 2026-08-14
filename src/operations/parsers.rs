@@ -1,4 +1,4 @@
-pub(crate) fn latest_go(
+pub(crate) fn select_go_release(
     input: &str,
     requested: &str,
     arch: &str,
@@ -29,7 +29,7 @@ pub(crate) fn latest_go(
     Ok((version.to_owned(), filename, sha256.to_owned()))
 }
 
-pub(crate) fn gnome_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {
+pub(crate) fn select_gnome_extension_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {
     use anyhow::{Context, bail};
     let value: serde_json::Value = serde_json::from_str(input).context("parse GNOME extension JSON")?;
     let versions = value["shell_version_map"].as_object().context("GNOME response has no shell_version_map")?;

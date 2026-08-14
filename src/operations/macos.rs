@@ -3,22 +3,22 @@ use anyhow::{Result, bail};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MacDefault {
-    Appearance(bool),
+    DarkMode(bool),
     DockAutohide(bool),
     DockRecentApplications(bool),
-    FinderExtensions(bool),
+    ShowAllFilenameExtensions(bool),
     FinderHiddenFiles(bool),
     KeyRepeat(i32),
     InitialKeyRepeat(i32),
     TrackpadTapToClick(bool),
 }
 
-pub fn ensure_admin(host: &Host) -> Result<()> {
-    host.require("macOS administrator access", "sudo", ["-v"])?;
+pub fn validate_sudo_access(host: &Host) -> Result<()> {
+    host.require("macOS sudo access", "sudo", ["-v"])?;
     Ok(())
 }
 
-pub fn bootstrap(host: &Host) -> Result<()> {
+pub fn install_homebrew(host: &Host) -> Result<()> {
     if brew_program(host).is_ok() {
         return Ok(());
     }
@@ -37,42 +37,42 @@ pub fn bootstrap(host: &Host) -> Result<()> {
         ],
     )?;
     host.require(
-        "Homebrew bootstrap",
+        "Homebrew install",
         "/bin/bash",
         [script.path().to_str().ok_or_else(|| anyhow::anyhow!("Homebrew installer path is not UTF-8"))?],
     )?;
     Ok(())
 }
 
-pub fn packages(host: &Host, formulae: &[String], casks: &[String]) -> Result<()> {
+pub fn install_packages(host: &Host, formulae: &[String], casks: &[String]) -> Result<()> {
     let brew = brew_program(host)?;
     for formula in formulae {
-        if !installed(host, &brew, "--formula", formula)? {
+        if !is_installed(host, &brew, "--formula", formula)? {
             host.require("Homebrew formula install", &brew, ["install", formula])?;
         }
     }
     for cask in casks {
-        if !installed(host, &brew, "--cask", cask)? {
+        if !is_installed(host, &brew, "--cask", cask)? {
             host.require("Homebrew cask install", &brew, ["install", "--cask", cask])?;
         }
     }
     Ok(())
 }
 
-fn installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
+fn is_installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
     Ok(host.run(brew, ["list", kind, name])?.status.success())
 }
 
 pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
-    bootstrap(host)?;
+    install_homebrew(host)?;
     let brew = brew_program(host)?;
-    if !installed(host, &brew, "--formula", formula)? {
+    if !is_installed(host, &brew, "--formula", formula)? {
         host.require("Homebrew formula install", &brew, ["install", formula])?;
     }
     Ok(())
 }
 
-pub(crate) fn formula_program(host: &Host, formula: &str, executable: &str) -> Result<String> {
+pub(crate) fn formula_executable(host: &Host, formula: &str, executable: &str) -> Result<String> {
     let brew = brew_program(host)?;
     let output = host.require("Homebrew formula prefix", &brew, ["--prefix", formula])?;
     let prefix = std::str::from_utf8(&output.stdout)?.trim();
@@ -87,11 +87,11 @@ fn brew_program(host: &Host) -> Result<String> {
         }
     }
     bail!(
-        "Homebrew is unavailable after bootstrap; expected brew on PATH, /opt/homebrew/bin/brew, or /usr/local/bin/brew"
+        "Homebrew is unavailable after install; expected brew on PATH, /opt/homebrew/bin/brew, or /usr/local/bin/brew"
     )
 }
 
-pub fn xcode_command_line_tools(host: &Host) -> Result<()> {
+pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {
     if host.run("xcode-select", ["-p"]).is_ok_and(|output| output.status.success()) {
         return Ok(());
     }
@@ -99,14 +99,14 @@ pub fn xcode_command_line_tools(host: &Host) -> Result<()> {
     Ok(())
 }
 
-pub fn rosetta(host: &Host) -> Result<()> {
-    host.require("Rosetta", "softwareupdate", ["--install-rosetta", "--agree-to-license"])?;
+pub fn install_rosetta(host: &Host) -> Result<()> {
+    host.require("Rosetta install", "softwareupdate", ["--install-rosetta", "--agree-to-license"])?;
     Ok(())
 }
 
 pub fn update(host: &Host, formulae: bool, casks: bool) -> Result<()> {
     let brew = brew_program(host)?;
-    host.require("Homebrew metadata refresh", &brew, ["update"])?;
+    host.require("Homebrew update", &brew, ["update"])?;
     if formulae {
         host.require("Homebrew formula updates", &brew, ["upgrade"])?;
     }
@@ -116,10 +116,10 @@ pub fn update(host: &Host, formulae: bool, casks: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
+pub fn write_defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
     for setting in settings {
         match setting {
-            MacDefault::Appearance(dark) => {
+            MacDefault::DarkMode(dark) => {
                 if *dark {
                     host.require(
                         "macOS appearance",
@@ -132,7 +132,7 @@ pub fn defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
             }
             MacDefault::DockAutohide(value) => write_bool(host, "com.apple.dock", "autohide", *value)?,
             MacDefault::DockRecentApplications(value) => write_bool(host, "com.apple.dock", "show-recents", *value)?,
-            MacDefault::FinderExtensions(value) => {
+            MacDefault::ShowAllFilenameExtensions(value) => {
                 write_bool(host, "NSGlobalDomain", "AppleShowAllExtensions", *value)?
             }
             MacDefault::FinderHiddenFiles(value) => write_bool(host, "com.apple.finder", "AppleShowAllFiles", *value)?,

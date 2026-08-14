@@ -45,7 +45,7 @@ shared:
     fonts: true
 linux:
   system:
-    ensure_admin: true
+    add_user_to_sudo_group: true
     require:
       distros:
         - ubuntu
@@ -54,8 +54,8 @@ linux:
         - gnome
     ubuntu:
       unattended_upgrades: disabled
-      snap: disabled
-      codecs: true
+      snapd: disabled
+      restricted_extras: true
   packages:
     apt:
       install:
@@ -135,14 +135,14 @@ linux:
       extensions:
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
-      dock: true
-      rounded_corners: true
+      dash_to_dock: true
+      rounded_window_corners: true
   updates:
-    apt: full
+    apt: full-upgrade
     flatpak: true
 macos:
   system:
-    ensure_admin: true
+    validate_sudo_access: true
     xcode:
       command_line_tools: true
     rosetta: false

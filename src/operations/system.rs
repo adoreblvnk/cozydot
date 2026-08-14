@@ -2,12 +2,12 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-use super::{Host, OperationOutcome, TempPath, apt, privileged_file::publish_bytes};
+use super::{Host, OperationOutcome, TempPath, apt, privileged_file::write_atomic};
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
 
-pub(crate) fn ensure_admin(host: &Host) -> Result<()> {
+pub(crate) fn add_user_to_sudo_group(host: &Host) -> Result<()> {
     let (username, _) = effective_user(host)?;
     host.require("administrative group membership", "sudo", ["usermod", "-aG", "sudo", "--", &username])?;
     Ok(())
@@ -21,14 +21,14 @@ pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
     };
     if enabled {
         apt::packages(host, &["unattended-upgrades".into()])?;
-        publish_bytes(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
+        write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
         host.require(
             "unattended-upgrades service enablement",
             "sudo",
             ["systemctl", "enable", "--now", "unattended-upgrades.service"],
         )?;
     } else {
-        publish_bytes(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
+        write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
         let is_enabled = systemd_state(host, "is-enabled", "unattended-upgrades.service")?;
         let is_active = systemd_state(host, "is-active", "unattended-upgrades.service")?;
         if is_enabled || is_active {
@@ -47,7 +47,7 @@ fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
     Ok(host.run("systemctl", [query, unit])?.status.success())
 }
 
-pub(crate) fn ubuntu_snap(host: &Host, enabled: bool) -> Result<()> {
+pub(crate) fn set_snapd_enabled(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
         host.require("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
         apt::packages(host, &["snapd".into()])?;
@@ -79,7 +79,7 @@ pub(crate) fn ubuntu_snap(host: &Host, enabled: bool) -> Result<()> {
         ],
     )?;
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
-    publish_bytes(host, Path::new(NO_SNAP_PIN), pin, "no-Snap APT pin publication")?;
+    write_atomic(host, Path::new(NO_SNAP_PIN), pin, "no-Snap APT pin write")?;
     Ok(())
 }
 
@@ -136,9 +136,9 @@ pub(crate) fn docker_group(host: &Host) -> Result<()> {
     ensure_product_group(host, Product::Docker)
 }
 
-pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()> {
+pub(crate) fn set_docker_local_logging_driver(host: &Host, max_size: Option<&str>) -> Result<()> {
     preflight(host, Product::Docker)?;
-    let mut requested = read_daemon_config(host)?;
+    let mut requested = read_docker_daemon_config(host)?;
     let object = requested.as_object_mut().context("Docker daemon config must be a JSON object")?;
     object.insert("log-driver".into(), Value::String("local".into()));
     if let Some(max_size) = max_size {
@@ -151,7 +151,7 @@ pub(crate) fn docker_local_log(host: &Host, max_size: Option<&str>) -> Result<()
     }
     let mut bytes = serde_json::to_vec_pretty(&requested).context("serialize Docker daemon configuration")?;
     bytes.push(b'\n');
-    publish_bytes(host, Path::new(DOCKER_DAEMON_CONFIG), &bytes, "Docker daemon config publication")?;
+    write_atomic(host, Path::new(DOCKER_DAEMON_CONFIG), &bytes, "Docker daemon config write")?;
     Ok(())
 }
 
@@ -159,7 +159,7 @@ pub(crate) fn virtualbox_group(host: &Host) -> Result<()> {
     ensure_product_group(host, Product::VirtualBox)
 }
 
-pub(crate) fn vscode_extensions(host: &Host, extensions: &[String]) -> Result<()> {
+pub(crate) fn install_vscode_extensions(host: &Host, extensions: &[String]) -> Result<()> {
     let program = if cfg!(target_os = "macos") {
         [
             "code",
@@ -231,7 +231,7 @@ fn ensure_product_group(host: &Host, product: Product) -> Result<()> {
     Ok(())
 }
 
-fn read_daemon_config(host: &Host) -> Result<Value> {
+fn read_docker_daemon_config(host: &Host) -> Result<Value> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
         host.require("Docker daemon config absence check", "sudo", ["test", "!", "-e", DOCKER_DAEMON_CONFIG])?;
@@ -262,16 +262,16 @@ pub enum DesktopEnvironment {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DesktopTheme {
+pub enum ColorScheme {
     Light,
     Dark,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DesktopSetting {
-    Theme(DesktopTheme),
+    ColorScheme(ColorScheme),
     Terminal(String),
-    IdleTimeoutSeconds(u32),
+    IdleDelaySeconds(u32),
     IdleDim(bool),
 }
 
@@ -281,13 +281,13 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
         DesktopEnvironment::Cinnamon => "org.cinnamon",
     };
     match setting {
-        DesktopSetting::Theme(theme) => ensure_gsetting(
+        DesktopSetting::ColorScheme(color_scheme) => set_gsetting(
             host,
             &format!("{prefix}.desktop.interface"),
             "color-scheme",
-            match theme {
-                DesktopTheme::Light => "'prefer-light'",
-                DesktopTheme::Dark => "'prefer-dark'",
+            match color_scheme {
+                ColorScheme::Light => "'prefer-light'",
+                ColorScheme::Dark => "'prefer-dark'",
             },
         ),
         DesktopSetting::Terminal(executable) => {
@@ -295,13 +295,13 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
                 bail!("desktop terminal executable {executable:?} is unavailable");
             }
             let schema = format!("{prefix}.desktop.default-applications.terminal");
-            ensure_gsetting(host, &schema, "exec", &format!("'{executable}'"))?;
-            ensure_gsetting(host, &schema, "exec-arg", "''")
+            set_gsetting(host, &schema, "exec", &format!("'{executable}'"))?;
+            set_gsetting(host, &schema, "exec-arg", "''")
         }
-        DesktopSetting::IdleTimeoutSeconds(seconds) => {
-            ensure_gsetting(host, &format!("{prefix}.desktop.session"), "idle-delay", &format!("uint32 {seconds}"))
+        DesktopSetting::IdleDelaySeconds(seconds) => {
+            set_gsetting(host, &format!("{prefix}.desktop.session"), "idle-delay", &format!("uint32 {seconds}"))
         }
-        DesktopSetting::IdleDim(enabled) => ensure_gsetting(
+        DesktopSetting::IdleDim(enabled) => set_gsetting(
             host,
             &format!("{prefix}.settings-daemon.plugins.power"),
             "idle-dim",
@@ -313,15 +313,15 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
 pub(crate) fn gnome_extensions(host: &Host, extensions: &[String]) -> Result<OperationOutcome> {
     let mut outcome = OperationOutcome::Completed;
     for extension in extensions {
-        if ensure_extension(host, extension)? == OperationOutcome::LoginRequired {
+        if install_or_enable_extension(host, extension)? == OperationOutcome::LoginRequired {
             outcome = OperationOutcome::LoginRequired;
         }
     }
     Ok(outcome)
 }
 
-pub(crate) fn gnome_dock(host: &Host) -> Result<OperationOutcome> {
-    if ensure_extension(host, DASH_TO_DOCK_UUID)? == OperationOutcome::LoginRequired {
+pub(crate) fn install_dash_to_dock(host: &Host) -> Result<OperationOutcome> {
+    if install_or_enable_extension(host, DASH_TO_DOCK_UUID)? == OperationOutcome::LoginRequired {
         return Ok(OperationOutcome::LoginRequired);
     }
     let settings = [
@@ -336,17 +336,17 @@ pub(crate) fn gnome_dock(host: &Host) -> Result<OperationOutcome> {
         ("click-action", "'minimize-or-previews'"),
     ];
     for (key, value) in settings {
-        ensure_dconf(host, &format!("/org/gnome/shell/extensions/dash-to-dock/{key}"), value)?;
+        write_dconf(host, &format!("/org/gnome/shell/extensions/dash-to-dock/{key}"), value)?;
     }
     Ok(OperationOutcome::Completed)
 }
 
-pub(crate) fn gnome_rounded_corners(host: &Host) -> Result<OperationOutcome> {
-    if ensure_extension(host, ROUNDED_CORNERS_UUID)? == OperationOutcome::LoginRequired {
+pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<OperationOutcome> {
+    if install_or_enable_extension(host, ROUNDED_CORNERS_UUID)? == OperationOutcome::LoginRequired {
         return Ok(OperationOutcome::LoginRequired);
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
-    ensure_dconf(
+    write_dconf(
         host,
         "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings",
         value,
@@ -354,7 +354,7 @@ pub(crate) fn gnome_rounded_corners(host: &Host) -> Result<OperationOutcome> {
     Ok(OperationOutcome::Completed)
 }
 
-fn ensure_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
+fn install_or_enable_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
     validate_extension(extension)?;
     if !host.run("gnome-extensions", ["info", extension])?.status.success() {
         install_extension(host, extension)?;
@@ -364,13 +364,13 @@ fn ensure_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
     Ok(OperationOutcome::Completed)
 }
 
-fn ensure_gsetting(host: &Host, schema: &str, key: &str, expected: &str) -> Result<()> {
-    host.require("desktop setting mutation", "gsettings", ["set", schema, key, expected])?;
+fn set_gsetting(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
+    host.require("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }
 
-fn ensure_dconf(host: &Host, key: &str, expected: &str) -> Result<()> {
-    host.require("GNOME dconf mutation", "dconf", ["write", key, expected])?;
+fn write_dconf(host: &Host, key: &str, value: &str) -> Result<()> {
+    host.require("dconf write", "dconf", ["write", key, value])?;
     Ok(())
 }
 
@@ -380,7 +380,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let shell = host.require("GNOME extension shell version", "gnome-shell", ["--version"])?;
     let shell_version =
         super::gnome_shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
-    let version = super::gnome_version(
+    let version = super::select_gnome_extension_version(
         std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
         &shell_version,
     )?;

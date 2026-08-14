@@ -269,7 +269,7 @@ fn empty_apply_and_update_are_silent_noops() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn ensure_admin_is_not_applied_on_a_non_debian_host() {
+fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     if os_release_value("ID") == "debian" {
         return;
     }
@@ -277,7 +277,7 @@ fn ensure_admin_is_not_applied_on_a_non_debian_host() {
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
-    write_config(&root, "{}", "system:\n  ensure_admin: true\n");
+    write_config(&root, "{}", "system:\n  add_user_to_sudo_group: true\n");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
 
@@ -488,7 +488,7 @@ fn run_apt(
 
 #[test]
 #[cfg(target_os = "linux")]
-fn repository_key_validation_precedes_publication() {
+fn repository_key_validation_precedes_repository_file_write() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -515,7 +515,7 @@ fn repository_key_validation_precedes_publication() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn repository_apply_is_ordered_and_packages_converge() {
+fn apply_writes_repository_files_and_installs_packages_in_order() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -536,18 +536,18 @@ fn repository_apply_is_ordered_and_packages_converge() {
     let position = |needle: &str| lines.iter().position(|line| line.contains(needle)).unwrap();
     let direct_install = position("apt-get install -y -qq -- direct-package+");
     let repository_download = position("curl ");
-    let publication = position("/etc/apt/sources.list.d/armored.list");
-    let repository_refresh = lines
+    let source_list_write = position("/etc/apt/sources.list.d/armored.list");
+    let apt_update = lines
         .iter()
         .enumerate()
-        .find(|(index, line)| *index > publication && **line == "sudo apt-get update -qq")
+        .find(|(index, line)| *index > source_list_write && **line == "sudo apt-get update -qq")
         .map(|(index, _)| index)
         .unwrap();
     let purge = position("apt-get purge -y -qq -- old-package");
     let install = position("apt-get install -y -qq -- vendor-one+ vendor-two+");
     assert!(direct_install < repository_download);
-    assert!(repository_download < publication && publication < repository_refresh);
-    assert!(repository_refresh < purge && purge < install);
+    assert!(repository_download < source_list_write && source_list_write < apt_update);
+    assert!(apt_update < purge && purge < install);
     assert!(!lines[purge].contains("absent-conflict"));
     assert_eq!(fs::read(state.join("files/armored.asc")).unwrap(), b"key");
     assert_eq!(fs::read(state.join("files/binary.gpg")).unwrap(), b"processed-key");
@@ -607,11 +607,11 @@ fn inapplicable_repositories_have_no_side_effects() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn apt_update_runs_only_the_selected_policy() {
+fn update_runs_only_the_selected_apt_upgrade_command() {
     for (policy, expected) in [
-        ("standard", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --\n"),
+        ("upgrade", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --\n"),
         (
-            "full",
+            "full-upgrade",
             concat!(
                 "sudo apt-get update -qq\n",
                 "sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq --\n",

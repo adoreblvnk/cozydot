@@ -12,15 +12,15 @@ mod repository;
 mod system;
 mod tools;
 
-pub use apt::AptUpgradePolicy;
+pub use apt::AptUpgradeCommand;
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
 pub use packages::fonts::NerdFontsMode;
 pub use repository::AptRepositoryOperation;
-pub use system::{DesktopEnvironment, DesktopSetting, DesktopTheme};
+pub use system::{ColorScheme, DesktopEnvironment, DesktopSetting};
 pub use tools::GoToolchainSelector;
 
 pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file};
-pub(super) use parsers::{gnome_shell_version, gnome_version, latest_go};
+pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version, select_go_release};
 
 use crate::platform::Architecture;
 use anyhow::{Result, bail};
@@ -28,17 +28,17 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    EnsureAdmin,
+    AddUserToSudoGroup,
     EnsureDebianAptComponents { release: String },
-    AptMetadataRefresh,
+    AptUpdate,
     UnattendedUpgrades { enabled: bool },
-    UbuntuSnap { enabled: bool },
+    Snapd { enabled: bool },
     AptPackages { packages: Vec<String> },
-    AptBootstrapPackages { packages: Vec<String> },
-    FlatpakEnsureFlathub,
-    RustupBootstrap,
-    FnmBootstrap,
-    UvBootstrap,
+    AptUpdateAndInstall { packages: Vec<String> },
+    FlatpakAddFlathubRemote,
+    InstallRustup,
+    InstallFnm,
+    InstallUv,
     RustToolchain { selector: String },
     RustToolchainUpdate,
     GoToolchain { selector: GoToolchainSelector, architecture: Architecture },
@@ -47,34 +47,34 @@ pub enum Operation {
     NodeToolchainUpdate { selector: String },
     PythonToolchain { version: String },
     PythonToolchainUpdate,
-    CargoBinstallBootstrap,
-    CargoUpdateBootstrap,
+    InstallCargoBinstall,
+    InstallCargoUpdate,
     AptRepository(Box<AptRepositoryOperation>),
-    AptRepositoryPackages { conflicts: Vec<String>, packages: Vec<String> },
-    FlatpakEnsureApps { refs: Vec<String> },
-    CargoPackageSet { packages: Vec<String> },
+    AptPurgeThenInstall { purge: Vec<String>, install: Vec<String> },
+    FlatpakInstallMissingApps { refs: Vec<String> },
+    CargoInstallMissing { packages: Vec<String> },
     CargoPackageUpdate,
-    NpmPackageSet { packages: Vec<String> },
+    NpmInstallMissing { packages: Vec<String> },
     NpmPackageUpdate,
     Appimaged { architecture: Architecture },
     BinaryPackage(BinaryPackageOperation),
     NerdFonts { families: Vec<String>, mode: NerdFontsMode },
     Dotfiles { root: PathBuf, packages: Vec<String>, replace: bool },
     DockerGroup,
-    DockerLocalLog { max_size: Option<String> },
+    DockerLocalLoggingDriver { max_size: Option<String> },
     VirtualBoxGroup,
-    VsCodeExtensionSet { extensions: Vec<String> },
+    VsCodeInstallExtensions { extensions: Vec<String> },
     DesktopSetting { target: DesktopEnvironment, setting: DesktopSetting },
     GnomeExtensions { extensions: Vec<String> },
-    GnomeDock,
-    GnomeRoundedCorners,
-    AptUpgrade { policy: AptUpgradePolicy },
+    InstallDashToDock,
+    InstallRoundedWindowCorners,
+    AptUpgrade { command: AptUpgradeCommand },
     FlatpakUpdateApps,
-    HomebrewBootstrap,
-    HomebrewPackages { formulae: Vec<String>, casks: Vec<String> },
-    MacEnsureAdmin,
-    XcodeCommandLineTools,
-    Rosetta,
+    InstallHomebrew,
+    InstallHomebrewPackages { formulae: Vec<String>, casks: Vec<String> },
+    ValidateMacosSudoAccess,
+    InstallCommandLineToolsForXcode,
+    InstallRosetta,
     UserNerdFonts { families: Vec<String>, mode: packages::fonts::NerdFontsMode },
     MacDefaults { settings: Vec<macos::MacDefault> },
     HomebrewUpdate { formulae: bool, casks: bool },
@@ -89,17 +89,17 @@ pub enum OperationOutcome {
 impl Operation {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::EnsureAdmin => "administrator access",
+            Self::AddUserToSudoGroup => "sudo group membership",
             Self::EnsureDebianAptComponents { .. } => "Debian APT components",
-            Self::AptMetadataRefresh => "APT metadata refresh",
+            Self::AptUpdate => "APT update",
             Self::UnattendedUpgrades { .. } => "unattended upgrades",
-            Self::UbuntuSnap { .. } => "Ubuntu Snap",
+            Self::Snapd { .. } => "snapd",
             Self::AptPackages { .. } => "APT packages",
-            Self::AptBootstrapPackages { .. } => "APT bootstrap packages",
-            Self::FlatpakEnsureFlathub => "Flathub remote",
-            Self::RustupBootstrap => "rustup bootstrap",
-            Self::FnmBootstrap => "FNM bootstrap",
-            Self::UvBootstrap => "uv bootstrap",
+            Self::AptUpdateAndInstall { .. } => "APT update and install",
+            Self::FlatpakAddFlathubRemote => "Flathub remote add",
+            Self::InstallRustup => "rustup install",
+            Self::InstallFnm => "FNM install",
+            Self::InstallUv => "uv install",
             Self::RustToolchain { .. } => "Rust toolchain",
             Self::RustToolchainUpdate => "Rust toolchain updates",
             Self::GoToolchain { .. } => "Go toolchain",
@@ -108,34 +108,34 @@ impl Operation {
             Self::NodeToolchainUpdate { .. } => "Node.js toolchain updates",
             Self::PythonToolchain { .. } => "Python toolchain",
             Self::PythonToolchainUpdate => "Python toolchain updates",
-            Self::CargoBinstallBootstrap => "cargo-binstall bootstrap",
-            Self::CargoUpdateBootstrap => "cargo-update bootstrap",
+            Self::InstallCargoBinstall => "cargo-binstall install",
+            Self::InstallCargoUpdate => "cargo-update install",
             Self::AptRepository(_) => "APT repository",
-            Self::AptRepositoryPackages { .. } => "APT repository packages",
-            Self::FlatpakEnsureApps { .. } => "Flatpak applications",
-            Self::CargoPackageSet { .. } => "Cargo packages",
+            Self::AptPurgeThenInstall { .. } => "APT purge and install",
+            Self::FlatpakInstallMissingApps { .. } => "Flatpak application install",
+            Self::CargoInstallMissing { .. } => "Cargo package install",
             Self::CargoPackageUpdate => "Cargo package updates",
-            Self::NpmPackageSet { .. } => "npm packages",
+            Self::NpmInstallMissing { .. } => "npm package install",
             Self::NpmPackageUpdate => "npm package updates",
             Self::Appimaged { .. } => "appimaged",
             Self::BinaryPackage(_) => "binary package",
             Self::NerdFonts { .. } => "Nerd Fonts",
             Self::Dotfiles { .. } => "dotfiles",
             Self::DockerGroup => "Docker group membership",
-            Self::DockerLocalLog { .. } => "Docker logging",
+            Self::DockerLocalLoggingDriver { .. } => "Docker local logging driver",
             Self::VirtualBoxGroup => "VirtualBox group membership",
-            Self::VsCodeExtensionSet { .. } => "Visual Studio Code extensions",
+            Self::VsCodeInstallExtensions { .. } => "Visual Studio Code extension install",
             Self::DesktopSetting { .. } => "desktop setting",
             Self::GnomeExtensions { .. } => "GNOME extensions",
-            Self::GnomeDock => "GNOME dock",
-            Self::GnomeRoundedCorners => "GNOME rounded corners",
+            Self::InstallDashToDock => "Dash to Dock install",
+            Self::InstallRoundedWindowCorners => "Rounded Window Corners install",
             Self::AptUpgrade { .. } => "APT upgrade",
             Self::FlatpakUpdateApps => "Flatpak application updates",
-            Self::HomebrewBootstrap => "Homebrew bootstrap",
-            Self::HomebrewPackages { .. } => "Homebrew packages",
-            Self::MacEnsureAdmin => "macOS administrator access",
-            Self::XcodeCommandLineTools => "Xcode command line tools",
-            Self::Rosetta => "Rosetta",
+            Self::InstallHomebrew => "Homebrew install",
+            Self::InstallHomebrewPackages { .. } => "Homebrew package install",
+            Self::ValidateMacosSudoAccess => "macOS sudo access",
+            Self::InstallCommandLineToolsForXcode => "Command Line Tools for Xcode install",
+            Self::InstallRosetta => "Rosetta install",
             Self::UserNerdFonts { .. } => "user Nerd Fonts",
             Self::MacDefaults { .. } => "macOS defaults",
             Self::HomebrewUpdate { .. } => "Homebrew updates",
@@ -150,11 +150,11 @@ pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
 fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
     if matches!(
         operation,
-        Operation::HomebrewBootstrap
-            | Operation::HomebrewPackages { .. }
-            | Operation::MacEnsureAdmin
-            | Operation::XcodeCommandLineTools
-            | Operation::Rosetta
+        Operation::InstallHomebrew
+            | Operation::InstallHomebrewPackages { .. }
+            | Operation::ValidateMacosSudoAccess
+            | Operation::InstallCommandLineToolsForXcode
+            | Operation::InstallRosetta
             | Operation::UserNerdFonts { .. }
             | Operation::MacDefaults { .. }
             | Operation::HomebrewUpdate { .. }
@@ -163,41 +163,41 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         bail!("macOS operation cannot execute on this host")
     }
     match operation {
-        Operation::EnsureAdmin => completed(system::ensure_admin(&host)),
+        Operation::AddUserToSudoGroup => completed(system::add_user_to_sudo_group(&host)),
         Operation::EnsureDebianAptComponents { release } => {
             completed(repository::debian_components::execute(&host, release))
         }
-        Operation::AptMetadataRefresh => completed(apt::metadata_refresh(&host)),
+        Operation::AptUpdate => completed(apt::update(&host)),
         Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
-        Operation::UbuntuSnap { enabled } => completed(system::ubuntu_snap(&host, *enabled)),
+        Operation::Snapd { enabled } => completed(system::set_snapd_enabled(&host, *enabled)),
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
-        Operation::AptBootstrapPackages { packages } => completed(apt::bootstrap_packages(&host, packages)),
-        Operation::FlatpakEnsureFlathub => completed(packages::flatpak::ensure_flathub(&host)),
-        Operation::RustupBootstrap => completed(languages::rustup(&host)),
-        Operation::FnmBootstrap => completed(languages::fnm_bootstrap(&host)),
-        Operation::UvBootstrap => completed(languages::uv_bootstrap(&host)),
-        Operation::RustToolchain { selector } => completed(tools::apply_rust(&host, selector)),
+        Operation::AptUpdateAndInstall { packages } => completed(apt::update_and_install(&host, packages)),
+        Operation::FlatpakAddFlathubRemote => completed(packages::flatpak::add_flathub_remote(&host)),
+        Operation::InstallRustup => completed(languages::install_rustup(&host)),
+        Operation::InstallFnm => completed(languages::install_fnm(&host)),
+        Operation::InstallUv => completed(languages::install_uv(&host)),
+        Operation::RustToolchain { selector } => completed(tools::install_default_rust_toolchain(&host, selector)),
         Operation::RustToolchainUpdate => completed(tools::update_rust(&host)),
         Operation::GoToolchain { selector, architecture } => {
-            completed(tools::execute_go(&host, selector, *architecture))
+            completed(tools::install_go(&host, selector, *architecture))
         }
         Operation::GoToolchainUpdate { selector, architecture } => {
             completed(tools::update_go(&host, selector, *architecture))
         }
-        Operation::NodeToolchain { selector } => completed(tools::apply_node(&host, selector)),
+        Operation::NodeToolchain { selector } => completed(tools::install_default_node_toolchain(&host, selector)),
         Operation::NodeToolchainUpdate { selector } => completed(tools::update_node(&host, selector)),
-        Operation::PythonToolchain { version } => completed(tools::apply_python(&host, version)),
+        Operation::PythonToolchain { version } => completed(tools::install_default_python(&host, version)),
         Operation::PythonToolchainUpdate => completed(tools::update_python(&host)),
-        Operation::CargoBinstallBootstrap => completed(binary::cargo_binstall::execute(&host)),
-        Operation::CargoUpdateBootstrap => completed(binary::cargo_binstall::ensure_cargo_update(&host)),
+        Operation::InstallCargoBinstall => completed(binary::cargo_binstall::install(&host)),
+        Operation::InstallCargoUpdate => completed(binary::cargo_binstall::install_cargo_update(&host)),
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
-        Operation::AptRepositoryPackages { conflicts, packages } => {
-            completed(apt::repository_packages(&host, conflicts, packages))
+        Operation::AptPurgeThenInstall { purge, install } => completed(apt::purge_then_install(&host, purge, install)),
+        Operation::FlatpakInstallMissingApps { refs } => {
+            completed(packages::flatpak::install_missing_apps(&host, refs))
         }
-        Operation::FlatpakEnsureApps { refs } => completed(packages::flatpak::ensure_apps(&host, refs)),
-        Operation::CargoPackageSet { packages } => completed(packages::cargo::ensure(&host, packages)),
+        Operation::CargoInstallMissing { packages } => completed(packages::cargo::install_missing(&host, packages)),
         Operation::CargoPackageUpdate => completed(packages::cargo::update_all(&host)),
-        Operation::NpmPackageSet { packages } => completed(packages::npm::ensure(&host, packages)),
+        Operation::NpmInstallMissing { packages } => completed(packages::npm::install_missing(&host, packages)),
         Operation::NpmPackageUpdate => completed(packages::npm::update_all(&host)),
         Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
         Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
@@ -206,22 +206,28 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
             completed(packages::dotfiles::execute(&host, root, packages, *replace))
         }
         Operation::DockerGroup => completed(system::docker_group(&host)),
-        Operation::DockerLocalLog { max_size } => completed(system::docker_local_log(&host, max_size.as_deref())),
+        Operation::DockerLocalLoggingDriver { max_size } => {
+            completed(system::set_docker_local_logging_driver(&host, max_size.as_deref()))
+        }
         Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
-        Operation::VsCodeExtensionSet { extensions } => completed(system::vscode_extensions(&host, extensions)),
+        Operation::VsCodeInstallExtensions { extensions } => {
+            completed(system::install_vscode_extensions(&host, extensions))
+        }
         Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
         Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
-        Operation::GnomeDock => system::gnome_dock(&host),
-        Operation::GnomeRoundedCorners => system::gnome_rounded_corners(&host),
-        Operation::AptUpgrade { policy } => completed(apt::upgrade(&host, *policy)),
+        Operation::InstallDashToDock => system::install_dash_to_dock(&host),
+        Operation::InstallRoundedWindowCorners => system::install_rounded_window_corners(&host),
+        Operation::AptUpgrade { command } => completed(apt::upgrade(&host, *command)),
         Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
-        Operation::HomebrewBootstrap => completed(macos::bootstrap(&host)),
-        Operation::HomebrewPackages { formulae, casks } => completed(macos::packages(&host, formulae, casks)),
-        Operation::MacEnsureAdmin => completed(macos::ensure_admin(&host)),
-        Operation::XcodeCommandLineTools => completed(macos::xcode_command_line_tools(&host)),
-        Operation::Rosetta => completed(macos::rosetta(&host)),
+        Operation::InstallHomebrew => completed(macos::install_homebrew(&host)),
+        Operation::InstallHomebrewPackages { formulae, casks } => {
+            completed(macos::install_packages(&host, formulae, casks))
+        }
+        Operation::ValidateMacosSudoAccess => completed(macos::validate_sudo_access(&host)),
+        Operation::InstallCommandLineToolsForXcode => completed(macos::install_command_line_tools_for_xcode(&host)),
+        Operation::InstallRosetta => completed(macos::install_rosetta(&host)),
         Operation::UserNerdFonts { families, mode } => completed(packages::fonts::execute_user(&host, families, *mode)),
-        Operation::MacDefaults { settings } => completed(macos::defaults(&host, settings)),
+        Operation::MacDefaults { settings } => completed(macos::write_defaults(&host, settings)),
         Operation::HomebrewUpdate { formulae, casks } => completed(macos::update(&host, *formulae, *casks)),
     }
 }
