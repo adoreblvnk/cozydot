@@ -75,6 +75,15 @@ pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
     path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
 }
 
+pub(crate) fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
+    let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
+    let record = output.strip_suffix('\n').unwrap_or(output);
+    if record.is_empty() || record.contains(['\n', '\r']) {
+        bail!("{command} returned malformed record output");
+    }
+    Ok(record)
+}
+
 pub(crate) struct TempPath(tempfile::TempPath);
 
 impl TempPath {

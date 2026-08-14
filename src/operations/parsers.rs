@@ -1,34 +1,3 @@
-pub(crate) fn select_go_release(
-    input: &str,
-    requested: &str,
-    arch: &str,
-    target_os: &str,
-) -> anyhow::Result<(String, String, String)> {
-    use anyhow::Context;
-    let value: serde_json::Value = serde_json::from_str(input).context("parse Go release JSON")?;
-    let releases = value.as_array().context("Go metadata must be an array")?;
-    let version = releases
-        .iter()
-        .filter_map(|release| release["version"].as_str())
-        .filter(|v| stable_go_version(v))
-        .map(|v| v.trim_start_matches("go"))
-        .find(|v| {
-            requested == "latest"
-                || *v == requested
-                || v.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
-        })
-        .context("Go metadata has no matching stable release")?;
-    let filename = format!("go{version}.{target_os}-{arch}.tar.gz");
-    let file = releases
-        .iter()
-        .find(|release| release["version"].as_str() == Some(&format!("go{version}")))
-        .and_then(|release| release["files"].as_array())
-        .and_then(|files| files.iter().find(|file| file["filename"].as_str() == Some(&filename)))
-        .context("Go metadata has no matching architecture archive")?;
-    let sha256 = file["sha256"].as_str().context("Go archive metadata has no SHA-256 checksum")?;
-    Ok((version.to_owned(), filename, sha256.to_owned()))
-}
-
 pub(crate) fn select_gnome_extension_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {
     use anyhow::{Context, bail};
     let value: serde_json::Value = serde_json::from_str(input).context("parse GNOME extension JSON")?;
@@ -58,13 +27,4 @@ pub(crate) fn gnome_shell_version(input: &str) -> anyhow::Result<String> {
         })
         .map(str::to_owned)
         .context("GNOME Shell version output has no numeric version")
-}
-
-fn stable_go_version(value: &str) -> bool {
-    let Some(rest) = value.strip_prefix("go") else {
-        return false;
-    };
-    let parts = rest.split('.').collect::<Vec<_>>();
-    (parts.len() == 2 || parts.len() == 3)
-        && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
