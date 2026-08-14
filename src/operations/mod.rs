@@ -1,26 +1,34 @@
 mod appimaged;
 mod apt;
 mod binary;
+mod desktop;
+mod docker;
+mod fnm;
+mod gnome;
+mod go;
 mod host;
-mod languages;
 pub(crate) mod macos;
 mod packages;
 mod parsers;
 pub(crate) mod privileged_file;
-
 mod repository;
-mod system;
-mod tools;
+mod rustup;
+mod shell;
+mod snapd;
+mod users;
+mod uv;
+mod virtualbox;
+mod vscode;
 
 pub use apt::AptUpgradeCommand;
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
+pub use desktop::{ColorScheme, DesktopEnvironment, DesktopSetting};
+pub use go::GoToolchainSelector;
 pub use packages::fonts::NerdFontsMode;
 pub use repository::AptRepositoryOperation;
-pub use system::{ColorScheme, DesktopEnvironment, DesktopSetting};
-pub use tools::GoToolchainSelector;
 
 pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file};
-pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version, select_go_release};
+pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version};
 
 use crate::platform::Architecture;
 use anyhow::{Result, bail};
@@ -163,31 +171,29 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         bail!("macOS operation cannot execute on this host")
     }
     match operation {
-        Operation::AddUserToSudoGroup => completed(system::add_user_to_sudo_group(&host)),
+        Operation::AddUserToSudoGroup => completed(users::add_user_to_sudo_group(&host)),
         Operation::EnsureDebianAptComponents { release } => {
             completed(repository::debian_components::execute(&host, release))
         }
         Operation::AptUpdate => completed(apt::update(&host)),
-        Operation::UnattendedUpgrades { enabled } => completed(system::unattended_upgrades(&host, *enabled)),
-        Operation::Snapd { enabled } => completed(system::set_snapd_enabled(&host, *enabled)),
+        Operation::UnattendedUpgrades { enabled } => completed(apt::unattended_upgrades(&host, *enabled)),
+        Operation::Snapd { enabled } => completed(snapd::set_snapd_enabled(&host, *enabled)),
         Operation::AptPackages { packages } => completed(apt::packages(&host, packages)),
         Operation::AptUpdateAndInstall { packages } => completed(apt::update_and_install(&host, packages)),
         Operation::FlatpakAddFlathubRemote => completed(packages::flatpak::add_flathub_remote(&host)),
-        Operation::InstallRustup => completed(languages::install_rustup(&host)),
-        Operation::InstallFnm => completed(languages::install_fnm(&host)),
-        Operation::InstallUv => completed(languages::install_uv(&host)),
-        Operation::RustToolchain { selector } => completed(tools::install_default_rust_toolchain(&host, selector)),
-        Operation::RustToolchainUpdate => completed(tools::update_rust(&host)),
-        Operation::GoToolchain { selector, architecture } => {
-            completed(tools::install_go(&host, selector, *architecture))
-        }
+        Operation::InstallRustup => completed(rustup::install_rustup(&host)),
+        Operation::InstallFnm => completed(fnm::install_fnm(&host)),
+        Operation::InstallUv => completed(uv::install_uv(&host)),
+        Operation::RustToolchain { selector } => completed(rustup::install_default_rust_toolchain(&host, selector)),
+        Operation::RustToolchainUpdate => completed(rustup::update_rust(&host)),
+        Operation::GoToolchain { selector, architecture } => completed(go::install_go(&host, selector, *architecture)),
         Operation::GoToolchainUpdate { selector, architecture } => {
-            completed(tools::update_go(&host, selector, *architecture))
+            completed(go::update_go(&host, selector, *architecture))
         }
-        Operation::NodeToolchain { selector } => completed(tools::install_default_node_toolchain(&host, selector)),
-        Operation::NodeToolchainUpdate { selector } => completed(tools::update_node(&host, selector)),
-        Operation::PythonToolchain { version } => completed(tools::install_default_python(&host, version)),
-        Operation::PythonToolchainUpdate => completed(tools::update_python(&host)),
+        Operation::NodeToolchain { selector } => completed(fnm::install_default_node_toolchain(&host, selector)),
+        Operation::NodeToolchainUpdate { selector } => completed(fnm::update_node(&host, selector)),
+        Operation::PythonToolchain { version } => completed(uv::install_default_python(&host, version)),
+        Operation::PythonToolchainUpdate => completed(uv::update_python(&host)),
         Operation::InstallCargoBinstall => completed(binary::cargo_binstall::install(&host)),
         Operation::InstallCargoUpdate => completed(binary::cargo_binstall::install_cargo_update(&host)),
         Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
@@ -205,18 +211,18 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::Dotfiles { root, packages, replace } => {
             completed(packages::dotfiles::execute(&host, root, packages, *replace))
         }
-        Operation::DockerGroup => completed(system::docker_group(&host)),
+        Operation::DockerGroup => completed(docker::docker_group(&host)),
         Operation::DockerLocalLoggingDriver { max_size } => {
-            completed(system::set_docker_local_logging_driver(&host, max_size.as_deref()))
+            completed(docker::set_docker_local_logging_driver(&host, max_size.as_deref()))
         }
-        Operation::VirtualBoxGroup => completed(system::virtualbox_group(&host)),
+        Operation::VirtualBoxGroup => completed(virtualbox::virtualbox_group(&host)),
         Operation::VsCodeInstallExtensions { extensions } => {
-            completed(system::install_vscode_extensions(&host, extensions))
+            completed(vscode::install_vscode_extensions(&host, extensions))
         }
-        Operation::DesktopSetting { target, setting } => completed(system::desktop_setting(&host, *target, setting)),
-        Operation::GnomeExtensions { extensions } => system::gnome_extensions(&host, extensions),
-        Operation::InstallDashToDock => system::install_dash_to_dock(&host),
-        Operation::InstallRoundedWindowCorners => system::install_rounded_window_corners(&host),
+        Operation::DesktopSetting { target, setting } => completed(desktop::desktop_setting(&host, *target, setting)),
+        Operation::GnomeExtensions { extensions } => gnome::gnome_extensions(&host, extensions),
+        Operation::InstallDashToDock => gnome::install_dash_to_dock(&host),
+        Operation::InstallRoundedWindowCorners => gnome::install_rounded_window_corners(&host),
         Operation::AptUpgrade { command } => completed(apt::upgrade(&host, *command)),
         Operation::FlatpakUpdateApps => completed(packages::flatpak::update_apps(&host)),
         Operation::InstallHomebrew => completed(macos::install_homebrew(&host)),

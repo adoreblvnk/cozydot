@@ -1,5 +1,9 @@
-use super::Host;
 use anyhow::Result;
+use std::path::Path;
+
+use super::{Host, privileged_file::write_atomic};
+
+const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AptUpgradeCommand {
@@ -10,6 +14,40 @@ pub enum AptUpgradeCommand {
 pub fn update(host: &Host) -> Result<()> {
     host.require("APT update", "sudo", ["apt-get", "update", "-qq"])?;
     Ok(())
+}
+
+pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
+    let contents = if enabled {
+        b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n".as_slice()
+    } else {
+        b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n".as_slice()
+    };
+    if enabled {
+        packages(host, &["unattended-upgrades".into()])?;
+        write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
+        host.require(
+            "unattended-upgrades service enablement",
+            "sudo",
+            ["systemctl", "enable", "--now", "unattended-upgrades.service"],
+        )?;
+    } else {
+        write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
+        let is_enabled = systemd_state(host, "is-enabled", "unattended-upgrades.service")?;
+        let is_active = systemd_state(host, "is-active", "unattended-upgrades.service")?;
+        if is_enabled || is_active {
+            host.require(
+                "unattended-upgrades service disablement",
+                "sudo",
+                ["systemctl", "disable", "--now", "unattended-upgrades.service"],
+            )?;
+        }
+        purge(host, &["unattended-upgrades".into()])?;
+    }
+    Ok(())
+}
+
+fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
+    Ok(host.run("systemctl", [query, unit])?.status.success())
 }
 
 pub fn update_and_install(host: &Host, packages: &[String]) -> Result<()> {
