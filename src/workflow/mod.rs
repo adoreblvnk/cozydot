@@ -15,7 +15,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const LINUX_FONT_PREREQUISITES: [&str; 5] = ["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"];
+const LINUX_BASE_PREREQUISITES: [&str; 5] = ["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"];
 
 #[derive(Default)]
 struct ManagerInstallPlan {
@@ -145,7 +145,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 
 fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPlan> {
     let identity = resolve_platform_identity(platform)?;
-    let mut apt_prerequisites = BTreeSet::new();
+    let mut apt_prerequisites = BTreeSet::from(LINUX_BASE_PREREQUISITES);
     let mut manager_installs = manager_install_plan(config);
     let apt = config.linux.packages.apt.as_ref();
     let mut update_apt = apt.and_then(|apt| apt.install.as_ref()).is_some_and(|values| !values.is_empty())
@@ -158,38 +158,22 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
     let mut repo_packages_to_install = Vec::new();
     for repo in applicable_repos(config, platform, identity) {
         repo_operation(repo, platform, identity)?;
-        apt_prerequisites.extend(["ca-certificates", "curl", "gnupg"]);
+        apt_prerequisites.insert("gnupg");
         repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
         repo_packages_to_install.extend(repo.packages.iter().cloned());
         applicable = true;
     }
     if config.linux.packages.flatpak.as_ref().is_some_and(|values| !values.is_empty()) {
-        apt_prerequisites.extend(["ca-certificates", "curl", "flatpak"]);
+        apt_prerequisites.insert("flatpak");
         manager_installs.flatpak = true;
-    }
-    if config.shared.tools.rust.is_some() || config.shared.tools.node.is_some() || config.shared.tools.python.is_some()
-    {
-        apt_prerequisites.extend(["ca-certificates", "curl"]);
-    }
-    if config.shared.tools.go.is_some() {
-        apt_prerequisites.extend(["ca-certificates", "curl", "tar"]);
-    }
-    if config.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
-        || config.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty())
-    {
-        apt_prerequisites.extend(["ca-certificates", "curl"]);
     }
     if manager_installs.fnm {
         apt_prerequisites.insert("unzip");
     }
     for binary in config.linux.packages.binaries.as_deref().unwrap_or_default() {
         if binary_operation(binary, platform.architecture).is_some() {
-            apt_prerequisites.extend(["ca-certificates", "curl"]);
             update_apt |= binary.format == BinaryFormat::Deb;
         }
-    }
-    if configured_fonts(config).is_some() {
-        apt_prerequisites.extend(LINUX_FONT_PREREQUISITES);
     }
     if !config.shared.dotfiles.packages.is_empty() || !config.linux.dotfiles.packages.is_empty() {
         apt_prerequisites.insert("stow");
@@ -252,6 +236,12 @@ fn apply_tools(config: &Config, architecture: Architecture, managers: &ManagerIn
     if let Some(selector) = config.shared.tools.rust.as_deref() {
         run("Applying", Operation::RustToolchain { selector: selector.to_owned() })?;
     }
+    if managers.cargo_binstall {
+        run("Applying", Operation::InstallCargoBinstall)?;
+    }
+    if managers.cargo_update {
+        run("Applying", Operation::InstallCargoUpdate)?;
+    }
     if managers.fnm {
         run("Applying", Operation::InstallFnm)?;
     }
@@ -266,12 +256,6 @@ fn apply_tools(config: &Config, architecture: Architecture, managers: &ManagerIn
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
         run("Applying", Operation::GoToolchain { selector: go_selector(selector), architecture })?;
-    }
-    if managers.cargo_binstall {
-        run("Applying", Operation::InstallCargoBinstall)?;
-    }
-    if managers.cargo_update {
-        run("Applying", Operation::InstallCargoUpdate)?;
     }
     Ok(())
 }
@@ -316,7 +300,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         prerequisites.insert("flatpak");
     }
     if config.shared.updates.fonts == Some(true) && configured_fonts(config).is_some() {
-        prerequisites.extend(LINUX_FONT_PREREQUISITES);
+        prerequisites.extend(LINUX_BASE_PREREQUISITES);
     }
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {

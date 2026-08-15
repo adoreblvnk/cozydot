@@ -169,8 +169,8 @@ macos:
       show_filename_extensions: true
       show_hidden_files: true
     keyboard:
-      key_repeat: 2
-      initial_key_repeat: 15
+      key_repeat: 2 # macOS default: 6
+      initial_key_repeat: 15 # macOS default: 25
     trackpad:
       tap_to_click: true
   updates:
