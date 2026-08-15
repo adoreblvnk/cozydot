@@ -15,7 +15,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const LINUX_BASE_PREREQUISITES: [&str; 5] = ["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"];
+const LINUX_BASE_PREREQUISITES: [&str; 6] = ["ca-certificates", "curl", "gnupg", "tar", "xz-utils", "fontconfig"];
+const LINUX_FONT_PREREQUISITES: [&str; 5] = ["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"];
 
 #[derive(Default)]
 struct ManagerInstallPlan {
@@ -158,7 +159,6 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
     let mut repo_packages_to_install = Vec::new();
     for repo in applicable_repos(config, platform, identity) {
         repo_operation(repo, platform, identity)?;
-        apt_prerequisites.insert("gnupg");
         repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
         repo_packages_to_install.extend(repo.packages.iter().cloned());
         applicable = true;
@@ -300,7 +300,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         prerequisites.insert("flatpak");
     }
     if config.shared.updates.fonts == Some(true) && configured_fonts(config).is_some() {
-        prerequisites.extend(LINUX_BASE_PREREQUISITES);
+        prerequisites.extend(LINUX_FONT_PREREQUISITES);
     }
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
