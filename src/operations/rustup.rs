@@ -11,18 +11,10 @@ pub fn install_rustup(host: &Host) -> Result<()> {
     let installed = cargo_home.join("bin/rustup");
     if !real_executable_file(&installed) {
         let installer = TempPath::new(host, "rustup")?;
-        host.require(
+        host.curl(
             "rustup installer download",
-            "curl",
-            [
-                "--proto",
-                "=https",
-                "--tlsv1.2",
-                "-sSf",
-                "-o",
-                &installer.path().to_string_lossy(),
-                "https://sh.rustup.rs",
-            ],
+            "https://sh.rustup.rs",
+            ["--proto", "=https", "--tlsv1.2", "--output", &installer.path().to_string_lossy()],
         )?;
         host.require(
             "rustup install",

@@ -55,24 +55,10 @@ fn install_family(host: &Host, family: &str, destination: &Path, privileged: boo
     url.path_segments_mut()
         .map_err(|_| anyhow::anyhow!("Nerd Fonts URL cannot be a base"))?
         .push(&format!("{family}.tar.xz"));
-    host.require(
+    host.curl(
         "Nerd Font archive download",
-        "curl",
-        [
-            "--proto".as_ref(),
-            "=https".as_ref(),
-            "--location".as_ref(),
-            "--fail".as_ref(),
-            "--silent".as_ref(),
-            "--show-error".as_ref(),
-            "--retry".as_ref(),
-            "3".as_ref(),
-            "--retry-all-errors".as_ref(),
-            "--output".as_ref(),
-            archive.path().as_os_str(),
-            "--".as_ref(),
-            url.as_str().as_ref(),
-        ],
+        url.as_str(),
+        ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.path().as_os_str()],
     )?;
     let path = destination.to_str().context("font path is not UTF-8")?;
     let archive_path = archive.path().to_str().context("font archive path is not UTF-8")?;

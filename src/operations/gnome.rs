@@ -66,7 +66,7 @@ fn write_dconf(host: &Host, key: &str, value: &str) -> Result<()> {
 
 fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
-    let metadata = host.require("GNOME extension metadata", "curl", ["-fsSL", &endpoint])?;
+    let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host.require("GNOME extension shell version", "gnome-shell", ["--version"])?;
     let shell_version =
         super::gnome_shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
@@ -77,7 +77,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let archive = TempPath::new_with_suffix(host, "gnome-extension", ".zip")?;
     let name = extension.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
-    host.require("GNOME extension download", "curl", ["-fL", "-o", &archive.path().to_string_lossy(), &url])?;
+    host.curl("GNOME extension download", &url, ["--output", &archive.path().to_string_lossy()])?;
     host.require(
         "GNOME extension install",
         "gnome-extensions",

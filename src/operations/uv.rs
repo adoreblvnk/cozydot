@@ -10,10 +10,10 @@ pub fn install_uv(host: &Host) -> Result<()> {
     let installed = host.home().join(".local/bin/uv");
     if !real_executable_file(&installed) {
         let installer = TempPath::new(host, "uv-install")?;
-        host.require(
+        host.curl(
             "uv installer download",
-            "curl",
-            ["-LsSf", "-o", &installer.path().to_string_lossy(), "https://astral.sh/uv/install.sh"],
+            "https://astral.sh/uv/install.sh",
+            ["--output", &installer.path().to_string_lossy()],
         )?;
         host.require(
             "uv install",

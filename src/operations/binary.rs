@@ -2,8 +2,9 @@ use super::{Host, TempPath};
 use crate::{config::BinaryFormat, platform::Architecture};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use serde_json::Value;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+
+use super::parsers::GithubRelease;
 
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
@@ -98,26 +99,18 @@ fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<String> {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
         BinarySourceOperation::GithubLatest { repo, selector } => {
             let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
-            let output = host.require(
+            let output = host.curl(
                 "resolve binary package release",
-                "curl",
+                &endpoint,
                 [
                     "--proto",
                     "=https",
-                    "--location",
-                    "--fail",
-                    "--silent",
-                    "--show-error",
-                    "--retry",
-                    "3",
-                    "--retry-all-errors",
                     "--header",
                     GITHUB_ACCEPT,
                     "--header",
                     GITHUB_API_VERSION,
                     "--header",
                     USER_AGENT,
-                    &endpoint,
                 ],
             )?;
             select_asset(&output.stdout, selector, operation)
@@ -126,13 +119,9 @@ fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<String> {
 }
 
 fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation) -> Result<String> {
-    let release: Value = serde_json::from_slice(input).context("parse GitHub release JSON")?;
-    let assets = release.get("assets").and_then(Value::as_array).context("GitHub release assets must be an array")?;
+    let release: GithubRelease = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(selector).context("compile binary asset regex")?;
-    let matches = assets
-        .iter()
-        .filter(|asset| asset.get("name").and_then(Value::as_str).is_some_and(|name| pattern.is_match(name)))
-        .collect::<Vec<_>>();
+    let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
     if matches.len() != 1 {
         bail!(
             "binary package {:?} ({}) selector matched {} assets",
@@ -141,11 +130,7 @@ fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation
             matches.len()
         );
     }
-    matches[0]
-        .get("browser_download_url")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .context("selected GitHub release asset must have a browser_download_url")
+    Ok(matches[0].browser_download_url.clone())
 }
 
 fn download(host: &Host, operation: &BinaryPackageOperation, url: &str) -> Result<TempPath> {
@@ -157,23 +142,7 @@ fn download(host: &Host, operation: &BinaryPackageOperation, url: &str) -> Resul
             TempPath::new_in_with_suffix(&applications, &format!("{}-", operation.name), ".part")?
         }
     };
-    host.require(
-        "download binary package",
-        "curl",
-        [
-            "--location".as_ref(),
-            "--fail".as_ref(),
-            "--silent".as_ref(),
-            "--show-error".as_ref(),
-            "--retry".as_ref(),
-            "3".as_ref(),
-            "--retry-all-errors".as_ref(),
-            "--output".as_ref(),
-            temporary.path().as_os_str(),
-            "--".as_ref(),
-            url.as_ref(),
-        ],
-    )?;
+    host.curl("download binary package", url, ["--output".as_ref(), temporary.path().as_os_str()])?;
     Ok(temporary)
 }
 

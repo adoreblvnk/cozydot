@@ -44,6 +44,20 @@ impl Host {
         Ok(output)
     }
 
+    pub fn curl<I, S>(&self, operation: &str, url: &str, args: I) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut curl_args = ["--location", "--fail", "--silent", "--show-error", "--retry", "3", "--retry-all-errors"]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>();
+        curl_args.extend(args.into_iter().map(|arg| arg.as_ref().to_os_string()));
+        curl_args.extend([OsString::from("--"), OsString::from(url)]);
+        self.require(operation, "curl", curl_args)
+    }
+
     pub fn home(&self) -> PathBuf {
         self.home.clone()
     }

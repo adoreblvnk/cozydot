@@ -23,17 +23,14 @@ pub fn install_homebrew(host: &Host) -> Result<()> {
         return Ok(());
     }
     let script = TempPath::new(host, "homebrew-install")?;
-    host.require(
+    host.curl(
         "Homebrew installer download",
-        "curl",
+        "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
         [
             "--proto",
             "=https",
-            "--fail",
-            "--location",
             "--output",
             script.path().to_str().ok_or_else(|| anyhow::anyhow!("Homebrew installer path is not UTF-8"))?,
-            "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
         ],
     )?;
     host.require(

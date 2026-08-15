@@ -67,24 +67,7 @@ pub(crate) fn add(host: &Host, repo: &AptRepo) -> Result<()> {
 
 fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
     let downloaded = TempPath::new(host, "repo-key-download")?;
-    host.require(
-        "repo key download",
-        "curl",
-        [
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--location",
-            "--tlsv1.2",
-            "--retry",
-            "3",
-            "--retry-all-errors",
-            "--output",
-            &downloaded.path().to_string_lossy(),
-            "--",
-            url,
-        ],
-    )?;
+    host.curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.path().to_string_lossy()])?;
 
     let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repo key")?;
     if downloaded_bytes.is_empty() {
