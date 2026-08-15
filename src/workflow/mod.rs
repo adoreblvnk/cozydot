@@ -16,7 +16,6 @@ use std::{
 };
 
 const LINUX_BASE_PREREQUISITES: [&str; 6] = ["ca-certificates", "curl", "gnupg", "tar", "xz-utils", "fontconfig"];
-const LINUX_FONT_PREREQUISITES: [&str; 5] = ["ca-certificates", "curl", "tar", "xz-utils", "fontconfig"];
 
 #[derive(Default)]
 struct ManagerInstallPlan {
@@ -300,7 +299,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         prerequisites.insert("flatpak");
     }
     if config.shared.updates.fonts == Some(true) && configured_fonts(config).is_some() {
-        prerequisites.extend(LINUX_FONT_PREREQUISITES);
+        prerequisites.extend(LINUX_BASE_PREREQUISITES);
     }
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
