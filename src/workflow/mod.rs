@@ -284,36 +284,23 @@ fn manager_install_plan(config: &Config) -> ManagerInstallPlan {
 }
 
 fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
-    let mut prerequisites = BTreeSet::new();
+    let mut prerequisites = BTreeSet::from(LINUX_BASE_PREREQUISITES);
     let updates = &config.shared.updates.tools;
-    if updates.rust == Some(true) || updates.node == Some(true) || updates.python == Some(true) {
-        prerequisites.extend(["ca-certificates", "curl"]);
-    }
-    if updates.go == Some(true) {
-        prerequisites.extend(["ca-certificates", "curl", "tar"]);
-    }
     if updates.node == Some(true) {
         prerequisites.insert("unzip");
     }
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
         prerequisites.insert("flatpak");
     }
-    if config.shared.updates.fonts == Some(true) && configured_fonts(config).is_some() {
-        prerequisites.extend(LINUX_BASE_PREREQUISITES);
-    }
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
         run("Updating", Operation::AptUpdate)?;
         run("Updating", Operation::AptUpgrade { command: policy })?;
     }
-    if !prerequisites.is_empty() {
-        run(
-            "Updating",
-            Operation::AptUpdateAndInstall {
-                packages: prerequisites.iter().map(|value| (*value).to_owned()).collect(),
-            },
-        )?;
-    }
+    run(
+        "Updating",
+        Operation::AptUpdateAndInstall { packages: prerequisites.iter().map(|value| (*value).to_owned()).collect() },
+    )?;
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
         run("Updating", Operation::FlatpakUpdateApps)?;
     }

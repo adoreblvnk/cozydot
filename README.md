@@ -92,10 +92,12 @@ Python updates use `latest`, `latest`, and `3` respectively. Font updates still
 redownload configured Nerd Font families because fonts have no native manager;
 an absent family list is a no-op.
 
-An absent or empty `updates:` section, or one containing only false controls,
-makes `cozydot update` a validated silent no-op. `apply` accepts update controls
-but never executes them. Managed Deb and AppImage binaries remain ensure-only
-and have no update category.
+On Linux, `cozydot update` always ensures the base prerequisite packages before
+running enabled update categories. With an absent, empty, or all-false
+`updates:` section, that baseline operation is its only work. The same
+configuration is a validated silent no-op on macOS. `apply` accepts update
+controls but never executes them. Managed Deb and AppImage binaries remain
+ensure-only and have no update category.
 
 `updates.apt: upgrade|full-upgrade` runs `apt-get update`, then performs a system-wide
 APT `upgrade` or `full-upgrade`; `full-upgrade` also runs purge-autoremove. This updates
