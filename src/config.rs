@@ -75,12 +75,26 @@ impl Config {
         let distro = identity.distro;
         let desktop = DesktopKind::from_platform(&platform.desktop)?;
 
-        if let Some(require) = self.linux.system.require.as_ref() {
-            if require.distros.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
-                bail!("linux.system.require.distros: detected distribution {:?} is not allowed", platform.distro);
+        if let Some(allowed_platforms) = self.linux.system.allowed_platforms.as_ref() {
+            if allowed_platforms
+                .distros
+                .as_ref()
+                .is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro))
+            {
+                bail!(
+                    "linux.system.allowed_platforms.distros: detected distribution {:?} is not allowed",
+                    platform.distro
+                );
             }
-            if require.desktops.as_ref().is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
-                bail!("linux.system.require.desktops: detected desktop {:?} is not allowed", platform.desktop);
+            if allowed_platforms
+                .desktops
+                .as_ref()
+                .is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop))
+            {
+                bail!(
+                    "linux.system.allowed_platforms.desktops: detected desktop {:?} is not allowed",
+                    platform.desktop
+                );
             }
         }
 
@@ -280,7 +294,7 @@ impl Distro {
             "linuxmint" => Ok(Self::Linuxmint),
             "pop" => Ok(Self::Pop),
             "debian" => Ok(Self::Debian),
-            _ => bail!("linux.system.require.distros: unsupported detected distribution {value:?}"),
+            _ => bail!("linux.system.allowed_platforms.distros: unsupported detected distribution {value:?}"),
         }
     }
 }
@@ -302,7 +316,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     let upstream = match platform.upstream.as_str() {
         "ubuntu" => Family::Ubuntu,
         "debian" => Family::Debian,
-        value => bail!("linux.system.require.distros: unsupported platform upstream family {value:?}"),
+        value => bail!("linux.system.allowed_platforms.distros: unsupported platform upstream family {value:?}"),
     };
     let valid = match distro {
         Distro::Ubuntu | Distro::Pop => upstream == Family::Ubuntu,
@@ -311,7 +325,7 @@ pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity
     };
     if !valid {
         bail!(
-            "linux.system.require.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
+            "linux.system.allowed_platforms.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
             platform.distro,
             platform.upstream
         );
@@ -333,7 +347,7 @@ impl DesktopKind {
             "none" => Ok(Self::None),
             "gnome" => Ok(Self::Gnome),
             "cinnamon" => Ok(Self::Cinnamon),
-            _ => bail!("linux.system.require.desktops: unsupported detected desktop {value:?}"),
+            _ => bail!("linux.system.allowed_platforms.desktops: unsupported detected desktop {value:?}"),
         }
     }
 }
@@ -382,14 +396,14 @@ pub fn select_distro_map<T>(
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct System {
-    pub require: Option<PlatformRequirements>,
+    pub allowed_platforms: Option<PlatformAllowlist>,
     pub add_user_to_sudo_group: Option<bool>,
     pub ubuntu: Option<UbuntuSystem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlatformRequirements {
+pub struct PlatformAllowlist {
     pub distros: Option<Vec<Distro>>,
     pub desktops: Option<Vec<DesktopKind>>,
 }

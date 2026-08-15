@@ -49,7 +49,7 @@ shared:
 linux:
   system:
     add_user_to_sudo_group: true
-    require:
+    allowed_platforms:
       distros:
         - ubuntu
         - debian
