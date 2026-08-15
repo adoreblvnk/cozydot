@@ -19,10 +19,10 @@ pub fn install_fnm(host: &Host) -> Result<()> {
     let installed = data_home.join("fnm/fnm");
     if !real_executable_file(&installed) {
         let installer = TempPath::new(host, "fnm-install")?;
-        host.require(
+        host.curl(
             "FNM installer download",
-            "curl",
-            ["-fsSL", "-o", &installer.path().to_string_lossy(), "https://fnm.vercel.app/install"],
+            "https://fnm.vercel.app/install",
+            ["--output", &installer.path().to_string_lossy()],
         )?;
         host.require(
             "FNM install",

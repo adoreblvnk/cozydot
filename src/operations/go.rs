@@ -1,5 +1,6 @@
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
@@ -20,6 +21,18 @@ struct GoRelease {
     sha256: String,
 }
 
+#[derive(Deserialize)]
+struct GoReleaseMetadata {
+    version: String,
+    files: Vec<GoFileMetadata>,
+}
+
+#[derive(Deserialize)]
+struct GoFileMetadata {
+    filename: String,
+    sha256: String,
+}
+
 pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     add_go_to_path(host)?;
     let expected_arch = architecture.go();
@@ -32,24 +45,10 @@ pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architectu
 
     let archive = TempPath::new_with_suffix(host, "go", ".tar.gz")?;
     let url = format!("https://go.dev/dl/{filename}");
-    host.require(
+    host.curl(
         "Go archive download",
-        "curl",
-        [
-            "--proto".as_ref(),
-            "=https".as_ref(),
-            "--location".as_ref(),
-            "--fail".as_ref(),
-            "--silent".as_ref(),
-            "--show-error".as_ref(),
-            "--retry".as_ref(),
-            "3".as_ref(),
-            "--retry-all-errors".as_ref(),
-            "--output".as_ref(),
-            archive.path().as_os_str(),
-            "--".as_ref(),
-            url.as_ref(),
-        ],
+        &url,
+        ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.path().as_os_str()],
     )?;
     let actual = format!("{:x}", Sha256::digest(fs::read(archive.path()).context("read downloaded Go archive")?));
     if actual != sha256 {
@@ -73,11 +72,10 @@ pub(crate) fn update_go(host: &Host, selector: &GoToolchainSelector, architectur
 }
 
 fn select_go_release(input: &str, selector: &GoToolchainSelector, arch: &str, target_os: &str) -> Result<GoRelease> {
-    let value: serde_json::Value = serde_json::from_str(input).context("parse Go release JSON")?;
-    let releases = value.as_array().context("Go metadata must be an array")?;
+    let releases: Vec<GoReleaseMetadata> = serde_json::from_str(input).context("parse Go release JSON")?;
     let version = releases
         .iter()
-        .filter_map(|release| release["version"].as_str())
+        .map(|release| release.version.as_str())
         .filter(|v| stable_go_version(v))
         .map(|v| v.trim_start_matches("go"))
         .find(|version| match selector {
@@ -90,12 +88,10 @@ fn select_go_release(input: &str, selector: &GoToolchainSelector, arch: &str, ta
     let filename = format!("go{version}.{target_os}-{arch}.tar.gz");
     let file = releases
         .iter()
-        .find(|release| release["version"].as_str() == Some(&format!("go{version}")))
-        .and_then(|release| release["files"].as_array())
-        .and_then(|files| files.iter().find(|file| file["filename"].as_str() == Some(&filename)))
+        .find(|release| release.version == format!("go{version}"))
+        .and_then(|release| release.files.iter().find(|file| file.filename == filename))
         .context("Go metadata has no matching architecture archive")?;
-    let sha256 = file["sha256"].as_str().context("Go archive metadata has no SHA-256 checksum")?;
-    Ok(GoRelease { version: version.to_owned(), filename, sha256: sha256.to_owned() })
+    Ok(GoRelease { version: version.to_owned(), filename, sha256: file.sha256.clone() })
 }
 
 fn stable_go_version(value: &str) -> bool {
@@ -112,23 +108,8 @@ pub fn add_go_to_path(host: &Host) -> Result<()> {
 }
 
 fn resolve_go_release(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<GoRelease> {
-    let metadata = host.require(
-        "Go release resolution",
-        "curl",
-        [
-            "--proto",
-            "=https",
-            "--location",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--retry",
-            "3",
-            "--retry-all-errors",
-            "--",
-            "https://go.dev/dl/?mode=json&include=all",
-        ],
-    )?;
+    let metadata =
+        host.curl("Go release resolution", "https://go.dev/dl/?mode=json&include=all", ["--proto", "=https"])?;
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
     select_go_release(
         std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,

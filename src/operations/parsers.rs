@@ -1,11 +1,35 @@
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub(crate) struct GithubRelease {
+    pub assets: Vec<GithubAsset>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct GithubAsset {
+    pub name: String,
+    pub browser_download_url: String,
+}
+
 pub(crate) fn select_gnome_extension_version(input: &str, shell_version: &str) -> anyhow::Result<u64> {
     use anyhow::{Context, bail};
-    let value: serde_json::Value = serde_json::from_str(input).context("parse GNOME extension JSON")?;
-    let versions = value["shell_version_map"].as_object().context("GNOME response has no shell_version_map")?;
+    use std::collections::HashMap;
+
+    #[derive(Deserialize)]
+    struct Response {
+        shell_version_map: HashMap<String, ExtensionVersion>,
+    }
+
+    #[derive(Deserialize)]
+    struct ExtensionVersion {
+        version: u64,
+    }
+
+    let response: Response = serde_json::from_str(input).context("parse GNOME extension JSON")?;
     let mut candidate = shell_version;
     loop {
-        if let Some(version) = versions.get(candidate).and_then(|entry| entry["version"].as_u64()) {
-            return Ok(version);
+        if let Some(extension) = response.shell_version_map.get(candidate) {
+            return Ok(extension.version);
         }
         let Some((parent, _)) = candidate.rsplit_once('.') else {
             bail!("GNOME response has no extension version for shell {shell_version}");
