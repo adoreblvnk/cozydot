@@ -241,29 +241,29 @@ fn validation_happens_before_platform_detection_or_mutation() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn empty_apply_and_update_are_silent_noops() {
+fn empty_apply_establishes_linux_baseline_and_update_is_a_silent_noop() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
     write_config(&root, "{}", "{}");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
     for command in ["sudo", "curl", "gpg", "stow", "flatpak", "rustup"] {
         write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
     }
 
-    for command in ["apply", "update"] {
-        Command::cargo_bin("cozydot")
-            .unwrap()
+    let command = || {
+        let mut command = Command::cargo_bin("cozydot").unwrap();
+        command
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
             .env("COZYDOT_TEST_MUTATION", &mutation)
-            .env("PATH", &fake_bin)
-            .arg(command)
-            .assert()
-            .success()
-            .stdout(predicate::str::is_empty());
-    }
+            .env("PATH", &fake_bin);
+        command
+    };
+    command().arg("apply").assert().success().stdout("Applying APT update and install\n");
+    command().arg("update").assert().success().stdout(predicate::str::is_empty());
     assert!(!mutation.exists());
 }
 
@@ -279,6 +279,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     let mutation = temp.path().join("mutation");
     write_config(&root, "{}", "system:\n  sudo_group: true\n");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
 
     Command::cargo_bin("cozydot")
@@ -289,7 +290,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
         .arg("apply")
         .assert()
         .success()
-        .stdout(predicate::str::is_empty());
+        .stdout("Applying APT update and install\n");
     assert!(!mutation.exists());
 }
 
@@ -588,7 +589,8 @@ fn inapplicable_repos_have_no_side_effects() {
             ),
         );
         write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
-        for command in ["curl", "gpg", "sudo", "dpkg-query"] {
+        write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+        for command in ["curl", "gpg", "sudo"] {
             write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
         }
         Command::cargo_bin("cozydot")
@@ -600,7 +602,7 @@ fn inapplicable_repos_have_no_side_effects() {
             .arg("apply")
             .assert()
             .success()
-            .stdout(predicate::str::is_empty());
+            .stdout("Applying APT update and install\n");
         assert!(!mutation.exists());
     }
 }
