@@ -2,14 +2,9 @@ use anyhow::Result;
 use std::path::Path;
 
 use super::{Host, privileged_file::write_atomic};
+use crate::config::AptUpgradeCommand;
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AptUpgradeCommand {
-    Upgrade,
-    FullUpgrade,
-}
 
 pub fn update(host: &Host) -> Result<()> {
     host.require("APT update", "sudo", ["apt-get", "update", "-qq"])?;

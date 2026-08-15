@@ -13,10 +13,6 @@ fi
 temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 
-generate_full() {
-  cp "$base" "$temporary/full.yaml"
-}
-
 generate_cli() {
   yq '
     del(
@@ -28,7 +24,7 @@ generate_cli() {
     ) |
     .linux.integrations = {} |
     .linux.packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
-    .linux.packages.apt.repositories |= map(select(.name == "github-cli")) |
+    .linux.packages.apt.repos |= map(select(.name == "github-cli")) |
     .shared.packages.npm = ["opencode-ai"] |
     .shared.integrations.vscode.extensions = [] |
     .linux.packages.binaries |= map(select(
@@ -48,7 +44,7 @@ generate_vm() {
       .linux.integrations.docker,
       .linux.integrations.virtualbox
     ) |
-    .linux.packages.apt.repositories |= map(select(.name == "vscode" or .name == "wezterm")) |
+    .linux.packages.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
     .linux.packages.flatpak = ["com.bitwarden.desktop"] |
     .shared.packages.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
     .shared.packages.npm = ["opencode-ai"] |
@@ -62,12 +58,11 @@ generate_vm() {
   ' "$base"
 }
 
-generate_full
 generate_cli >"$temporary/cli.yaml"
 generate_vm >"$temporary/vm.yaml"
 
 status=0
-for preset in full cli vm; do
+for preset in cli vm; do
   generated="$temporary/$preset.yaml"
   committed="$root/configs/$preset.yaml"
   if [[ "$mode" == "--check" ]]; then

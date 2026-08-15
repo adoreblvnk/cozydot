@@ -57,9 +57,11 @@ fn resolve_asset(host: &Host, architecture: Architecture) -> Result<String> {
         .and_then(|assets| {
             assets.iter().find_map(|asset| {
                 let name = asset["name"].as_str()?;
-                (name.starts_with("appimaged-") && name.ends_with(suffix))
-                    .then(|| asset["browser_download_url"].as_str().map(str::to_owned))
-                    .flatten()
+                if name.starts_with("appimaged-") && name.ends_with(suffix) {
+                    asset["browser_download_url"].as_str().map(str::to_owned)
+                } else {
+                    None
+                }
             })
         })
         .with_context(|| format!("appimaged release has no asset for {}", architecture.canonical()))

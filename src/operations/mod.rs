@@ -20,7 +20,6 @@ mod uv;
 mod virtualbox;
 mod vscode;
 
-pub use apt::AptUpgradeCommand;
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
 pub use desktop::{ColorScheme, DesktopEnvironment, DesktopSetting};
 pub use go::GoToolchainSelector;
@@ -30,7 +29,7 @@ pub use repo::AptRepo;
 pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file};
 pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version};
 
-use crate::platform::Architecture;
+use crate::{config::AptUpgradeCommand, platform::Architecture};
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 

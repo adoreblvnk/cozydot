@@ -52,7 +52,7 @@ cozydot update
 ```
 
 `init` defaults to the embedded `cozydot` preset. Use
-`cozydot init --preset cozydot|full|cli|vm` to select any bundled preset. It
+`cozydot init --preset cozydot|cli|vm` to select any bundled preset. It
 writes the active configuration and bundled dotfiles under
 `${XDG_CONFIG_HOME:-$HOME/.config}/cozydot` without a checkout or network
 request.
@@ -60,9 +60,9 @@ request.
 ## Configuration sources
 
 `configs/cozydot.yaml` is the manually maintained base preset.
-`scripts/generate-configs.sh` derives `configs/full.yaml`, `configs/cli.yaml`,
-and `configs/vm.yaml`; do not edit those generated files directly. Builds embed
-snapshots of all four presets.
+`scripts/generate-configs.sh` derives `configs/cli.yaml` and `configs/vm.yaml`;
+do not edit those generated files directly. Builds embed snapshots of all three
+presets.
 
 The active `cozydot.yaml` created by `init` is user configuration, not a
 generated repository file. Edit that active file and run `cozydot check` to

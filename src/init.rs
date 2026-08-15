@@ -14,7 +14,6 @@ use std::{
 pub enum Preset {
     #[default]
     Cozydot,
-    Full,
     Cli,
     Vm,
 }
@@ -23,7 +22,6 @@ impl Preset {
     fn name(self) -> &'static str {
         match self {
             Self::Cozydot => "cozydot",
-            Self::Full => "full",
             Self::Cli => "cli",
             Self::Vm => "vm",
         }

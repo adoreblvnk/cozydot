@@ -1,11 +1,11 @@
 use crate::{
     config::{
-        AptUpgradeCommand, BinaryFormat, BinarySource, Config, EnabledDisabled, PlatformIdentity, Repo, Theme,
-        resolve_platform_identity, select_distro_map, selected_repo_codename,
+        BinaryFormat, BinarySource, Config, EnabledDisabled, PlatformIdentity, Repo, Theme, resolve_platform_identity,
+        select_distro_map, selected_repo_codename,
     },
     operations::{
-        self, AptRepo, AptUpgradeCommand as OperationAptUpgradeCommand, BinaryPackageOperation, BinarySourceOperation,
-        ColorScheme, DesktopEnvironment, DesktopSetting, GoToolchainSelector, NerdFontsMode, Operation,
+        self, AptRepo, BinaryPackageOperation, BinarySourceOperation, ColorScheme, DesktopEnvironment, DesktopSetting,
+        GoToolchainSelector, NerdFontsMode, Operation,
     },
     platform::{Architecture, Platform},
 };
@@ -321,15 +321,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
         run("Updating", Operation::AptUpdate)?;
-        run(
-            "Updating",
-            Operation::AptUpgrade {
-                command: match policy {
-                    AptUpgradeCommand::Upgrade => OperationAptUpgradeCommand::Upgrade,
-                    AptUpgradeCommand::FullUpgrade => OperationAptUpgradeCommand::FullUpgrade,
-                },
-            },
-        )?;
+        run("Updating", Operation::AptUpgrade { command: policy })?;
     }
     if !prerequisites.is_empty() {
         run(

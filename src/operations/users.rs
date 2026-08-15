@@ -3,13 +3,13 @@ use anyhow::{Result, bail};
 use super::{Host, host::one_record};
 
 pub(crate) fn sudo_group(host: &Host) -> Result<()> {
-    let (username, _) = effective_user(host)?;
+    let username = effective_user(host)?;
     host.require("administrative group membership", "sudo", ["usermod", "-aG", "sudo", "--", &username])?;
     Ok(())
 }
 
 pub(crate) fn ensure_product_group(host: &Host, label: &str, program: &str, group: &str) -> Result<()> {
-    let (username, _) = effective_user(host)?;
+    let username = effective_user(host)?;
     let groups = host.require(&format!("{label} group membership query"), "id", ["-nG", "--", &username])?;
     if one_record(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|current| current == group) {
         return Ok(());
@@ -20,15 +20,20 @@ pub(crate) fn ensure_product_group(host: &Host, label: &str, program: &str, grou
     Ok(())
 }
 
-fn effective_user(host: &Host) -> Result<(String, u32)> {
+fn effective_user(host: &Host) -> Result<String> {
     let uid = rustix::process::geteuid().as_raw();
     let output = host.require("effective user query", "getent", ["passwd", &uid.to_string()])?;
     let record = one_record(&output.stdout, "getent passwd")?;
-    let fields = record.split(':').collect::<Vec<_>>();
-    if fields.len() != 7 || fields[0].is_empty() || fields[2].parse::<u32>().ok() != Some(uid) {
+    let mut fields = record.split(':');
+    let username = fields.next().unwrap_or_default();
+    if username.is_empty()
+        || fields.next().is_none()
+        || fields.next().and_then(|field| field.parse::<u32>().ok()) != Some(uid)
+        || fields.count() != 4
+    {
         bail!("getent passwd returned a malformed effective-user record");
     }
-    Ok((fields[0].to_owned(), uid))
+    Ok(username.to_owned())
 }
 
 fn preflight(host: &Host, label: &str, program: &str) -> Result<()> {

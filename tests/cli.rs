@@ -160,7 +160,7 @@ esac
 
 #[test]
 fn init_materializes_presets_and_preserves_user_edits() {
-    for preset in ["cozydot", "full", "cli", "vm"] {
+    for preset in ["cozydot", "cli", "vm"] {
         let temp = tempfile::tempdir().unwrap();
         Command::cargo_bin("cozydot")
             .unwrap()
