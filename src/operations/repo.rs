@@ -1,23 +1,23 @@
 use super::{Host, TempPath};
-use crate::{config::validate_repository_key_path, platform::Architecture};
+use crate::{config::validate_repo_key_path, platform::Architecture};
 use anyhow::{Context, Result, bail};
 use std::{fs, path::PathBuf};
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AptRepositoryOperation {
+pub struct AptRepo {
     name: String,
     key_url: String,
     source_url: String,
     architecture: Architecture,
     suite: String,
     components: Vec<String>,
-    keyring_path: PathBuf,
+    key_path: PathBuf,
     source_list_path: PathBuf,
 }
 
-impl AptRepositoryOperation {
+impl AptRepo {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
@@ -26,50 +26,50 @@ impl AptRepositoryOperation {
         architecture: Architecture,
         suite: String,
         components: Vec<String>,
-        keyring_path: PathBuf,
+        key_path: PathBuf,
     ) -> Result<Self> {
         let name = name.into();
-        validate_repository_key_path(&keyring_path)?;
+        validate_repo_key_path(&key_path)?;
         for value in std::iter::once(source_url.as_str())
             .chain(std::iter::once(suite.as_str()))
             .chain(components.iter().map(String::as_str))
         {
             if value.chars().any(char::is_control) {
-                bail!("APT repository source values must fit on one line and contain no control characters");
+                bail!("APT repo source values must fit on one line and contain no control characters");
             }
         }
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Ok(Self { name, key_url, source_url, architecture, suite, components, keyring_path, source_list_path })
+        Ok(Self { name, key_url, source_url, architecture, suite, components, key_path, source_list_path })
     }
 
     pub fn render_source(&self) -> String {
         let prefix = format!(
             "deb [arch={} signed-by={}] {} ",
             self.architecture.debian(),
-            self.keyring_path.display(),
+            self.key_path.display(),
             self.source_url
         );
         format!("{prefix}{} {}\n", self.suite, self.components.join(" "))
     }
 }
 
-pub(crate) fn execute(host: &Host, operation: &AptRepositoryOperation) -> Result<()> {
-    let keyring_path_str = operation.keyring_path.to_str().context("keyring path is not UTF-8")?;
-    let preserve_armor = keyring_path_str.ends_with(".asc");
+pub(crate) fn add(host: &Host, repo: &AptRepo) -> Result<()> {
+    let key_path = repo.key_path.to_str().context("key path is not UTF-8")?;
+    let preserve_armor = key_path.ends_with(".asc");
 
-    let key = processed_key(host, &operation.key_url, preserve_armor)?;
-    let source = operation.render_source().into_bytes();
+    let key = processed_key(host, &repo.key_url, preserve_armor)?;
+    let source = repo.render_source().into_bytes();
 
-    super::privileged_file::write_atomic(host, &operation.keyring_path, &key, "APT repository keyring write")?;
-    super::privileged_file::write_atomic(host, &operation.source_list_path, &source, "APT repository source write")?;
+    super::privileged_file::write_atomic(host, &repo.key_path, &key, "APT repo key write")?;
+    super::privileged_file::write_atomic(host, &repo.source_list_path, &source, "APT repo source write")?;
 
     Ok(())
 }
 
 fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
-    let downloaded = TempPath::new(host, "repository-key-download")?;
+    let downloaded = TempPath::new(host, "repo-key-download")?;
     host.require(
-        "repository key download",
+        "repo key download",
         "curl",
         [
             "--fail",
@@ -87,15 +87,15 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
         ],
     )?;
 
-    let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repository key")?;
+    let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repo key")?;
     if downloaded_bytes.is_empty() {
-        bail!("repository key download produced empty output");
+        bail!("repo key download produced empty output");
     }
 
-    let binary_keyring = TempPath::new_with_suffix(host, "repository-key-binary", ".gpg")?;
+    let binary_keyring = TempPath::new_with_suffix(host, "repo-key-binary", ".gpg")?;
 
     host.require(
-        "repository key conversion",
+        "repo key conversion",
         "gpg",
         [
             "--no-options",
@@ -109,7 +109,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
     )?;
 
     let inspection = host.require(
-        "repository key validation",
+        "repo key validation",
         "gpg",
         [
             "--no-options",
@@ -126,15 +126,15 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
         .split(|byte| *byte == b'\n')
         .any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()))
     {
-        bail!("repository key validation found no public key");
+        bail!("repo key validation found no public key");
     }
 
     if preserve_armor {
         Ok(downloaded_bytes)
     } else {
-        let bytes = fs::read(binary_keyring.path()).context("read dearmored repository key")?;
+        let bytes = fs::read(binary_keyring.path()).context("read dearmored repo key")?;
         if bytes.is_empty() {
-            bail!("repository key conversion produced empty output");
+            bail!("repo key conversion produced empty output");
         }
         Ok(bytes)
     }
@@ -149,7 +149,7 @@ pub(crate) mod debian_components {
     const MODERN_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
-    pub(crate) fn execute(host: &Host, release: &str) -> Result<()> {
+    pub(crate) fn add(host: &Host, release: &str) -> Result<()> {
         if !matches!(release, "bookworm" | "trixie") {
             bail!("unsupported Debian release {release:?}; supported releases are bookworm and trixie");
         }

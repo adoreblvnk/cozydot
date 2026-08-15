@@ -6,7 +6,7 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
-pub(crate) fn execute(host: &Host, architecture: Architecture) -> Result<()> {
+pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
     if !host.run("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
         let _ = host.run("systemctl", ["--user", "stop", "appimaged.service"]);
         let _ = host.run("sudo", ["apt-get", "remove", "-qy", "appimagelauncher"]);

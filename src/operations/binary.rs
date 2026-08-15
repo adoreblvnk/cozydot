@@ -11,7 +11,7 @@ const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
-    GithubLatest { repository: String, selector: String },
+    GithubLatest { repo: String, selector: String },
     Url { url: String },
 }
 
@@ -70,7 +70,7 @@ impl BinaryPackageOperation {
     }
 }
 
-pub(crate) fn execute(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
+pub(crate) fn install(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
     if installed(host, operation) {
         return Ok(());
     }
@@ -96,8 +96,8 @@ fn appimage_destination(host: &Host, operation: &BinaryPackageOperation) -> Path
 fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<String> {
     match &operation.source {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
-        BinarySourceOperation::GithubLatest { repository, selector } => {
-            let endpoint = format!("https://api.github.com/repos/{repository}/releases/latest");
+        BinarySourceOperation::GithubLatest { repo, selector } => {
+            let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
             let output = host.require(
                 "resolve binary package release",
                 "curl",

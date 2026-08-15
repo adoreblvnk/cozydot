@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 
 use super::{Host, host::one_record};
 
-pub(crate) fn add_user_to_sudo_group(host: &Host) -> Result<()> {
+pub(crate) fn sudo_group(host: &Host) -> Result<()> {
     let (username, _) = effective_user(host)?;
     host.require("administrative group membership", "sudo", ["usermod", "-aG", "sudo", "--", &username])?;
     Ok(())

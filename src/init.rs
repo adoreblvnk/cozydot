@@ -30,7 +30,7 @@ impl Preset {
     }
 }
 
-pub fn initialization_workflow(preset: Preset) -> Result<PathBuf> {
+pub fn init(preset: Preset) -> Result<PathBuf> {
     let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
     let preset = select_embedded_preset(preset)?;
     initialization.synchronize_active_configuration(preset)?;

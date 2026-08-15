@@ -8,7 +8,7 @@ use std::{
 
 use super::super::Host;
 
-pub(crate) fn execute(host: &Host, root: &Path, packages: &[String], replace: bool) -> Result<()> {
+pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool) -> Result<()> {
     let root =
         fs::canonicalize(root).with_context(|| format!("dotfiles operation: canonicalize root {}", root.display()))?;
     if !fs::symlink_metadata(&root)?.file_type().is_dir() {

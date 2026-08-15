@@ -30,7 +30,7 @@ pub fn add_flathub_remote(host: &Host) -> Result<()> {
     Ok(())
 }
 
-pub fn install_missing_apps(host: &Host, refs: &[String]) -> Result<()> {
+pub fn install(host: &Host, refs: &[String]) -> Result<()> {
     let mut missing = Vec::new();
     for reference in refs {
         let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", reference])?;

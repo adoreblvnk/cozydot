@@ -8,21 +8,21 @@ const FONT_ROOT: &str = "/usr/share/fonts";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NerdFontsMode {
-    InstallMissing,
+    Install,
     Update,
 }
 
-pub(crate) fn execute(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
-    execute_at(host, families, mode, Path::new(FONT_ROOT), true)
+pub(crate) fn apply(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
+    apply_at(host, families, mode, Path::new(FONT_ROOT), true)
 }
 
-pub(crate) fn execute_user(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
+pub(crate) fn apply_user(host: &Host, families: &[String], mode: NerdFontsMode) -> Result<()> {
     let parent = host.home().join("Library/Fonts");
     fs::create_dir_all(&parent).context("create user font directory")?;
-    execute_at(host, families, mode, &parent, false)
+    apply_at(host, families, mode, &parent, false)
 }
 
-fn execute_at(host: &Host, families: &[String], mode: NerdFontsMode, parent: &Path, privileged: bool) -> Result<()> {
+fn apply_at(host: &Host, families: &[String], mode: NerdFontsMode, parent: &Path, privileged: bool) -> Result<()> {
     let mut changed = false;
     for family in families {
         let destination = parent.join(family);

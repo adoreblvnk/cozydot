@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::super::{Host, executable_file, path_program};
 
-pub(crate) fn install_missing(host: &Host, packages: &[String]) -> Result<()> {
+pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
     let cargo_home = host.home().join(".cargo");
     let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
     let output = host.require("Cargo installed package query", &cargo, ["install", "--list"])?;
