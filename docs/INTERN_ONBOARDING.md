@@ -176,7 +176,7 @@ Cozydot never adopts destination files into its dotfile source.
 
 ## Update workflow
 
-`update` executes only explicitly enabled controls and does not replay apply intent. An absent, empty, or all-false update section is a validated silent no-op. Managed Deb and AppImage declarations are ensure-only and have no update category.
+`update` executes only explicitly enabled controls and does not replay apply intent. Linux always ensures its base prerequisite packages first; with an absent, empty, or all-false update section, that baseline operation is its only work. The same configuration is a validated silent no-op on macOS. Managed Deb and AppImage declarations are ensure-only and have no update category.
 
 Linux update executes:
 
@@ -238,7 +238,7 @@ Linux desktop intent is checked against the detected desktop before mutation. Th
 
 ## Tests and changes
 
-`tests/cli.rs` is the authoritative compact integration suite. It covers validation before platform detection or mutation, init ownership, silent no-ops, dotfile preflight and replacement, repository applicability and key safety, repository/package ordering, APT policy, and installer safety. Do not add unit tests under `src/`.
+`tests/cli.rs` is the authoritative compact integration suite. It covers validation before platform detection or mutation, init ownership, Linux baseline behavior, dotfile preflight and replacement, repository applicability and key safety, repository/package ordering, APT policy, and installer safety. Do not add unit tests under `src/`.
 
 When changing orchestration:
 

@@ -241,7 +241,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn empty_apply_establishes_linux_baseline_and_update_is_a_silent_noop() {
+fn empty_apply_and_update_establish_the_linux_baseline() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -263,7 +263,7 @@ fn empty_apply_establishes_linux_baseline_and_update_is_a_silent_noop() {
         command
     };
     command().arg("apply").assert().success().stdout("Applying APT update and install\n");
-    command().arg("update").assert().success().stdout(predicate::str::is_empty());
+    command().arg("update").assert().success().stdout("Updating APT update and install\n");
     assert!(!mutation.exists());
 }
 
@@ -627,6 +627,7 @@ fn update_runs_only_the_selected_apt_upgrade_command() {
         let log = temp.path().join("update.log");
         write_config(&root, "{}", &format!("updates:\n  apt: {policy}\n"));
         write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+        write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
         write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
 
         Command::cargo_bin("cozydot")
