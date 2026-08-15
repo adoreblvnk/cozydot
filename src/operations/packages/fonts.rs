@@ -51,10 +51,9 @@ fn apply_at(host: &Host, families: &[String], mode: NerdFontsMode, parent: &Path
 
 fn install_family(host: &Host, family: &str, destination: &Path, privileged: bool) -> Result<()> {
     let archive = TempPath::new_with_suffix(host, "nerd-font", ".tar.xz")?;
-    let mut url = Url::parse("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/placeholder.tar.xz")?;
+    let mut url = Url::parse("https://github.com/ryanoasis/nerd-fonts/releases/latest/download")?;
     url.path_segments_mut()
         .map_err(|_| anyhow::anyhow!("Nerd Fonts URL cannot be a base"))?
-        .pop()
         .push(&format!("{family}.tar.xz"));
     host.require(
         "Nerd Font archive download",
