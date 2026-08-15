@@ -19,7 +19,7 @@ fn generate() -> io::Result<()> {
     walk(&root.join("dotfiles"), Path::new("dotfiles"), &mut records)?;
 
     let mut presets = BTreeMap::new();
-    for name in ["cozydot", "full", "cli", "vm"] {
+    for name in ["cozydot", "cli", "vm"] {
         let source = root.join("configs").join(format!("{name}.yaml"));
         println!("cargo:rerun-if-changed={}", source.display());
         let metadata = fs::symlink_metadata(&source)?;

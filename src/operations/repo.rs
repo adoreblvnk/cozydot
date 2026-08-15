@@ -7,7 +7,6 @@ const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepo {
-    name: String,
     key_url: String,
     source_url: String,
     architecture: Architecture,
@@ -39,7 +38,7 @@ impl AptRepo {
             }
         }
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Ok(Self { name, key_url, source_url, architecture, suite, components, key_path, source_list_path })
+        Ok(Self { key_url, source_url, architecture, suite, components, key_path, source_list_path })
     }
 
     pub fn render_source(&self) -> String {
