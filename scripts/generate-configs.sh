@@ -20,7 +20,7 @@ generate_full() {
 generate_cli() {
   yq '
     del(
-      .linux.system.require.desktops,
+      .linux.system.allowed_platforms.desktops,
       .linux.system.ubuntu.restricted_extras,
       .linux.packages.flatpak,
       .linux.desktop,
@@ -40,7 +40,7 @@ generate_cli() {
 
 generate_vm() {
   yq '
-    .linux.system.require = {
+    .linux.system.allowed_platforms = {
       "distros": ["ubuntu", "debian"],
       "desktops": ["gnome"]
     } |
