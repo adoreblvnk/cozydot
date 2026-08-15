@@ -43,21 +43,21 @@ fn main() -> Result<()> {
         return Ok(());
     };
     match command {
-        CliCommand::Init { preset } => init_command_workflow(preset)?,
-        CliCommand::Apply => apply_command_workflow()?,
-        CliCommand::Check => check_command_workflow()?,
-        CliCommand::Dotfiles { replace } => dotfiles_command_workflow(replace)?,
-        CliCommand::Update => update_command_workflow()?,
+        CliCommand::Init { preset } => init(preset)?,
+        CliCommand::Apply => apply()?,
+        CliCommand::Check => check()?,
+        CliCommand::Dotfiles { replace } => dotfiles(replace)?,
+        CliCommand::Update => update()?,
     }
     Ok(())
 }
 
-fn init_command_workflow(preset: init::Preset) -> Result<()> {
-    println!("Initialized cozydot in {}", init::initialization_workflow(preset)?.display());
+fn init(preset: init::Preset) -> Result<()> {
+    println!("Initialized cozydot in {}", init::init(preset)?.display());
     Ok(())
 }
 
-fn check_command_workflow() -> Result<()> {
+fn check() -> Result<()> {
     let path = active_configuration_path()?;
     config::Config::load(&path)
         .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
@@ -65,17 +65,17 @@ fn check_command_workflow() -> Result<()> {
     Ok(())
 }
 
-fn apply_command_workflow() -> Result<()> {
+fn apply() -> Result<()> {
     let host = ActiveHost::load()?;
     workflow::apply(&host.config, &host.platform, &host.root.join("dotfiles"))
 }
 
-fn dotfiles_command_workflow(replace: bool) -> Result<()> {
+fn dotfiles(replace: bool) -> Result<()> {
     let host = ActiveHost::load()?;
     workflow::dotfiles(&host.config, &host.platform, &host.root.join("dotfiles"), replace)
 }
 
-fn update_command_workflow() -> Result<()> {
+fn update() -> Result<()> {
     let host = ActiveHost::load()?;
     workflow::update(&host.config, &host.platform)
 }

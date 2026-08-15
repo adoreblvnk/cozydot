@@ -1,12 +1,11 @@
 use crate::{
     config::{
-        AptUpgradeCommand, BinaryFormat, BinarySource, Config, EnabledDisabled, PlatformIdentity, Repository, Theme,
-        resolve_platform_identity, select_distro_map, selected_repository_codename,
+        AptUpgradeCommand, BinaryFormat, BinarySource, Config, EnabledDisabled, PlatformIdentity, Repo, Theme,
+        resolve_platform_identity, select_distro_map, selected_repo_codename,
     },
     operations::{
-        self, AptRepositoryOperation, AptUpgradeCommand as OperationAptUpgradeCommand, BinaryPackageOperation,
-        BinarySourceOperation, ColorScheme, DesktopEnvironment, DesktopSetting, GoToolchainSelector, NerdFontsMode,
-        Operation,
+        self, AptRepo, AptUpgradeCommand as OperationAptUpgradeCommand, BinaryPackageOperation, BinarySourceOperation,
+        ColorScheme, DesktopEnvironment, DesktopSetting, GoToolchainSelector, NerdFontsMode, Operation,
     },
     platform::{Architecture, Platform},
 };
@@ -33,9 +32,9 @@ struct LinuxApplyPlan {
     apt_prerequisites: BTreeSet<&'static str>,
     manager_installs: ManagerInstallPlan,
     update_apt: bool,
-    has_applicable_repositories: bool,
-    repository_packages_to_purge: Vec<String>,
-    repository_packages_to_install: Vec<String>,
+    has_repos: bool,
+    repo_packages_to_purge: Vec<String>,
+    repo_packages_to_install: Vec<String>,
 }
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
@@ -54,7 +53,7 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
     let platform_packages =
         if platform.is_macos() { &config.macos.dotfiles.packages } else { &config.linux.dotfiles.packages };
     if let Some(operation) = dotfiles_operation(config, platform_packages, root, replace)? {
-        execute("Applying", operation)?;
+        run("Applying", operation)?;
     }
     Ok(())
 }
@@ -63,29 +62,29 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     let plan = plan_linux_apply(config, platform)?;
 
     if platform.distro == "debian" {
-        if config.linux.system.add_user_to_sudo_group == Some(true) {
-            execute("Applying", Operation::AddUserToSudoGroup)?;
+        if config.linux.system.sudo_group == Some(true) {
+            run("Applying", Operation::SudoGroup)?;
         }
-        execute("Applying", Operation::EnsureDebianAptComponents { release: platform.distro_codename.clone() })?;
+        run("Applying", Operation::AddDebianAptComponents { release: platform.distro_codename.clone() })?;
     }
     if platform.distro == "ubuntu"
         && let Some(ubuntu) = &config.linux.system.ubuntu
     {
         if let Some(state) = ubuntu.unattended_upgrades {
-            execute("Applying", Operation::UnattendedUpgrades { enabled: state == EnabledDisabled::Enabled })?;
+            run("Applying", Operation::UnattendedUpgrades { enabled: state == EnabledDisabled::Enabled })?;
         }
         if let Some(state) = ubuntu.snapd {
-            execute("Applying", Operation::Snapd { enabled: state == EnabledDisabled::Enabled })?;
+            run("Applying", Operation::Snapd { enabled: state == EnabledDisabled::Enabled })?;
         }
         if ubuntu.restricted_extras {
-            execute("Applying", Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] })?;
+            run("Applying", Operation::AptPackages { packages: vec!["ubuntu-restricted-extras".into()] })?;
         }
     }
     if plan.update_apt {
-        execute("Applying", Operation::AptUpdate)?;
+        run("Applying", Operation::AptUpdate)?;
     }
     if !plan.apt_prerequisites.is_empty() {
-        execute(
+        run(
             "Applying",
             Operation::AptUpdateAndInstall {
                 packages: plan.apt_prerequisites.iter().map(|value| (*value).to_owned()).collect(),
@@ -95,31 +94,28 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if let Some(packages) =
         config.linux.packages.apt.as_ref().and_then(|apt| apt.install.as_ref()).filter(|packages| !packages.is_empty())
     {
-        execute("Applying", Operation::AptPackages { packages: packages.clone() })?;
+        run("Applying", Operation::AptPackages { packages: packages.clone() })?;
     }
-    for repository in applicable_repositories(config, platform, plan.identity) {
-        execute(
-            "Applying",
-            Operation::AptRepository(Box::new(repository_operation(repository, platform, plan.identity)?)),
-        )?;
+    for repo in applicable_repos(config, platform, plan.identity) {
+        run("Applying", Operation::AptRepo(Box::new(repo_operation(repo, platform, plan.identity)?)))?;
     }
-    if plan.has_applicable_repositories {
-        execute("Applying", Operation::AptUpdate)?;
+    if plan.has_repos {
+        run("Applying", Operation::AptUpdate)?;
     }
-    if !plan.repository_packages_to_purge.is_empty() || !plan.repository_packages_to_install.is_empty() {
-        execute(
+    if !plan.repo_packages_to_purge.is_empty() || !plan.repo_packages_to_install.is_empty() {
+        run(
             "Applying",
             Operation::AptPurgeThenInstall {
-                purge: plan.repository_packages_to_purge,
-                install: plan.repository_packages_to_install,
+                purge: plan.repo_packages_to_purge,
+                install: plan.repo_packages_to_install,
             },
         )?;
     }
     if plan.manager_installs.flatpak {
-        execute("Applying", Operation::FlatpakAddFlathubRemote)?;
-        execute(
+        run("Applying", Operation::FlatpakAddFlathubRemote)?;
+        run(
             "Applying",
-            Operation::FlatpakInstallMissingApps {
+            Operation::FlatpakInstall {
                 refs: config.linux.packages.flatpak.as_ref().expect("Flatpak intent was derived").clone(),
             },
         )?;
@@ -127,20 +123,20 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     apply_tools(config, platform.architecture, &plan.manager_installs)?;
     apply_packages(config)?;
     for binary in configured_binaries(config, platform.architecture, BinaryFormat::Deb) {
-        execute("Applying", Operation::BinaryPackage(binary))?;
+        run("Applying", Operation::BinaryPackage(binary))?;
     }
     let appimages = configured_binaries(config, platform.architecture, BinaryFormat::Appimage);
     if !appimages.is_empty() {
-        execute("Applying", Operation::Appimaged { architecture: platform.architecture })?;
+        run("Applying", Operation::Appimaged { architecture: platform.architecture })?;
         for binary in appimages {
-            execute("Applying", Operation::BinaryPackage(binary))?;
+            run("Applying", Operation::BinaryPackage(binary))?;
         }
     }
     if let Some(families) = configured_fonts(config) {
-        execute("Applying", Operation::NerdFonts { families, mode: NerdFontsMode::InstallMissing })?;
+        run("Applying", Operation::NerdFonts { families, mode: NerdFontsMode::Install })?;
     }
     if let Some(operation) = dotfiles_operation(config, &config.linux.dotfiles.packages, dotfiles_root, false)? {
-        execute("Applying", operation)?;
+        run("Applying", operation)?;
     }
     linux_integrations(config)?;
     linux_desktop(config, platform)?;
@@ -158,13 +154,13 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
                 ubuntu.unattended_upgrades.is_some() || ubuntu.snapd.is_some() || ubuntu.restricted_extras
             }));
     let mut applicable = false;
-    let mut repository_packages_to_purge = Vec::new();
-    let mut repository_packages_to_install = Vec::new();
-    for repository in applicable_repositories(config, platform, identity) {
-        repository_operation(repository, platform, identity)?;
+    let mut repo_packages_to_purge = Vec::new();
+    let mut repo_packages_to_install = Vec::new();
+    for repo in applicable_repos(config, platform, identity) {
+        repo_operation(repo, platform, identity)?;
         apt_prerequisites.extend(["ca-certificates", "curl", "gnupg"]);
-        repository_packages_to_purge.extend(repository.conflicts.iter().cloned());
-        repository_packages_to_install.extend(repository.packages.iter().cloned());
+        repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
+        repo_packages_to_install.extend(repo.packages.iter().cloned());
         applicable = true;
     }
     if config.linux.packages.flatpak.as_ref().is_some_and(|values| !values.is_empty()) {
@@ -204,9 +200,9 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
         apt_prerequisites,
         manager_installs,
         update_apt,
-        has_applicable_repositories: applicable,
-        repository_packages_to_purge,
-        repository_packages_to_install,
+        has_repos: applicable,
+        repo_packages_to_purge,
+        repo_packages_to_install,
     })
 }
 
@@ -218,34 +214,31 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
     let needs_homebrew = homebrew_packages || managers.fnm || managers.cargo_binstall;
 
     if config.macos.system.validate_sudo_access == Some(true) {
-        execute("Applying", Operation::ValidateMacosSudoAccess)?;
+        run("Applying", Operation::ValidateMacosSudoAccess)?;
     }
     if config.macos.system.xcode.command_line_tools == Some(true) {
-        execute("Applying", Operation::InstallCommandLineToolsForXcode)?;
+        run("Applying", Operation::InstallCommandLineToolsForXcode)?;
     }
     if config.macos.system.rosetta == Some(true) {
-        execute("Applying", Operation::InstallRosetta)?;
+        run("Applying", Operation::InstallRosetta)?;
     }
     if needs_homebrew {
-        execute("Applying", Operation::InstallHomebrew)?;
+        run("Applying", Operation::InstallHomebrew)?;
     }
     if homebrew_packages {
         let mut formulae = config.macos.homebrew.formulae.clone();
         if dotfiles && !formulae.iter().any(|formula| formula == "stow") {
             formulae.push("stow".into());
         }
-        execute(
-            "Applying",
-            Operation::InstallHomebrewPackages { formulae, casks: config.macos.homebrew.casks.clone() },
-        )?;
+        run("Applying", Operation::InstallHomebrewPackages { formulae, casks: config.macos.homebrew.casks.clone() })?;
     }
     apply_tools(config, architecture, &managers)?;
     apply_packages(config)?;
     if let Some(families) = configured_fonts(config) {
-        execute("Applying", Operation::UserNerdFonts { families, mode: NerdFontsMode::InstallMissing })?;
+        run("Applying", Operation::UserNerdFonts { families, mode: NerdFontsMode::Install })?;
     }
     if let Some(operation) = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false)? {
-        execute("Applying", operation)?;
+        run("Applying", operation)?;
     }
     vscode_extensions(config)?;
     macos_desktop(config)?;
@@ -254,41 +247,41 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
 
 fn apply_tools(config: &Config, architecture: Architecture, managers: &ManagerInstallPlan) -> Result<()> {
     if managers.rustup {
-        execute("Applying", Operation::InstallRustup)?;
+        run("Applying", Operation::InstallRustup)?;
     }
     if let Some(selector) = config.shared.tools.rust.as_deref() {
-        execute("Applying", Operation::RustToolchain { selector: selector.to_owned() })?;
+        run("Applying", Operation::RustToolchain { selector: selector.to_owned() })?;
     }
     if managers.fnm {
-        execute("Applying", Operation::InstallFnm)?;
+        run("Applying", Operation::InstallFnm)?;
     }
     if let Some(selector) = config.shared.tools.node.as_deref() {
-        execute("Applying", Operation::NodeToolchain { selector: selector.to_owned() })?;
+        run("Applying", Operation::NodeToolchain { selector: selector.to_owned() })?;
     }
     if managers.uv {
-        execute("Applying", Operation::InstallUv)?;
+        run("Applying", Operation::InstallUv)?;
     }
     if let Some(version) = &config.shared.tools.python {
-        execute("Applying", Operation::PythonToolchain { version: version.clone() })?;
+        run("Applying", Operation::PythonToolchain { version: version.clone() })?;
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
-        execute("Applying", Operation::GoToolchain { selector: go_selector(selector), architecture })?;
+        run("Applying", Operation::GoToolchain { selector: go_selector(selector), architecture })?;
     }
     if managers.cargo_binstall {
-        execute("Applying", Operation::InstallCargoBinstall)?;
+        run("Applying", Operation::InstallCargoBinstall)?;
     }
     if managers.cargo_update {
-        execute("Applying", Operation::InstallCargoUpdate)?;
+        run("Applying", Operation::InstallCargoUpdate)?;
     }
     Ok(())
 }
 
 fn apply_packages(config: &Config) -> Result<()> {
     if let Some(packages) = config.shared.packages.cargo.as_ref().filter(|values| !values.is_empty()) {
-        execute("Applying", Operation::CargoInstallMissing { packages: packages.clone() })?;
+        run("Applying", Operation::CargoInstall { packages: packages.clone() })?;
     }
     if let Some(packages) = config.shared.packages.npm.as_ref().filter(|values| !values.is_empty()) {
-        execute("Applying", Operation::NpmInstallMissing { packages: packages.clone() })?;
+        run("Applying", Operation::NpmInstall { packages: packages.clone() })?;
     }
     Ok(())
 }
@@ -327,8 +320,8 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
     }
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
-        execute("Updating", Operation::AptUpdate)?;
-        execute(
+        run("Updating", Operation::AptUpdate)?;
+        run(
             "Updating",
             Operation::AptUpgrade {
                 command: match policy {
@@ -339,7 +332,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         )?;
     }
     if !prerequisites.is_empty() {
-        execute(
+        run(
             "Updating",
             Operation::AptUpdateAndInstall {
                 packages: prerequisites.iter().map(|value| (*value).to_owned()).collect(),
@@ -347,13 +340,13 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         )?;
     }
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
-        execute("Updating", Operation::FlatpakUpdateApps)?;
+        run("Updating", Operation::FlatpakUpdateApps)?;
     }
     update_tools_and_packages(config, platform.architecture, false)?;
     if config.shared.updates.fonts == Some(true)
         && let Some(families) = configured_fonts(config)
     {
-        execute("Updating", Operation::NerdFonts { families, mode: NerdFontsMode::Update })?;
+        run("Updating", Operation::NerdFonts { families, mode: NerdFontsMode::Update })?;
     }
     Ok(())
 }
@@ -364,16 +357,16 @@ fn macos_update(config: &Config, architecture: Architecture) -> Result<()> {
     let needs_fnm = config.shared.updates.tools.node == Some(true) || config.shared.updates.packages.npm == Some(true);
 
     if needs_fnm {
-        execute("Updating", Operation::InstallHomebrew)?;
+        run("Updating", Operation::InstallHomebrew)?;
     }
     if homebrew_formulae || homebrew_casks {
-        execute("Updating", Operation::HomebrewUpdate { formulae: homebrew_formulae, casks: homebrew_casks })?;
+        run("Updating", Operation::HomebrewUpdate { formulae: homebrew_formulae, casks: homebrew_casks })?;
     }
     update_tools_and_packages(config, architecture, true)?;
     if config.shared.updates.fonts == Some(true)
         && let Some(families) = configured_fonts(config)
     {
-        execute("Updating", Operation::UserNerdFonts { families, mode: NerdFontsMode::Update })?;
+        run("Updating", Operation::UserNerdFonts { families, mode: NerdFontsMode::Update })?;
     }
     Ok(())
 }
@@ -381,11 +374,11 @@ fn macos_update(config: &Config, architecture: Architecture) -> Result<()> {
 fn update_tools_and_packages(config: &Config, architecture: Architecture, macos: bool) -> Result<()> {
     let updates = &config.shared.updates;
     if updates.tools.rust == Some(true) {
-        execute("Updating", Operation::InstallRustup)?;
-        execute("Updating", Operation::RustToolchainUpdate)?;
+        run("Updating", Operation::InstallRustup)?;
+        run("Updating", Operation::RustToolchainUpdate)?;
     }
     if updates.tools.go == Some(true) {
-        execute(
+        run(
             "Updating",
             Operation::GoToolchainUpdate {
                 selector: go_selector(config.shared.tools.go.as_deref().unwrap_or("latest")),
@@ -394,10 +387,10 @@ fn update_tools_and_packages(config: &Config, architecture: Architecture, macos:
         )?;
     }
     if updates.tools.node == Some(true) || (macos && updates.packages.npm == Some(true)) {
-        execute("Updating", Operation::InstallFnm)?;
+        run("Updating", Operation::InstallFnm)?;
     }
     if updates.tools.node == Some(true) {
-        execute(
+        run(
             "Updating",
             Operation::NodeToolchainUpdate {
                 selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".to_owned()),
@@ -405,54 +398,50 @@ fn update_tools_and_packages(config: &Config, architecture: Architecture, macos:
         )?;
     }
     if updates.tools.python == Some(true) {
-        execute("Updating", Operation::InstallUv)?;
-        execute("Updating", Operation::PythonToolchainUpdate)?;
+        run("Updating", Operation::InstallUv)?;
+        run("Updating", Operation::PythonToolchainUpdate)?;
     }
     if updates.packages.cargo == Some(true) {
-        execute("Updating", Operation::CargoPackageUpdate)?;
+        run("Updating", Operation::CargoPackageUpdate)?;
     }
     if updates.packages.npm == Some(true) {
-        execute("Updating", Operation::NpmPackageUpdate)?;
+        run("Updating", Operation::NpmPackageUpdate)?;
     }
     Ok(())
 }
 
-fn applicable_repositories<'a>(
+fn applicable_repos<'a>(
     config: &'a Config,
     platform: &Platform,
     identity: PlatformIdentity,
-) -> impl Iterator<Item = &'a Repository> {
+) -> impl Iterator<Item = &'a Repo> {
     config
         .linux
         .packages
         .apt
         .as_ref()
-        .and_then(|apt| apt.repositories.as_deref())
+        .and_then(|apt| apt.repos.as_deref())
         .unwrap_or_default()
         .iter()
-        .filter(move |repository| repository.applies_to(identity.distro, identity.upstream, platform.architecture))
+        .filter(move |repo| repo.applies_to(identity.distro, identity.upstream, platform.architecture))
 }
 
-fn repository_operation(
-    repository: &Repository,
-    platform: &Platform,
-    identity: PlatformIdentity,
-) -> Result<AptRepositoryOperation> {
-    let (key, source_url) = select_distro_map(&repository.urls, identity.distro, identity.upstream)
-        .expect("applicable repository has a selected URL");
-    let suite = if repository.suite == "system" {
-        selected_repository_codename(key, platform, identity.distro).to_owned()
+fn repo_operation(repo: &Repo, platform: &Platform, identity: PlatformIdentity) -> Result<AptRepo> {
+    let (key, source_url) =
+        select_distro_map(&repo.urls, identity.distro, identity.upstream).expect("applicable repo has a selected URL");
+    let suite = if repo.suite == "system" {
+        selected_repo_codename(key, platform, identity.distro).to_owned()
     } else {
-        repository.suite.clone()
+        repo.suite.clone()
     };
-    AptRepositoryOperation::new(
-        repository.name.clone(),
-        repository.key.clone(),
+    AptRepo::new(
+        repo.name.clone(),
+        repo.key.clone(),
         source_url.clone(),
         platform.architecture,
         suite,
-        repository.components.clone(),
-        PathBuf::from(&repository.key_path),
+        repo.components.clone(),
+        PathBuf::from(&repo.key_path),
     )
 }
 
@@ -478,10 +467,9 @@ fn binary_operation(
     architecture: Architecture,
 ) -> Option<BinaryPackageOperation> {
     let source = match &binary.source {
-        BinarySource::Github { repository, assets } => BinarySourceOperation::GithubLatest {
-            repository: repository.clone(),
-            selector: assets.get(architecture)?.to_owned(),
-        },
+        BinarySource::Github { repo, assets } => {
+            BinarySourceOperation::GithubLatest { repo: repo.clone(), selector: assets.get(architecture)?.to_owned() }
+        }
         BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.to_owned() },
     };
     Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, architecture, source))
@@ -509,28 +497,22 @@ fn dotfiles_operation(
 
 fn linux_integrations(config: &Config) -> Result<()> {
     if let Some(docker) = &config.linux.integrations.docker {
-        if docker.add_user_to_group == Some(true) {
-            execute("Applying", Operation::DockerGroup)?;
+        if docker.group == Some(true) {
+            run("Applying", Operation::DockerGroup)?;
         }
         if let Some(logging) = &docker.logging {
-            execute("Applying", Operation::DockerLocalLoggingDriver { max_size: logging.max_size.clone() })?;
+            run("Applying", Operation::DockerLocalLoggingDriver { max_size: logging.max_size.clone() })?;
         }
     }
-    if config
-        .linux
-        .integrations
-        .virtualbox
-        .as_ref()
-        .is_some_and(|virtualbox| virtualbox.add_user_to_group == Some(true))
-    {
-        execute("Applying", Operation::VirtualBoxGroup)?;
+    if config.linux.integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.group == Some(true)) {
+        run("Applying", Operation::VirtualBoxGroup)?;
     }
     vscode_extensions(config)
 }
 
 fn vscode_extensions(config: &Config) -> Result<()> {
     if !config.shared.integrations.vscode.extensions.is_empty() {
-        execute(
+        run(
             "Applying",
             Operation::VsCodeInstallExtensions { extensions: config.shared.integrations.vscode.extensions.clone() },
         )?;
@@ -560,7 +542,7 @@ fn linux_desktop(config: &Config, platform: &Platform) -> Result<()> {
         _ => unreachable!("platform validation rejects unsupported desktop intent"),
     };
     if let Some(theme) = desktop.theme {
-        execute(
+        run(
             "Applying",
             Operation::DesktopSetting {
                 target,
@@ -572,33 +554,30 @@ fn linux_desktop(config: &Config, platform: &Platform) -> Result<()> {
         )?;
     }
     if let Some(executable) = &desktop.terminal {
-        execute(
-            "Applying",
-            Operation::DesktopSetting { target, setting: DesktopSetting::Terminal(executable.clone()) },
-        )?;
+        run("Applying", Operation::DesktopSetting { target, setting: DesktopSetting::Terminal(executable.clone()) })?;
     }
     if let Some(idle) = &desktop.idle {
         if let Some(timeout) = idle.timeout {
-            execute(
+            run(
                 "Applying",
                 Operation::DesktopSetting { target, setting: DesktopSetting::IdleDelaySeconds(timeout.seconds()) },
             )?;
         }
         if let Some(enabled) = idle.dim {
-            execute("Applying", Operation::DesktopSetting { target, setting: DesktopSetting::IdleDim(enabled) })?;
+            run("Applying", Operation::DesktopSetting { target, setting: DesktopSetting::IdleDim(enabled) })?;
         }
     }
     if target == DesktopEnvironment::Gnome
         && let Some(gnome) = &desktop.gnome
     {
         if let Some(extensions) = gnome.extensions.as_ref().filter(|values| !values.is_empty()) {
-            execute("Applying", Operation::GnomeExtensions { extensions: extensions.clone() })?;
+            run("Applying", Operation::GnomeExtensions { extensions: extensions.clone() })?;
         }
         if gnome.dash_to_dock == Some(true) {
-            execute("Applying", Operation::InstallDashToDock)?;
+            run("Applying", Operation::InstallDashToDock)?;
         }
         if gnome.rounded_window_corners == Some(true) {
-            execute("Applying", Operation::InstallRoundedWindowCorners)?;
+            run("Applying", Operation::InstallRoundedWindowCorners)?;
         }
     }
     Ok(())
@@ -640,7 +619,7 @@ fn macos_desktop(config: &Config) -> Result<()> {
         settings.push(operations::macos::MacDefault::TrackpadTapToClick(value));
     }
     if !settings.is_empty() {
-        execute("Applying", Operation::MacDefaults { settings })?;
+        run("Applying", Operation::MacDefaults { settings })?;
     }
     Ok(())
 }
@@ -649,11 +628,11 @@ fn go_selector(value: &str) -> GoToolchainSelector {
     if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
 }
 
-fn execute(progress: &str, operation: Operation) -> Result<()> {
+fn run(progress: &str, operation: Operation) -> Result<()> {
     let label = operation.label();
     println!("{progress} {label}");
     if matches!(
-        operations::execute(&operation).with_context(|| format!("{} {label}", progress.to_lowercase()))?,
+        operations::run(&operation).with_context(|| format!("{} {label}", progress.to_lowercase()))?,
         operations::OperationOutcome::LoginRequired
     ) {
         println!("Login required to finish {label}");

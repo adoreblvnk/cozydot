@@ -397,7 +397,7 @@ pub fn select_distro_map<T>(
 #[serde(deny_unknown_fields)]
 pub struct System {
     pub allowed_platforms: Option<PlatformAllowlist>,
-    pub add_user_to_sudo_group: Option<bool>,
+    pub sudo_group: Option<bool>,
     pub ubuntu: Option<UbuntuSystem>,
 }
 
@@ -454,26 +454,23 @@ impl Packages {
 #[serde(deny_unknown_fields)]
 pub struct AptPackages {
     pub install: Option<Vec<String>>,
-    pub repositories: Option<Vec<Repository>>,
+    pub repos: Option<Vec<Repo>>,
 }
 
 impl AptPackages {
     fn validate(&self) -> Result<()> {
-        if let Some(repositories) = &self.repositories {
+        if let Some(repos) = &self.repos {
             let mut names = HashSet::new();
             let mut key_paths = HashSet::new();
-            for (index, repository) in repositories.iter().enumerate() {
-                repository.validate(index)?;
-                if !names.insert(repository.name.as_str()) {
-                    bail!(
-                        "linux.packages.apt.repositories[{index}].name: duplicate repository name {:?}",
-                        repository.name
-                    );
+            for (index, repo) in repos.iter().enumerate() {
+                repo.validate(index)?;
+                if !names.insert(repo.name.as_str()) {
+                    bail!("linux.packages.apt.repos[{index}].name: duplicate repo name {:?}", repo.name);
                 }
-                if !key_paths.insert(repository.key_path.as_str()) {
+                if !key_paths.insert(repo.key_path.as_str()) {
                     bail!(
-                        "linux.packages.apt.repositories[{index}].key_path: destination {:?} collides with an earlier repository",
-                        repository.key_path
+                        "linux.packages.apt.repos[{index}].key_path: destination {:?} collides with an earlier repo",
+                        repo.key_path
                     );
                 }
             }
@@ -484,7 +481,7 @@ impl AptPackages {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Repository {
+pub struct Repo {
     pub name: String,
     pub key: String,
     pub key_path: String,
@@ -498,15 +495,15 @@ pub struct Repository {
     pub packages: Vec<String>,
 }
 
-impl Repository {
+impl Repo {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("linux.packages.apt.repositories[{index}]");
+        let path = format!("linux.packages.apt.repos[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
         if self.key.chars().any(char::is_control) {
             bail!("{path}.key: must contain no control characters");
         }
-        validate_repository_key_path(Path::new(&self.key_path))?;
+        validate_repo_key_path(Path::new(&self.key_path))?;
         if self.suite.is_empty() {
             bail!("{path}.suite: must not be empty");
         }
@@ -535,16 +532,16 @@ impl Repository {
     }
 }
 
-pub(crate) fn validate_repository_key_path(path: &Path) -> Result<()> {
-    let parent = path.parent().context("APT repository key path has no parent")?;
+pub(crate) fn validate_repo_key_path(path: &Path) -> Result<()> {
+    let parent = path.parent().context("APT repo key path has no parent")?;
     if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
-        bail!("APT repository key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
+        bail!("APT repo key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
     }
-    let name = path.file_name().and_then(|name| name.to_str()).context("APT repository key path has no filename")?;
+    let name = path.file_name().and_then(|name| name.to_str()).context("APT repo key path has no filename")?;
     if !matches!(path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
         || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
     {
-        bail!("APT repository key path must name a safe .asc or .gpg file");
+        bail!("APT repo key path must name a safe .asc or .gpg file");
     }
     Ok(())
 }
@@ -568,7 +565,7 @@ impl AptArchitecture {
     }
 }
 
-pub fn selected_repository_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
+pub fn selected_repo_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
     if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
         &platform.distro_codename
     } else {
@@ -602,7 +599,7 @@ impl BinaryPackage {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
-    Github { repository: String, assets: ArchitectureMap },
+    Github { repo: String, assets: ArchitectureMap },
     Url { urls: Box<ArchitectureMap> },
 }
 
@@ -683,7 +680,7 @@ pub struct Integrations {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DockerIntegration {
-    pub add_user_to_group: Option<bool>,
+    pub group: Option<bool>,
     pub logging: Option<DockerLogging>,
 }
 
@@ -703,7 +700,7 @@ pub struct DockerLogging {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VirtualBoxIntegration {
-    pub add_user_to_group: Option<bool>,
+    pub group: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

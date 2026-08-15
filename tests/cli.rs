@@ -209,22 +209,22 @@ fn validation_happens_before_platform_detection_or_mutation() {
     assert!(!probe.exists());
     assert!(!mutation.exists());
 
-    let repository = |extra: &str| {
+    let repo = |extra: &str| {
         format!(
-            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
         )
     };
     for (linux, error) in [
-        (repository("        path: /\n"), "unknown field `path`"),
-        (repository("        arch: [arm32]\n"), "unknown variant `arm32`"),
-        (repository("        arch: []\n"), "arch: must not be empty"),
-        (repository("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
+        (repo("        path: /\n"), "unknown field `path`"),
+        (repo("        arch: [arm32]\n"), "unknown variant `arm32`"),
+        (repo("        arch: []\n"), "arch: must not be empty"),
+        (repo("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
         (
-            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        components: [main]\n".to_owned(),
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        components: [main]\n".to_owned(),
             "missing field `suite`",
         ),
         (
-            "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n".to_owned(),
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n".to_owned(),
             "missing field `components`",
         ),
     ] {
@@ -277,7 +277,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
-    write_config(&root, "{}", "system:\n  add_user_to_sudo_group: true\n");
+    write_config(&root, "{}", "system:\n  sudo_group: true\n");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
 
@@ -358,13 +358,13 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
     assert_eq!(fs::read_to_string(backup).unwrap(), "existing\n");
 }
 
-fn repository_config() -> String {
+fn repo_config() -> String {
     config(
         "{}",
         r#"packages:
   apt:
     install: [direct-package]
-    repositories:
+    repos:
       - name: armored
         key: https://example.com/armored
         key_path: /etc/apt/keyrings/armored.asc
@@ -488,7 +488,7 @@ fn run_apt(
 
 #[test]
 #[cfg(target_os = "linux")]
-fn repository_key_validation_precedes_repository_file_write() {
+fn repo_key_validation_precedes_repo_file_write() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -502,20 +502,20 @@ fn repository_key_validation_precedes_repository_file_write() {
     write_config(
         &root,
         "{}",
-        "packages:\n  apt:\n    repositories:\n      - name: vendor\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
+        "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
     );
     write_apt_fakes(&fake_bin);
 
     let output = run_apt(&temp.path().join("config"), &fake_bin, &state, &log, Some(("COZYDOT_TEST_NO_PUBLIC", "1")));
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("repository key validation found no public key"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("repo key validation found no public key"));
     assert!(!state.join("files/vendor.gpg").exists());
     assert!(!state.join("files/vendor.list").exists());
 }
 
 #[test]
 #[cfg(target_os = "linux")]
-fn apply_writes_repository_files_and_installs_packages_in_order() {
+fn apply_writes_repo_files_and_installs_packages_in_order() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -523,7 +523,7 @@ fn apply_writes_repository_files_and_installs_packages_in_order() {
     let log = temp.path().join("apt.log");
     fs::create_dir_all(state.join("files")).unwrap();
     fs::create_dir_all(state.join("packages")).unwrap();
-    fs::write(root.join("cozydot.yaml"), repository_config()).unwrap();
+    fs::write(root.join("cozydot.yaml"), repo_config()).unwrap();
     for package in ["ca-certificates", "curl", "gnupg", "old-package"] {
         fs::write(state.join("packages").join(package), "").unwrap();
     }
@@ -535,7 +535,7 @@ fn apply_writes_repository_files_and_installs_packages_in_order() {
     let lines = first.lines().collect::<Vec<_>>();
     let position = |needle: &str| lines.iter().position(|line| line.contains(needle)).unwrap();
     let direct_install = position("apt-get install -y -qq -- direct-package+");
-    let repository_download = position("curl ");
+    let repo_download = position("curl ");
     let source_list_write = position("/etc/apt/sources.list.d/armored.list");
     let apt_update = lines
         .iter()
@@ -545,8 +545,8 @@ fn apply_writes_repository_files_and_installs_packages_in_order() {
         .unwrap();
     let purge = position("apt-get purge -y -qq -- old-package");
     let install = position("apt-get install -y -qq -- vendor-one+ vendor-two+");
-    assert!(direct_install < repository_download);
-    assert!(repository_download < source_list_write && source_list_write < apt_update);
+    assert!(direct_install < repo_download);
+    assert!(repo_download < source_list_write && source_list_write < apt_update);
     assert!(apt_update < purge && purge < install);
     assert!(!lines[purge].contains("absent-conflict"));
     assert_eq!(fs::read(state.join("files/armored.asc")).unwrap(), b"key");
@@ -570,7 +570,7 @@ fn apply_writes_repository_files_and_installs_packages_in_order() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn inapplicable_repositories_have_no_side_effects() {
+fn inapplicable_repos_have_no_side_effects() {
     let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
     for applicability in [
         "          default: https://example.com/repo\n        arch: [arm64]".to_owned(),
@@ -584,7 +584,7 @@ fn inapplicable_repositories_have_no_side_effects() {
             &root,
             "{}",
             &format!(
-                "packages:\n  apt:\n    repositories:\n      - name: skipped\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        urls:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
+                "packages:\n  apt:\n    repos:\n      - name: skipped\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        urls:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
             ),
         );
         write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");

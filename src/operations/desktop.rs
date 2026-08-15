@@ -28,7 +28,7 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
         DesktopEnvironment::Cinnamon => "org.cinnamon",
     };
     match setting {
-        DesktopSetting::ColorScheme(color_scheme) => set_gsetting(
+        DesktopSetting::ColorScheme(color_scheme) => gsettings_set(
             host,
             &format!("{prefix}.desktop.interface"),
             "color-scheme",
@@ -42,13 +42,13 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
                 bail!("desktop terminal executable {executable:?} is unavailable");
             }
             let schema = format!("{prefix}.desktop.default-applications.terminal");
-            set_gsetting(host, &schema, "exec", &format!("'{executable}'"))?;
-            set_gsetting(host, &schema, "exec-arg", "''")
+            gsettings_set(host, &schema, "exec", &format!("'{executable}'"))?;
+            gsettings_set(host, &schema, "exec-arg", "''")
         }
         DesktopSetting::IdleDelaySeconds(seconds) => {
-            set_gsetting(host, &format!("{prefix}.desktop.session"), "idle-delay", &format!("uint32 {seconds}"))
+            gsettings_set(host, &format!("{prefix}.desktop.session"), "idle-delay", &format!("uint32 {seconds}"))
         }
-        DesktopSetting::IdleDim(enabled) => set_gsetting(
+        DesktopSetting::IdleDim(enabled) => gsettings_set(
             host,
             &format!("{prefix}.settings-daemon.plugins.power"),
             "idle-dim",
@@ -57,7 +57,7 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
     }
 }
 
-fn set_gsetting(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
+fn gsettings_set(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
     host.require("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }

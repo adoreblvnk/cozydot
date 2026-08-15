@@ -11,7 +11,7 @@ pub(crate) mod macos;
 mod packages;
 mod parsers;
 pub(crate) mod privileged_file;
-mod repository;
+mod repo;
 mod rustup;
 mod shell;
 mod snapd;
@@ -25,7 +25,7 @@ pub use binary::{BinaryPackageOperation, BinarySourceOperation};
 pub use desktop::{ColorScheme, DesktopEnvironment, DesktopSetting};
 pub use go::GoToolchainSelector;
 pub use packages::fonts::NerdFontsMode;
-pub use repository::AptRepositoryOperation;
+pub use repo::AptRepo;
 
 pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file};
 pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version};
@@ -36,8 +36,8 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    AddUserToSudoGroup,
-    EnsureDebianAptComponents { release: String },
+    SudoGroup,
+    AddDebianAptComponents { release: String },
     AptUpdate,
     UnattendedUpgrades { enabled: bool },
     Snapd { enabled: bool },
@@ -57,12 +57,12 @@ pub enum Operation {
     PythonToolchainUpdate,
     InstallCargoBinstall,
     InstallCargoUpdate,
-    AptRepository(Box<AptRepositoryOperation>),
+    AptRepo(Box<AptRepo>),
     AptPurgeThenInstall { purge: Vec<String>, install: Vec<String> },
-    FlatpakInstallMissingApps { refs: Vec<String> },
-    CargoInstallMissing { packages: Vec<String> },
+    FlatpakInstall { refs: Vec<String> },
+    CargoInstall { packages: Vec<String> },
     CargoPackageUpdate,
-    NpmInstallMissing { packages: Vec<String> },
+    NpmInstall { packages: Vec<String> },
     NpmPackageUpdate,
     Appimaged { architecture: Architecture },
     BinaryPackage(BinaryPackageOperation),
@@ -97,8 +97,8 @@ pub enum OperationOutcome {
 impl Operation {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::AddUserToSudoGroup => "sudo group membership",
-            Self::EnsureDebianAptComponents { .. } => "Debian APT components",
+            Self::SudoGroup => "sudo group membership",
+            Self::AddDebianAptComponents { .. } => "Debian APT components",
             Self::AptUpdate => "APT update",
             Self::UnattendedUpgrades { .. } => "unattended upgrades",
             Self::Snapd { .. } => "snapd",
@@ -118,12 +118,12 @@ impl Operation {
             Self::PythonToolchainUpdate => "Python toolchain updates",
             Self::InstallCargoBinstall => "cargo-binstall install",
             Self::InstallCargoUpdate => "cargo-update install",
-            Self::AptRepository(_) => "APT repository",
+            Self::AptRepo(_) => "APT repo",
             Self::AptPurgeThenInstall { .. } => "APT purge and install",
-            Self::FlatpakInstallMissingApps { .. } => "Flatpak application install",
-            Self::CargoInstallMissing { .. } => "Cargo package install",
+            Self::FlatpakInstall { .. } => "Flatpak application install",
+            Self::CargoInstall { .. } => "Cargo package install",
             Self::CargoPackageUpdate => "Cargo package updates",
-            Self::NpmInstallMissing { .. } => "npm package install",
+            Self::NpmInstall { .. } => "npm package install",
             Self::NpmPackageUpdate => "npm package updates",
             Self::Appimaged { .. } => "appimaged",
             Self::BinaryPackage(_) => "binary package",
@@ -151,11 +151,11 @@ impl Operation {
     }
 }
 
-pub(crate) fn execute(operation: &Operation) -> Result<OperationOutcome> {
-    execute_on_host(operation, Host::new()?)
+pub(crate) fn run(operation: &Operation) -> Result<OperationOutcome> {
+    run_on(operation, Host::new()?)
 }
 
-fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome> {
+fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
     if matches!(
         operation,
         Operation::InstallHomebrew
@@ -168,13 +168,11 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
             | Operation::HomebrewUpdate { .. }
     ) && !cfg!(target_os = "macos")
     {
-        bail!("macOS operation cannot execute on this host")
+        bail!("macOS operation cannot run on this host")
     }
     match operation {
-        Operation::AddUserToSudoGroup => completed(users::add_user_to_sudo_group(&host)),
-        Operation::EnsureDebianAptComponents { release } => {
-            completed(repository::debian_components::execute(&host, release))
-        }
+        Operation::SudoGroup => completed(users::sudo_group(&host)),
+        Operation::AddDebianAptComponents { release } => completed(repo::debian_components::add(&host, release)),
         Operation::AptUpdate => completed(apt::update(&host)),
         Operation::UnattendedUpgrades { enabled } => completed(apt::unattended_upgrades(&host, *enabled)),
         Operation::Snapd { enabled } => completed(snapd::set_snapd_enabled(&host, *enabled)),
@@ -196,20 +194,18 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::PythonToolchainUpdate => completed(uv::update_python(&host)),
         Operation::InstallCargoBinstall => completed(binary::cargo_binstall::install(&host)),
         Operation::InstallCargoUpdate => completed(binary::cargo_binstall::install_cargo_update(&host)),
-        Operation::AptRepository(operation) => completed(repository::execute(&host, operation)),
+        Operation::AptRepo(repo) => completed(repo::add(&host, repo)),
         Operation::AptPurgeThenInstall { purge, install } => completed(apt::purge_then_install(&host, purge, install)),
-        Operation::FlatpakInstallMissingApps { refs } => {
-            completed(packages::flatpak::install_missing_apps(&host, refs))
-        }
-        Operation::CargoInstallMissing { packages } => completed(packages::cargo::install_missing(&host, packages)),
+        Operation::FlatpakInstall { refs } => completed(packages::flatpak::install(&host, refs)),
+        Operation::CargoInstall { packages } => completed(packages::cargo::install(&host, packages)),
         Operation::CargoPackageUpdate => completed(packages::cargo::update_all(&host)),
-        Operation::NpmInstallMissing { packages } => completed(packages::npm::install_missing(&host, packages)),
+        Operation::NpmInstall { packages } => completed(packages::npm::install(&host, packages)),
         Operation::NpmPackageUpdate => completed(packages::npm::update_all(&host)),
-        Operation::Appimaged { architecture } => completed(appimaged::execute(&host, *architecture)),
-        Operation::BinaryPackage(package) => completed(binary::execute(&host, package)),
-        Operation::NerdFonts { families, mode } => completed(packages::fonts::execute(&host, families, *mode)),
+        Operation::Appimaged { architecture } => completed(appimaged::install(&host, *architecture)),
+        Operation::BinaryPackage(package) => completed(binary::install(&host, package)),
+        Operation::NerdFonts { families, mode } => completed(packages::fonts::apply(&host, families, *mode)),
         Operation::Dotfiles { root, packages, replace } => {
-            completed(packages::dotfiles::execute(&host, root, packages, *replace))
+            completed(packages::dotfiles::apply(&host, root, packages, *replace))
         }
         Operation::DockerGroup => completed(docker::docker_group(&host)),
         Operation::DockerLocalLoggingDriver { max_size } => {
@@ -232,7 +228,7 @@ fn execute_on_host(operation: &Operation, host: Host) -> Result<OperationOutcome
         Operation::ValidateMacosSudoAccess => completed(macos::validate_sudo_access(&host)),
         Operation::InstallCommandLineToolsForXcode => completed(macos::install_command_line_tools_for_xcode(&host)),
         Operation::InstallRosetta => completed(macos::install_rosetta(&host)),
-        Operation::UserNerdFonts { families, mode } => completed(packages::fonts::execute_user(&host, families, *mode)),
+        Operation::UserNerdFonts { families, mode } => completed(packages::fonts::apply_user(&host, families, *mode)),
         Operation::MacDefaults { settings } => completed(macos::write_defaults(&host, settings)),
         Operation::HomebrewUpdate { formulae, casks } => completed(macos::update(&host, *formulae, *casks)),
     }

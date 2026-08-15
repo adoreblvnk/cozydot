@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 
 use super::super::{Host, executable_file};
 
-pub(crate) fn install_missing(host: &Host, packages: &[String]) -> Result<()> {
+pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
     let Some(fnm) = resolve_fnm(host)? else {
         bail!("npm package operation: managed fnm is unavailable after install");
     };

@@ -78,7 +78,7 @@ shared:
 
 linux:
   system:
-    add_user_to_sudo_group: true
+    sudo_group: true
     allowed_platforms:
       distros:
         - ubuntu
@@ -117,7 +117,7 @@ linux:
         - vim
         - vlc
         - xz-utils
-      repositories:
+      repos:
         - name: docker
           key: https://download.docker.com/linux/ubuntu/gpg
           key_path: /etc/apt/keyrings/docker.asc
@@ -226,7 +226,7 @@ linux:
         format: deb
         source:
           provider: github
-          repository: jgraph/drawio-desktop
+          repo: jgraph/drawio-desktop
           assets:
             amd64: ^drawio-amd64-.*\.deb$
             arm64: ^drawio-arm64-.*\.deb$
@@ -234,7 +234,7 @@ linux:
         format: deb
         source:
           provider: github
-          repository: fastfetch-cli/fastfetch
+          repo: fastfetch-cli/fastfetch
           assets:
             amd64: ^fastfetch-linux-amd64\.deb$
             arm64: ^fastfetch-linux-aarch64\.deb$
@@ -243,7 +243,7 @@ linux:
         format: deb
         source:
           provider: github
-          repository: git-ecosystem/git-credential-manager
+          repo: git-ecosystem/git-credential-manager
           assets:
             amd64: ^gcm-linux-x64-.*\.deb$
             arm64: ^gcm-linux-arm64-.*\.deb$
@@ -251,7 +251,7 @@ linux:
         format: appimage
         source:
           provider: github
-          repository: obsidianmd/obsidian-releases
+          repo: obsidianmd/obsidian-releases
           assets:
             amd64: ^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$
             arm64: ^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$
@@ -259,7 +259,7 @@ linux:
         format: appimage
         source:
           provider: github
-          repository: zen-browser/desktop
+          repo: zen-browser/desktop
           assets:
             amd64: ^zen-x86_6[0-9]\.AppImage$
             arm64: ^zen-aarch6[0-9]\.AppImage$
@@ -270,12 +270,12 @@ linux:
 
   integrations:
     docker:
-      add_user_to_group: true
+      group: true
       logging:
         driver: local
         max_size: 10m
     virtualbox:
-      add_user_to_group: true
+      group: true
 
   desktop:
     theme: dark
