@@ -93,11 +93,10 @@ redownload configured Nerd Font families because fonts have no native manager;
 an absent family list is a no-op.
 
 On Linux, `cozydot update` always ensures the base prerequisite packages before
-running enabled update categories. With an absent, empty, or all-false
-`updates:` section, that baseline operation is its only work. The same
-configuration is a validated silent no-op on macOS. `apply` accepts update
-controls but never executes them. Managed Deb and AppImage binaries remain
-ensure-only and have no update category.
+running enabled update categories; on macOS, it always ensures Homebrew. With
+an absent, empty, or all-false `updates:` section, that baseline operation is
+its only work. `apply` accepts update controls but never executes them. Managed
+Deb and AppImage binaries remain ensure-only and have no update category.
 
 `updates.apt: upgrade|full-upgrade` runs `apt-get update`, then performs a system-wide
 APT `upgrade` or `full-upgrade`; `full-upgrade` also runs purge-autoremove. This updates

@@ -119,7 +119,7 @@ Linux apply executes the following order, skipping absent configuration:
 
 `AptUpdateAndInstall` runs `apt-get update` immediately before installing missing prerequisites. A transcript can therefore contain that update in addition to the explicit distro or repository updates.
 
-macOS apply derives Homebrew need from configured formulae, casks, dotfiles, FNM, and cargo-binstall. It adds `stow` to formulae for apply dotfile intent.
+macOS apply always ensures Homebrew as its base prerequisite. It adds `stow` to formulae for apply dotfile intent.
 
 macOS apply executes the following order, skipping absent configuration:
 
@@ -127,8 +127,7 @@ macOS apply executes the following order, skipping absent configuration:
    1. Run `sudo -v`.
 2. If Xcode Command Line Tools are enabled:
    1. Install Xcode Command Line Tools.
-3. If Homebrew is required:
-   1. Install Homebrew.
+3. Install Homebrew.
 4. If Homebrew packages are required:
    1. Install configured formulae and casks.
 5. Apply required tools:
@@ -174,7 +173,7 @@ Cozydot never adopts destination files into its dotfile source.
 
 ## Update workflow
 
-`update` executes only explicitly enabled controls and does not replay apply intent. Linux always ensures its base prerequisite packages first; with an absent, empty, or all-false update section, that baseline operation is its only work. The same configuration is a validated silent no-op on macOS. Managed Deb and AppImage declarations are ensure-only and have no update category.
+`update` executes only explicitly enabled controls and does not replay apply intent. Linux always ensures its base prerequisite packages first, and macOS always ensures Homebrew. With an absent, empty, or all-false update section, that baseline operation is the only work. Managed Deb and AppImage declarations are ensure-only and have no update category.
 
 Linux update executes:
 
@@ -197,7 +196,7 @@ Linux npm package update remains independent from Node toolchain update: npm-onl
 
 macOS update executes:
 
-1. Install Homebrew when required by FNM.
+1. Install Homebrew.
 2. Update selected Homebrew formulae and casks.
 3. Install rustup.
 4. Update Rust toolchains.
@@ -210,11 +209,11 @@ macOS update executes:
 11. Update global npm packages.
 12. Redownload configured user Nerd Fonts.
 
-npm update on macOS derives FNM and therefore Homebrew. Selectorless Go and Node updates use `latest`; Python updates use major line `3`; Rust updates all installed rustup toolchains.
+Selectorless Go and Node updates use `latest`; Python updates use major line `3`; Rust updates all installed rustup toolchains.
 
 ## Operation execution
 
-The small workflow `execute` helper obtains the operation label, prints `Applying <label>` or `Updating <label>`, dispatches through `operations::execute`, adds action context to failures, reports `LoginRequired`, and returns immediately on failure. A workflow with no enabled operations prints nothing.
+The small workflow `execute` helper obtains the operation label, prints `Applying <label>` or `Updating <label>`, dispatches through `operations::execute`, adds action context to failures, reports `LoginRequired`, and returns immediately on failure. A workflow with no enabled operations prints only its platform baseline prerequisite operation.
 
 `Operation` remains Cozydot's safe typed execution boundary. There is no YAML-to-shell path. Executors invoke fixed programs with separate argument vectors, inspect live state, reject unexpected status, and return success when requested state is already correct.
 

@@ -195,7 +195,6 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
     let dotfiles = !config.shared.dotfiles.packages.is_empty() || !config.macos.dotfiles.packages.is_empty();
     let homebrew_packages =
         dotfiles || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
-    let needs_homebrew = homebrew_packages || managers.fnm || managers.cargo_binstall;
 
     if config.macos.system.validate_sudo_access == Some(true) {
         run("Applying", Operation::ValidateMacosSudoAccess)?;
@@ -203,9 +202,7 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
     if config.macos.system.xcode.command_line_tools == Some(true) {
         run("Applying", Operation::InstallCommandLineToolsForXcode)?;
     }
-    if needs_homebrew {
-        run("Applying", Operation::InstallHomebrew)?;
-    }
+    run("Applying", Operation::InstallHomebrew)?;
     if homebrew_packages {
         let mut formulae = config.macos.homebrew.formulae.clone();
         if dotfiles && !formulae.iter().any(|formula| formula == "stow") {
@@ -310,11 +307,8 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
 fn macos_update(config: &Config, architecture: Architecture) -> Result<()> {
     let homebrew_formulae = config.macos.updates.homebrew.formulae == Some(true);
     let homebrew_casks = config.macos.updates.homebrew.casks == Some(true);
-    let needs_fnm = config.shared.updates.tools.node == Some(true) || config.shared.updates.packages.npm == Some(true);
 
-    if needs_fnm {
-        run("Updating", Operation::InstallHomebrew)?;
-    }
+    run("Updating", Operation::InstallHomebrew)?;
     if homebrew_formulae || homebrew_casks {
         run("Updating", Operation::HomebrewUpdate { formulae: homebrew_formulae, casks: homebrew_casks })?;
     }
