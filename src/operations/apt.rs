@@ -27,8 +27,8 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
         )?;
     } else {
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        let is_enabled = systemd_state(host, "is-enabled", "unattended-upgrades.service")?;
-        let is_active = systemd_state(host, "is-active", "unattended-upgrades.service")?;
+        let is_enabled = host.run("systemctl", ["is-enabled", "unattended-upgrades.service"])?.status.success();
+        let is_active = host.run("systemctl", ["is-active", "unattended-upgrades.service"])?.status.success();
         if is_enabled || is_active {
             host.run_checked(
                 "unattended-upgrades service disablement",
@@ -39,10 +39,6 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
         purge(host, &["unattended-upgrades".into()])?;
     }
     Ok(())
-}
-
-fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
-    Ok(host.run("systemctl", [query, unit])?.status.success())
 }
 
 pub fn update_and_install_packages(host: &Host, packages: &[String]) -> Result<()> {

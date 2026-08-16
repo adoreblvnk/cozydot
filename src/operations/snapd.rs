@@ -15,8 +15,8 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
 
     remove_snaps(host)?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        let is_enabled = systemd_state(host, "is-enabled", unit)?;
-        let is_active = systemd_state(host, "is-active", unit)?;
+        let is_enabled = host.run("systemctl", ["is-enabled", unit])?.status.success();
+        let is_active = host.run("systemctl", ["is-active", unit])?.status.success();
         if is_enabled || is_active {
             host.run_checked("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
@@ -39,10 +39,6 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
     write_atomic(host, Path::new(NO_SNAP_PIN), pin, "no-Snap APT pin write")?;
     Ok(())
-}
-
-fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
-    Ok(host.run("systemctl", [query, unit])?.status.success())
 }
 
 fn remove_snaps(host: &Host) -> Result<()> {
