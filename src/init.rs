@@ -179,8 +179,8 @@ fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Create missing dirs under `root` & reject symlinked managed paths.
 fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
-    // reject symlinked managed paths so writes can't escape config root
     if root.exists() && fs::symlink_metadata(root)?.file_type().is_symlink() {
         bail!("configuration root is a symlink");
     }
