@@ -1,4 +1,4 @@
-//! Declarative Linux and macOS provisioning from one active configuration.
+//! Provision Linux & macOS from one config.
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -18,23 +18,23 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
-    /// Create or safely refresh the config and bundled dotfiles
+    /// Safely create or refresh config & bundled dotfiles.
     Init {
-        /// Configuration preset to materialize
+        /// Choose config preset.
         #[arg(long, value_enum, default_value = "cozydot")]
         preset: init::Preset,
     },
-    /// Apply the active configuration to this host
+    /// Apply active config to this host.
     Apply,
-    /// Validate the active configuration
+    /// Check active config.
     Check,
-    /// Apply configured dotfiles
+    /// Apply configured dotfiles.
     Dotfiles {
-        /// Back up conflicting files before replacing them with Cozydot links
+        /// Back up conflicts before replacing with Cozydot links.
         #[arg(short = 'r', long)]
         replace: bool,
     },
-    /// Run enabled ecosystem updates
+    /// Run enabled updates.
     Update,
 }
 

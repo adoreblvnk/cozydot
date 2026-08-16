@@ -52,7 +52,7 @@ fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Operation
     validate_extension(extension)?;
     if !host.run("gnome-extensions", ["info", extension])?.status.success() {
         install_extension(host, extension)?;
-        // GNOME Shell does not discover a newly installed extension until the user logs in again.
+        // GNOME only finds newly installed extensions after next login
         return Ok(OperationOutcome::LoginRequired);
     }
     host.require("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
@@ -82,7 +82,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
 }
 
 fn validate_extension(value: &str) -> Result<()> {
-    // UUIDs enter both request URLs and archive names, so accept only GNOME's path-safe form.
+    // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
     let mut parts = value.split('@');
     if !valid_uuid_part(parts.next().unwrap_or_default())
         || !valid_uuid_part(parts.next().unwrap_or_default())

@@ -1,4 +1,4 @@
-//! Typed host mutations and their centralized execution boundary.
+//! Define & run typed host operations.
 
 mod appimaged;
 mod apt;
@@ -35,7 +35,7 @@ use crate::{config::AptUpgradeCommand, platform::Architecture};
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
-/// A typed host operation accepted by the centralized executor.
+/// Typed host operation handled by central executor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     SudoGroup,
@@ -89,7 +89,7 @@ pub enum Operation {
     HomebrewUpdate { formulae: bool, casks: bool },
 }
 
-/// Reports whether the requested state is active or requires another login to take effect.
+/// Whether change is active now or needs another login.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationOutcome {
     Completed,
@@ -97,7 +97,7 @@ pub enum OperationOutcome {
 }
 
 impl Operation {
-    /// Supplies the user-facing label used for progress and error context.
+    /// Get label used in progress messages & errors.
     pub fn label(&self) -> &'static str {
         match self {
             Self::SudoGroup => "sudo group membership",

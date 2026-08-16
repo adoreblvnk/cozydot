@@ -75,7 +75,7 @@ fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (P
         return Err(invalid(source, "asset is not a regular file"));
     }
     let destination = valid_destination(destination, source)?;
-    // Normalize bundled modes for reproducible installs; only shebang files are executable.
+    // normalize bundled modes for reproducible installs; only shebang files are executable
     let mode = if fs::read(source)?.starts_with(b"#!") { 0o755 } else { 0o644 };
     if records.insert(destination.clone(), (source.to_path_buf(), mode)).is_some() {
         return Err(invalid(source, &format!("duplicate destination {destination}")));

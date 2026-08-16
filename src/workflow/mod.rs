@@ -1,4 +1,4 @@
-//! Platform workflows that derive prerequisites and execute typed operations in dependency order.
+//! Derive prerequisites & run each platform's operations in dependency order.
 
 use crate::{
     config::{
@@ -338,7 +338,7 @@ fn update_tools_and_packages(config: &Config, architecture: Architecture, macos:
             },
         )?;
     }
-    // macOS resolves npm through Homebrew's FNM, so npm-only updates must ensure the formula first.
+    // macOS resolves npm via Homebrew FNM, so npm-only updates must ensure its formula first
     if updates.tools.node == Some(true) || (macos && updates.packages.npm == Some(true)) {
         run("Updating", Operation::InstallFnm)?;
     }
