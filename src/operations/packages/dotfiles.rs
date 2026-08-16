@@ -73,7 +73,7 @@ fn prepare_gnupg_home(source: &Path, home: &Path) -> Result<()> {
         return Ok(());
     }
 
-    // Stow folds directories into symlinks, but GnuPG requires its home to remain a real directory with mode 0700.
+    // Prevent Stow's tree folding from making ~/.gnupg a symlink; keep this security-sensitive directory real and mode 0700.
     let target = home.join(".gnupg");
     if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         fs::remove_file(&target).context("replace folded GnuPG dotfiles directory")?;

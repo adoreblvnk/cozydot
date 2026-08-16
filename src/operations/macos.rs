@@ -92,6 +92,7 @@ pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {
     if host.run("xcode-select", ["-p"]).is_ok_and(|output| output.status.success()) {
         return Ok(());
     }
+    // This launches Apple's interactive installer; successful launch is the only synchronous postcondition.
     host.require("Xcode command line tools", "xcode-select", ["--install"])?;
     Ok(())
 }
@@ -119,6 +120,7 @@ pub fn write_defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
                         ["write", "-g", "AppleInterfaceStyle", "-string", "Dark"],
                     )?;
                 } else {
+                    // Deletion is best-effort because an absent preference already selects light mode.
                     host.run("defaults", ["delete", "-g", "AppleInterfaceStyle"]).ok();
                 }
             }
@@ -135,6 +137,7 @@ pub fn write_defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
             }
         }
     }
+    // Restart is best-effort because Dock or Finder may not currently be running.
     host.require("Dock restart", "killall", ["Dock"]).ok();
     host.require("Finder restart", "killall", ["Finder"]).ok();
     Ok(())

@@ -154,6 +154,7 @@ fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
         "debian" => Ok("debian"),
         "linuxmint" => {
             let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
+            // Ubuntu-based Mint can report both families; prefer Ubuntu, while LMDE resolves through Debian.
             let ubuntu = families.clone().any(|family| family == "ubuntu");
             let debian = families.any(|family| family == "debian");
             match (ubuntu, debian) {

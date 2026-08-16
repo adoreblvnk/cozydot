@@ -59,7 +59,7 @@ impl Config {
         })
     }
 
-    /// Validates host-dependent constraints after platform detection.
+    /// Revalidates the complete configuration, then rejects constraints incompatible with `platform`.
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         if platform.is_macos() {

@@ -41,7 +41,6 @@ struct LinuxApplyPlan {
     appimages: Vec<BinaryPackageOperation>,
 }
 
-/// Ensures the configured host state without executing update controls.
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     if platform.is_macos() {
         macos_apply(config, platform.architecture, dotfiles_root)
@@ -50,12 +49,10 @@ pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resu
     }
 }
 
-/// Ensures platform prerequisites and executes only enabled update controls.
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     if platform.is_macos() { macos_update(config, platform.architecture) } else { linux_update(config, platform) }
 }
 
-/// Applies configured dotfile packages, optionally backing up unmanaged conflicts.
 pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool) -> Result<()> {
     let platform_packages =
         if platform.is_macos() { &config.macos.dotfiles.packages } else { &config.linux.dotfiles.packages };
