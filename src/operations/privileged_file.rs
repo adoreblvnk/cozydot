@@ -6,6 +6,7 @@ pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], ope
     write_atomic_with_mode(host, destination, contents, operation, "0644")
 }
 
+/// Atomically publish at a trusted system path; this function does not validate destination ancestors.
 pub(crate) fn write_atomic_with_mode(
     host: &Host,
     destination: &Path,

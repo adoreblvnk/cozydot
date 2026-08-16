@@ -90,6 +90,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
         ],
     )?;
 
+    // Parsing proves the download contains a public key; the configured URL remains the identity trust boundary.
     let inspection = host.require(
         "repo key validation",
         "gpg",

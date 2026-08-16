@@ -338,6 +338,7 @@ fn update_tools_and_packages(config: &Config, architecture: Architecture, macos:
             },
         )?;
     }
+    // macOS resolves npm through Homebrew's FNM, so npm-only updates must ensure the formula first.
     if updates.tools.node == Some(true) || (macos && updates.packages.npm == Some(true)) {
         run("Updating", Operation::InstallFnm)?;
     }
