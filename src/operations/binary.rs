@@ -139,6 +139,7 @@ fn download(host: &Host, operation: &BinaryPackageOperation, url: &str) -> Resul
         BinaryFormat::Appimage => {
             let applications = host.home().join("Applications");
             fs::create_dir_all(&applications).context("create Applications directory")?;
+            // Stage beside the destination so the publishing rename never crosses filesystems.
             TempPath::new_in_with_suffix(&applications, &format!("{}-", operation.name), ".part")?
         }
     };
