@@ -28,11 +28,13 @@ impl Preset {
     }
 }
 
+/// Synchronize bundled config and dotfiles while preserving unmanaged or modified paths.
 pub fn init(preset: Preset) -> Result<PathBuf> {
     let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
     let preset = select_embedded_preset(preset)?;
     initialization.synchronize_active_configuration(preset)?;
     initialization.synchronize_bundled_dotfiles()?;
+    // Publish ownership last so the manifest never claims files from a partial synchronization.
     initialization.publish_managed_file_manifest()?;
     Ok(initialization.root)
 }
@@ -134,6 +136,7 @@ fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
 }
 
 fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
+    // Managed paths must not traverse existing symlinks that could redirect writes outside the config root.
     if root.exists() && fs::symlink_metadata(root)?.file_type().is_symlink() {
         bail!("configuration root is a symlink");
     }

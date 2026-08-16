@@ -54,6 +54,7 @@ impl Host {
             .map(OsString::from)
             .collect::<Vec<_>>();
         curl_args.extend(args.into_iter().map(|arg| arg.as_ref().to_os_string()));
+        // Keep the URL after `--` so a leading hyphen cannot turn configured input into a curl option.
         curl_args.extend([OsString::from("--"), OsString::from(url)]);
         self.require(operation, "curl", curl_args)
     }
