@@ -231,7 +231,7 @@ Architecture-specific binary declarations are derived immediately before their e
 
 Linux desktop intent is checked against the detected desktop before mutation. The workflow derives `dconf-cli` and `libglib2.0-bin`, plus `gnome-shell` for GNOME extension capabilities. Desktop settings execute last. macOS defaults are collected into one typed operation and also execute last.
 
-`init` owns its separate managed-file lifecycle: validate managed paths and symlink boundaries, preserve user-edited or unmanaged files, atomically synchronize selected files, and publish the managed hash manifest only after successful synchronization.
+`init` owns its separate managed-file lifecycle: validate managed paths and symlink boundaries, preserve user-edited or unmanaged files, refresh a bundled dotfile package only when the entire package is unchanged, atomically synchronize selected files, and publish the managed hash manifest only after successful synchronization.
 
 ## Tests and changes
 

@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env,
     fs::{self, File},
     io::{self, Write},
@@ -87,10 +87,58 @@ impl Initialization {
     }
 
     fn synchronize_bundled_dotfiles(&mut self) -> Result<()> {
+        let mut packages = BTreeMap::<PathBuf, Vec<&Record>>::new();
         for record in records() {
-            self.synchronize_record(record)?;
+            let relative = PathBuf::from(record.path);
+            validate_relative(&relative)?;
+            let package = dotfile_package(&relative).context("bundled dotfile is outside a package")?;
+            packages.entry(package).or_default().push(record);
+        }
+        for (package, records) in packages {
+            self.synchronize_dotfile_package(&package, &records)?;
         }
         Ok(())
+    }
+
+    fn synchronize_dotfile_package(&mut self, package: &Path, records: &[&Record]) -> Result<()> {
+        if !self.dotfile_package_is_unmodified(package)? {
+            return Ok(());
+        }
+
+        for record in records {
+            let relative = PathBuf::from(record.path);
+            install_file(&self.root, record, &relative)?;
+            self.managed.insert(relative, hash_bytes(record.bytes));
+        }
+        Ok(())
+    }
+
+    fn dotfile_package_is_unmodified(&self, package: &Path) -> Result<bool> {
+        let managed = self
+            .managed
+            .iter()
+            .filter(|(relative, _)| dotfile_package(relative).as_deref() == Some(package))
+            .collect::<Vec<_>>();
+        let destination = self.root.join(package);
+        match fs::symlink_metadata(&destination) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(managed.is_empty()),
+            Err(error) => return Err(error.into()),
+            Ok(metadata) if !metadata.file_type().is_dir() => return Ok(false),
+            Ok(_) if managed.is_empty() => return Ok(false),
+            Ok(_) => {}
+        }
+
+        let mut files = BTreeSet::new();
+        if !collect_real_files(&destination, &self.root, &mut files)? {
+            return Ok(false);
+        }
+        let expected = managed.iter().map(|(relative, _)| (*relative).clone()).collect::<BTreeSet<_>>();
+        if files != expected {
+            return Ok(false);
+        }
+        Ok(managed
+            .iter()
+            .all(|(relative, hash)| hash_file(&self.root.join(relative)).is_ok_and(|current| &current == *hash)))
     }
 
     fn synchronize_record(&mut self, record: &Record) -> Result<()> {
@@ -160,6 +208,33 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn dotfile_package(path: &Path) -> Option<PathBuf> {
+    let mut components = path.components();
+    let Component::Normal(root) = components.next()? else { return None };
+    let Component::Normal(package) = components.next()? else { return None };
+    if root != "dotfiles" || components.next().is_none() {
+        return None;
+    }
+    Some(PathBuf::from(root).join(package))
+}
+
+fn collect_real_files(directory: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            if !collect_real_files(&entry.path(), root, files)? {
+                return Ok(false);
+            }
+        } else if file_type.is_file() {
+            files.insert(entry.path().strip_prefix(root)?.to_path_buf());
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
