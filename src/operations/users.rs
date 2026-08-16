@@ -21,6 +21,7 @@ pub(crate) fn ensure_product_group(host: &Host, label: &str, program: &str, grou
 }
 
 fn effective_user(host: &Host) -> Result<String> {
+    // Resolve the effective UID through NSS rather than trusting user-controlled environment variables.
     let uid = rustix::process::geteuid().as_raw();
     let output = host.require("effective user query", "getent", ["passwd", &uid.to_string()])?;
     let record = one_record(&output.stdout, "getent passwd")?;

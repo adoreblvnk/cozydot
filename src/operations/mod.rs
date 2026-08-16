@@ -35,7 +35,7 @@ use crate::{config::AptUpgradeCommand, platform::Architecture};
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
-/// A validated host mutation constructed by a platform workflow.
+/// A typed host operation accepted by the centralized executor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     SudoGroup,
@@ -89,7 +89,7 @@ pub enum Operation {
     HomebrewUpdate { formulae: bool, casks: bool },
 }
 
-/// The completion state of an executed operation.
+/// Reports whether the requested state is active or requires another login to take effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationOutcome {
     Completed,
@@ -97,7 +97,7 @@ pub enum OperationOutcome {
 }
 
 impl Operation {
-    /// Returns the stable user-facing label for progress and error context.
+    /// Supplies the user-facing label used for progress and error context.
     pub fn label(&self) -> &'static str {
         match self {
             Self::SudoGroup => "sudo group membership",
