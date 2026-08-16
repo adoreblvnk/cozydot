@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 fn config(shared: &str, linux: &str) -> String {
@@ -177,6 +178,41 @@ fn init_materializes_presets_and_preserves_user_edits() {
     fs::write(&active, "user edit\n").unwrap();
     cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
     assert_eq!(fs::read_to_string(active).unwrap(), "user edit\n");
+}
+
+#[test]
+fn init_preserves_entire_dotfile_package_when_one_file_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
+    let root = temp.path().join("cozydot");
+    let edited = root.join("dotfiles/yazi/.config/yazi/yazi.toml");
+    let sibling = root.join("dotfiles/yazi/.config/yazi/theme.toml");
+    let bundled_edited = fs::read(&edited).unwrap();
+    let bundled_sibling = fs::read(&sibling).unwrap();
+    fs::write(&edited, "user edit\n").unwrap();
+
+    let previous = b"previous bundled theme\n";
+    fs::write(&sibling, previous).unwrap();
+    let relative = "dotfiles/yazi/.config/yazi/theme.toml";
+    let hash = format!("{:x}", Sha256::digest(previous));
+    let manifest = fs::read_to_string(root.join(".managed-files"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let (_, path) = line.split_once('\t').unwrap();
+            if path == relative { format!("{hash}\t{path}") } else { line.to_owned() }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(root.join(".managed-files"), format!("{manifest}\n")).unwrap();
+
+    cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
+    assert_eq!(fs::read_to_string(&edited).unwrap(), "user edit\n");
+    assert_eq!(fs::read(&sibling).unwrap(), previous);
+
+    fs::write(&edited, bundled_edited).unwrap();
+    cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
+    assert_eq!(fs::read(&sibling).unwrap(), bundled_sibling);
 }
 
 #[test]
