@@ -73,7 +73,7 @@ fn prepare_gnupg_home(source: &Path, home: &Path) -> Result<()> {
         return Ok(());
     }
 
-    // Prevent Stow's tree folding from making ~/.gnupg a symlink; keep this security-sensitive directory real and mode 0700.
+    // keep ~/.gnupg as real 0700 dir instead of letting Stow fold it into symlink
     let target = home.join(".gnupg");
     if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         fs::remove_file(&target).context("replace folded GnuPG dotfiles directory")?;
@@ -136,7 +136,7 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
         let backup = backup_root.join(package).join(relative);
         let parent = backup.parent().context("dotfiles backup has no parent")?;
         fs::create_dir_all(parent).context("create dotfiles backup directory")?;
-        // Rename makes each backup all-or-nothing and therefore requires HOME and XDG_STATE_HOME on one filesystem.
+        // rename makes each backup atomic, requiring HOME & XDG_STATE_HOME on same filesystem
         fs::rename(conflict, &backup)
             .with_context(|| format!("move dotfiles conflict {} to {}", conflict.display(), backup.display()))?;
         if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err() {

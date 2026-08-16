@@ -59,7 +59,7 @@ fn remove_snaps(host: &Host) -> Result<()> {
         }
         names.push(name.to_owned());
     }
-    // Remove application snaps before the base and runtime snaps they may depend on.
+    // remove app snaps before base & runtime snaps
     names.sort_by_key(|name| matches!(name.as_str(), "snapd" | "bare") || name.starts_with("core"));
     for name in names {
         host.require("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;

@@ -90,7 +90,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
         ],
     )?;
 
-    // Parsing proves the download contains a public key; the configured URL remains the identity trust boundary.
+    // parsing proves download contains a public key; configured URL remains identity trust boundary
     let inspection = host.require(
         "repo key validation",
         "gpg",
@@ -159,7 +159,7 @@ pub(crate) mod debian_components {
         if replacement.as_bytes() == original {
             return Ok(());
         }
-        // Detect changes since the initial read before publishing our replacement; this does not lock the source file.
+        // catch changes since first read before replacing file; this isn't a lock
         if read(host, source)? != original {
             bail!("Debian APT source changed concurrently before write");
         }

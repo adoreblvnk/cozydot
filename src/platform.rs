@@ -129,7 +129,7 @@ impl Architecture {
 
     pub fn go_archive(self) -> &'static str {
         match self {
-            // Go publishes its 32-bit ARM archive as armv6l, which also runs on supported ARMv7 hosts.
+            // Go calls its 32-bit ARM archive armv6l; it also runs on ARMv7
             Self::Arm32 => "armv6l",
             Self::DarwinArm64 => "arm64",
             other => other.go(),
@@ -154,7 +154,7 @@ fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
         "debian" => Ok("debian"),
         "linuxmint" => {
             let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
-            // Ubuntu-based Mint can report both families; prefer Ubuntu, while LMDE resolves through Debian.
+            // prefer Ubuntu when Mint lists both families; LMDE uses Debian
             let ubuntu = families.clone().any(|family| family == "ubuntu");
             let debian = families.any(|family| family == "debian");
             match (ubuntu, debian) {

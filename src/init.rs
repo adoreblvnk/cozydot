@@ -28,13 +28,13 @@ impl Preset {
     }
 }
 
-/// Create `cozydot.yaml` and the `dotfiles` directory without overwriting user-managed changes.
+/// Create `cozydot.yaml` & `dotfiles` dir without overwriting user-managed changes.
 pub fn init(preset: Preset) -> Result<PathBuf> {
     let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
     let preset = select_embedded_preset(preset)?;
     initialization.synchronize_active_configuration(preset)?;
     initialization.synchronize_bundled_dotfiles()?;
-    // Publish updated ownership last; after a partial run, synchronized files are preserved on retry.
+    // publish ownership last so retries preserve files synced by partial runs
     initialization.publish_managed_file_manifest()?;
     Ok(initialization.root)
 }
@@ -184,7 +184,7 @@ fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
 }
 
 fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
-    // Managed paths must not traverse existing symlinks that could redirect writes outside the config root.
+    // reject symlinked managed paths so writes can't escape config root
     if root.exists() && fs::symlink_metadata(root)?.file_type().is_symlink() {
         bail!("configuration root is a symlink");
     }
