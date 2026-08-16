@@ -4,7 +4,7 @@ use crate::{
         select_distro_map, selected_repo_codename,
     },
     operations::{
-        self, AptRepo, BinaryPackageOperation, BinarySourceOperation, ColorScheme, DesktopEnvironment, DesktopSetting,
+        self, AptRepo, BinaryPackageOperation, BinarySourceOperation, DesktopEnvironment, DesktopSetting,
         GoToolchainSelector, NerdFontsMode, Operation,
     },
     platform::{Architecture, Platform},
@@ -15,7 +15,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const LINUX_BASE_PREREQUISITES: [&str; 6] = ["ca-certificates", "curl", "gnupg", "tar", "xz-utils", "fontconfig"];
+const LINUX_BASE_PREREQUISITES: [&str; 7] =
+    ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
 
 #[derive(Default)]
 struct ManagerInstallPlan {
@@ -28,13 +29,14 @@ struct ManagerInstallPlan {
 }
 
 struct LinuxApplyPlan {
-    identity: PlatformIdentity,
     apt_prerequisites: BTreeSet<&'static str>,
     manager_installs: ManagerInstallPlan,
     update_apt: bool,
-    has_repos: bool,
+    repos: Vec<AptRepo>,
     repo_packages_to_purge: Vec<String>,
     repo_packages_to_install: Vec<String>,
+    deb_binaries: Vec<BinaryPackageOperation>,
+    appimages: Vec<BinaryPackageOperation>,
 }
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
@@ -83,23 +85,21 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if plan.update_apt {
         run("Applying", Operation::AptUpdate)?;
     }
-    if !plan.apt_prerequisites.is_empty() {
-        run(
-            "Applying",
-            Operation::AptUpdateAndInstall {
-                packages: plan.apt_prerequisites.iter().map(|value| (*value).to_owned()).collect(),
-            },
-        )?;
-    }
+    run(
+        "Applying",
+        Operation::AptUpdateAndInstall {
+            packages: plan.apt_prerequisites.iter().map(|value| (*value).to_owned()).collect(),
+        },
+    )?;
     if let Some(packages) =
         config.linux.packages.apt.as_ref().and_then(|apt| apt.install.as_ref()).filter(|packages| !packages.is_empty())
     {
         run("Applying", Operation::AptPackages { packages: packages.clone() })?;
     }
-    for repo in applicable_repos(config, platform, plan.identity) {
-        run("Applying", Operation::AptRepo(Box::new(repo_operation(repo, platform, plan.identity)?)))?;
-    }
-    if plan.has_repos {
+    if !plan.repos.is_empty() {
+        for repo in plan.repos {
+            run("Applying", Operation::AptRepo(Box::new(repo)))?;
+        }
         run("Applying", Operation::AptUpdate)?;
     }
     if !plan.repo_packages_to_purge.is_empty() || !plan.repo_packages_to_install.is_empty() {
@@ -122,13 +122,12 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     apply_tools(config, platform.architecture, &plan.manager_installs)?;
     apply_packages(config)?;
-    for binary in configured_binaries(config, platform.architecture, BinaryFormat::Deb) {
+    for binary in plan.deb_binaries {
         run("Applying", Operation::BinaryPackage(binary))?;
     }
-    let appimages = configured_binaries(config, platform.architecture, BinaryFormat::Appimage);
-    if !appimages.is_empty() {
+    if !plan.appimages.is_empty() {
         run("Applying", Operation::Appimaged { architecture: platform.architecture })?;
-        for binary in appimages {
+        for binary in plan.appimages {
             run("Applying", Operation::BinaryPackage(binary))?;
         }
     }
@@ -153,39 +152,41 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
             && config.linux.system.ubuntu.as_ref().is_some_and(|ubuntu| {
                 ubuntu.unattended_upgrades.is_some() || ubuntu.snapd.is_some() || ubuntu.restricted_extras
             }));
-    let mut applicable = false;
+    let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
     for repo in applicable_repos(config, platform, identity) {
-        repo_operation(repo, platform, identity)?;
+        repos.push(repo_operation(repo, platform, identity)?);
         repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
         repo_packages_to_install.extend(repo.packages.iter().cloned());
-        applicable = true;
     }
     if config.linux.packages.flatpak.as_ref().is_some_and(|values| !values.is_empty()) {
         apt_prerequisites.insert("flatpak");
         manager_installs.flatpak = true;
     }
-    if manager_installs.fnm {
-        apt_prerequisites.insert("unzip");
-    }
+    let mut deb_binaries = Vec::new();
+    let mut appimages = Vec::new();
     for binary in config.linux.packages.binaries.as_deref().unwrap_or_default() {
-        if binary_operation(binary, platform.architecture).is_some() {
-            update_apt |= binary.format == BinaryFormat::Deb;
+        if let Some(operation) = binary_operation(binary, platform.architecture) {
+            match binary.format {
+                BinaryFormat::Deb => {
+                    update_apt = true;
+                    deb_binaries.push(operation);
+                }
+                BinaryFormat::Appimage => appimages.push(operation),
+            }
         }
-    }
-    if !config.shared.dotfiles.packages.is_empty() || !config.linux.dotfiles.packages.is_empty() {
-        apt_prerequisites.insert("stow");
     }
     derive_desktop_prerequisites(config, platform, &mut apt_prerequisites);
     Ok(LinuxApplyPlan {
-        identity,
         apt_prerequisites,
         manager_installs,
         update_apt,
-        has_repos: applicable,
+        repos,
         repo_packages_to_purge,
         repo_packages_to_install,
+        deb_binaries,
+        appimages,
     })
 }
 
@@ -201,9 +202,6 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
     }
     if config.macos.system.xcode.command_line_tools == Some(true) {
         run("Applying", Operation::InstallCommandLineToolsForXcode)?;
-    }
-    if config.macos.system.rosetta == Some(true) {
-        run("Applying", Operation::InstallRosetta)?;
     }
     if needs_homebrew {
         run("Applying", Operation::InstallHomebrew)?;
@@ -285,10 +283,6 @@ fn manager_install_plan(config: &Config) -> ManagerInstallPlan {
 
 fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
     let mut prerequisites = BTreeSet::from(LINUX_BASE_PREREQUISITES);
-    let updates = &config.shared.updates.tools;
-    if updates.node == Some(true) {
-        prerequisites.insert("unzip");
-    }
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
         prerequisites.insert("flatpak");
     }
@@ -407,23 +401,6 @@ fn repo_operation(repo: &Repo, platform: &Platform, identity: PlatformIdentity) 
     )
 }
 
-fn configured_binaries(
-    config: &Config,
-    architecture: Architecture,
-    format: BinaryFormat,
-) -> Vec<BinaryPackageOperation> {
-    config
-        .linux
-        .packages
-        .binaries
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .filter(|binary| binary.format == format)
-        .filter_map(|binary| binary_operation(binary, architecture))
-        .collect()
-}
-
 fn binary_operation(
     binary: &crate::config::BinaryPackage,
     architecture: Architecture,
@@ -504,16 +481,7 @@ fn linux_desktop(config: &Config, platform: &Platform) -> Result<()> {
         _ => unreachable!("platform validation rejects unsupported desktop intent"),
     };
     if let Some(theme) = desktop.theme {
-        run(
-            "Applying",
-            Operation::DesktopSetting {
-                target,
-                setting: DesktopSetting::ColorScheme(match theme {
-                    Theme::Light => ColorScheme::Light,
-                    Theme::Dark => ColorScheme::Dark,
-                }),
-            },
-        )?;
+        run("Applying", Operation::DesktopSetting { target, setting: DesktopSetting::ColorScheme(theme) })?;
     }
     if let Some(executable) = &desktop.terminal {
         run("Applying", Operation::DesktopSetting { target, setting: DesktopSetting::Terminal(executable.clone()) })?;

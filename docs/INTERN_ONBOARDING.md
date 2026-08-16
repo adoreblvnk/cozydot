@@ -127,13 +127,11 @@ macOS apply executes the following order, skipping absent configuration:
    1. Run `sudo -v`.
 2. If Xcode Command Line Tools are enabled:
    1. Install Xcode Command Line Tools.
-3. If Rosetta is enabled:
-   1. Install Rosetta.
-4. If Homebrew is required:
+3. If Homebrew is required:
    1. Install Homebrew.
-5. If Homebrew packages are required:
+4. If Homebrew packages are required:
    1. Install configured formulae and casks.
-6. Apply required tools:
+5. Apply required tools:
    1. Install rustup.
    2. Ensure the Rust toolchain.
    3. Install FNM.

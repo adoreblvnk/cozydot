@@ -58,7 +58,7 @@ fn init(preset: init::Preset) -> Result<()> {
 }
 
 fn check() -> Result<()> {
-    let path = active_configuration_path()?;
+    let path = init::config_root()?.join("cozydot.yaml");
     config::Config::load(&path)
         .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
     println!("Checked {}", path.display());
@@ -95,8 +95,4 @@ impl ActiveHost {
         config.validate_for_platform(&platform)?;
         Ok(Self { root, config, platform })
     }
-}
-
-fn active_configuration_path() -> Result<std::path::PathBuf> {
-    Ok(init::config_root()?.join("cozydot.yaml"))
 }

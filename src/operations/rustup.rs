@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::{Host, TempPath, path_program, real_executable_file, shell::append_profile};
+use super::{Host, TempPath, real_executable_file, required_real_executable, shell::append_profile};
 
 const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then
   . "$HOME/.cargo/env"
@@ -36,26 +36,26 @@ pub fn install_rustup(host: &Host) -> Result<()> {
 }
 
 pub(crate) fn install_default_rust_toolchain(host: &Host, selector: &str) -> Result<()> {
-    let rustup = managed_executable(host, "Rust toolchain operation: rustup is unavailable after install")?;
-    host.require("rustup toolchain install", &rustup, rust_install_args(selector))?;
+    let rustup = required_real_executable(
+        &host.home().join(".cargo/bin/rustup"),
+        "managed tool executable path",
+        "Rust toolchain operation: rustup is unavailable after install",
+    )?;
+    host.require(
+        "rustup toolchain install",
+        &rustup,
+        ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", selector],
+    )?;
     host.require("rustup default", &rustup, ["default", "--", selector])?;
     Ok(())
 }
 
 pub(crate) fn update_rust(host: &Host) -> Result<()> {
-    let rustup = managed_executable(host, "Rust toolchain update: rustup is unavailable after install")?;
+    let rustup = required_real_executable(
+        &host.home().join(".cargo/bin/rustup"),
+        "managed tool executable path",
+        "Rust toolchain update: rustup is unavailable after install",
+    )?;
     host.require("Rust toolchain update", &rustup, ["update"])?;
     Ok(())
-}
-
-fn managed_executable(host: &Host, message: &str) -> Result<String> {
-    let path = host.home().join(".cargo/bin/rustup");
-    if real_executable_file(&path) {
-        return path_program(&path, "managed tool executable path");
-    }
-    bail!("{message}")
-}
-
-fn rust_install_args(toolchain: &str) -> [&str; 7] {
-    ["toolchain", "install", "--profile", "minimal", "--no-self-update", "--", toolchain]
 }

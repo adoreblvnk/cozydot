@@ -89,6 +89,13 @@ pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
     path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
 }
 
+pub(crate) fn required_real_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
+    if !real_executable_file(path) {
+        bail!("{unavailable}");
+    }
+    path_program(path, description)
+}
+
 pub(crate) fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
     let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
     let record = output.strip_suffix('\n').unwrap_or(output);
