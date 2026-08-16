@@ -64,15 +64,15 @@ impl Host {
     }
 
     pub fn temp_dir(&self) -> PathBuf {
-        self.value("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
+        self.env("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
     }
 
-    pub fn value(&self, name: &str) -> Option<OsString> {
+    pub fn env(&self, name: &str) -> Option<OsString> {
         std::env::var_os(name)
     }
 
     pub fn executable_on_path(&self, name: &str) -> bool {
-        self.value("PATH")
+        self.env("PATH")
             .is_some_and(|path| std::env::split_paths(&path).any(|directory| executable_file(&directory.join(name))))
     }
 }

@@ -19,7 +19,6 @@ mod shell;
 mod snapd;
 mod users;
 mod uv;
-mod virtualbox;
 mod vscode;
 
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
@@ -183,14 +182,14 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         Operation::InstallRustup => completed(rustup::install_rustup(&host)),
         Operation::InstallFnm => completed(fnm::install_fnm(&host)),
         Operation::InstallUv => completed(uv::install_uv(&host)),
-        Operation::RustToolchain { selector } => completed(rustup::install_default_rust_toolchain(&host, selector)),
+        Operation::RustToolchain { selector } => completed(rustup::install_default_toolchain(&host, selector)),
         Operation::RustToolchainUpdate => completed(rustup::update_rust(&host)),
-        Operation::GoToolchain { selector, architecture } => completed(go::install_go(&host, selector, *architecture)),
+        Operation::GoToolchain { selector, architecture } => completed(go::install(&host, selector, *architecture)),
         Operation::GoToolchainUpdate { selector, architecture } => {
-            completed(go::update_go(&host, selector, *architecture))
+            completed(go::update(&host, selector, *architecture))
         }
-        Operation::NodeToolchain { selector } => completed(fnm::install_default_node_toolchain(&host, selector)),
-        Operation::NodeToolchainUpdate { selector } => completed(fnm::install_default_node_toolchain(&host, selector)),
+        Operation::NodeToolchain { selector } => completed(fnm::install_default_toolchain(&host, selector)),
+        Operation::NodeToolchainUpdate { selector } => completed(fnm::install_default_toolchain(&host, selector)),
         Operation::PythonToolchain { version } => completed(uv::install_default_python(&host, version)),
         Operation::PythonToolchainUpdate => completed(uv::update_python(&host)),
         Operation::InstallCargoBinstall => completed(binary::cargo_binstall::install(&host)),
@@ -208,16 +207,16 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         Operation::Dotfiles { root, packages, replace } => {
             completed(packages::dotfiles::apply(&host, root, packages, *replace))
         }
-        Operation::DockerGroup => completed(docker::docker_group(&host)),
+        Operation::DockerGroup => completed(users::ensure_product_group(&host, "Docker", "docker", "docker")),
         Operation::DockerLocalLoggingDriver { max_size } => {
-            completed(docker::set_docker_local_logging_driver(&host, max_size.as_deref()))
+            completed(docker::set_local_logging_driver(&host, max_size.as_deref()))
         }
-        Operation::VirtualBoxGroup => completed(virtualbox::virtualbox_group(&host)),
-        Operation::VsCodeInstallExtensions { extensions } => {
-            completed(vscode::install_vscode_extensions(&host, extensions))
+        Operation::VirtualBoxGroup => {
+            completed(users::ensure_product_group(&host, "VirtualBox", "VBoxManage", "vboxusers"))
         }
-        Operation::DesktopSetting { target, setting } => completed(desktop::desktop_setting(&host, *target, setting)),
-        Operation::GnomeExtensions { extensions } => gnome::gnome_extensions(&host, extensions),
+        Operation::VsCodeInstallExtensions { extensions } => completed(vscode::install_extensions(&host, extensions)),
+        Operation::DesktopSetting { target, setting } => completed(desktop::apply_setting(&host, *target, setting)),
+        Operation::GnomeExtensions { extensions } => gnome::apply_extensions(&host, extensions),
         Operation::InstallDashToDock => gnome::install_dash_to_dock(&host),
         Operation::InstallRoundedWindowCorners => gnome::install_rounded_window_corners(&host),
         Operation::AptUpgrade { command } => completed(apt::upgrade(&host, *command)),

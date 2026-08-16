@@ -122,8 +122,7 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
     if conflicts.is_empty() {
         return Ok(());
     }
-    let state_home =
-        host.value("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/state"));
+    let state_home = host.env("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/state"));
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("dotfiles backup timestamp is before the Unix epoch")?

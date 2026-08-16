@@ -49,7 +49,7 @@ pub fn update_and_install(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         anyhow::bail!("APT update-and-install package sequence must not be empty");
     }
-    let missing = packages_with_state(host, packages, false)?;
+    let missing = missing_packages(host, packages)?;
     if missing.is_empty() {
         return Ok(());
     }
@@ -61,7 +61,7 @@ pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
-    let missing = packages_with_state(host, packages, false)?;
+    let missing = missing_packages(host, packages)?;
     if missing.is_empty() {
         return Ok(());
     }
@@ -73,14 +73,24 @@ pub fn purge_then_install(host: &Host, purge_packages: &[String], install_packag
     self::packages(host, install_packages)
 }
 
-fn packages_with_state(host: &Host, packages: &[String], installed: bool) -> Result<Vec<String>> {
-    let mut matching = Vec::new();
+fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
+    let mut missing = Vec::new();
     for package in packages {
-        if package_is_installed(host, package)? == installed {
-            matching.push(package.clone());
+        if !package_is_installed(host, package)? {
+            missing.push(package.clone());
         }
     }
-    Ok(matching)
+    Ok(missing)
+}
+
+fn installed_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
+    let mut installed = Vec::new();
+    for package in packages {
+        if package_is_installed(host, package)? {
+            installed.push(package.clone());
+        }
+    }
+    Ok(installed)
 }
 
 fn package_is_installed(host: &Host, package: &str) -> Result<bool> {
@@ -134,7 +144,7 @@ pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
-    let installed = packages_with_state(host, packages, true)?;
+    let installed = installed_packages(host, packages)?;
     if installed.is_empty() {
         return Ok(());
     }

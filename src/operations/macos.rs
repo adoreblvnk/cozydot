@@ -19,7 +19,7 @@ pub fn validate_sudo_access(host: &Host) -> Result<()> {
 }
 
 pub fn install_homebrew(host: &Host) -> Result<()> {
-    if brew_program(host).is_ok() {
+    if find_brew(host).is_ok() {
         return Ok(());
     }
     let script = TempPath::new(host, "homebrew-install")?;
@@ -42,7 +42,7 @@ pub fn install_homebrew(host: &Host) -> Result<()> {
 }
 
 pub fn install_packages(host: &Host, formulae: &[String], casks: &[String]) -> Result<()> {
-    let brew = brew_program(host)?;
+    let brew = find_brew(host)?;
     for formula in formulae {
         if !is_installed(host, &brew, "--formula", formula)? {
             host.require("Homebrew formula install", &brew, ["install", formula])?;
@@ -62,7 +62,7 @@ fn is_installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool>
 
 pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
     install_homebrew(host)?;
-    let brew = brew_program(host)?;
+    let brew = find_brew(host)?;
     if !is_installed(host, &brew, "--formula", formula)? {
         host.require("Homebrew formula install", &brew, ["install", formula])?;
     }
@@ -70,14 +70,14 @@ pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
 }
 
 pub(crate) fn formula_executable(host: &Host, formula: &str, executable: &str) -> Result<String> {
-    let brew = brew_program(host)?;
+    let brew = find_brew(host)?;
     let output = host.require("Homebrew formula prefix", &brew, ["--prefix", formula])?;
     let prefix = std::str::from_utf8(&output.stdout)?.trim();
     let program = std::path::Path::new(prefix).join("bin").join(executable);
     program.to_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("Homebrew executable path is not UTF-8"))
 }
 
-fn brew_program(host: &Host) -> Result<String> {
+fn find_brew(host: &Host) -> Result<String> {
     for candidate in ["brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
         if host.run(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {
             return Ok(candidate.to_owned());
@@ -98,7 +98,7 @@ pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {
 }
 
 pub fn update(host: &Host, formulae: bool, casks: bool) -> Result<()> {
-    let brew = brew_program(host)?;
+    let brew = find_brew(host)?;
     host.require("Homebrew update", &brew, ["update"])?;
     if formulae {
         host.require("Homebrew formula updates", &brew, ["upgrade"])?;

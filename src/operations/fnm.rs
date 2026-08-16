@@ -41,7 +41,7 @@ pub fn install_fnm(host: &Host) -> Result<()> {
     append_shell(host, FNM_BASH_INIT)
 }
 
-pub(crate) fn install_default_node_toolchain(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn install_default_toolchain(host: &Host, selector: &str) -> Result<()> {
     let fnm = resolve_fnm(host)?;
     fnm_install(host, &fnm, selector)?;
     host.require("fnm default", &fnm, ["default", "--", fnm_alias(selector)])?;

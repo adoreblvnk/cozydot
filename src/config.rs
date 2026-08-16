@@ -619,9 +619,9 @@ pub struct ArchitectureMap {
 }
 
 impl ArchitectureMap {
-    fn validate(&self, path: &str, value_kind: &str) -> Result<()> {
+    fn validate(&self, path: &str, kind: &str) -> Result<()> {
         if self.amd64.is_none() && self.arm64.is_none() && self.arm32.is_none() {
-            bail!("{path}: must contain at least one canonical architecture {value_kind}");
+            bail!("{path}: must contain at least one canonical architecture {kind}");
         }
         Ok(())
     }

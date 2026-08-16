@@ -71,31 +71,31 @@ impl BinaryPackageOperation {
     }
 }
 
-pub(crate) fn install(host: &Host, operation: &BinaryPackageOperation) -> Result<()> {
-    if installed(host, operation) {
+pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<()> {
+    if installed(host, package) {
         return Ok(());
     }
-    let url = resolve(host, operation)?;
-    let temporary = download(host, operation, &url)?;
-    match operation.format {
-        BinaryFormat::Deb => install_deb(host, temporary),
-        BinaryFormat::Appimage => install_appimage(host, operation, temporary),
+    let url = resolve(host, package)?;
+    let temp = download(host, package, &url)?;
+    match package.format {
+        BinaryFormat::Deb => install_deb(host, temp),
+        BinaryFormat::Appimage => install_appimage(host, package, temp),
     }
 }
 
-fn installed(host: &Host, operation: &BinaryPackageOperation) -> bool {
-    match operation.format {
-        BinaryFormat::Deb => host.executable_on_path(&operation.name),
-        BinaryFormat::Appimage => appimage_destination(host, operation).exists(),
+fn installed(host: &Host, package: &BinaryPackageOperation) -> bool {
+    match package.format {
+        BinaryFormat::Deb => host.executable_on_path(&package.name),
+        BinaryFormat::Appimage => appimage_path(host, package).exists(),
     }
 }
 
-fn appimage_destination(host: &Host, operation: &BinaryPackageOperation) -> PathBuf {
-    host.home().join("Applications").join(format!("{}.AppImage", operation.name))
+fn appimage_path(host: &Host, package: &BinaryPackageOperation) -> PathBuf {
+    host.home().join("Applications").join(format!("{}.AppImage", package.name))
 }
 
-fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<String> {
-    match &operation.source {
+fn resolve(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
+    match &package.source {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
         BinarySourceOperation::GithubLatest { repo, selector } => {
             let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
@@ -113,41 +113,41 @@ fn resolve(host: &Host, operation: &BinaryPackageOperation) -> Result<String> {
                     USER_AGENT,
                 ],
             )?;
-            select_asset(&output.stdout, selector, operation)
+            select_asset(&output.stdout, selector, package)
         }
     }
 }
 
-fn select_asset(input: &[u8], selector: &str, operation: &BinaryPackageOperation) -> Result<String> {
+fn select_asset(input: &[u8], selector: &str, package: &BinaryPackageOperation) -> Result<String> {
     let release: GithubRelease = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(selector).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
     if matches.len() != 1 {
         bail!(
             "binary package {:?} ({}) selector matched {} assets",
-            operation.name,
-            operation.architecture.canonical(),
+            package.name,
+            package.architecture.canonical(),
             matches.len()
         );
     }
     Ok(matches[0].browser_download_url.clone())
 }
 
-fn download(host: &Host, operation: &BinaryPackageOperation, url: &str) -> Result<TempPath> {
-    let temporary = match operation.format {
-        BinaryFormat::Deb => TempPath::new_with_suffix(host, &operation.name, ".deb")?,
+fn download(host: &Host, package: &BinaryPackageOperation, url: &str) -> Result<TempPath> {
+    let temp = match package.format {
+        BinaryFormat::Deb => TempPath::new_with_suffix(host, &package.name, ".deb")?,
         BinaryFormat::Appimage => {
             let applications = host.home().join("Applications");
             fs::create_dir_all(&applications).context("create Applications directory")?;
             // stage beside destination so final rename can't cross filesystems
-            TempPath::new_in_with_suffix(&applications, &format!("{}-", operation.name), ".part")?
+            TempPath::new_in_with_suffix(&applications, &format!("{}-", package.name), ".part")?
         }
     };
-    host.curl("download binary package", url, ["--output".as_ref(), temporary.path().as_os_str()])?;
-    Ok(temporary)
+    host.curl("download binary package", url, ["--output".as_ref(), temp.path().as_os_str()])?;
+    Ok(temp)
 }
 
-fn install_deb(host: &Host, temporary: TempPath) -> Result<()> {
+fn install_deb(host: &Host, temp: TempPath) -> Result<()> {
     host.require(
         "binary Debian install",
         "sudo",
@@ -158,13 +158,13 @@ fn install_deb(host: &Host, temporary: TempPath) -> Result<()> {
             "-y".as_ref(),
             "-qq".as_ref(),
             "--".as_ref(),
-            temporary.path().as_os_str(),
+            temp.path().as_os_str(),
         ],
     )?;
     Ok(())
 }
 
-fn install_appimage(host: &Host, operation: &BinaryPackageOperation, temporary: TempPath) -> Result<()> {
-    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755))?;
-    fs::rename(temporary.path(), appimage_destination(host, operation)).context("publish AppImage into Applications")
+fn install_appimage(host: &Host, package: &BinaryPackageOperation, temp: TempPath) -> Result<()> {
+    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o755))?;
+    fs::rename(temp.path(), appimage_path(host, package)).context("publish AppImage into Applications")
 }

@@ -30,13 +30,14 @@ impl Preset {
 
 /// Create `cozydot.yaml` & `dotfiles` dir without overwriting user-managed changes.
 pub fn init(preset: Preset) -> Result<PathBuf> {
-    let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
-    let preset = select_embedded_preset(preset)?;
-    initialization.synchronize_record(&Record { path: "cozydot.yaml", bytes: preset.bytes, mode: 0o644 })?;
-    initialization.synchronize_bundled_dotfiles()?;
+    let mut init = Init::resolve_and_validate_configuration_root()?;
+    let preset =
+        PRESETS.iter().find(|candidate| candidate.name == preset.name()).context("embedded preset is missing")?;
+    init.sync_cozydot_yaml(preset)?;
+    init.sync_bundled_dotfiles()?;
     // publish ownership last so retries preserve files synced by partial runs
-    initialization.publish_managed_file_manifest()?;
-    Ok(initialization.root)
+    write_manifest(&init.root.join(".managed-files"), &init.managed)?;
+    Ok(init.root)
 }
 
 pub fn config_root() -> Result<PathBuf> {
@@ -61,20 +62,12 @@ pub struct PresetRecord {
 
 include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
 
-pub fn records() -> &'static [Record] {
-    RECORDS
-}
-
-pub fn preset(name: &str) -> Option<&'static PresetRecord> {
-    PRESETS.iter().find(|preset| preset.name == name)
-}
-
-struct Initialization {
+struct Init {
     root: PathBuf,
     managed: BTreeMap<PathBuf, String>,
 }
 
-impl Initialization {
+impl Init {
     fn resolve_and_validate_configuration_root() -> Result<Self> {
         let root = config_root()?;
         ensure_directory_path(&root, Path::new(""))?;
@@ -82,21 +75,21 @@ impl Initialization {
         Ok(Self { root, managed })
     }
 
-    fn synchronize_bundled_dotfiles(&mut self) -> Result<()> {
+    fn sync_bundled_dotfiles(&mut self) -> Result<()> {
         let mut packages = BTreeMap::<PathBuf, Vec<&Record>>::new();
-        for record in records() {
+        for record in RECORDS {
             let relative = PathBuf::from(record.path);
             validate_relative(&relative)?;
             let package = dotfile_package(&relative).context("bundled dotfile is outside a package")?;
             packages.entry(package).or_default().push(record);
         }
         for (package, records) in packages {
-            self.synchronize_dotfile_package(&package, &records)?;
+            self.sync_dotfile_package(&package, &records)?;
         }
         Ok(())
     }
 
-    fn synchronize_dotfile_package(&mut self, package: &Path, records: &[&Record]) -> Result<()> {
+    fn sync_dotfile_package(&mut self, package: &Path, records: &[&Record]) -> Result<()> {
         if !self.dotfile_package_is_unmodified(package)? {
             return Ok(());
         }
@@ -115,8 +108,8 @@ impl Initialization {
             .iter()
             .filter(|(relative, _)| dotfile_package(relative).as_deref() == Some(package))
             .collect::<Vec<_>>();
-        let destination = self.root.join(package);
-        match fs::symlink_metadata(&destination) {
+        let dest = self.root.join(package);
+        match fs::symlink_metadata(&dest) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(managed.is_empty()),
             Err(error) => return Err(error.into()),
             Ok(metadata) if !metadata.file_type().is_dir() => return Ok(false),
@@ -125,7 +118,7 @@ impl Initialization {
         }
 
         let mut files = BTreeSet::new();
-        if !collect_real_files(&destination, &self.root, &mut files)? {
+        if !collect_real_files(&dest, &self.root, &mut files)? {
             return Ok(false);
         }
         let expected = managed.iter().map(|(relative, _)| (*relative).clone()).collect::<BTreeSet<_>>();
@@ -137,49 +130,42 @@ impl Initialization {
             .all(|(relative, hash)| hash_file(&self.root.join(relative)).is_ok_and(|current| &current == *hash)))
     }
 
-    fn synchronize_record(&mut self, record: &Record) -> Result<()> {
+    fn sync_cozydot_yaml(&mut self, preset: &PresetRecord) -> Result<()> {
+        let record = Record { path: "cozydot.yaml", bytes: preset.bytes, mode: 0o644 };
         let relative = PathBuf::from(record.path);
         validate_relative(&relative)?;
-        let destination = self.root.join(&relative);
+        let dest = self.root.join(&relative);
         let new_hash = hash_bytes(record.bytes);
         let old_hash = self.managed.get(&relative);
-        let install = match fs::symlink_metadata(&destination) {
+        let install = match fs::symlink_metadata(&dest) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => true,
             Err(e) => return Err(e.into()),
             Ok(metadata) if !metadata.file_type().is_file() => false,
-            Ok(_) => old_hash.is_some_and(|hash| hash_file(&destination).ok().as_ref() == Some(hash)),
+            Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).ok().as_ref() == Some(hash)),
         };
         if install {
-            install_file(&self.root, record, &relative)?;
+            install_file(&self.root, &record, &relative)?;
             self.managed.insert(relative, new_hash);
         }
         Ok(())
     }
-
-    fn publish_managed_file_manifest(&self) -> Result<()> {
-        write_manifest(&self.root.join(".managed-files"), &self.managed)
-    }
-}
-
-fn select_embedded_preset(preset: Preset) -> Result<&'static PresetRecord> {
-    self::preset(preset.name()).context("embedded preset is missing")
 }
 
 fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     let parent = relative.parent().unwrap_or(Path::new(""));
     ensure_directory_path(root, parent)?;
-    let destination = root.join(relative);
-    let destination_parent = required_parent(&destination)?;
-    let mut temporary = tempfile::Builder::new().prefix(".cozydot.").tempfile_in(destination_parent)?;
-    temporary.write_all(record.bytes)?;
-    temporary.as_file_mut().sync_all()?;
-    temporary.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
-    temporary.persist(&destination).map_err(|e| e.error)?;
-    sync_directory(destination_parent)?;
+    let dest = root.join(relative);
+    let dest_parent = required_parent(&dest)?;
+    let mut temp = tempfile::Builder::new().prefix(".cozydot.").tempfile_in(dest_parent)?;
+    temp.write_all(record.bytes)?;
+    temp.as_file_mut().sync_all()?;
+    temp.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
+    temp.persist(&dest).map_err(|e| e.error)?;
+    sync_dir(dest_parent)?;
     Ok(())
 }
 
-/// Create missing dirs under `root` & reject symlinked managed paths.
+/// Create missing dirs under `root` & fail if `root` or a child dir is a symlink.
 fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
     if root.exists() && fs::symlink_metadata(root)?.file_type().is_symlink() {
         bail!("configuration root is a symlink");
@@ -216,8 +202,8 @@ fn dotfile_package(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(root).join(package))
 }
 
-fn collect_real_files(directory: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
-    for entry in fs::read_dir(directory)? {
+fn collect_real_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
+    for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
@@ -254,13 +240,13 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
 
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
     let parent = required_parent(path)?;
-    let mut temporary = tempfile::Builder::new().prefix(".managed-files.").tempfile_in(parent)?;
+    let mut temp = tempfile::Builder::new().prefix(".managed-files.").tempfile_in(parent)?;
     for (relative, hash) in managed {
-        writeln!(temporary, "{}\t{}", hash, relative.display())?;
+        writeln!(temp, "{}\t{}", hash, relative.display())?;
     }
-    temporary.as_file_mut().sync_all()?;
-    temporary.persist(path).map_err(|e| e.error)?;
-    sync_directory(parent)?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(path).map_err(|e| e.error)?;
+    sync_dir(parent)?;
     Ok(())
 }
 
@@ -268,7 +254,7 @@ fn required_parent(path: &Path) -> Result<&Path> {
     path.parent().with_context(|| format!("path has no parent: {}", path.display()))
 }
 
-fn sync_directory(path: &Path) -> Result<()> {
+fn sync_dir(path: &Path) -> Result<()> {
     File::open(path)?.sync_all()?;
     Ok(())
 }
