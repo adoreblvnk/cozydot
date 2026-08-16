@@ -32,7 +32,7 @@ impl Preset {
 pub fn init(preset: Preset) -> Result<PathBuf> {
     let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
     let preset = select_embedded_preset(preset)?;
-    initialization.synchronize_active_configuration(preset)?;
+    initialization.synchronize_record(&Record { path: "cozydot.yaml", bytes: preset.bytes, mode: 0o644 })?;
     initialization.synchronize_bundled_dotfiles()?;
     // publish ownership last so retries preserve files synced by partial runs
     initialization.publish_managed_file_manifest()?;
@@ -80,10 +80,6 @@ impl Initialization {
         ensure_directory_path(&root, Path::new(""))?;
         let managed = read_manifest(&root.join(".managed-files"))?;
         Ok(Self { root, managed })
-    }
-
-    fn synchronize_active_configuration(&mut self, preset: &PresetRecord) -> Result<()> {
-        self.synchronize_record(&Record { path: "cozydot.yaml", bytes: preset.bytes, mode: 0o644 })
     }
 
     fn synchronize_bundled_dotfiles(&mut self) -> Result<()> {
