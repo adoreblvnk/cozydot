@@ -10,29 +10,21 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Debug, ValueEnum)]
 pub enum Preset {
-    #[default]
     Cozydot,
     Cli,
     Vm,
 }
 
-impl Preset {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Cozydot => "cozydot",
-            Self::Cli => "cli",
-            Self::Vm => "vm",
-        }
-    }
-}
-
 /// Create `cozydot.yaml` & `dotfiles` dir without overwriting user-managed changes.
 pub fn init(preset: Preset) -> Result<PathBuf> {
     let mut init = Init::resolve_and_validate_configuration_root()?;
-    let preset =
-        PRESETS.iter().find(|candidate| candidate.name == preset.name()).context("embedded preset is missing")?;
+    let preset = match preset {
+        Preset::Cozydot => COZYDOT_PRESET,
+        Preset::Cli => CLI_PRESET,
+        Preset::Vm => VM_PRESET,
+    };
     init.sync_cozydot_yaml(preset)?;
     init.sync_bundled_dotfiles()?;
     // write ownership last so retries preserve files synced by partial runs
@@ -47,17 +39,10 @@ pub fn config_root() -> Result<PathBuf> {
     Ok(PathBuf::from(env::var_os("HOME").context("HOME is not set")?).join(".config/cozydot"))
 }
 
-#[derive(Clone, Copy, Debug)]
 pub struct Record {
     pub path: &'static str,
     pub bytes: &'static [u8],
     pub mode: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct PresetRecord {
-    pub name: &'static str,
-    pub bytes: &'static [u8],
 }
 
 include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
@@ -79,8 +64,7 @@ impl Init {
         let mut packages = BTreeMap::<PathBuf, Vec<&Record>>::new();
         for record in RECORDS {
             let relative = PathBuf::from(record.path);
-            validate_relative(&relative)?;
-            let package = dotfile_package(&relative).context("bundled dotfile is outside a package")?;
+            let package = bundled_dotfile_package(&relative);
             packages.entry(package).or_default().push(record);
         }
         for (package, records) in packages {
@@ -102,6 +86,7 @@ impl Init {
         Ok(())
     }
 
+    // TODO: consider using a simpler approach?
     fn dotfile_package_is_unmodified(&self, package: &Path) -> Result<bool> {
         let managed = self
             .managed
@@ -130,10 +115,9 @@ impl Init {
             .all(|(relative, hash)| hash_file(&self.root.join(relative)).is_ok_and(|current| &current == *hash)))
     }
 
-    fn sync_cozydot_yaml(&mut self, preset: &PresetRecord) -> Result<()> {
-        let record = Record { path: "cozydot.yaml", bytes: preset.bytes, mode: 0o644 };
+    fn sync_cozydot_yaml(&mut self, preset: &'static [u8]) -> Result<()> {
+        let record = Record { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
         let relative = PathBuf::from(record.path);
-        validate_relative(&relative)?;
         let dest = self.root.join(&relative);
         let new_hash = hash_bytes(record.bytes);
         let old_hash = self.managed.get(&relative);
@@ -202,6 +186,10 @@ fn dotfile_package(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(root).join(package))
 }
 
+fn bundled_dotfile_package(path: &Path) -> PathBuf {
+    path.components().take(2).collect()
+}
+
 fn collect_real_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -238,6 +226,7 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
     Ok(result)
 }
 
+// TODO: do we really need this where we're going?
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
     let parent = required_parent(path)?;
     let mut temp = tempfile::Builder::new().prefix(".managed-files.").tempfile_in(parent)?;

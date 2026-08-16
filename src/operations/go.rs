@@ -81,9 +81,7 @@ fn select_release(input: &str, selector: &GoToolchainSelector, arch: &str, targe
         .map(|v| v.trim_start_matches("go"))
         .find(|version| match selector {
             GoToolchainSelector::Latest => true,
-            GoToolchainSelector::Version(requested) => {
-                *version == requested || version.strip_prefix(requested).is_some_and(|rest| rest.starts_with('.'))
-            }
+            GoToolchainSelector::Version(requested) => *version == requested,
         })
         .context("Go metadata has no matching stable release")?;
     let filename = format!("go{version}.{target_os}-{arch}.tar.gz");

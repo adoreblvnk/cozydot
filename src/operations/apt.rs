@@ -46,9 +46,6 @@ fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
 }
 
 pub fn update_and_install_packages(host: &Host, packages: &[String]) -> Result<()> {
-    if packages.is_empty() {
-        anyhow::bail!("APT update-and-install package sequence must not be empty");
-    }
     let missing = missing_packages(host, packages)?;
     if missing.is_empty() {
         return Ok(());

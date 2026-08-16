@@ -9,10 +9,9 @@ const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 pub(crate) fn set_local_logging_driver(host: &Host, max_size: Option<&str>) -> Result<()> {
     preflight(host)?;
     let mut requested = read_daemon_config(host)?;
-    let object = requested.as_object_mut().context("Docker daemon config must be a JSON object")?;
-    object.insert("log-driver".into(), Value::String("local".into()));
+    requested.insert("log-driver".into(), Value::String("local".into()));
     if let Some(max_size) = max_size {
-        let log_options = object
+        let log_options = requested
             .entry("log-opts")
             .or_insert_with(|| Value::Object(Map::new()))
             .as_object_mut()
@@ -31,7 +30,7 @@ fn preflight(host: &Host) -> Result<()> {
     Ok(())
 }
 
-fn read_daemon_config(host: &Host) -> Result<Value> {
+fn read_daemon_config(host: &Host) -> Result<Map<String, Value>> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
         host.run_checked("Docker daemon config absence check", "sudo", ["test", "!", "-e", DOCKER_DAEMON_CONFIG])?;
@@ -40,7 +39,7 @@ fn read_daemon_config(host: &Host) -> Result<Value> {
             "sudo",
             ["test", "!", "-L", DOCKER_DAEMON_CONFIG],
         )?;
-        return Ok(Value::Object(Map::new()));
+        return Ok(Map::new());
     }
     let mode = one_record(&kind.stdout, "sudo stat")?;
     let mode = u32::from_str_radix(mode, 16).context("sudo stat returned malformed mode output")?;
@@ -49,9 +48,5 @@ fn read_daemon_config(host: &Host) -> Result<Value> {
     }
     let output = host.run_checked("Docker daemon config inspection", "sudo", ["cat", "--", DOCKER_DAEMON_CONFIG])?;
     let text = std::str::from_utf8(&output.stdout).context("Docker daemon config is not valid UTF-8")?;
-    let value: Value = serde_json::from_str(text).context("Docker daemon config is invalid JSON")?;
-    if !value.is_object() {
-        bail!("Docker daemon config must be a JSON object");
-    }
-    Ok(value)
+    serde_json::from_str(text).context("Docker daemon config must be a JSON object")
 }

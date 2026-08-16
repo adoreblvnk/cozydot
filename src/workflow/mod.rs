@@ -2,14 +2,14 @@
 
 use crate::{
     config::{
-        BinaryFormat, BinarySource, Config, EnabledDisabled, PlatformIdentity, Repo, Theme, resolve_platform_identity,
+        AptArchitecture, BinaryFormat, BinarySource, Config, DistroMapKey, EnabledDisabled, Repo, Theme,
         select_distro_map, selected_repo_codename,
     },
     operations::{
         self, AptRepo, BinaryPackageOperation, BinarySourceOperation, DesktopEnvironment, DesktopSetting,
         GoToolchainSelector, Operation,
     },
-    platform::{Architecture, Platform},
+    platform::{Architecture, DesktopKind, Distro, Family, Platform, PlatformIdentity},
 };
 use anyhow::{Context, Result};
 use std::{
@@ -21,7 +21,6 @@ const APT_PREREQS: [&str; 7] = ["ca-certificates", "curl", "fontconfig", "gnupg"
 
 #[derive(Default)]
 struct ManagerInstallPlan {
-    flatpak: bool,
     rustup: bool,
     fnm: bool,
     uv: bool,
@@ -32,6 +31,7 @@ struct ManagerInstallPlan {
 struct LinuxApplyPlan {
     apt_prereqs: BTreeSet<&'static str>,
     manager_installs: ManagerInstallPlan,
+    flatpak_refs: Option<Vec<String>>,
     update_apt: bool,
     repos: Vec<AptRepo>,
     repo_packages_to_purge: Vec<String>,
@@ -41,36 +41,46 @@ struct LinuxApplyPlan {
 }
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
-    if platform.is_macos() {
-        macos_apply(config, platform.architecture, dotfiles_root)
-    } else {
-        linux_apply(config, platform, dotfiles_root)
+    match platform.identity {
+        PlatformIdentity::MacOs => macos_apply(config, platform.architecture, dotfiles_root),
+        PlatformIdentity::Linux { distro, upstream } => linux_apply(config, platform, distro, upstream, dotfiles_root),
     }
 }
 
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
-    if platform.is_macos() { macos_update(config, platform.architecture) } else { linux_update(config, platform) }
+    match platform.identity {
+        PlatformIdentity::MacOs => macos_update(config, platform.architecture),
+        PlatformIdentity::Linux { .. } => linux_update(config, platform),
+    }
 }
 
 pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool) -> Result<()> {
-    let platform_packages =
-        if platform.is_macos() { &config.macos.dotfiles.packages } else { &config.linux.dotfiles.packages };
-    if let Some(operation) = dotfiles_operation(config, platform_packages, root, replace)? {
+    let platform_packages = match platform.identity {
+        PlatformIdentity::MacOs => &config.macos.dotfiles.packages,
+        PlatformIdentity::Linux { .. } => &config.linux.dotfiles.packages,
+    };
+    if let Some(operation) = dotfiles_operation(config, platform_packages, root, replace) {
         run("Apply", operation)?;
     }
     Ok(())
 }
 
-fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
-    let plan = plan_linux_apply(config, platform)?;
+fn linux_apply(
+    config: &Config,
+    platform: &Platform,
+    distro: Distro,
+    upstream: Family,
+    dotfiles_root: &Path,
+) -> Result<()> {
+    let plan = plan_linux_apply(config, platform, distro, upstream);
 
-    if platform.distro == "debian" {
+    if distro == Distro::Debian {
         if config.linux.system.sudo_group == Some(true) {
             run("Apply", Operation::SudoGroupEnsure)?;
         }
-        run("Apply", Operation::DebianAptComponentsAdd { codename: platform.distro_codename.clone() })?;
+        run("Apply", Operation::DebianAptComponentsAdd)?;
     }
-    if platform.distro == "ubuntu"
+    if distro == Distro::Ubuntu
         && let Some(ubuntu) = &config.linux.system.ubuntu
     {
         if let Some(state) = ubuntu.unattended_upgrades {
@@ -112,14 +122,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             },
         )?;
     }
-    if plan.manager_installs.flatpak {
+    if let Some(refs) = plan.flatpak_refs {
         run("Apply", Operation::FlatpakFlathubRemoteAdd)?;
-        run(
-            "Apply",
-            Operation::FlatpakApplicationsInstall {
-                refs: config.linux.packages.flatpak.as_ref().expect("Flatpak intent was derived").clone(),
-            },
-        )?;
+        run("Apply", Operation::FlatpakApplicationsInstall { refs })?;
     }
     apply_tools(config, platform.architecture, &plan.manager_installs)?;
     apply_packages(config)?;
@@ -135,7 +140,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if let Some(families) = nerd_fonts(config) {
         run("Apply", Operation::NerdFontsInstall { families })?;
     }
-    if let Some(operation) = dotfiles_operation(config, &config.linux.dotfiles.packages, dotfiles_root, false)? {
+    if let Some(operation) = dotfiles_operation(config, &config.linux.dotfiles.packages, dotfiles_root, false) {
         run("Apply", operation)?;
     }
     linux_integrations(config)?;
@@ -143,27 +148,26 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     Ok(())
 }
 
-fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPlan> {
-    let identity = resolve_platform_identity(platform)?;
+fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, upstream: Family) -> LinuxApplyPlan {
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
-    let mut manager_installs = manager_install_plan(config);
+    let manager_installs = manager_install_plan(config);
     let apt = config.linux.packages.apt.as_ref();
     let mut update_apt = apt.and_then(|apt| apt.install.as_ref()).is_some_and(|values| !values.is_empty())
-        || (platform.distro == "ubuntu"
+        || (distro == Distro::Ubuntu
             && config.linux.system.ubuntu.as_ref().is_some_and(|ubuntu| {
                 ubuntu.unattended_upgrades.is_some() || ubuntu.snapd.is_some() || ubuntu.restricted_extras
             }));
     let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
-    for repo in applicable_repos(config, platform, identity) {
-        repos.push(add_repo(repo, platform, identity)?);
+    for (repo, key, source_url) in applicable_repos(config, distro, upstream, platform.architecture) {
+        repos.push(add_repo(repo, platform, distro, key, source_url));
         repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
         repo_packages_to_install.extend(repo.packages.iter().cloned());
     }
-    if config.linux.packages.flatpak.as_ref().is_some_and(|values| !values.is_empty()) {
+    let flatpak_refs = config.linux.packages.flatpak.as_ref().filter(|values| !values.is_empty()).cloned();
+    if flatpak_refs.is_some() {
         apt_prereqs.insert("flatpak");
-        manager_installs.flatpak = true;
     }
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
@@ -179,16 +183,17 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
         }
     }
     add_desktop_prereqs(config, platform, &mut apt_prereqs);
-    Ok(LinuxApplyPlan {
+    LinuxApplyPlan {
         apt_prereqs,
         manager_installs,
+        flatpak_refs,
         update_apt,
         repos,
         repo_packages_to_purge,
         repo_packages_to_install,
         deb_binaries,
         appimages,
-    })
+    }
 }
 
 fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
@@ -216,7 +221,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
     if let Some(families) = nerd_fonts(config) {
         run("Apply", Operation::UserNerdFontsInstall { families })?;
     }
-    if let Some(operation) = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false)? {
+    if let Some(operation) = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false) {
         run("Apply", operation)?;
     }
     vscode_extensions(config)?;
@@ -267,15 +272,12 @@ fn apply_packages(config: &Config) -> Result<()> {
 
 fn manager_install_plan(config: &Config) -> ManagerInstallPlan {
     let rust = config.shared.tools.rust.is_some();
-    let cargo = config.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty());
     ManagerInstallPlan {
-        rustup: rust || cargo,
-        fnm: config.shared.tools.node.is_some()
-            || config.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty()),
+        rustup: rust,
+        fnm: config.shared.tools.node.is_some(),
         uv: config.shared.tools.python.is_some(),
-        cargo_binstall: rust || cargo,
+        cargo_binstall: rust,
         cargo_update: rust,
-        ..ManagerInstallPlan::default()
     }
 }
 
@@ -364,11 +366,12 @@ fn update_tools_and_packages(config: &Config, arch: Architecture, macos: bool) -
     Ok(())
 }
 
-fn applicable_repos<'a>(
-    config: &'a Config,
-    platform: &Platform,
-    identity: PlatformIdentity,
-) -> impl Iterator<Item = &'a Repo> {
+fn applicable_repos(
+    config: &Config,
+    distro: Distro,
+    upstream: Family,
+    architecture: Architecture,
+) -> impl Iterator<Item = (&Repo, DistroMapKey, &String)> {
     config
         .linux
         .packages
@@ -377,21 +380,31 @@ fn applicable_repos<'a>(
         .and_then(|apt| apt.repos.as_deref())
         .unwrap_or_default()
         .iter()
-        .filter(move |repo| repo.applies_to(identity.distro, identity.upstream, platform.architecture))
+        .filter(move |repo| {
+            repo.arch.as_ref().is_none_or(|values| {
+                values.iter().any(|value| {
+                    matches!(
+                        (value, architecture),
+                        (AptArchitecture::Amd64, Architecture::Amd64)
+                            | (AptArchitecture::Arm64, Architecture::Arm64)
+                            | (AptArchitecture::Armhf, Architecture::Arm32)
+                    )
+                })
+            })
+        })
+        .filter_map(move |repo| select_distro_map(&repo.urls, distro, upstream).map(|(key, url)| (repo, key, url)))
 }
 
-fn add_repo(repo: &Repo, platform: &Platform, identity: PlatformIdentity) -> Result<AptRepo> {
-    let (key, source_url) =
-        select_distro_map(&repo.urls, identity.distro, identity.upstream).expect("applicable repo has a selected URL");
+fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_url: &str) -> AptRepo {
     let suite = if repo.suite == "system" {
-        selected_repo_codename(key, platform, identity.distro).to_owned()
+        selected_repo_codename(key, platform, distro).to_owned()
     } else {
         repo.suite.clone()
     };
     AptRepo::new(
         repo.name.clone(),
         repo.key.clone(),
-        source_url.clone(),
+        source_url.to_owned(),
         platform.architecture,
         suite,
         repo.components.clone(),
@@ -413,20 +426,12 @@ fn nerd_fonts(config: &Config) -> Option<Vec<String>> {
     config.shared.fonts.nerd.as_ref().filter(|families| !families.is_empty()).cloned()
 }
 
-fn dotfiles_operation(
-    config: &Config,
-    platform_packages: &[String],
-    root: &Path,
-    replace: bool,
-) -> Result<Option<Operation>> {
+fn dotfiles_operation(config: &Config, platform_packages: &[String], root: &Path, replace: bool) -> Option<Operation> {
     let packages = config.shared.dotfiles.packages.iter().chain(platform_packages).cloned().collect::<Vec<_>>();
     if packages.is_empty() {
-        return Ok(None);
+        return None;
     }
-    if root.as_os_str().is_empty() {
-        anyhow::bail!("dotfiles root must not be empty");
-    }
-    Ok(Some(Operation::DotfilesApply { root: root.to_path_buf(), packages, replace }))
+    Some(Operation::DotfilesApply { root: root.to_path_buf(), packages, replace })
 }
 
 fn linux_integrations(config: &Config) -> Result<()> {
@@ -457,7 +462,7 @@ fn vscode_extensions(config: &Config) -> Result<()> {
 fn add_desktop_prereqs(config: &Config, platform: &Platform, apt_prereqs: &mut BTreeSet<&'static str>) {
     let Some(desktop) = config.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
     apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
-    if platform.desktop == "gnome"
+    if platform.desktop == DesktopKind::Gnome
         && desktop.gnome.as_ref().is_some_and(|gnome| {
             gnome.extensions.as_ref().is_some_and(|values| !values.is_empty())
                 || gnome.dash_to_dock == Some(true)
@@ -470,10 +475,12 @@ fn add_desktop_prereqs(config: &Config, platform: &Platform, apt_prereqs: &mut B
 
 fn linux_desktop(config: &Config, platform: &Platform) -> Result<()> {
     let Some(desktop) = config.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return Ok(()) };
-    let environment = match platform.desktop.as_str() {
-        "gnome" => DesktopEnvironment::Gnome,
-        "cinnamon" => DesktopEnvironment::Cinnamon,
-        _ => unreachable!("platform validation rejects unsupported desktop intent"),
+    let Some(environment) = (match platform.desktop {
+        DesktopKind::Gnome => Some(DesktopEnvironment::Gnome),
+        DesktopKind::Cinnamon => Some(DesktopEnvironment::Cinnamon),
+        DesktopKind::None => None,
+    }) else {
+        return Ok(());
     };
     if let Some(theme) = desktop.theme {
         run("Apply", Operation::DesktopSettingSet { environment, setting: DesktopSetting::ColorScheme(theme) })?;

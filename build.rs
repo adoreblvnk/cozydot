@@ -18,15 +18,15 @@ fn generate() -> io::Result<()> {
     let mut records = BTreeMap::new();
     walk(&root.join("dotfiles"), Path::new("dotfiles"), &mut records)?;
 
-    let mut presets = BTreeMap::new();
-    for name in ["cozydot", "cli", "vm"] {
+    let mut presets = Vec::new();
+    for (constant, name) in [("COZYDOT_PRESET", "cozydot"), ("CLI_PRESET", "cli"), ("VM_PRESET", "vm")] {
         let source = root.join("configs").join(format!("{name}.yaml"));
         println!("cargo:rerun-if-changed={}", source.display());
         let metadata = fs::symlink_metadata(&source)?;
         if !metadata.file_type().is_file() {
             return Err(invalid(&source, "preset is not a regular file"));
         }
-        presets.insert(name, fs::read(source)?);
+        presets.push((constant, fs::read(source)?));
     }
 
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("bundle.rs");
@@ -37,11 +37,10 @@ fn generate() -> io::Result<()> {
         writeln!(file, "    Record {{ path: {path:?}, bytes: &{bytes:?}, mode: {mode:#o} }},")?;
     }
     writeln!(file, "];")?;
-    writeln!(file, "pub static PRESETS: &[PresetRecord] = &[")?;
-    for (name, bytes) in presets {
-        writeln!(file, "    PresetRecord {{ name: {name:?}, bytes: &{bytes:?} }},")?;
+    for (constant, bytes) in presets {
+        writeln!(file, "pub const {constant}: &[u8] = &{bytes:?};")?;
     }
-    writeln!(file, "];")
+    Ok(())
 }
 
 fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathBuf, u32)>) -> io::Result<()> {
@@ -92,9 +91,13 @@ fn valid_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
 }
 
 fn valid_destination(destination: &Path, source: &Path) -> io::Result<String> {
-    if destination.as_os_str().is_empty() || destination.components().any(|part| !matches!(part, Component::Normal(_)))
+    let mut components = destination.components();
+    if !matches!(components.next(), Some(Component::Normal(root)) if root == "dotfiles")
+        || !matches!(components.next(), Some(Component::Normal(_)))
+        || !matches!(components.next(), Some(Component::Normal(_)))
+        || components.any(|part| !matches!(part, Component::Normal(_)))
     {
-        return Err(invalid(source, "asset destination is unsafe"));
+        return Err(invalid(source, "asset destination must have shape dotfiles/<package>/<content>"));
     }
     destination
         .to_str()

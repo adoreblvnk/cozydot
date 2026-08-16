@@ -1,22 +1,8 @@
 use super::{Host, TempPath};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::{ffi::OsStr, fs, io::Write, path::Path};
 
 pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], label: &str) -> Result<()> {
-    write_atomic_with_mode(host, destination, contents, label, "0644")
-}
-
-/// Atomically publish to trusted system path; doesn't validate destination ancestors.
-pub(crate) fn write_atomic_with_mode(
-    host: &Host,
-    destination: &Path,
-    contents: &[u8],
-    label: &str,
-    mode: &str,
-) -> Result<()> {
-    if !matches!(mode, "0600" | "0644") {
-        bail!("unsupported privileged file mode");
-    }
     let local = TempPath::new(host, "privileged-write")?;
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -62,7 +48,7 @@ pub(crate) fn write_atomic_with_mode(
                 OsStr::new("-g"),
                 OsStr::new("root"),
                 OsStr::new("-m"),
-                OsStr::new(mode),
+                OsStr::new("0644"),
                 OsStr::new("--"),
                 local_arg,
                 staged_arg,
@@ -75,17 +61,11 @@ pub(crate) fn write_atomic_with_mode(
             "sudo",
             [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg],
         )?;
-        sync_parent_directory(host, destination, label)?;
+        host.run_checked(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent_arg])?;
         Ok(())
     })();
     if result.is_err() {
         let _ = host.run("sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg]);
     }
     result
-}
-
-pub(crate) fn sync_parent_directory(host: &Host, destination: &Path, label: &str) -> Result<()> {
-    let parent = destination.parent().context("atomic-write destination has no parent")?;
-    host.run_checked(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()])?;
-    Ok(())
 }
