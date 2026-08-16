@@ -1,3 +1,5 @@
+//! Typed host mutations and their centralized execution boundary.
+
 mod appimaged;
 mod apt;
 mod binary;
@@ -33,6 +35,7 @@ use crate::{config::AptUpgradeCommand, platform::Architecture};
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
+/// A validated host mutation constructed by a platform workflow.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     SudoGroup,
@@ -86,6 +89,7 @@ pub enum Operation {
     HomebrewUpdate { formulae: bool, casks: bool },
 }
 
+/// The completion state of an executed operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationOutcome {
     Completed,
@@ -93,6 +97,7 @@ pub enum OperationOutcome {
 }
 
 impl Operation {
+    /// Returns the stable user-facing label for progress and error context.
     pub fn label(&self) -> &'static str {
         match self {
             Self::SudoGroup => "sudo group membership",

@@ -129,6 +129,7 @@ impl Architecture {
 
     pub fn go_archive(self) -> &'static str {
         match self {
+            // Go publishes its 32-bit ARM archive as armv6l, which also runs on supported ARMv7 hosts.
             Self::Arm32 => "armv6l",
             Self::DarwinArm64 => "arm64",
             other => other.go(),

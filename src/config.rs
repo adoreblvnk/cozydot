@@ -1,3 +1,5 @@
+//! Typed configuration schema and validation boundaries.
+
 use crate::platform::{Architecture, Platform};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -37,6 +39,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Loads and validates a complete configuration from `path`.
     pub fn load(path: &Path) -> Result<Self> {
         let load = || -> Result<Self> {
             let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -56,6 +59,7 @@ impl Config {
         })
     }
 
+    /// Validates host-dependent constraints after platform detection.
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         self.validate()?;
         if platform.is_macos() {

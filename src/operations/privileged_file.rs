@@ -49,6 +49,7 @@ pub(crate) fn write_atomic_with_mode(
             parent_arg,
         ],
     )?;
+    // Stage beside the destination so rename is atomic, then sync both the file and its parent for crash durability.
     let result = (|| {
         host.require(
             operation,
