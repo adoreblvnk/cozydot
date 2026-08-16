@@ -82,6 +82,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
 }
 
 fn validate_extension(value: &str) -> Result<()> {
+    // UUIDs enter both request URLs and archive names, so accept only GNOME's path-safe form.
     let mut parts = value.split('@');
     if !valid_uuid_part(parts.next().unwrap_or_default())
         || !valid_uuid_part(parts.next().unwrap_or_default())

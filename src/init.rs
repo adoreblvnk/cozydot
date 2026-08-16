@@ -34,7 +34,7 @@ pub fn init(preset: Preset) -> Result<PathBuf> {
     let preset = select_embedded_preset(preset)?;
     initialization.synchronize_active_configuration(preset)?;
     initialization.synchronize_bundled_dotfiles()?;
-    // Publish ownership last so the manifest never claims files from a partial synchronization.
+    // Publish updated ownership last; after a partial run, synchronized files are preserved on retry.
     initialization.publish_managed_file_manifest()?;
     Ok(initialization.root)
 }

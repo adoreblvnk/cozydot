@@ -54,6 +54,7 @@ pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architectu
     if actual != sha256 {
         bail!("downloaded Go archive checksum mismatch");
     }
+    // Remove the whole tree so files absent from the new release cannot survive the replacement.
     host.require("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
     host.require(
         "Go archive extraction",

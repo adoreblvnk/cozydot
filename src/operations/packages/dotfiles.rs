@@ -136,6 +136,7 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
         let backup = backup_root.join(package).join(relative);
         let parent = backup.parent().context("dotfiles backup has no parent")?;
         fs::create_dir_all(parent).context("create dotfiles backup directory")?;
+        // Rename makes each backup all-or-nothing and therefore requires HOME and XDG_STATE_HOME on one filesystem.
         fs::rename(conflict, &backup)
             .with_context(|| format!("move dotfiles conflict {} to {}", conflict.display(), backup.display()))?;
         if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err() {

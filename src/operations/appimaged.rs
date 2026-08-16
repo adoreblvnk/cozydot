@@ -8,6 +8,7 @@ const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/re
 
 pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
     if !host.run("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
+        // Legacy cleanup is best-effort so cleanup failures do not block installation.
         let _ = host.run("systemctl", ["--user", "stop", "appimaged.service"]);
         let _ = host.run("sudo", ["apt-get", "remove", "-qy", "appimagelauncher"]);
 
