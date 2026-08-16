@@ -22,8 +22,7 @@ command -v "$TAR" >/dev/null 2>&1 || { printf 'required GNU tar command is unava
 ASSET="cozydot-$VERSION-$PLATFORM-$ARCH.tar.gz"
 mkdir -p "$ROOT/target"
 STAGE="$(mktemp -d "$ROOT/target/.package.XXXXXX")"
-cleanup() { rm -rf "$STAGE"; }
-trap cleanup EXIT
+trap 'rm -rf "$STAGE"' EXIT
 
 CARGO_TARGET_DIR="$ROOT/target" cargo build --release --locked --target "$TARGET" --manifest-path "$ROOT/Cargo.toml"
 install -m 0755 "$ROOT/target/$TARGET/release/cozydot" "$STAGE/cozydot"
