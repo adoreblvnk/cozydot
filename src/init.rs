@@ -28,7 +28,7 @@ impl Preset {
     }
 }
 
-/// Synchronize bundled config and dotfiles while preserving unmanaged or modified paths.
+/// Create `cozydot.yaml` and the `dotfiles` directory without overwriting user-managed changes.
 pub fn init(preset: Preset) -> Result<PathBuf> {
     let mut initialization = Initialization::resolve_and_validate_configuration_root()?;
     let preset = select_embedded_preset(preset)?;
