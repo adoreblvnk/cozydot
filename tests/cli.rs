@@ -292,8 +292,8 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
             .env("PATH", &fake_bin);
         command
     };
-    command().arg("apply").assert().success().stdout("Applying APT update and install\n");
-    command().arg("update").assert().success().stdout("Updating APT update and install\n");
+    command().arg("apply").assert().success().stdout("Apply: APT update and package install\n");
+    command().arg("update").assert().success().stdout("Update: APT update and package install\n");
     assert!(!mutation.exists());
 }
 
@@ -318,7 +318,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
         .arg("apply")
         .assert()
         .success()
-        .stdout("Applying APT update and install\n");
+        .stdout("Apply: APT update and package install\n");
     assert!(!mutation.exists());
 }
 
@@ -380,7 +380,7 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
     assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
     assert!(!state.exists());
 
-    command().args(["dotfiles", "--replace"]).assert().success().stdout("Applying dotfiles\n");
+    command().args(["dotfiles", "--replace"]).assert().success().stdout("Apply: dotfiles apply\n");
     assert_eq!(fs::canonicalize(home.join(".bashrc")).unwrap(), fs::canonicalize(source).unwrap());
     let backups = state.join("cozydot/dotfile-backups");
     let backup = fs::read_dir(backups).unwrap().next().unwrap().unwrap().path().join("bash/.bashrc");
@@ -628,7 +628,7 @@ fn inapplicable_repos_have_no_side_effects() {
             .arg("apply")
             .assert()
             .success()
-            .stdout("Applying APT update and install\n");
+            .stdout("Apply: APT update and package install\n");
         assert!(!mutation.exists());
     }
 }

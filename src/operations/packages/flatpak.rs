@@ -6,13 +6,13 @@ const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpa
 const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
 
 pub fn add_flathub_remote(host: &Host) -> Result<()> {
-    host.require(
+    host.run_checked(
         "Flathub remote add",
         "flatpak",
         ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
     )?;
     let url_arg = format!("--url={FLATHUB_URL}");
-    host.require(
+    host.run_checked(
         "Flathub remote modify",
         "flatpak",
         [
@@ -51,11 +51,11 @@ pub fn install(host: &Host, refs: &[String]) -> Result<()> {
         "--".into(),
     ];
     args.extend(missing);
-    host.require("Flatpak application installation", "flatpak", args)?;
+    host.run_checked("Flatpak application install", "flatpak", args)?;
     Ok(())
 }
 
-pub fn update_apps(host: &Host) -> Result<()> {
-    host.require("Flatpak application update", "flatpak", ["--user", "update", "--app", "--noninteractive", "-y"])?;
+pub fn update(host: &Host) -> Result<()> {
+    host.run_checked("Flatpak application update", "flatpak", ["--user", "update", "--app", "--noninteractive", "-y"])?;
     Ok(())
 }

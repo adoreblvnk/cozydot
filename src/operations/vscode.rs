@@ -16,7 +16,7 @@ pub(crate) fn install_extensions(host: &Host, extensions: &[String]) -> Result<(
         "code"
     };
     for extension in extensions {
-        host.require("VS Code extension installation", program, ["--install-extension", extension.as_str()])?;
+        host.run_checked("VS Code extension install", program, ["--install-extension", extension.as_str()])?;
     }
     Ok(())
 }

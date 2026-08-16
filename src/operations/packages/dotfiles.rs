@@ -38,7 +38,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
             "unmanaged dotfile conflicts:\n{paths}\nno dotfiles were changed; rerun with `cozydot dotfiles --replace`"
         );
     }
-    host.require("Stow preflight", "stow", ["--version"]).context("dotfiles require GNU Stow")?;
+    host.run_checked("Stow preflight", "stow", ["--version"]).context("dotfiles require GNU Stow")?;
     if replace {
         backup_conflicts(host, &conflicts)?;
     }
@@ -51,7 +51,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
 
 fn apply_package(host: &Host, root: &Path, package: &str, source: &Path) -> Result<()> {
     prepare_gnupg_home(source, &host.home())?;
-    host.require(
+    host.run_checked(
         "stow package install",
         "stow",
         [

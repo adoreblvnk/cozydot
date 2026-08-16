@@ -35,7 +35,7 @@ pub fn init(preset: Preset) -> Result<PathBuf> {
         PRESETS.iter().find(|candidate| candidate.name == preset.name()).context("embedded preset is missing")?;
     init.sync_cozydot_yaml(preset)?;
     init.sync_bundled_dotfiles()?;
-    // publish ownership last so retries preserve files synced by partial runs
+    // write ownership last so retries preserve files synced by partial runs
     write_manifest(&init.root.join(".managed-files"), &init.managed)?;
     Ok(init.root)
 }
@@ -96,7 +96,7 @@ impl Init {
 
         for record in records {
             let relative = PathBuf::from(record.path);
-            install_file(&self.root, record, &relative)?;
+            write_file(&self.root, record, &relative)?;
             self.managed.insert(relative, hash_bytes(record.bytes));
         }
         Ok(())
@@ -137,21 +137,21 @@ impl Init {
         let dest = self.root.join(&relative);
         let new_hash = hash_bytes(record.bytes);
         let old_hash = self.managed.get(&relative);
-        let install = match fs::symlink_metadata(&dest) {
+        let write = match fs::symlink_metadata(&dest) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => true,
             Err(e) => return Err(e.into()),
             Ok(metadata) if !metadata.file_type().is_file() => false,
             Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).ok().as_ref() == Some(hash)),
         };
-        if install {
-            install_file(&self.root, &record, &relative)?;
+        if write {
+            write_file(&self.root, &record, &relative)?;
             self.managed.insert(relative, new_hash);
         }
         Ok(())
     }
 }
 
-fn install_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
+fn write_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     let parent = relative.parent().unwrap_or(Path::new(""));
     ensure_directory_path(root, parent)?;
     let dest = root.join(relative);

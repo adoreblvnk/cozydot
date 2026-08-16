@@ -28,23 +28,19 @@ impl Host {
         command.output().with_context(|| format!("{program} operation: start {}", display(program, &args)))
     }
 
-    pub fn require<I, S>(&self, operation: &str, program: &str, args: I) -> Result<Output>
+    pub fn run_checked<I, S>(&self, label: &str, program: &str, args: I) -> Result<Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
         let output = self.run(program, args)?;
         if !output.status.success() {
-            bail!(
-                "{operation}: {program} failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+            bail!("{label}: {program} failed ({}): {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
         }
         Ok(output)
     }
 
-    pub fn curl<I, S>(&self, operation: &str, url: &str, args: I) -> Result<Output>
+    pub fn curl<I, S>(&self, label: &str, url: &str, args: I) -> Result<Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -56,7 +52,7 @@ impl Host {
         curl_args.extend(args.into_iter().map(|arg| arg.as_ref().to_os_string()));
         // keep URL after `--` so a leading hyphen can't become a curl option
         curl_args.extend([OsString::from("--"), OsString::from(url)]);
-        self.require(operation, "curl", curl_args)
+        self.run_checked(label, "curl", curl_args)
     }
 
     pub fn home(&self) -> PathBuf {
@@ -81,7 +77,7 @@ pub(crate) fn executable_file(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
-pub(crate) fn real_executable_file(path: &Path) -> bool {
+pub(crate) fn regular_executable_file(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
@@ -90,8 +86,8 @@ pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
     path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
 }
 
-pub(crate) fn required_real_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
-    if !real_executable_file(path) {
+pub(crate) fn require_regular_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
+    if !regular_executable_file(path) {
         bail!("{unavailable}");
     }
     path_program(path, description)

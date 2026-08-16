@@ -17,8 +17,8 @@ pub enum DesktopSetting {
     IdleDim(bool),
 }
 
-pub(crate) fn apply_setting(host: &Host, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
-    let prefix = match target {
+pub(crate) fn set(host: &Host, environment: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
+    let prefix = match environment {
         DesktopEnvironment::Gnome => "org.gnome",
         DesktopEnvironment::Cinnamon => "org.cinnamon",
     };
@@ -53,6 +53,6 @@ pub(crate) fn apply_setting(host: &Host, target: DesktopEnvironment, setting: &D
 }
 
 fn gsettings_set(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
-    host.require("gsettings set", "gsettings", ["set", schema, key, value])?;
+    host.run_checked("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }

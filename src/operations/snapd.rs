@@ -5,11 +5,11 @@ use super::{Host, apt, privileged_file::write_atomic};
 
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
 
-pub(crate) fn set_snapd_enabled(host: &Host, enabled: bool) -> Result<()> {
+pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
-        host.require("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
-        apt::packages(host, &["snapd".into()])?;
-        host.require("Snap service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
+        host.run_checked("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
+        apt::install_packages(host, &["snapd".into()])?;
+        host.run_checked("Snap service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
         return Ok(());
     }
 
@@ -18,12 +18,12 @@ pub(crate) fn set_snapd_enabled(host: &Host, enabled: bool) -> Result<()> {
         let is_enabled = systemd_state(host, "is-enabled", unit)?;
         let is_active = systemd_state(host, "is-active", unit)?;
         if is_enabled || is_active {
-            host.require("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
+            host.run_checked("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }
     apt::purge(host, &["snapd".into()])?;
     let home_snap = host.home().join("snap");
-    host.require(
+    host.run_checked(
         "Snap data removal",
         "sudo",
         [
@@ -62,7 +62,7 @@ fn remove_snaps(host: &Host) -> Result<()> {
     // remove app snaps before base & runtime snaps
     names.sort_by_key(|name| matches!(name.as_str(), "snapd" | "bare") || name.starts_with("core"));
     for name in names {
-        host.require("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
+        host.run_checked("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
     }
     Ok(())
 }

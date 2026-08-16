@@ -4,26 +4,26 @@ use super::{Host, host::one_record};
 
 pub(crate) fn sudo_group(host: &Host) -> Result<()> {
     let username = effective_user(host)?;
-    host.require("administrative group membership", "sudo", ["usermod", "-aG", "sudo", "--", &username])?;
+    host.run_checked("administrative group membership", "sudo", ["usermod", "-aG", "sudo", "--", &username])?;
     Ok(())
 }
 
 pub(crate) fn ensure_product_group(host: &Host, label: &str, program: &str, group: &str) -> Result<()> {
     let username = effective_user(host)?;
-    let groups = host.require(&format!("{label} group membership query"), "id", ["-nG", "--", &username])?;
+    let groups = host.run_checked(&format!("{label} group membership query"), "id", ["-nG", "--", &username])?;
     if one_record(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|current| current == group) {
         return Ok(());
     }
     preflight(host, label, program)?;
-    host.require(&format!("{label} group creation"), "sudo", ["groupadd", "-f", group])?;
-    host.require(&format!("{label} group membership"), "sudo", ["usermod", "-aG", group, "--", username.as_str()])?;
+    host.run_checked(&format!("{label} group creation"), "sudo", ["groupadd", "-f", group])?;
+    host.run_checked(&format!("{label} group membership"), "sudo", ["usermod", "-aG", group, "--", username.as_str()])?;
     Ok(())
 }
 
 fn effective_user(host: &Host) -> Result<String> {
     // use effective UID from NSS instead of user-controlled env vars
     let uid = rustix::process::geteuid().as_raw();
-    let output = host.require("effective user query", "getent", ["passwd", &uid.to_string()])?;
+    let output = host.run_checked("effective user query", "getent", ["passwd", &uid.to_string()])?;
     let record = one_record(&output.stdout, "getent passwd")?;
     let mut fields = record.split(':');
     let username = fields.next().unwrap_or_default();
@@ -40,7 +40,7 @@ fn effective_user(host: &Host) -> Result<String> {
 fn preflight(host: &Host, label: &str, program: &str) -> Result<()> {
     use anyhow::Context;
 
-    host.require(&format!("{label} existing-product preflight"), program, ["--version"])
+    host.run_checked(&format!("{label} existing-product preflight"), program, ["--version"])
         .with_context(|| format!("{label} integration requires an existing usable {program} CLI"))?;
     Ok(())
 }
