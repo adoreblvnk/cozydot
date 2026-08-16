@@ -4,7 +4,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
-use super::{Host, TempPath, host::one_record, real_executable_file, shell::append_profile};
+use super::{Host, TempPath, host::one_record, regular_executable_file, shell::append_profile};
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 
@@ -33,7 +33,7 @@ struct FileMetadata {
     sha256: String,
 }
 
-pub(crate) fn install(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     append_profile(host, GO_PATH_INIT)?;
     let expected_arch = architecture.go();
     let Release { version, filename, sha256 } = resolve_release(host, selector, architecture)?;
@@ -55,8 +55,8 @@ pub(crate) fn install(host: &Host, selector: &GoToolchainSelector, architecture:
         bail!("downloaded Go archive checksum mismatch");
     }
     // remove whole tree so files missing from new release can't survive replacement
-    host.require("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
-    host.require(
+    host.run_checked("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
+    host.run_checked(
         "Go archive extraction",
         "sudo",
         ["tar", "-xzf", archive.path().to_str().context("Go archive path is not UTF-8")?, "-C", "/usr/local"],
@@ -64,12 +64,12 @@ pub(crate) fn install(host: &Host, selector: &GoToolchainSelector, architecture:
     Ok(())
 }
 
-pub(crate) fn update(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+pub(crate) fn update_toolchain(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     if matches!(selector, GoToolchainSelector::Version(_)) {
         eprintln!("warning: Go update skipped because shared.tools.go is pinned to an exact version");
         return Ok(());
     }
-    install(host, selector, architecture)
+    install_toolchain(host, selector, architecture)
 }
 
 fn select_release(input: &str, selector: &GoToolchainSelector, arch: &str, target_os: &str) -> Result<Release> {
@@ -123,7 +123,7 @@ struct Installation {
 }
 
 fn inspect_installation(host: &Host, program: &str) -> Result<Option<Installation>> {
-    if program.starts_with('/') && !real_executable_file(Path::new(program)) {
+    if program.starts_with('/') && !regular_executable_file(Path::new(program)) {
         return Ok(None);
     }
     let output = match host.run(program, ["version"]) {

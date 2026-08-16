@@ -2,8 +2,8 @@ use super::{Host, TempPath};
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, io::Write, path::Path};
 
-pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], operation: &str) -> Result<()> {
-    write_atomic_with_mode(host, destination, contents, operation, "0644")
+pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], label: &str) -> Result<()> {
+    write_atomic_with_mode(host, destination, contents, label, "0644")
 }
 
 /// Atomically publish to trusted system path; doesn't validate destination ancestors.
@@ -11,7 +11,7 @@ pub(crate) fn write_atomic_with_mode(
     host: &Host,
     destination: &Path,
     contents: &[u8],
-    operation: &str,
+    label: &str,
     mode: &str,
 ) -> Result<()> {
     if !matches!(mode, "0600" | "0644") {
@@ -34,8 +34,8 @@ pub(crate) fn write_atomic_with_mode(
     let local_arg = local.path().as_os_str();
     let staged_arg = staged.as_os_str();
     let destination_arg = destination.as_os_str();
-    host.require(
-        operation,
+    host.run_checked(
+        label,
         "sudo",
         [
             OsStr::new("install"),
@@ -52,8 +52,8 @@ pub(crate) fn write_atomic_with_mode(
     )?;
     // stage beside target for atomic rename, then sync file & parent
     let result = (|| {
-        host.require(
-            operation,
+        host.run_checked(
+            label,
             "sudo",
             [
                 OsStr::new("install"),
@@ -68,14 +68,14 @@ pub(crate) fn write_atomic_with_mode(
                 staged_arg,
             ],
         )?;
-        host.require(operation, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
-        host.require(operation, "sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg])?;
-        host.require(
-            operation,
+        host.run_checked(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
+        host.run_checked(label, "sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg])?;
+        host.run_checked(
+            label,
             "sudo",
             [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg],
         )?;
-        sync_parent_directory(host, destination, operation)?;
+        sync_parent_directory(host, destination, label)?;
         Ok(())
     })();
     if result.is_err() {
@@ -84,8 +84,8 @@ pub(crate) fn write_atomic_with_mode(
     result
 }
 
-pub(crate) fn sync_parent_directory(host: &Host, destination: &Path, operation: &str) -> Result<()> {
+pub(crate) fn sync_parent_directory(host: &Host, destination: &Path, label: &str) -> Result<()> {
     let parent = destination.parent().context("atomic-write destination has no parent")?;
-    host.require(operation, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()])?;
+    host.run_checked(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent.as_os_str()])?;
     Ok(())
 }

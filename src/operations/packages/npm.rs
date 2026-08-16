@@ -20,11 +20,11 @@ pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
     }
     let mut npm_args = vec!["install".to_owned(), "--global".into(), "--".into()];
     npm_args.extend(missing);
-    run_npm_checked(host, &fnm, "npm package installation", npm_args)?;
+    run_npm_checked(host, &fnm, "npm package install", npm_args)?;
     Ok(())
 }
 
-pub(crate) fn update_all(host: &Host) -> Result<()> {
+pub(crate) fn update(host: &Host) -> Result<()> {
     let Some(fnm) = resolve_fnm(host)? else { return Ok(()) };
     run_npm_checked(host, &fnm, "npm package update", ["update", "--global"])?;
     Ok(())
@@ -51,12 +51,12 @@ fn resolve_fnm(host: &Host) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn run_npm_checked<I, S>(host: &Host, fnm: &str, operation: &str, npm_args: I) -> Result<std::process::Output>
+fn run_npm_checked<I, S>(host: &Host, fnm: &str, label: &str, npm_args: I) -> Result<std::process::Output>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
     let mut args = vec!["exec".to_owned(), "--using=default".into(), "--".into(), "npm".into()];
     args.extend(npm_args.into_iter().map(|arg| arg.as_ref().to_owned()));
-    host.require(operation, fnm, args)
+    host.run_checked(label, fnm, args)
 }

@@ -26,7 +26,7 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
             ["--output", destination.to_str().context("appimaged path is not UTF-8")?],
         )?;
         fs::set_permissions(&destination, fs::Permissions::from_mode(0o755)).context("make appimaged executable")?;
-        host.require(
+        host.run_checked(
             "launch appimaged",
             destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?,
             std::iter::empty::<&str>(),
@@ -81,8 +81,8 @@ fn ensure_fuse(host: &Host) -> Result<()> {
     let package =
         if host.run("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
     if !host.run("dpkg", ["--status", package])?.status.success() {
-        host.require("refresh APT for AppImages", "sudo", ["apt-get", "update", "-qq"])?;
-        host.require("install AppImage FUSE support", "sudo", ["apt-get", "install", "-qq", package])?;
+        host.run_checked("APT update for AppImages", "sudo", ["apt-get", "update", "-qq"])?;
+        host.run_checked("AppImage FUSE support install", "sudo", ["apt-get", "install", "-qq", package])?;
     }
     Ok(())
 }

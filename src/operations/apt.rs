@@ -7,20 +7,20 @@ use crate::config::AptUpgradeCommand;
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 
 pub fn update(host: &Host) -> Result<()> {
-    host.require("APT update", "sudo", ["apt-get", "update", "-qq"])?;
+    host.run_checked("APT update", "sudo", ["apt-get", "update", "-qq"])?;
     Ok(())
 }
 
-pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
+pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
     let contents = if enabled {
         b"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n".as_slice()
     } else {
         b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n".as_slice()
     };
     if enabled {
-        packages(host, &["unattended-upgrades".into()])?;
+        install_packages(host, &["unattended-upgrades".into()])?;
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        host.require(
+        host.run_checked(
             "unattended-upgrades service enablement",
             "sudo",
             ["systemctl", "enable", "--now", "unattended-upgrades.service"],
@@ -30,7 +30,7 @@ pub(crate) fn unattended_upgrades(host: &Host, enabled: bool) -> Result<()> {
         let is_enabled = systemd_state(host, "is-enabled", "unattended-upgrades.service")?;
         let is_active = systemd_state(host, "is-active", "unattended-upgrades.service")?;
         if is_enabled || is_active {
-            host.require(
+            host.run_checked(
                 "unattended-upgrades service disablement",
                 "sudo",
                 ["systemctl", "disable", "--now", "unattended-upgrades.service"],
@@ -45,7 +45,7 @@ fn systemd_state(host: &Host, query: &str, unit: &str) -> Result<bool> {
     Ok(host.run("systemctl", [query, unit])?.status.success())
 }
 
-pub fn update_and_install(host: &Host, packages: &[String]) -> Result<()> {
+pub fn update_and_install_packages(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         anyhow::bail!("APT update-and-install package sequence must not be empty");
     }
@@ -53,11 +53,11 @@ pub fn update_and_install(host: &Host, packages: &[String]) -> Result<()> {
     if missing.is_empty() {
         return Ok(());
     }
-    host.require("APT update before install", "sudo", ["apt-get", "update", "-qq"])?;
+    host.run_checked("APT update before install", "sudo", ["apt-get", "update", "-qq"])?;
     install(host, "APT package install", missing)
 }
 
-pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
+pub fn install_packages(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
@@ -65,18 +65,18 @@ pub fn packages(host: &Host, packages: &[String]) -> Result<()> {
     if missing.is_empty() {
         return Ok(());
     }
-    install(host, "APT package installation", missing)
+    install(host, "APT package install", missing)
 }
 
-pub fn purge_then_install(host: &Host, purge_packages: &[String], install_packages: &[String]) -> Result<()> {
+pub fn purge_then_install_packages(host: &Host, purge_packages: &[String], install_packages: &[String]) -> Result<()> {
     purge(host, purge_packages)?;
-    self::packages(host, install_packages)
+    self::install_packages(host, install_packages)
 }
 
 fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
     let mut missing = Vec::new();
     for package in packages {
-        if !package_is_installed(host, package)? {
+        if !is_package_installed(host, package)? {
             missing.push(package.clone());
         }
     }
@@ -86,14 +86,14 @@ fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
 fn installed_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
     let mut installed = Vec::new();
     for package in packages {
-        if package_is_installed(host, package)? {
+        if is_package_installed(host, package)? {
             installed.push(package.clone());
         }
     }
     Ok(installed)
 }
 
-fn package_is_installed(host: &Host, package: &str) -> Result<bool> {
+fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
     let output = host.run("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
     if !output.status.success() {
         if output.status.code() == Some(1) {
@@ -117,16 +117,11 @@ fn package_is_installed(host: &Host, package: &str) -> Result<bool> {
     }
 }
 
-fn install(host: &Host, operation: &str, packages: Vec<String>) -> Result<()> {
-    change_packages(host, operation, "install", packages.into_iter().map(|package| format!("{package}+")))
+fn install(host: &Host, label: &str, packages: Vec<String>) -> Result<()> {
+    change_packages(host, label, "install", packages.into_iter().map(|package| format!("{package}+")))
 }
 
-fn change_packages(
-    host: &Host,
-    operation: &str,
-    command: &str,
-    packages: impl IntoIterator<Item = String>,
-) -> Result<()> {
+fn change_packages(host: &Host, label: &str, command: &str, packages: impl IntoIterator<Item = String>) -> Result<()> {
     let mut args = vec![
         "DEBIAN_FRONTEND=noninteractive".to_owned(),
         "apt-get".to_owned(),
@@ -136,7 +131,7 @@ fn change_packages(
         "--".into(),
     ];
     args.extend(packages);
-    host.require(operation, "sudo", args)?;
+    host.run_checked(label, "sudo", args)?;
     Ok(())
 }
 
@@ -152,13 +147,13 @@ pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
 }
 
 pub fn upgrade(host: &Host, command: AptUpgradeCommand) -> Result<()> {
-    let (operation, apt_command) = match command {
+    let (label, apt_command) = match command {
         AptUpgradeCommand::Upgrade => ("APT upgrade", "upgrade"),
         AptUpgradeCommand::FullUpgrade => ("APT full-upgrade", "full-upgrade"),
     };
-    host.require(operation, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq", "--"])?;
+    host.run_checked(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq", "--"])?;
     if command == AptUpgradeCommand::FullUpgrade {
-        host.require(
+        host.run_checked(
             "APT purge autoremove",
             "sudo",
             ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq", "--"],

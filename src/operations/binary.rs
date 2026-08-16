@@ -12,7 +12,7 @@ const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
-    GithubLatest { repo: String, selector: String },
+    GithubLatest { repo: String, asset_pattern: String },
     Url { url: String },
 }
 
@@ -42,7 +42,7 @@ pub(crate) mod cargo_binstall {
             .to_str()
             .with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo_bin.display()))?;
 
-        host.require("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
+        host.run_checked("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
         Ok(())
     }
 
@@ -60,7 +60,7 @@ pub(crate) mod cargo_binstall {
                 .with_context(|| format!("cargo-binstall executable path is not UTF-8: {}", binstall.display()))?
                 .to_owned()
         };
-        host.require("cargo-update install", &program, ["--no-confirm", "--", "cargo-update"])?;
+        host.run_checked("cargo-update install", &program, ["--no-confirm", "--", "cargo-update"])?;
         Ok(())
     }
 }
@@ -72,7 +72,7 @@ impl BinaryPackageOperation {
 }
 
 pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<()> {
-    if installed(host, package) {
+    if is_installed(host, package) {
         return Ok(());
     }
     let url = resolve(host, package)?;
@@ -83,7 +83,7 @@ pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<(
     }
 }
 
-fn installed(host: &Host, package: &BinaryPackageOperation) -> bool {
+fn is_installed(host: &Host, package: &BinaryPackageOperation) -> bool {
     match package.format {
         BinaryFormat::Deb => host.executable_on_path(&package.name),
         BinaryFormat::Appimage => appimage_path(host, package).exists(),
@@ -97,7 +97,7 @@ fn appimage_path(host: &Host, package: &BinaryPackageOperation) -> PathBuf {
 fn resolve(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
     match &package.source {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
-        BinarySourceOperation::GithubLatest { repo, selector } => {
+        BinarySourceOperation::GithubLatest { repo, asset_pattern } => {
             let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
             let output = host.curl(
                 "resolve binary package release",
@@ -113,18 +113,18 @@ fn resolve(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
                     USER_AGENT,
                 ],
             )?;
-            select_asset(&output.stdout, selector, package)
+            select_asset(&output.stdout, asset_pattern, package)
         }
     }
 }
 
-fn select_asset(input: &[u8], selector: &str, package: &BinaryPackageOperation) -> Result<String> {
+fn select_asset(input: &[u8], asset_pattern: &str, package: &BinaryPackageOperation) -> Result<String> {
     let release: GithubRelease = serde_json::from_slice(input).context("parse GitHub release JSON")?;
-    let pattern = Regex::new(selector).context("compile binary asset regex")?;
+    let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
     if matches.len() != 1 {
         bail!(
-            "binary package {:?} ({}) selector matched {} assets",
+            "binary package {:?} ({}) asset pattern matched {} assets",
             package.name,
             package.architecture.canonical(),
             matches.len()
@@ -148,7 +148,7 @@ fn download(host: &Host, package: &BinaryPackageOperation, url: &str) -> Result<
 }
 
 fn install_deb(host: &Host, temp: TempPath) -> Result<()> {
-    host.require(
+    host.run_checked(
         "binary Debian install",
         "sudo",
         [

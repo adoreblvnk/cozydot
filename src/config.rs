@@ -604,7 +604,7 @@ pub enum BinarySource {
 impl BinarySource {
     fn validate(&self, path: &str) -> Result<()> {
         match self {
-            Self::Github { assets, .. } => assets.validate(&format!("{path}.assets"), "selector"),
+            Self::Github { assets, .. } => assets.validate(&format!("{path}.assets"), "asset pattern"),
             Self::Url { urls } => urls.validate(&format!("{path}.urls"), "URL"),
         }
     }

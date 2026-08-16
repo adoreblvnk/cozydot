@@ -26,7 +26,7 @@ pub(crate) fn set_local_logging_driver(host: &Host, max_size: Option<&str>) -> R
 }
 
 fn preflight(host: &Host) -> Result<()> {
-    host.require("Docker existing-product preflight", "docker", ["--version"])
+    host.run_checked("Docker existing-product preflight", "docker", ["--version"])
         .with_context(|| "Docker integration requires an existing usable docker CLI")?;
     Ok(())
 }
@@ -34,8 +34,12 @@ fn preflight(host: &Host) -> Result<()> {
 fn read_daemon_config(host: &Host) -> Result<Value> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
-        host.require("Docker daemon config absence check", "sudo", ["test", "!", "-e", DOCKER_DAEMON_CONFIG])?;
-        host.require("Docker daemon config symlink absence check", "sudo", ["test", "!", "-L", DOCKER_DAEMON_CONFIG])?;
+        host.run_checked("Docker daemon config absence check", "sudo", ["test", "!", "-e", DOCKER_DAEMON_CONFIG])?;
+        host.run_checked(
+            "Docker daemon config symlink absence check",
+            "sudo",
+            ["test", "!", "-L", DOCKER_DAEMON_CONFIG],
+        )?;
         return Ok(Value::Object(Map::new()));
     }
     let mode = one_record(&kind.stdout, "sudo stat")?;
@@ -43,7 +47,7 @@ fn read_daemon_config(host: &Host) -> Result<Value> {
     if mode & 0o170000 != 0o100000 {
         bail!("Docker daemon config destination is not a regular file");
     }
-    let output = host.require("Docker daemon config inspection", "sudo", ["cat", "--", DOCKER_DAEMON_CONFIG])?;
+    let output = host.run_checked("Docker daemon config inspection", "sudo", ["cat", "--", DOCKER_DAEMON_CONFIG])?;
     let text = std::str::from_utf8(&output.stdout).context("Docker daemon config is not valid UTF-8")?;
     let value: Value = serde_json::from_str(text).context("Docker daemon config is invalid JSON")?;
     if !value.is_object() {

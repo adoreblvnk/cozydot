@@ -14,7 +14,7 @@ pub enum MacDefault {
 }
 
 pub fn validate_sudo_access(host: &Host) -> Result<()> {
-    host.require("macOS sudo access", "sudo", ["-v"])?;
+    host.run_checked("macOS sudo access", "sudo", ["-v"])?;
     Ok(())
 }
 
@@ -33,7 +33,7 @@ pub fn install_homebrew(host: &Host) -> Result<()> {
             script.path().to_str().ok_or_else(|| anyhow::anyhow!("Homebrew installer path is not UTF-8"))?,
         ],
     )?;
-    host.require(
+    host.run_checked(
         "Homebrew install",
         "/bin/bash",
         [script.path().to_str().ok_or_else(|| anyhow::anyhow!("Homebrew installer path is not UTF-8"))?],
@@ -45,12 +45,12 @@ pub fn install_packages(host: &Host, formulae: &[String], casks: &[String]) -> R
     let brew = find_brew(host)?;
     for formula in formulae {
         if !is_installed(host, &brew, "--formula", formula)? {
-            host.require("Homebrew formula install", &brew, ["install", formula])?;
+            host.run_checked("Homebrew formula install", &brew, ["install", formula])?;
         }
     }
     for cask in casks {
         if !is_installed(host, &brew, "--cask", cask)? {
-            host.require("Homebrew cask install", &brew, ["install", "--cask", cask])?;
+            host.run_checked("Homebrew cask install", &brew, ["install", "--cask", cask])?;
         }
     }
     Ok(())
@@ -64,14 +64,14 @@ pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
     install_homebrew(host)?;
     let brew = find_brew(host)?;
     if !is_installed(host, &brew, "--formula", formula)? {
-        host.require("Homebrew formula install", &brew, ["install", formula])?;
+        host.run_checked("Homebrew formula install", &brew, ["install", formula])?;
     }
     Ok(())
 }
 
 pub(crate) fn formula_executable(host: &Host, formula: &str, executable: &str) -> Result<String> {
     let brew = find_brew(host)?;
-    let output = host.require("Homebrew formula prefix", &brew, ["--prefix", formula])?;
+    let output = host.run_checked("Homebrew formula prefix", &brew, ["--prefix", formula])?;
     let prefix = std::str::from_utf8(&output.stdout)?.trim();
     let program = std::path::Path::new(prefix).join("bin").join(executable);
     program.to_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("Homebrew executable path is not UTF-8"))
@@ -93,18 +93,18 @@ pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {
         return Ok(());
     }
     // launch Apple's interactive installer; success only means it started
-    host.require("Xcode command line tools", "xcode-select", ["--install"])?;
+    host.run_checked("Xcode command line tools", "xcode-select", ["--install"])?;
     Ok(())
 }
 
-pub fn update(host: &Host, formulae: bool, casks: bool) -> Result<()> {
+pub fn update_and_upgrade(host: &Host, formulae: bool, casks: bool) -> Result<()> {
     let brew = find_brew(host)?;
-    host.require("Homebrew update", &brew, ["update"])?;
+    host.run_checked("Homebrew update", &brew, ["update"])?;
     if formulae {
-        host.require("Homebrew formula updates", &brew, ["upgrade"])?;
+        host.run_checked("Homebrew formula upgrade", &brew, ["upgrade"])?;
     }
     if casks {
-        host.require("Homebrew cask updates", &brew, ["upgrade", "--cask"])?;
+        host.run_checked("Homebrew cask upgrade", &brew, ["upgrade", "--cask"])?;
     }
     Ok(())
 }
@@ -114,7 +114,7 @@ pub fn write_defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
         match setting {
             MacDefault::DarkMode(dark) => {
                 if *dark {
-                    host.require(
+                    host.run_checked(
                         "macOS appearance",
                         "defaults",
                         ["write", "-g", "AppleInterfaceStyle", "-string", "Dark"],
@@ -138,17 +138,21 @@ pub fn write_defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
         }
     }
     // ignore restart errors when Dock or Finder isn't running
-    host.require("Dock restart", "killall", ["Dock"]).ok();
-    host.require("Finder restart", "killall", ["Finder"]).ok();
+    host.run_checked("Dock restart", "killall", ["Dock"]).ok();
+    host.run_checked("Finder restart", "killall", ["Finder"]).ok();
     Ok(())
 }
 
 fn write_bool(host: &Host, domain: &str, key: &str, value: bool) -> Result<()> {
-    host.require("macOS defaults", "defaults", ["write", domain, key, "-bool", if value { "true" } else { "false" }])?;
+    host.run_checked(
+        "macOS defaults",
+        "defaults",
+        ["write", domain, key, "-bool", if value { "true" } else { "false" }],
+    )?;
     Ok(())
 }
 
 fn write_int(host: &Host, domain: &str, key: &str, value: i32) -> Result<()> {
-    host.require("macOS defaults", "defaults", ["write", domain, key, "-int", &value.to_string()])?;
+    host.run_checked("macOS defaults", "defaults", ["write", domain, key, "-int", &value.to_string()])?;
     Ok(())
 }

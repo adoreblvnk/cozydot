@@ -76,7 +76,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
 
     let binary_keyring = TempPath::new_with_suffix(host, "repo-key-binary", ".gpg")?;
 
-    host.require(
+    host.run_checked(
         "repo key conversion",
         "gpg",
         [
@@ -91,7 +91,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
     )?;
 
     // parsing proves download contains a public key; configured URL remains identity trust boundary
-    let inspection = host.require(
+    let inspection = host.run_checked(
         "repo key validation",
         "gpg",
         [
@@ -132,18 +132,18 @@ pub(crate) mod debian_components {
     const MODERN_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
-    pub(crate) fn add(host: &Host, release: &str) -> Result<()> {
-        if !matches!(release, "bookworm" | "trixie") {
-            bail!("unsupported Debian release {release:?}; supported releases are bookworm and trixie");
+    pub(crate) fn add(host: &Host, codename: &str) -> Result<()> {
+        if !matches!(codename, "bookworm" | "trixie") {
+            bail!("unsupported Debian codename {codename:?}; supported codenames are bookworm and trixie");
         }
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
-            host.require("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
+            host.run_checked("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
         }
 
         reject_symlink(host, MODERN_SOURCE)?;
         let modern = probe_regular(host, MODERN_SOURCE)?;
         if !modern {
-            host.require("Debian APT modern source absence check", "sudo", ["test", "!", "-e", MODERN_SOURCE])?;
+            host.run_checked("Debian APT modern source absence check", "sudo", ["test", "!", "-e", MODERN_SOURCE])?;
         }
         let source = if modern { MODERN_SOURCE } else { LEGACY_SOURCE };
         if !modern {
@@ -190,7 +190,11 @@ pub(crate) mod debian_components {
 
     fn read(host: &Host, path: &str) -> Result<Vec<u8>> {
         Ok(host
-            .require("Debian APT source inspection", "sudo", [OsStr::new("cat"), OsStr::new("--"), OsStr::new(path)])?
+            .run_checked(
+                "Debian APT source inspection",
+                "sudo",
+                [OsStr::new("cat"), OsStr::new("--"), OsStr::new(path)],
+            )?
             .stdout)
     }
 

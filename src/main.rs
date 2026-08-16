@@ -18,7 +18,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Safely create or refresh config & bundled dotfiles.
+    /// Safely initialize or synchronize config & bundled dotfiles.
     Init {
         /// Choose config preset.
         #[arg(long, value_enum, default_value = "cozydot")]
