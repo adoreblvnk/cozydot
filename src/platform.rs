@@ -2,14 +2,14 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use etc_os_release::OsRelease;
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Platform {
-    pub distro: String,
-    pub upstream: String,
+    pub identity: PlatformIdentity,
     pub distro_codename: String,
     pub base_codename: String,
-    pub desktop: String,
+    pub desktop: DesktopKind,
     pub architecture: Architecture,
 }
 
@@ -18,67 +18,144 @@ impl Platform {
         if cfg!(target_os = "macos") {
             let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
             let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-            return Self::from_release_parts(
-                "macos".into(),
-                "macos".into(),
-                String::new(),
-                String::new(),
-                "none".into(),
-                &arch,
-            );
+            let architecture = match arch.as_str() {
+                "aarch64" | "arm64" => Architecture::DarwinArm64,
+                _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
+            };
+            return Ok(Self {
+                identity: PlatformIdentity::MacOs,
+                distro_codename: String::new(),
+                base_codename: String::new(),
+                desktop: DesktopKind::None,
+                architecture,
+            });
         }
         let os = OsRelease::open().context("read os-release")?;
         let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
         let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-        let desktop = normalize_desktop(std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().as_str());
-        Self::from_os_release(&os, desktop, &arch)
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        Self::from_os_release(&os, &desktop, &arch)
     }
 
-    pub fn is_macos(&self) -> bool {
-        self.distro == "macos"
-    }
-
-    pub fn from_release_parts(
-        distro: String,
-        upstream: String,
-        distro_codename: String,
-        base_codename: String,
-        desktop: String,
-        arch: &str,
-    ) -> Result<Self> {
-        let architecture = if distro == "macos" {
-            match arch {
-                "aarch64" | "arm64" => Architecture::DarwinArm64,
-                _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
-            }
-        } else {
-            Architecture::normalize(arch)?
-        };
-        if distro == "debian" && !matches!(distro_codename.as_str(), "bookworm" | "trixie") {
-            bail!("unsupported Debian release {distro_codename:?}; supported releases are bookworm and trixie");
-        }
-        Ok(Self {
-            distro,
-            upstream,
-            distro_codename,
-            base_codename,
-            desktop: normalize_desktop(&desktop),
-            architecture,
-        })
-    }
-
-    fn from_os_release(os: &OsRelease, desktop: String, arch: &str) -> Result<Self> {
-        let distro = os.id().to_owned();
-        let upstream: String = upstream(&distro, os.get_value("ID_LIKE"))?.into();
+    fn from_os_release(os: &OsRelease, desktop: &str, arch: &str) -> Result<Self> {
+        let distro = Distro::from_os_release(os.id())?;
+        let upstream = distro.family(os.get_value("ID_LIKE"))?;
         let distro_codename = os.version_codename().unwrap_or_default().to_owned();
-        let base_codename = match upstream.as_str() {
-            "ubuntu" => os.get_value("UBUNTU_CODENAME"),
-            "debian" => os.get_value("DEBIAN_CODENAME"),
-            _ => unreachable!(),
+        let base_codename = match upstream {
+            Family::Ubuntu => os.get_value("UBUNTU_CODENAME"),
+            Family::Debian => os.get_value("DEBIAN_CODENAME"),
         }
         .unwrap_or(&distro_codename)
         .to_owned();
-        Self::from_release_parts(distro, upstream, distro_codename, base_codename, desktop, arch)
+        if distro == Distro::Debian && !matches!(distro_codename.as_str(), "bookworm" | "trixie") {
+            bail!("unsupported Debian release {distro_codename:?}; supported releases are bookworm and trixie");
+        }
+        if distro_codename.chars().any(char::is_control) || base_codename.chars().any(char::is_control) {
+            bail!("detected distribution codenames must fit on one line and contain no control characters");
+        }
+        Ok(Self {
+            identity: PlatformIdentity::Linux { distro, upstream },
+            distro_codename,
+            base_codename,
+            desktop: DesktopKind::from_environment(desktop),
+            architecture: Architecture::normalize(arch)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Distro {
+    Ubuntu,
+    Linuxmint,
+    Pop,
+    Debian,
+}
+
+impl Distro {
+    fn from_os_release(value: &str) -> Result<Self> {
+        match value {
+            "ubuntu" => Ok(Self::Ubuntu),
+            "linuxmint" => Ok(Self::Linuxmint),
+            "pop" => Ok(Self::Pop),
+            "debian" => Ok(Self::Debian),
+            _ => bail!("unsupported distro: {value}"),
+        }
+    }
+
+    fn family(self, id_like: Option<&str>) -> Result<Family> {
+        match self {
+            Self::Ubuntu | Self::Pop => Ok(Family::Ubuntu),
+            Self::Debian => Ok(Family::Debian),
+            Self::Linuxmint => {
+                let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
+                let ubuntu = families.clone().any(|family| family == "ubuntu");
+                let debian = families.any(|family| family == "debian");
+                match (ubuntu, debian) {
+                    (true, _) => Ok(Family::Ubuntu),
+                    (false, true) => Ok(Family::Debian),
+                    _ => bail!(
+                        "unsupported linuxmint base family in ID_LIKE {:?}; expected ubuntu or debian",
+                        id_like.unwrap_or_default()
+                    ),
+                }
+            }
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ubuntu => "ubuntu",
+            Self::Linuxmint => "linuxmint",
+            Self::Pop => "pop",
+            Self::Debian => "debian",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    Ubuntu,
+    Debian,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlatformIdentity {
+    MacOs,
+    Linux { distro: Distro, upstream: Family },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopKind {
+    None,
+    Gnome,
+    Cinnamon,
+}
+
+impl DesktopKind {
+    fn from_environment(value: &str) -> Self {
+        value
+            .split(':')
+            .find_map(|token| {
+                let token = token.to_ascii_lowercase();
+                if token.contains("gnome") {
+                    Some(Self::Gnome)
+                } else if token.contains("cinnamon") {
+                    Some(Self::Cinnamon)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Self::None)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Gnome => "gnome",
+            Self::Cinnamon => "cinnamon",
+        }
     }
 }
 
@@ -146,43 +223,4 @@ fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
         bail!("uname -m returned an empty machine architecture");
     }
     Ok(machine.into())
-}
-
-fn upstream(id: &str, id_like: Option<&str>) -> Result<&'static str> {
-    match id {
-        "ubuntu" | "pop" => Ok("ubuntu"),
-        "debian" => Ok("debian"),
-        "linuxmint" => {
-            let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
-            // prefer Ubuntu when Mint lists both families; LMDE uses Debian
-            let ubuntu = families.clone().any(|family| family == "ubuntu");
-            let debian = families.any(|family| family == "debian");
-            match (ubuntu, debian) {
-                (true, _) => Ok("ubuntu"),
-                (false, true) => Ok("debian"),
-                _ => bail!(
-                    "unsupported linuxmint base family in ID_LIKE {:?}; expected ubuntu or debian",
-                    id_like.unwrap_or_default()
-                ),
-            }
-        }
-        _ => bail!("unsupported distro: {id}"),
-    }
-}
-
-fn normalize_desktop(value: &str) -> String {
-    value
-        .split(':')
-        .find_map(|token| {
-            let token = token.to_ascii_lowercase();
-            if token.contains("gnome") {
-                Some("gnome")
-            } else if token.contains("cinnamon") {
-                Some("cinnamon")
-            } else {
-                None
-            }
-        })
-        .unwrap_or("none")
-        .into()
 }

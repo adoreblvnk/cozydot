@@ -33,14 +33,14 @@ pub(crate) use host::{
 pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version};
 
 use crate::{config::AptUpgradeCommand, platform::Architecture};
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::path::PathBuf;
 
 /// Typed host operation handled by central executor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     SudoGroupEnsure,
-    DebianAptComponentsAdd { codename: String },
+    DebianAptComponentsAdd,
     AptUpdate,
     UnattendedUpgradesSet { enabled: bool },
     SnapdSet { enabled: bool },
@@ -104,7 +104,7 @@ impl Operation {
     pub fn label(&self) -> &'static str {
         match self {
             Self::SudoGroupEnsure => "sudo group membership",
-            Self::DebianAptComponentsAdd { .. } => "Debian APT component add",
+            Self::DebianAptComponentsAdd => "Debian APT component add",
             Self::AptUpdate => "APT update",
             Self::UnattendedUpgradesSet { .. } => "unattended upgrades set",
             Self::SnapdSet { .. } => "snapd set",
@@ -163,23 +163,9 @@ pub(crate) fn run(operation: &Operation) -> Result<OperationOutcome> {
 }
 
 fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
-    if matches!(
-        operation,
-        Operation::HomebrewInstall
-            | Operation::HomebrewPackagesInstall { .. }
-            | Operation::MacosSudoAccessValidate
-            | Operation::CommandLineToolsForXcodeInstall
-            | Operation::UserNerdFontsInstall { .. }
-            | Operation::UserNerdFontsUpdate { .. }
-            | Operation::MacDefaultsWrite { .. }
-            | Operation::HomebrewUpdateAndUpgrade { .. }
-    ) && !cfg!(target_os = "macos")
-    {
-        bail!("macOS operation cannot run on this host")
-    }
     match operation {
         Operation::SudoGroupEnsure => completed(users::sudo_group(&host)),
-        Operation::DebianAptComponentsAdd { codename } => completed(repo::debian_components::add(&host, codename)),
+        Operation::DebianAptComponentsAdd => completed(repo::debian_components::add(&host)),
         Operation::AptUpdate => completed(apt::update(&host)),
         Operation::UnattendedUpgradesSet { enabled } => completed(apt::set_unattended_upgrades(&host, *enabled)),
         Operation::SnapdSet { enabled } => completed(snapd::set_enabled(&host, *enabled)),

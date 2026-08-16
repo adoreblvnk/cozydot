@@ -1,6 +1,6 @@
 //! Define & validate Cozydot config.
 
-use crate::platform::{Architecture, Platform};
+use crate::platform::{Architecture, DesktopKind, Distro, Family, Platform, PlatformIdentity};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, de};
@@ -59,18 +59,10 @@ impl Config {
         })
     }
 
-    /// Recheck full config against `platform`.
+    /// Validate config intent that depends on the detected `platform`.
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
-        self.validate()?;
-        if platform.is_macos() {
-            if platform.architecture != Architecture::DarwinArm64 {
-                bail!("unsupported macOS architecture; only Apple Silicon (arm64) is supported");
-            }
-            return Ok(());
-        }
-        let identity = resolve_platform_identity(platform)?;
-        let distro = identity.distro;
-        let desktop = DesktopKind::from_platform(&platform.desktop)?;
+        let PlatformIdentity::Linux { distro, .. } = platform.identity else { return Ok(()) };
+        let desktop = platform.desktop;
 
         if let Some(allowed_platforms) = self.linux.system.allowed_platforms.as_ref() {
             if allowed_platforms
@@ -80,7 +72,7 @@ impl Config {
             {
                 bail!(
                     "linux.system.allowed_platforms.distros: detected distribution {:?} is not allowed",
-                    platform.distro
+                    distro.as_str()
                 );
             }
             if allowed_platforms
@@ -90,7 +82,7 @@ impl Config {
             {
                 bail!(
                     "linux.system.allowed_platforms.desktops: detected desktop {:?} is not allowed",
-                    platform.desktop
+                    desktop.as_str()
                 );
             }
         }
@@ -101,13 +93,13 @@ impl Config {
             if configured.has_neutral_intent() {
                 bail!(
                     "linux.desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
-                    platform.desktop
+                    desktop.as_str()
                 );
             }
             if configured.gnome.as_ref().is_some_and(Gnome::has_intent) {
                 bail!(
                     "linux.desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
-                    platform.desktop
+                    desktop.as_str()
                 );
             }
         }
@@ -272,80 +264,6 @@ pub struct MacUpdates {
 pub struct MacHomebrewUpdates {
     pub formulae: Option<bool>,
     pub casks: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Distro {
-    Ubuntu,
-    Linuxmint,
-    Pop,
-    Debian,
-}
-
-impl Distro {
-    fn parse_platform(value: &str) -> Result<Self> {
-        match value {
-            "ubuntu" => Ok(Self::Ubuntu),
-            "linuxmint" => Ok(Self::Linuxmint),
-            "pop" => Ok(Self::Pop),
-            "debian" => Ok(Self::Debian),
-            _ => bail!("linux.system.allowed_platforms.distros: unsupported detected distribution {value:?}"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Family {
-    Ubuntu,
-    Debian,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PlatformIdentity {
-    pub distro: Distro,
-    pub upstream: Family,
-}
-
-pub fn resolve_platform_identity(platform: &Platform) -> Result<PlatformIdentity> {
-    let distro = Distro::parse_platform(&platform.distro)?;
-    let upstream = match platform.upstream.as_str() {
-        "ubuntu" => Family::Ubuntu,
-        "debian" => Family::Debian,
-        value => bail!("linux.system.allowed_platforms.distros: unsupported platform upstream family {value:?}"),
-    };
-    let valid = match distro {
-        Distro::Ubuntu | Distro::Pop => upstream == Family::Ubuntu,
-        Distro::Debian => upstream == Family::Debian,
-        Distro::Linuxmint => true,
-    };
-    if !valid {
-        bail!(
-            "linux.system.allowed_platforms.distros: detected distribution {:?} is inconsistent with upstream family {:?}",
-            platform.distro,
-            platform.upstream
-        );
-    }
-    Ok(PlatformIdentity { distro, upstream })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DesktopKind {
-    None,
-    Gnome,
-    Cinnamon,
-}
-
-impl DesktopKind {
-    fn from_platform(value: &str) -> Result<Self> {
-        match value {
-            "none" => Ok(Self::None),
-            "gnome" => Ok(Self::Gnome),
-            "cinnamon" => Ok(Self::Cinnamon),
-            _ => bail!("linux.system.allowed_platforms.desktops: unsupported detected desktop {value:?}"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
@@ -523,11 +441,6 @@ impl Repo {
         }
         Ok(())
     }
-
-    pub fn applies_to(&self, distro: Distro, upstream: Family, architecture: Architecture) -> bool {
-        select_distro_map(&self.urls, distro, upstream).is_some()
-            && self.arch.as_ref().is_none_or(|values| values.iter().any(|value| value.matches(architecture)))
-    }
 }
 
 pub(crate) fn validate_repo_key_path(path: &Path) -> Result<()> {
@@ -550,17 +463,6 @@ pub enum AptArchitecture {
     Amd64,
     Arm64,
     Armhf,
-}
-
-impl AptArchitecture {
-    fn matches(self, architecture: Architecture) -> bool {
-        matches!(
-            (self, architecture),
-            (Self::Amd64, Architecture::Amd64)
-                | (Self::Arm64, Architecture::Arm64)
-                | (Self::Armhf, Architecture::Arm32)
-        )
-    }
 }
 
 pub fn selected_repo_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
@@ -665,7 +567,7 @@ pub struct Dotfiles {
 
 impl Dotfiles {
     fn validate(&self, path: &str) -> Result<()> {
-        validate_string_values(&self.packages, &format!("{path}.packages"), validate_dotfile_package)
+        validate_string_values(&self.packages, &format!("{path}.packages"), validate_definition_name)
     }
 }
 
@@ -830,13 +732,6 @@ fn validate_definition_name(value: &str, path: &str) -> Result<()> {
         );
     }
     Ok(())
-}
-
-fn validate_dotfile_package(value: &str, path: &str) -> Result<()> {
-    if matches!(value, "." | "..") {
-        bail!("{path}: must denote exactly one child directory, not {value:?}");
-    }
-    validate_definition_name(value, path)
 }
 
 fn validate_executable(value: &str, path: &str) -> Result<()> {

@@ -1,7 +1,7 @@
 use super::{Host, TempPath};
-use crate::{config::validate_repo_key_path, platform::Architecture};
+use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
-use std::{fs, path::PathBuf};
+use std::{ffi::OsStr, fs, path::PathBuf};
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
@@ -26,19 +26,10 @@ impl AptRepo {
         suite: String,
         components: Vec<String>,
         key_path: PathBuf,
-    ) -> Result<Self> {
+    ) -> Self {
         let name = name.into();
-        validate_repo_key_path(&key_path)?;
-        for value in std::iter::once(source_url.as_str())
-            .chain(std::iter::once(suite.as_str()))
-            .chain(components.iter().map(String::as_str))
-        {
-            if value.chars().any(char::is_control) {
-                bail!("APT repo source values must fit on one line and contain no control characters");
-            }
-        }
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Ok(Self { key_url, source_url, architecture, suite, components, key_path, source_list_path })
+        Self { key_url, source_url, architecture, suite, components, key_path, source_list_path }
     }
 
     pub fn render_source(&self) -> String {
@@ -53,8 +44,7 @@ impl AptRepo {
 }
 
 pub(crate) fn add(host: &Host, repo: &AptRepo) -> Result<()> {
-    let key_path = repo.key_path.to_str().context("key path is not UTF-8")?;
-    let preserve_armor = key_path.ends_with(".asc");
+    let preserve_armor = repo.key_path.extension() == Some(OsStr::new("asc"));
 
     let key = processed_key(host, &repo.key_url, preserve_armor)?;
     let source = repo.render_source().into_bytes();
@@ -132,10 +122,7 @@ pub(crate) mod debian_components {
     const MODERN_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
-    pub(crate) fn add(host: &Host, codename: &str) -> Result<()> {
-        if !matches!(codename, "bookworm" | "trixie") {
-            bail!("unsupported Debian codename {codename:?}; supported codenames are bookworm and trixie");
-        }
+    pub(crate) fn add(host: &Host) -> Result<()> {
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
             host.run_checked("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
         }
