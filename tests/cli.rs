@@ -65,10 +65,19 @@ fn os_release_value(key: &str) -> String {
         .to_owned()
 }
 
+fn cozydot() -> Command {
+    Command::cargo_bin("cozydot").unwrap()
+}
+
+fn write_linux_host_fakes(fake_bin: &Path) {
+    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
+    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+}
+
 #[test]
 fn cli_contracts() {
     for args in [Vec::<&str>::new(), vec!["--help"]] {
-        Command::cargo_bin("cozydot").unwrap().args(args).assert().success().stdout(
+        cozydot().args(args).assert().success().stdout(
             predicate::str::contains("init")
                 .and(predicate::str::contains("apply"))
                 .and(predicate::str::contains("check"))
@@ -76,25 +85,18 @@ fn cli_contracts() {
                 .and(predicate::str::contains("update")),
         );
     }
-    Command::cargo_bin("cozydot")
-        .unwrap()
-        .arg("--version")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+    cozydot().arg("--version").assert().success().stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 
     let temp = tempfile::tempdir().unwrap();
     for command in ["apply", "check", "dotfiles", "update"] {
-        Command::cargo_bin("cozydot")
-            .unwrap()
+        cozydot()
             .env("XDG_CONFIG_HOME", temp.path())
             .arg(command)
             .assert()
             .failure()
             .stderr(predicate::str::contains("active configuration is missing or invalid"));
     }
-    Command::cargo_bin("cozydot")
-        .unwrap()
+    cozydot()
         .env("XDG_CONFIG_HOME", temp.path())
         .args(["init", "--preset", "unknown"])
         .assert()
@@ -162,12 +164,7 @@ esac
 fn init_materializes_presets_and_preserves_user_edits() {
     for preset in ["cozydot", "cli", "vm"] {
         let temp = tempfile::tempdir().unwrap();
-        Command::cargo_bin("cozydot")
-            .unwrap()
-            .env("XDG_CONFIG_HOME", temp.path())
-            .args(["init", "--preset", preset])
-            .assert()
-            .success();
+        cozydot().env("XDG_CONFIG_HOME", temp.path()).args(["init", "--preset", preset]).assert().success();
         let root = temp.path().join("cozydot");
         assert_eq!(fs::read(root.join("cozydot.yaml")).unwrap(), fs::read(format!("configs/{preset}.yaml")).unwrap());
         assert!(root.join(".managed-files").is_file());
@@ -175,10 +172,10 @@ fn init_materializes_presets_and_preserves_user_edits() {
     }
 
     let temp = tempfile::tempdir().unwrap();
-    Command::cargo_bin("cozydot").unwrap().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
+    cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
     let active = temp.path().join("cozydot/cozydot.yaml");
     fs::write(&active, "user edit\n").unwrap();
-    Command::cargo_bin("cozydot").unwrap().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
+    cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("init").assert().success();
     assert_eq!(fs::read_to_string(active).unwrap(), "user edit\n");
 }
 
@@ -196,8 +193,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
         write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
     }
 
-    Command::cargo_bin("cozydot")
-        .unwrap()
+    cozydot()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
         .env("COZYDOT_TEST_PROBE", &probe)
         .env("COZYDOT_TEST_MUTATION", &mutation)
@@ -229,8 +225,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
         ),
     ] {
         write_config(&root, "{}", &linux);
-        Command::cargo_bin("cozydot")
-            .unwrap()
+        cozydot()
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .arg("check")
             .assert()
@@ -247,14 +242,13 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
     write_config(&root, "{}", "{}");
-    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
-    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+    write_linux_host_fakes(&fake_bin);
     for command in ["sudo", "curl", "gpg", "stow", "flatpak", "rustup"] {
         write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
     }
 
     let command = || {
-        let mut command = Command::cargo_bin("cozydot").unwrap();
+        let mut command = cozydot();
         command
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
@@ -278,12 +272,10 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
     write_config(&root, "{}", "system:\n  sudo_group: true\n");
-    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
-    write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+    write_linux_host_fakes(&fake_bin);
     write_executable(&fake_bin.join("sudo"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
 
-    Command::cargo_bin("cozydot")
-        .unwrap()
+    cozydot()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
         .env("COZYDOT_TEST_MUTATION", &mutation)
         .env("PATH", &fake_bin)
@@ -326,7 +318,7 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
     );
 
     let command = || {
-        let mut command = Command::cargo_bin("cozydot").unwrap();
+        let mut command = cozydot();
         command
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
@@ -473,7 +465,7 @@ fn run_apt(
     extra_env: Option<(&str, &str)>,
 ) -> std::process::Output {
     fs::write(log, "").unwrap();
-    let mut command = Command::cargo_bin("cozydot").unwrap();
+    let mut command = cozydot();
     command
         .env("XDG_CONFIG_HOME", config_home)
         .env("XDG_CURRENT_DESKTOP", "gnome")
@@ -588,13 +580,11 @@ fn inapplicable_repos_have_no_side_effects() {
                 "packages:\n  apt:\n    repos:\n      - name: skipped\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        urls:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
             ),
         );
-        write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
-        write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+        write_linux_host_fakes(&fake_bin);
         for command in ["curl", "gpg", "sudo"] {
             write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
         }
-        Command::cargo_bin("cozydot")
-            .unwrap()
+        cozydot()
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
             .env("COZYDOT_TEST_MUTATION", &mutation)
@@ -626,12 +616,10 @@ fn update_runs_only_the_selected_apt_upgrade_command() {
         let fake_bin = temp.path().join("bin");
         let log = temp.path().join("update.log");
         write_config(&root, "{}", &format!("updates:\n  apt: {policy}\n"));
-        write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
-        write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
+        write_linux_host_fakes(&fake_bin);
         write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
 
-        Command::cargo_bin("cozydot")
-            .unwrap()
+        cozydot()
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
             .env("COZYDOT_TEST_LOG", &log)

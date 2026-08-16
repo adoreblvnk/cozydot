@@ -21,12 +21,12 @@ mod virtualbox;
 mod vscode;
 
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
-pub use desktop::{ColorScheme, DesktopEnvironment, DesktopSetting};
+pub use desktop::{DesktopEnvironment, DesktopSetting};
 pub use go::GoToolchainSelector;
 pub use packages::fonts::NerdFontsMode;
 pub use repo::AptRepo;
 
-pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file};
+pub(crate) use host::{Host, TempPath, executable_file, path_program, real_executable_file, required_real_executable};
 pub(super) use parsers::{gnome_shell_version, select_gnome_extension_version};
 
 use crate::{config::AptUpgradeCommand, platform::Architecture};
@@ -81,7 +81,6 @@ pub enum Operation {
     InstallHomebrewPackages { formulae: Vec<String>, casks: Vec<String> },
     ValidateMacosSudoAccess,
     InstallCommandLineToolsForXcode,
-    InstallRosetta,
     UserNerdFonts { families: Vec<String>, mode: packages::fonts::NerdFontsMode },
     MacDefaults { settings: Vec<macos::MacDefault> },
     HomebrewUpdate { formulae: bool, casks: bool },
@@ -142,7 +141,6 @@ impl Operation {
             Self::InstallHomebrewPackages { .. } => "Homebrew package install",
             Self::ValidateMacosSudoAccess => "macOS sudo access",
             Self::InstallCommandLineToolsForXcode => "Command Line Tools for Xcode install",
-            Self::InstallRosetta => "Rosetta install",
             Self::UserNerdFonts { .. } => "user Nerd Fonts",
             Self::MacDefaults { .. } => "macOS defaults",
             Self::HomebrewUpdate { .. } => "Homebrew updates",
@@ -161,7 +159,6 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
             | Operation::InstallHomebrewPackages { .. }
             | Operation::ValidateMacosSudoAccess
             | Operation::InstallCommandLineToolsForXcode
-            | Operation::InstallRosetta
             | Operation::UserNerdFonts { .. }
             | Operation::MacDefaults { .. }
             | Operation::HomebrewUpdate { .. }
@@ -188,7 +185,7 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
             completed(go::update_go(&host, selector, *architecture))
         }
         Operation::NodeToolchain { selector } => completed(fnm::install_default_node_toolchain(&host, selector)),
-        Operation::NodeToolchainUpdate { selector } => completed(fnm::update_node(&host, selector)),
+        Operation::NodeToolchainUpdate { selector } => completed(fnm::install_default_node_toolchain(&host, selector)),
         Operation::PythonToolchain { version } => completed(uv::install_default_python(&host, version)),
         Operation::PythonToolchainUpdate => completed(uv::update_python(&host)),
         Operation::InstallCargoBinstall => completed(binary::cargo_binstall::install(&host)),
@@ -226,7 +223,6 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         }
         Operation::ValidateMacosSudoAccess => completed(macos::validate_sudo_access(&host)),
         Operation::InstallCommandLineToolsForXcode => completed(macos::install_command_line_tools_for_xcode(&host)),
-        Operation::InstallRosetta => completed(macos::install_rosetta(&host)),
         Operation::UserNerdFonts { families, mode } => completed(packages::fonts::apply_user(&host, families, *mode)),
         Operation::MacDefaults { settings } => completed(macos::write_defaults(&host, settings)),
         Operation::HomebrewUpdate { formulae, casks } => completed(macos::update(&host, *formulae, *casks)),

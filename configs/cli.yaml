@@ -119,7 +119,6 @@ macos:
     validate_sudo_access: true
     xcode:
       command_line_tools: true
-    rosetta: false
   homebrew:
     formulae:
       - cmake

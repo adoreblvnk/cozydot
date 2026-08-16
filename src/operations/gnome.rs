@@ -4,6 +4,8 @@ use super::{Host, OperationOutcome, TempPath};
 
 const DASH_TO_DOCK_UUID: &str = "dash-to-dock@micxgx.gmail.com";
 const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
+const ROUNDED_CORNERS_SETTINGS: &str =
+    "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings";
 
 pub(crate) fn gnome_extensions(host: &Host, extensions: &[String]) -> Result<OperationOutcome> {
     let mut outcome = OperationOutcome::Completed;
@@ -31,7 +33,8 @@ pub(crate) fn install_dash_to_dock(host: &Host) -> Result<OperationOutcome> {
         ("click-action", "'minimize-or-previews'"),
     ];
     for (key, value) in settings {
-        write_dconf(host, &format!("/org/gnome/shell/extensions/dash-to-dock/{key}"), value)?;
+        let path = format!("/org/gnome/shell/extensions/dash-to-dock/{key}");
+        host.require("dconf write", "dconf", ["write", &path, value])?;
     }
     Ok(OperationOutcome::Completed)
 }
@@ -41,11 +44,7 @@ pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<OperationOut
         return Ok(OperationOutcome::LoginRequired);
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
-    write_dconf(
-        host,
-        "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings",
-        value,
-    )?;
+    host.require("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
     Ok(OperationOutcome::Completed)
 }
 
@@ -57,11 +56,6 @@ fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Operation
     }
     host.require("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
     Ok(OperationOutcome::Completed)
-}
-
-fn write_dconf(host: &Host, key: &str, value: &str) -> Result<()> {
-    host.require("dconf write", "dconf", ["write", key, value])?;
-    Ok(())
 }
 
 fn install_extension(host: &Host, extension: &str) -> Result<()> {

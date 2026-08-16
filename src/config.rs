@@ -37,14 +37,10 @@ pub struct Config {
 }
 
 impl Config {
-    fn deserialize(path: &Path) -> Result<Self> {
-        let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        Self::deserialize_str(&text)
-    }
-
     pub fn load(path: &Path) -> Result<Self> {
         let load = || -> Result<Self> {
-            let config = Self::deserialize(path)?;
+            let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+            let config = Self::deserialize_str(&text)?;
             config.validate()?;
             Ok(config)
         };
@@ -65,9 +61,6 @@ impl Config {
         if platform.is_macos() {
             if platform.architecture != Architecture::DarwinArm64 {
                 bail!("unsupported macOS architecture; only Apple Silicon (arm64) is supported");
-            }
-            if self.macos.system.rosetta == Some(true) && platform.architecture != Architecture::DarwinArm64 {
-                bail!("macos.system.rosetta: Rosetta requires Apple Silicon macOS");
             }
             return Ok(());
         }
@@ -212,7 +205,6 @@ pub struct MacOsConfig {
 pub struct MacSystem {
     pub validate_sudo_access: Option<bool>,
     pub xcode: MacXcode,
-    pub rosetta: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -499,7 +491,9 @@ impl Repo {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("linux.packages.apt.repos[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        validate_non_empty_map(&self.urls, &format!("{path}.urls"))?;
+        if self.urls.is_empty() {
+            bail!("{path}.urls: must be a non-empty mapping");
+        }
         if self.key.chars().any(char::is_control) {
             bail!("{path}.key: must contain no control characters");
         }
@@ -654,7 +648,8 @@ pub struct Fonts {
 
 impl Fonts {
     fn validate(&self) -> Result<()> {
-        validate_string_list(self.nerd.as_deref(), "shared.fonts.nerd", validate_definition_name)
+        let Some(families) = self.nerd.as_deref() else { return Ok(()) };
+        validate_string_values(families, "shared.fonts.nerd", validate_definition_name)
     }
 }
 
@@ -813,20 +808,6 @@ pub struct ToolUpdates {
 pub struct PackageUpdates {
     pub cargo: Option<bool>,
     pub npm: Option<bool>,
-}
-
-fn validate_non_empty_map<K, V>(map: &BTreeMap<K, V>, path: &str) -> Result<()> {
-    if map.is_empty() {
-        bail!("{path}: must be a non-empty mapping");
-    }
-    Ok(())
-}
-
-fn validate_string_list(values: Option<&[String]>, path: &str, validator: fn(&str, &str) -> Result<()>) -> Result<()> {
-    let Some(values) = values else {
-        return Ok(());
-    };
-    validate_string_values(values, path, validator)
 }
 
 fn validate_string_values(values: &[String], path: &str, validator: fn(&str, &str) -> Result<()>) -> Result<()> {

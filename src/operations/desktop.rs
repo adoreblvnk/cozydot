@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 
 use super::Host;
+use crate::config::Theme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopEnvironment {
@@ -8,15 +9,9 @@ pub enum DesktopEnvironment {
     Cinnamon,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColorScheme {
-    Light,
-    Dark,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DesktopSetting {
-    ColorScheme(ColorScheme),
+    ColorScheme(Theme),
     Terminal(String),
     IdleDelaySeconds(u32),
     IdleDim(bool),
@@ -33,8 +28,8 @@ pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: 
             &format!("{prefix}.desktop.interface"),
             "color-scheme",
             match color_scheme {
-                ColorScheme::Light => "'prefer-light'",
-                ColorScheme::Dark => "'prefer-dark'",
+                Theme::Light => "'prefer-light'",
+                Theme::Dark => "'prefer-dark'",
             },
         ),
         DesktopSetting::Terminal(executable) => {

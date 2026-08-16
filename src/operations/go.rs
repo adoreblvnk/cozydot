@@ -4,7 +4,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
-use super::{Host, TempPath, real_executable_file, shell::append_profile};
+use super::{Host, TempPath, host::one_record, real_executable_file, shell::append_profile};
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 
@@ -34,7 +34,7 @@ struct GoFileMetadata {
 }
 
 pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
-    add_go_to_path(host)?;
+    append_profile(host, GO_PATH_INIT)?;
     let expected_arch = architecture.go();
     let GoRelease { version, filename, sha256 } = resolve_go_release(host, selector, architecture)?;
     if inspect_go_installation(host, "/usr/local/go/bin/go")?
@@ -103,10 +103,6 @@ fn stable_go_version(value: &str) -> bool {
         && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
 
-pub fn add_go_to_path(host: &Host) -> Result<()> {
-    append_profile(host, GO_PATH_INIT)
-}
-
 fn resolve_go_release(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<GoRelease> {
     let metadata =
         host.curl("Go release resolution", "https://go.dev/dl/?mode=json&include=all", ["--proto", "=https"])?;
@@ -147,7 +143,7 @@ fn inspect_go_installation(host: &Host, program: &str) -> Result<Option<GoInstal
 }
 
 fn parse_go_version_output(output: &[u8]) -> Result<GoInstallation> {
-    let output = single_line(output, "go version")?;
+    let output = one_record(output, "go version")?;
     let fields = output.split_whitespace().collect::<Vec<_>>();
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
     if fields.len() != 4
@@ -176,13 +172,4 @@ fn numeric_version(value: &str, min_parts: usize, max_parts: usize) -> bool {
                 && part.bytes().all(|byte| byte.is_ascii_digit())
                 && (*part == "0" || !part.starts_with('0'))
         })
-}
-
-fn single_line<'a>(output: &'a [u8], command: &str) -> Result<&'a str> {
-    let output = std::str::from_utf8(output).with_context(|| format!("{command} returned non-UTF-8 state"))?;
-    let output = output.strip_suffix('\n').unwrap_or(output);
-    if output.is_empty() || output.contains(['\n', '\r']) {
-        bail!("{command} returned malformed multiline state");
-    }
-    Ok(output)
 }

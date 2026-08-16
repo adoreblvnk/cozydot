@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 
-use super::{Host, TempPath, path_program, real_executable_file, shell::append_profile};
+use super::{Host, TempPath, real_executable_file, required_real_executable, shell::append_profile};
 
 const UV_INIT: &str = r#"if [ -f "$HOME/.local/bin/env" ]; then
   . "$HOME/.local/bin/env"
@@ -28,7 +28,11 @@ pub fn install_uv(host: &Host) -> Result<()> {
 }
 
 pub(crate) fn install_default_python(host: &Host, version: &str) -> Result<()> {
-    let uv = managed_executable(host, "Python toolchain operation: uv is unavailable after install")?;
+    let uv = required_real_executable(
+        &host.home().join(".local/bin/uv"),
+        "managed tool executable path",
+        "Python toolchain operation: uv is unavailable after install",
+    )?;
     host.require(
         "uv python install",
         &uv,
@@ -38,7 +42,11 @@ pub(crate) fn install_default_python(host: &Host, version: &str) -> Result<()> {
 }
 
 pub(crate) fn update_python(host: &Host) -> Result<()> {
-    let uv = managed_executable(host, "Python toolchain update: uv is unavailable after install")?;
+    let uv = required_real_executable(
+        &host.home().join(".local/bin/uv"),
+        "managed tool executable path",
+        "Python toolchain update: uv is unavailable after install",
+    )?;
     host.require("uv self update", &uv, ["self", "update"])?;
     host.require(
         "Python toolchain update",
@@ -46,12 +54,4 @@ pub(crate) fn update_python(host: &Host) -> Result<()> {
         ["python", "upgrade", "--no-config", "--managed-python", "--no-progress"],
     )?;
     Ok(())
-}
-
-fn managed_executable(host: &Host, message: &str) -> Result<String> {
-    let path = host.home().join(".local/bin/uv");
-    if real_executable_file(&path) {
-        return path_program(&path, "managed tool executable path");
-    }
-    bail!("{message}")
 }

@@ -48,10 +48,6 @@ pub(crate) fn install_default_node_toolchain(host: &Host, selector: &str) -> Res
     Ok(())
 }
 
-pub(crate) fn update_node(host: &Host, selector: &str) -> Result<()> {
-    install_default_node_toolchain(host, selector)
-}
-
 fn fnm_install(host: &Host, fnm: &str, selector: &str) -> Result<()> {
     if selector == "lts" {
         host.require("fnm install", fnm, ["install", "--progress", "never", "--lts"])?;

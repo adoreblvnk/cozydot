@@ -96,11 +96,6 @@ pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {
     Ok(())
 }
 
-pub fn install_rosetta(host: &Host) -> Result<()> {
-    host.require("Rosetta install", "softwareupdate", ["--install-rosetta", "--agree-to-license"])?;
-    Ok(())
-}
-
 pub fn update(host: &Host, formulae: bool, casks: bool) -> Result<()> {
     let brew = brew_program(host)?;
     host.require("Homebrew update", &brew, ["update"])?;
