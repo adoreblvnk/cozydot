@@ -13,11 +13,11 @@ mod workflow;
 #[command(name = "cozydot", version, about = "Provision Linux and macOS from one active configuration")]
 struct Cli {
     #[command(subcommand)]
-    command: Option<CliCommand>,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
-enum CliCommand {
+enum Command {
     /// Safely create or refresh config & bundled dotfiles.
     Init {
         /// Choose config preset.
@@ -45,17 +45,12 @@ fn main() -> Result<()> {
         return Ok(());
     };
     match command {
-        CliCommand::Init { preset } => init(preset)?,
-        CliCommand::Apply => apply()?,
-        CliCommand::Check => check()?,
-        CliCommand::Dotfiles { replace } => dotfiles(replace)?,
-        CliCommand::Update => update()?,
+        Command::Init { preset } => println!("Initialized cozydot in {}", init::init(preset)?.display()),
+        Command::Apply => apply()?,
+        Command::Check => check()?,
+        Command::Dotfiles { replace } => dotfiles(replace)?,
+        Command::Update => update()?,
     }
-    Ok(())
-}
-
-fn init(preset: init::Preset) -> Result<()> {
-    println!("Initialized cozydot in {}", init::init(preset)?.display());
     Ok(())
 }
 

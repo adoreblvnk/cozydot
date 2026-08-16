@@ -15,29 +15,29 @@ pub enum GoToolchainSelector {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct GoRelease {
+struct Release {
     version: String,
     filename: String,
     sha256: String,
 }
 
 #[derive(Deserialize)]
-struct GoReleaseMetadata {
+struct ReleaseMetadata {
     version: String,
-    files: Vec<GoFileMetadata>,
+    files: Vec<FileMetadata>,
 }
 
 #[derive(Deserialize)]
-struct GoFileMetadata {
+struct FileMetadata {
     filename: String,
     sha256: String,
 }
 
-pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+pub(crate) fn install(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     append_profile(host, GO_PATH_INIT)?;
     let expected_arch = architecture.go();
-    let GoRelease { version, filename, sha256 } = resolve_go_release(host, selector, architecture)?;
-    if inspect_go_installation(host, "/usr/local/go/bin/go")?
+    let Release { version, filename, sha256 } = resolve_release(host, selector, architecture)?;
+    if inspect_installation(host, "/usr/local/go/bin/go")?
         .is_some_and(|installation| installation.version == version && installation.architecture == expected_arch)
     {
         return Ok(());
@@ -64,20 +64,20 @@ pub(crate) fn install_go(host: &Host, selector: &GoToolchainSelector, architectu
     Ok(())
 }
 
-pub(crate) fn update_go(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+pub(crate) fn update(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     if matches!(selector, GoToolchainSelector::Version(_)) {
         eprintln!("warning: Go update skipped because shared.tools.go is pinned to an exact version");
         return Ok(());
     }
-    install_go(host, selector, architecture)
+    install(host, selector, architecture)
 }
 
-fn select_go_release(input: &str, selector: &GoToolchainSelector, arch: &str, target_os: &str) -> Result<GoRelease> {
-    let releases: Vec<GoReleaseMetadata> = serde_json::from_str(input).context("parse Go release JSON")?;
+fn select_release(input: &str, selector: &GoToolchainSelector, arch: &str, target_os: &str) -> Result<Release> {
+    let releases: Vec<ReleaseMetadata> = serde_json::from_str(input).context("parse Go release JSON")?;
     let version = releases
         .iter()
         .map(|release| release.version.as_str())
-        .filter(|v| stable_go_version(v))
+        .filter(|v| stable_version(v))
         .map(|v| v.trim_start_matches("go"))
         .find(|version| match selector {
             GoToolchainSelector::Latest => true,
@@ -92,10 +92,10 @@ fn select_go_release(input: &str, selector: &GoToolchainSelector, arch: &str, ta
         .find(|release| release.version == format!("go{version}"))
         .and_then(|release| release.files.iter().find(|file| file.filename == filename))
         .context("Go metadata has no matching architecture archive")?;
-    Ok(GoRelease { version: version.to_owned(), filename, sha256: file.sha256.clone() })
+    Ok(Release { version: version.to_owned(), filename, sha256: file.sha256.clone() })
 }
 
-fn stable_go_version(value: &str) -> bool {
+fn stable_version(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("go") else {
         return false;
     };
@@ -104,11 +104,11 @@ fn stable_go_version(value: &str) -> bool {
         && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
 
-fn resolve_go_release(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<GoRelease> {
+fn resolve_release(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<Release> {
     let metadata =
         host.curl("Go release resolution", "https://go.dev/dl/?mode=json&include=all", ["--proto", "=https"])?;
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
-    select_go_release(
+    select_release(
         std::str::from_utf8(&metadata.stdout).context("Go release metadata is not UTF-8")?,
         selector,
         architecture.go_archive(),
@@ -117,12 +117,12 @@ fn resolve_go_release(host: &Host, selector: &GoToolchainSelector, architecture:
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct GoInstallation {
+struct Installation {
     version: String,
     architecture: String,
 }
 
-fn inspect_go_installation(host: &Host, program: &str) -> Result<Option<GoInstallation>> {
+fn inspect_installation(host: &Host, program: &str) -> Result<Option<Installation>> {
     if program.starts_with('/') && !real_executable_file(Path::new(program)) {
         return Ok(None);
     }
@@ -140,10 +140,10 @@ fn inspect_go_installation(host: &Host, program: &str) -> Result<Option<GoInstal
     if !output.status.success() {
         return Ok(None);
     }
-    parse_go_version_output(&output.stdout).map(Some)
+    parse_version_output(&output.stdout).map(Some)
 }
 
-fn parse_go_version_output(output: &[u8]) -> Result<GoInstallation> {
+fn parse_version_output(output: &[u8]) -> Result<Installation> {
     let output = one_record(output, "go version")?;
     let fields = output.split_whitespace().collect::<Vec<_>>();
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
@@ -159,7 +159,7 @@ fn parse_go_version_output(output: &[u8]) -> Result<GoInstallation> {
         .strip_prefix("go")
         .filter(|version| numeric_version(version, 2, 3))
         .context("go returned malformed version state")?;
-    Ok(GoInstallation {
+    Ok(Installation {
         version: version.to_owned(),
         architecture: fields[3].trim_start_matches(&format!("{target_os}/")).to_owned(),
     })

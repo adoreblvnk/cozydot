@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 
 use super::Host;
 
-pub(crate) fn install_vscode_extensions(host: &Host, extensions: &[String]) -> Result<()> {
+pub(crate) fn install_extensions(host: &Host, extensions: &[String]) -> Result<()> {
     let program = if cfg!(target_os = "macos") {
         [
             "code",

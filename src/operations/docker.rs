@@ -2,17 +2,13 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-use super::{Host, host::one_record, privileged_file::write_atomic, users};
+use super::{Host, host::one_record, privileged_file::write_atomic};
 
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 
-pub(crate) fn docker_group(host: &Host) -> Result<()> {
-    users::ensure_product_group(host, "Docker", "docker", "docker")
-}
-
-pub(crate) fn set_docker_local_logging_driver(host: &Host, max_size: Option<&str>) -> Result<()> {
+pub(crate) fn set_local_logging_driver(host: &Host, max_size: Option<&str>) -> Result<()> {
     preflight(host)?;
-    let mut requested = read_docker_daemon_config(host)?;
+    let mut requested = read_daemon_config(host)?;
     let object = requested.as_object_mut().context("Docker daemon config must be a JSON object")?;
     object.insert("log-driver".into(), Value::String("local".into()));
     if let Some(max_size) = max_size {
@@ -35,7 +31,7 @@ fn preflight(host: &Host) -> Result<()> {
     Ok(())
 }
 
-fn read_docker_daemon_config(host: &Host) -> Result<Value> {
+fn read_daemon_config(host: &Host) -> Result<Value> {
     let kind = host.run("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
     if !kind.status.success() {
         host.require("Docker daemon config absence check", "sudo", ["test", "!", "-e", DOCKER_DAEMON_CONFIG])?;

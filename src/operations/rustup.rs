@@ -35,7 +35,7 @@ pub fn install_rustup(host: &Host) -> Result<()> {
     append_profile(host, CARGO_INIT)
 }
 
-pub(crate) fn install_default_rust_toolchain(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn install_default_toolchain(host: &Host, selector: &str) -> Result<()> {
     let rustup = required_real_executable(
         &host.home().join(".cargo/bin/rustup"),
         "managed tool executable path",

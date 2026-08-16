@@ -17,7 +17,7 @@ pub enum DesktopSetting {
     IdleDim(bool),
 }
 
-pub(crate) fn desktop_setting(host: &Host, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
+pub(crate) fn apply_setting(host: &Host, target: DesktopEnvironment, setting: &DesktopSetting) -> Result<()> {
     let prefix = match target {
         DesktopEnvironment::Gnome => "org.gnome",
         DesktopEnvironment::Cinnamon => "org.cinnamon",

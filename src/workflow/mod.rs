@@ -17,8 +17,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const LINUX_BASE_PREREQUISITES: [&str; 7] =
-    ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
+const APT_PREREQS: [&str; 7] = ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
 
 #[derive(Default)]
 struct ManagerInstallPlan {
@@ -31,7 +30,7 @@ struct ManagerInstallPlan {
 }
 
 struct LinuxApplyPlan {
-    apt_prerequisites: BTreeSet<&'static str>,
+    apt_prereqs: BTreeSet<&'static str>,
     manager_installs: ManagerInstallPlan,
     update_apt: bool,
     repos: Vec<AptRepo>,
@@ -89,9 +88,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     run(
         "Applying",
-        Operation::AptUpdateAndInstall {
-            packages: plan.apt_prerequisites.iter().map(|value| (*value).to_owned()).collect(),
-        },
+        Operation::AptUpdateAndInstall { packages: plan.apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
     if let Some(packages) =
         config.linux.packages.apt.as_ref().and_then(|apt| apt.install.as_ref()).filter(|packages| !packages.is_empty())
@@ -133,7 +130,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             run("Applying", Operation::BinaryPackage(binary))?;
         }
     }
-    if let Some(families) = configured_fonts(config) {
+    if let Some(families) = nerd_fonts(config) {
         run("Applying", Operation::NerdFonts { families, mode: NerdFontsMode::Install })?;
     }
     if let Some(operation) = dotfiles_operation(config, &config.linux.dotfiles.packages, dotfiles_root, false)? {
@@ -146,7 +143,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 
 fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPlan> {
     let identity = resolve_platform_identity(platform)?;
-    let mut apt_prerequisites = BTreeSet::from(LINUX_BASE_PREREQUISITES);
+    let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     let mut manager_installs = manager_install_plan(config);
     let apt = config.linux.packages.apt.as_ref();
     let mut update_apt = apt.and_then(|apt| apt.install.as_ref()).is_some_and(|values| !values.is_empty())
@@ -158,12 +155,12 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
     for repo in applicable_repos(config, platform, identity) {
-        repos.push(repo_operation(repo, platform, identity)?);
+        repos.push(add_repo(repo, platform, identity)?);
         repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
         repo_packages_to_install.extend(repo.packages.iter().cloned());
     }
     if config.linux.packages.flatpak.as_ref().is_some_and(|values| !values.is_empty()) {
-        apt_prerequisites.insert("flatpak");
+        apt_prereqs.insert("flatpak");
         manager_installs.flatpak = true;
     }
     let mut deb_binaries = Vec::new();
@@ -179,9 +176,9 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
             }
         }
     }
-    derive_desktop_prerequisites(config, platform, &mut apt_prerequisites);
+    add_desktop_prereqs(config, platform, &mut apt_prereqs);
     Ok(LinuxApplyPlan {
-        apt_prerequisites,
+        apt_prereqs,
         manager_installs,
         update_apt,
         repos,
@@ -192,7 +189,7 @@ fn plan_linux_apply(config: &Config, platform: &Platform) -> Result<LinuxApplyPl
     })
 }
 
-fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path) -> Result<()> {
+fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
     let managers = manager_install_plan(config);
     let dotfiles = !config.shared.dotfiles.packages.is_empty() || !config.macos.dotfiles.packages.is_empty();
     let homebrew_packages =
@@ -212,9 +209,9 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
         }
         run("Applying", Operation::InstallHomebrewPackages { formulae, casks: config.macos.homebrew.casks.clone() })?;
     }
-    apply_tools(config, architecture, &managers)?;
+    apply_tools(config, arch, &managers)?;
     apply_packages(config)?;
-    if let Some(families) = configured_fonts(config) {
+    if let Some(families) = nerd_fonts(config) {
         run("Applying", Operation::UserNerdFonts { families, mode: NerdFontsMode::Install })?;
     }
     if let Some(operation) = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false)? {
@@ -225,7 +222,7 @@ fn macos_apply(config: &Config, architecture: Architecture, dotfiles_root: &Path
     Ok(())
 }
 
-fn apply_tools(config: &Config, architecture: Architecture, managers: &ManagerInstallPlan) -> Result<()> {
+fn apply_tools(config: &Config, arch: Architecture, managers: &ManagerInstallPlan) -> Result<()> {
     if managers.rustup {
         run("Applying", Operation::InstallRustup)?;
     }
@@ -251,7 +248,7 @@ fn apply_tools(config: &Config, architecture: Architecture, managers: &ManagerIn
         run("Applying", Operation::PythonToolchain { version: version.clone() })?;
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
-        run("Applying", Operation::GoToolchain { selector: go_selector(selector), architecture })?;
+        run("Applying", Operation::GoToolchain { selector: go_selector(selector), architecture: arch })?;
     }
     Ok(())
 }
@@ -281,9 +278,9 @@ fn manager_install_plan(config: &Config) -> ManagerInstallPlan {
 }
 
 fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
-    let mut prerequisites = BTreeSet::from(LINUX_BASE_PREREQUISITES);
+    let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
-        prerequisites.insert("flatpak");
+        apt_prereqs.insert("flatpak");
     }
 
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
@@ -292,21 +289,21 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
     }
     run(
         "Updating",
-        Operation::AptUpdateAndInstall { packages: prerequisites.iter().map(|value| (*value).to_owned()).collect() },
+        Operation::AptUpdateAndInstall { packages: apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
         run("Updating", Operation::FlatpakUpdateApps)?;
     }
     update_tools_and_packages(config, platform.architecture, false)?;
     if config.shared.updates.fonts == Some(true)
-        && let Some(families) = configured_fonts(config)
+        && let Some(families) = nerd_fonts(config)
     {
         run("Updating", Operation::NerdFonts { families, mode: NerdFontsMode::Update })?;
     }
     Ok(())
 }
 
-fn macos_update(config: &Config, architecture: Architecture) -> Result<()> {
+fn macos_update(config: &Config, arch: Architecture) -> Result<()> {
     let homebrew_formulae = config.macos.updates.homebrew.formulae == Some(true);
     let homebrew_casks = config.macos.updates.homebrew.casks == Some(true);
 
@@ -314,16 +311,16 @@ fn macos_update(config: &Config, architecture: Architecture) -> Result<()> {
     if homebrew_formulae || homebrew_casks {
         run("Updating", Operation::HomebrewUpdate { formulae: homebrew_formulae, casks: homebrew_casks })?;
     }
-    update_tools_and_packages(config, architecture, true)?;
+    update_tools_and_packages(config, arch, true)?;
     if config.shared.updates.fonts == Some(true)
-        && let Some(families) = configured_fonts(config)
+        && let Some(families) = nerd_fonts(config)
     {
         run("Updating", Operation::UserNerdFonts { families, mode: NerdFontsMode::Update })?;
     }
     Ok(())
 }
 
-fn update_tools_and_packages(config: &Config, architecture: Architecture, macos: bool) -> Result<()> {
+fn update_tools_and_packages(config: &Config, arch: Architecture, macos: bool) -> Result<()> {
     let updates = &config.shared.updates;
     if updates.tools.rust == Some(true) {
         run("Updating", Operation::InstallRustup)?;
@@ -334,7 +331,7 @@ fn update_tools_and_packages(config: &Config, architecture: Architecture, macos:
             "Updating",
             Operation::GoToolchainUpdate {
                 selector: go_selector(config.shared.tools.go.as_deref().unwrap_or("latest")),
-                architecture,
+                architecture: arch,
             },
         )?;
     }
@@ -379,7 +376,7 @@ fn applicable_repos<'a>(
         .filter(move |repo| repo.applies_to(identity.distro, identity.upstream, platform.architecture))
 }
 
-fn repo_operation(repo: &Repo, platform: &Platform, identity: PlatformIdentity) -> Result<AptRepo> {
+fn add_repo(repo: &Repo, platform: &Platform, identity: PlatformIdentity) -> Result<AptRepo> {
     let (key, source_url) =
         select_distro_map(&repo.urls, identity.distro, identity.upstream).expect("applicable repo has a selected URL");
     let suite = if repo.suite == "system" {
@@ -398,20 +395,17 @@ fn repo_operation(repo: &Repo, platform: &Platform, identity: PlatformIdentity) 
     )
 }
 
-fn binary_operation(
-    binary: &crate::config::BinaryPackage,
-    architecture: Architecture,
-) -> Option<BinaryPackageOperation> {
+fn binary_operation(binary: &crate::config::BinaryPackage, arch: Architecture) -> Option<BinaryPackageOperation> {
     let source = match &binary.source {
         BinarySource::Github { repo, assets } => {
-            BinarySourceOperation::GithubLatest { repo: repo.clone(), selector: assets.get(architecture)?.to_owned() }
+            BinarySourceOperation::GithubLatest { repo: repo.clone(), selector: assets.get(arch)?.to_owned() }
         }
-        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(architecture)?.to_owned() },
+        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(arch)?.to_owned() },
     };
-    Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, architecture, source))
+    Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, arch, source))
 }
 
-fn configured_fonts(config: &Config) -> Option<Vec<String>> {
+fn nerd_fonts(config: &Config) -> Option<Vec<String>> {
     config.shared.fonts.nerd.as_ref().filter(|families| !families.is_empty()).cloned()
 }
 
@@ -456,9 +450,9 @@ fn vscode_extensions(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn derive_desktop_prerequisites(config: &Config, platform: &Platform, prerequisites: &mut BTreeSet<&'static str>) {
+fn add_desktop_prereqs(config: &Config, platform: &Platform, apt_prereqs: &mut BTreeSet<&'static str>) {
     let Some(desktop) = config.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
-    prerequisites.extend(["dconf-cli", "libglib2.0-bin"]);
+    apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
     if platform.desktop == "gnome"
         && desktop.gnome.as_ref().is_some_and(|gnome| {
             gnome.extensions.as_ref().is_some_and(|values| !values.is_empty())
@@ -466,7 +460,7 @@ fn derive_desktop_prerequisites(config: &Config, platform: &Platform, prerequisi
                 || gnome.rounded_window_corners == Some(true)
         })
     {
-        prerequisites.insert("gnome-shell");
+        apt_prereqs.insert("gnome-shell");
     }
 }
 

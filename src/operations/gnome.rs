@@ -7,7 +7,7 @@ const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
 const ROUNDED_CORNERS_SETTINGS: &str =
     "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings";
 
-pub(crate) fn gnome_extensions(host: &Host, extensions: &[String]) -> Result<OperationOutcome> {
+pub(crate) fn apply_extensions(host: &Host, extensions: &[String]) -> Result<OperationOutcome> {
     let mut outcome = OperationOutcome::Completed;
     for extension in extensions {
         if install_or_enable_extension(host, extension)? == OperationOutcome::LoginRequired {
