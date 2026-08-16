@@ -1,3 +1,5 @@
+//! Declarative Linux and macOS provisioning from one active configuration.
+
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 

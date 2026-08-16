@@ -158,6 +158,7 @@ pub(crate) mod debian_components {
         if replacement.as_bytes() == original {
             return Ok(());
         }
+        // Do not replace a source file another process changed after our inspection.
         if read(host, source)? != original {
             bail!("Debian APT source changed concurrently before write");
         }
