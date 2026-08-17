@@ -7,22 +7,22 @@ const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/nosnap.pref";
 
 pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
-        host.run("no-Snap APT pin removal", "sudo", ["rm", "-f", NO_SNAP_PIN])?;
+        host.run("no-snap APT pin removal", "sudo", ["rm", "-f", NO_SNAP_PIN])?;
         apt::install_packages(host, &["snapd".into()])?;
-        host.run("Snap service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
+        host.run("snapd service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
         return Ok(());
     }
 
     remove_snaps(host)?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
         if systemd::enabled_or_active(host, unit)? {
-            host.run("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
+            host.run("snapd service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }
     apt::purge(host, &["snapd".into()])?;
     let home_snap = host.home().join("snap");
     host.run(
-        "Snap data removal",
+        "snap data removal",
         "sudo",
         [
             "rm".as_ref(),
@@ -35,7 +35,7 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
         ],
     )?;
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
-    write_atomic(host, Path::new(NO_SNAP_PIN), pin, "no-Snap APT pin write")?;
+    write_atomic(host, Path::new(NO_SNAP_PIN), pin, "no-snap APT pin write")?;
     Ok(())
 }
 
@@ -56,7 +56,7 @@ fn remove_snaps(host: &Host) -> Result<()> {
     // remove app snaps before base & runtime snaps
     names.sort_by_key(|name| matches!(name.as_str(), "snapd" | "bare") || name.starts_with("core"));
     for name in names {
-        host.run("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
+        host.run("snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
     }
     Ok(())
 }

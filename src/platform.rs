@@ -176,7 +176,7 @@ impl Architecture {
         }
     }
 
-    pub fn canonical(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::X86_64 => "x86_64",
             Self::Aarch64 => "aarch64",
