@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use super::{Host, privileged_file::write_atomic};
+use super::{Host, privileged_file::write_atomic, systemd};
 use crate::config::AptUpgradeCommand;
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
@@ -27,9 +27,7 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
         )?;
     } else {
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        let is_enabled = host.output("systemctl", ["is-enabled", "unattended-upgrades.service"])?.status.success();
-        let is_active = host.output("systemctl", ["is-active", "unattended-upgrades.service"])?.status.success();
-        if is_enabled || is_active {
+        if systemd::enabled_or_active(host, "unattended-upgrades.service")? {
             host.run(
                 "unattended-upgrades service disablement",
                 "sudo",

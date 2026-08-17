@@ -37,7 +37,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
             "unmanaged dotfile conflicts:\n{paths}\nno dotfiles were changed; rerun with `cozydot dotfiles --replace`"
         );
     }
-    host.run("GNU Stow version check", "stow", ["--version"]).context("dotfiles require GNU Stow")?;
+    host.require_cli("GNU Stow", "stow").context("dotfiles require GNU Stow")?;
     if replace {
         backup_conflicts(host, &conflicts)?;
     }

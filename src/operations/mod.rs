@@ -17,6 +17,7 @@ mod repo;
 mod rustup;
 mod shell;
 mod snapd;
+mod systemd;
 mod users;
 mod uv;
 mod vscode;

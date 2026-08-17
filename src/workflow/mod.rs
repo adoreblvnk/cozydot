@@ -2,7 +2,7 @@
 
 use crate::{
     config::{
-        AptArchitecture, BinaryFormat, BinarySource, Config, DistroMapKey, EnabledDisabled, Repo, Theme,
+        AptArchitecture, BinaryFormat, BinarySource, Config, DistroMapKey, EnabledDisabled, Gnome, Repo, Theme,
         select_distro_map, selected_repo_codename,
     },
     operations::{
@@ -462,13 +462,7 @@ fn vscode_extensions(config: &Config) -> Result<()> {
 fn add_desktop_prereqs(config: &Config, platform: &Platform, apt_prereqs: &mut BTreeSet<&'static str>) {
     let Some(desktop) = config.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
     apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
-    if platform.desktop == DesktopKind::Gnome
-        && desktop.gnome.as_ref().is_some_and(|gnome| {
-            gnome.extensions.as_ref().is_some_and(|values| !values.is_empty())
-                || gnome.dash_to_dock == Some(true)
-                || gnome.rounded_window_corners == Some(true)
-        })
-    {
+    if platform.desktop == DesktopKind::Gnome && desktop.gnome.as_ref().is_some_and(Gnome::has_intent) {
         apt_prereqs.insert("gnome-shell");
     }
 }
