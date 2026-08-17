@@ -7,7 +7,7 @@ use crate::config::AptUpgradeCommand;
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 
 pub fn update(host: &Host) -> Result<()> {
-    host.run_checked("APT update", "sudo", ["apt-get", "update", "-qq"])?;
+    host.run("APT update", "sudo", ["apt-get", "update", "-qq"])?;
     Ok(())
 }
 
@@ -20,17 +20,17 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
     if enabled {
         install_packages(host, &["unattended-upgrades".into()])?;
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        host.run_checked(
+        host.run(
             "unattended-upgrades service enablement",
             "sudo",
             ["systemctl", "enable", "--now", "unattended-upgrades.service"],
         )?;
     } else {
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        let is_enabled = host.run("systemctl", ["is-enabled", "unattended-upgrades.service"])?.status.success();
-        let is_active = host.run("systemctl", ["is-active", "unattended-upgrades.service"])?.status.success();
+        let is_enabled = host.output("systemctl", ["is-enabled", "unattended-upgrades.service"])?.status.success();
+        let is_active = host.output("systemctl", ["is-active", "unattended-upgrades.service"])?.status.success();
         if is_enabled || is_active {
-            host.run_checked(
+            host.run(
                 "unattended-upgrades service disablement",
                 "sudo",
                 ["systemctl", "disable", "--now", "unattended-upgrades.service"],
@@ -46,7 +46,7 @@ pub fn update_and_install_packages(host: &Host, packages: &[String]) -> Result<(
     if missing.is_empty() {
         return Ok(());
     }
-    host.run_checked("APT update before install", "sudo", ["apt-get", "update", "-qq"])?;
+    host.run("APT update before install", "sudo", ["apt-get", "update", "-qq"])?;
     install(host, "APT package install", missing)
 }
 
@@ -87,15 +87,12 @@ fn installed_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
 }
 
 fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
-    let output = host.run("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
+    let output = host.output("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
     if !output.status.success() {
         if output.status.code() == Some(1) {
             return Ok(false);
         }
-        anyhow::bail!(
-            "APT package inspection failed for {package:?}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        anyhow::bail!("dpkg-query failed for {package:?}: {}", String::from_utf8_lossy(&output.stderr).trim());
     }
     match output.stdout.as_slice() {
         b"installed\n" => Ok(true),
@@ -106,7 +103,7 @@ fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
         | b"half-configured\n"
         | b"triggers-awaited\n"
         | b"triggers-pending\n" => Ok(false),
-        _ => anyhow::bail!("APT package inspection returned malformed state for {package:?}"),
+        _ => anyhow::bail!("dpkg-query returned unrecognized package status for {package:?}"),
     }
 }
 
@@ -124,7 +121,7 @@ fn change_packages(host: &Host, label: &str, command: &str, packages: impl IntoI
         "--".into(),
     ];
     args.extend(packages);
-    host.run_checked(label, "sudo", args)?;
+    host.run(label, "sudo", args)?;
     Ok(())
 }
 
@@ -144,9 +141,9 @@ pub fn upgrade(host: &Host, command: AptUpgradeCommand) -> Result<()> {
         AptUpgradeCommand::Upgrade => ("APT upgrade", "upgrade"),
         AptUpgradeCommand::FullUpgrade => ("APT full-upgrade", "full-upgrade"),
     };
-    host.run_checked(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq", "--"])?;
+    host.run(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq", "--"])?;
     if command == AptUpgradeCommand::FullUpgrade {
-        host.run_checked(
+        host.run(
             "APT purge autoremove",
             "sudo",
             ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq", "--"],

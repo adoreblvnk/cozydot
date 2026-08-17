@@ -34,7 +34,7 @@ pub(crate) fn install_dash_to_dock(host: &Host) -> Result<OperationOutcome> {
     ];
     for (key, value) in settings {
         let path = format!("/org/gnome/shell/extensions/dash-to-dock/{key}");
-        host.run_checked("dconf write", "dconf", ["write", &path, value])?;
+        host.run("dconf write", "dconf", ["write", &path, value])?;
     }
     Ok(OperationOutcome::Completed)
 }
@@ -44,25 +44,25 @@ pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<OperationOut
         return Ok(OperationOutcome::LoginRequired);
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
-    host.run_checked("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
+    host.run("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
     Ok(OperationOutcome::Completed)
 }
 
 fn install_or_enable_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
     validate_extension(extension)?;
-    if !host.run("gnome-extensions", ["info", extension])?.status.success() {
+    if !host.output("gnome-extensions", ["info", extension])?.status.success() {
         install_extension(host, extension)?;
         // GNOME only finds newly installed extensions after next login
         return Ok(OperationOutcome::LoginRequired);
     }
-    host.run_checked("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
+    host.run("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
     Ok(OperationOutcome::Completed)
 }
 
 fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
-    let shell = host.run_checked("GNOME extension shell version", "gnome-shell", ["--version"])?;
+    let shell = host.run("GNOME extension shell version", "gnome-shell", ["--version"])?;
     let shell_version =
         super::gnome_shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
     let version = super::select_gnome_extension_version(
@@ -73,11 +73,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let name = extension.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
     host.curl("GNOME extension download", &url, ["--output", &archive.path().to_string_lossy()])?;
-    host.run_checked(
-        "GNOME extension install",
-        "gnome-extensions",
-        ["install", "--force", &archive.path().to_string_lossy()],
-    )?;
+    host.run("GNOME extension install", "gnome-extensions", ["install", "--force", &archive.path().to_string_lossy()])?;
     Ok(())
 }
 

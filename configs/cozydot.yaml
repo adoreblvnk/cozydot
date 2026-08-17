@@ -119,7 +119,7 @@ linux:
         - xz-utils
       repos:
         - name: docker
-          key: https://download.docker.com/linux/ubuntu/gpg
+          key_url: https://download.docker.com/linux/ubuntu/gpg
           key_path: /etc/apt/keyrings/docker.asc
           urls:
             ubuntu: https://download.docker.com/linux/ubuntu
@@ -142,7 +142,7 @@ linux:
             - docker-buildx-plugin
             - docker-compose-plugin
         - name: github-cli
-          key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+          key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
           key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
           urls:
             default: https://cli.github.com/packages
@@ -152,7 +152,7 @@ linux:
           packages:
             - gh
         - name: helium
-          key: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
+          key_url: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
           key_path: /usr/share/keyrings/helium.gpg
           urls:
             default: https://pkg.helium.computer/deb
@@ -165,7 +165,7 @@ linux:
           packages:
             - helium-bin
         - name: onlyoffice
-          key: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+          key_url: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
           key_path: /usr/share/keyrings/onlyoffice.gpg
           urls:
             default: https://download.onlyoffice.com/repo/debian
@@ -178,7 +178,7 @@ linux:
           packages:
             - onlyoffice-desktopeditors
         - name: virtualbox
-          key: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+          key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
           urls:
             default: https://download.virtualbox.org/virtualbox/debian
@@ -190,7 +190,7 @@ linux:
           packages:
             - virtualbox-7.1
         - name: vscode
-          key: https://packages.microsoft.com/keys/microsoft.asc
+          key_url: https://packages.microsoft.com/keys/microsoft.asc
           key_path: /etc/apt/keyrings/packages.microsoft.gpg
           urls:
             default: https://packages.microsoft.com/repos/code
@@ -200,7 +200,7 @@ linux:
           packages:
             - code
         - name: wezterm
-          key: https://apt.fury.io/wez/gpg.key
+          key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
           urls:
             default: https://apt.fury.io/wez/

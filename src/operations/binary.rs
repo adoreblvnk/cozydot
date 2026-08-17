@@ -33,8 +33,8 @@ pub(crate) mod cargo_binstall {
             return super::super::macos::install_formula(host, "cargo-binstall");
         }
         let cargo_home = host.home().join(".cargo");
-        let installed = cargo_home.join("bin/cargo-binstall");
-        if executable_file(&installed) {
+        let cargo_binstall_path = cargo_home.join("bin/cargo-binstall");
+        if executable_file(&cargo_binstall_path) {
             return Ok(());
         }
         let cargo_bin = cargo_home.join("bin/cargo");
@@ -42,7 +42,7 @@ pub(crate) mod cargo_binstall {
             .to_str()
             .with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo_bin.display()))?;
 
-        host.run_checked("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
+        host.run("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
         Ok(())
     }
 
@@ -60,7 +60,7 @@ pub(crate) mod cargo_binstall {
                 .with_context(|| format!("cargo-binstall executable path is not UTF-8: {}", binstall.display()))?
                 .to_owned()
         };
-        host.run_checked("cargo-update install", &program, ["--no-confirm", "--", "cargo-update"])?;
+        host.run("cargo-update install", &program, ["--no-confirm", "--", "cargo-update"])?;
         Ok(())
     }
 }
@@ -75,7 +75,7 @@ pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<(
     if is_installed(host, package) {
         return Ok(());
     }
-    let url = resolve(host, package)?;
+    let url = resolve_url(host, package)?;
     let temp = download(host, package, &url)?;
     match package.format {
         BinaryFormat::Deb => install_deb(host, temp),
@@ -94,7 +94,7 @@ fn appimage_path(host: &Host, package: &BinaryPackageOperation) -> PathBuf {
     host.home().join("Applications").join(format!("{}.AppImage", package.name))
 }
 
-fn resolve(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
+fn resolve_url(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
     match &package.source {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
         BinarySourceOperation::GithubLatest { repo, asset_pattern } => {
@@ -113,12 +113,12 @@ fn resolve(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
                     USER_AGENT,
                 ],
             )?;
-            select_asset(&output.stdout, asset_pattern, package)
+            select_asset_url(&output.stdout, asset_pattern, package)
         }
     }
 }
 
-fn select_asset(input: &[u8], asset_pattern: &str, package: &BinaryPackageOperation) -> Result<String> {
+fn select_asset_url(input: &[u8], asset_pattern: &str, package: &BinaryPackageOperation) -> Result<String> {
     let release: GithubRelease = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
@@ -148,7 +148,7 @@ fn download(host: &Host, package: &BinaryPackageOperation, url: &str) -> Result<
 }
 
 fn install_deb(host: &Host, temp: TempPath) -> Result<()> {
-    host.run_checked(
+    host.run(
         "binary Debian install",
         "sudo",
         [

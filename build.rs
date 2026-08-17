@@ -53,7 +53,7 @@ fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathB
     entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
         let file_name = entry.file_name();
-        let name = valid_name(&file_name, &entry.path())?;
+        let name = validate_name(&file_name, &entry.path())?;
         let child_destination = destination.join(name);
         let kind = entry.file_type()?;
         if kind.is_dir() {
@@ -73,7 +73,7 @@ fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (P
     if !metadata.file_type().is_file() {
         return Err(invalid(source, "asset is not a regular file"));
     }
-    let destination = valid_destination(destination, source)?;
+    let destination = validate_destination(destination, source)?;
     // normalize bundled modes for reproducible installs; only shebang files are executable
     let mode = if fs::read(source)?.starts_with(b"#!") { 0o755 } else { 0o644 };
     if records.insert(destination.clone(), (source.to_path_buf(), mode)).is_some() {
@@ -82,7 +82,7 @@ fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (P
     Ok(())
 }
 
-fn valid_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
+fn validate_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
     let name = name.to_str().ok_or_else(|| invalid(source, "asset path is not UTF-8"))?;
     if name.is_empty() || name.contains(['\t', '\n', '\r']) {
         return Err(invalid(source, "asset path contains an unsafe character"));
@@ -90,7 +90,7 @@ fn valid_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
     Ok(name)
 }
 
-fn valid_destination(destination: &Path, source: &Path) -> io::Result<String> {
+fn validate_destination(destination: &Path, source: &Path) -> io::Result<String> {
     let mut components = destination.components();
     if !matches!(components.next(), Some(Component::Normal(root)) if root == "dotfiles")
         || !matches!(components.next(), Some(Component::Normal(_)))

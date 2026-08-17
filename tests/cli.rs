@@ -243,7 +243,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
 
     let repo = |extra: &str| {
         format!(
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
         )
     };
     for (linux, error) in [
@@ -252,11 +252,11 @@ fn validation_happens_before_platform_detection_or_mutation() {
         (repo("        arch: []\n"), "arch: must not be empty"),
         (repo("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
         (
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        components: [main]\n".to_owned(),
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        components: [main]\n".to_owned(),
             "missing field `suite`",
         ),
         (
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n".to_owned(),
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n".to_owned(),
             "missing field `components`",
         ),
     ] {
@@ -395,7 +395,7 @@ fn repo_config() -> String {
     install: [direct-package]
     repos:
       - name: armored
-        key: https://example.com/armored
+        key_url: https://example.com/armored
         key_path: /etc/apt/keyrings/armored.asc
         urls: {default: https://example.com/armored}
         suite: stable
@@ -403,7 +403,7 @@ fn repo_config() -> String {
         conflicts: [old-package, absent-conflict]
         packages: [vendor-one]
       - name: binary
-        key: https://example.com/binary
+        key_url: https://example.com/binary
         key_path: /usr/share/keyrings/binary.gpg
         urls: {default: https://example.com/binary}
         suite: vendor-suite
@@ -531,7 +531,7 @@ fn repo_key_validation_precedes_repo_file_write() {
     write_config(
         &root,
         "{}",
-        "packages:\n  apt:\n    repos:\n      - name: vendor\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
+        "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
     );
     write_apt_fakes(&fake_bin);
 
@@ -613,7 +613,7 @@ fn inapplicable_repos_have_no_side_effects() {
             &root,
             "{}",
             &format!(
-                "packages:\n  apt:\n    repos:\n      - name: skipped\n        key: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        urls:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
+                "packages:\n  apt:\n    repos:\n      - name: skipped\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        urls:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
             ),
         );
         write_linux_host_fakes(&fake_bin);

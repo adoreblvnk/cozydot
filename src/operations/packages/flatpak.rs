@@ -6,13 +6,13 @@ const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpa
 const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
 
 pub fn add_flathub_remote(host: &Host) -> Result<()> {
-    host.run_checked(
+    host.run(
         "Flathub remote add",
         "flatpak",
         ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
     )?;
     let url_arg = format!("--url={FLATHUB_URL}");
-    host.run_checked(
+    host.run(
         "Flathub remote modify",
         "flatpak",
         [
@@ -33,7 +33,7 @@ pub fn add_flathub_remote(host: &Host) -> Result<()> {
 pub fn install(host: &Host, refs: &[String]) -> Result<()> {
     let mut missing = Vec::new();
     for reference in refs {
-        let output = host.run("flatpak", ["--user", "info", "--show-ref", "--", reference])?;
+        let output = host.output("flatpak", ["--user", "info", "--show-ref", "--", reference])?;
         if !output.status.success() {
             missing.push(reference.clone());
         }
@@ -51,11 +51,11 @@ pub fn install(host: &Host, refs: &[String]) -> Result<()> {
         "--".into(),
     ];
     args.extend(missing);
-    host.run_checked("Flatpak application install", "flatpak", args)?;
+    host.run("Flatpak application install", "flatpak", args)?;
     Ok(())
 }
 
 pub fn update(host: &Host) -> Result<()> {
-    host.run_checked("Flatpak application update", "flatpak", ["--user", "update", "--app", "--noninteractive", "-y"])?;
+    host.run("Flatpak application update", "flatpak", ["--user", "update", "--app", "--noninteractive", "-y"])?;
     Ok(())
 }

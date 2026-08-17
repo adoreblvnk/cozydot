@@ -82,7 +82,7 @@ linux:
         - xz-utils
       repos:
         - name: vscode
-          key: https://packages.microsoft.com/keys/microsoft.asc
+          key_url: https://packages.microsoft.com/keys/microsoft.asc
           key_path: /etc/apt/keyrings/packages.microsoft.gpg
           urls:
             default: https://packages.microsoft.com/repos/code
@@ -92,7 +92,7 @@ linux:
           packages:
             - code
         - name: wezterm
-          key: https://apt.fury.io/wez/gpg.key
+          key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
           urls:
             default: https://apt.fury.io/wez/

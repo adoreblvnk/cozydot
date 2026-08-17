@@ -31,7 +31,7 @@ fn apply_at(host: &Host, families: &[String], mode: NerdFontsMode, parent: &Path
             Ok(_) => bail!("Nerd Font destination conflict at {}", destination.display()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
             Err(error) => {
-                return Err(error).context(format!("inspect Nerd Font destination {}", destination.display()));
+                return Err(error).context(format!("read Nerd Font destination metadata {}", destination.display()));
             }
         };
         if mode == NerdFontsMode::Update || !is_family_installed {
@@ -40,7 +40,7 @@ fn apply_at(host: &Host, families: &[String], mode: NerdFontsMode, parent: &Path
         }
     }
     if changed && privileged {
-        host.run_checked(
+        host.run(
             "Nerd Font cache refresh",
             "sudo",
             [OsStr::new("fc-cache"), OsStr::new("--force"), parent.as_os_str()],
@@ -63,17 +63,17 @@ fn install_family(host: &Host, family: &str, destination: &Path, privileged: boo
     let path = destination.to_str().context("font path is not UTF-8")?;
     let archive_path = archive.path().to_str().context("font archive path is not UTF-8")?;
     if privileged {
-        host.run_checked("Nerd Font destination replacement", "sudo", ["rm", "--recursive", "--force", "--", path])?;
-        host.run_checked("Nerd Font destination creation", "sudo", ["mkdir", "--parents", "--", path])?;
-        host.run_checked(
+        host.run("Nerd Font destination replacement", "sudo", ["rm", "--recursive", "--force", "--", path])?;
+        host.run("Nerd Font destination creation", "sudo", ["mkdir", "--parents", "--", path])?;
+        host.run(
             "Nerd Font archive extraction",
             "sudo",
             ["tar", "--extract", "--xz", "--directory", path, "--file", archive_path],
         )?;
     } else {
-        host.run_checked("Nerd Font destination replacement", "rm", ["-rf", path])?;
-        host.run_checked("Nerd Font destination creation", "mkdir", ["-p", path])?;
-        host.run_checked("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;
+        host.run("Nerd Font destination replacement", "rm", ["-rf", path])?;
+        host.run("Nerd Font destination creation", "mkdir", ["-p", path])?;
+        host.run("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;
     }
     Ok(())
 }

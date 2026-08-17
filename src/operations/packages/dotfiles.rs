@@ -9,8 +9,7 @@ use std::{
 use super::super::Host;
 
 pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool) -> Result<()> {
-    let root =
-        fs::canonicalize(root).with_context(|| format!("dotfiles operation: canonicalize root {}", root.display()))?;
+    let root = fs::canonicalize(root).with_context(|| format!("canonicalize dotfiles root {}", root.display()))?;
     if !fs::symlink_metadata(&root)?.file_type().is_dir() {
         bail!("dotfiles root is not a directory: {}", root.display());
     }
@@ -38,7 +37,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
             "unmanaged dotfile conflicts:\n{paths}\nno dotfiles were changed; rerun with `cozydot dotfiles --replace`"
         );
     }
-    host.run_checked("Stow preflight", "stow", ["--version"]).context("dotfiles require GNU Stow")?;
+    host.run("GNU Stow version check", "stow", ["--version"]).context("dotfiles require GNU Stow")?;
     if replace {
         backup_conflicts(host, &conflicts)?;
     }
@@ -51,7 +50,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
 
 fn apply_package(host: &Host, root: &Path, package: &str, source: &Path) -> Result<()> {
     prepare_gnupg_home(source, &host.home())?;
-    host.run_checked(
+    host.run(
         "stow package install",
         "stow",
         [
@@ -90,7 +89,7 @@ fn collect_conflicts(
     conflicts: &mut Vec<(String, PathBuf)>,
 ) -> Result<()> {
     let source_metadata =
-        fs::symlink_metadata(source).with_context(|| format!("inspect dotfiles source {}", source.display()))?;
+        fs::symlink_metadata(source).with_context(|| format!("read dotfiles source metadata {}", source.display()))?;
     if source_metadata.file_type().is_dir() {
         match fs::symlink_metadata(&target) {
             Ok(metadata) if metadata.file_type().is_dir() => {
@@ -103,14 +102,14 @@ fn collect_conflicts(
             Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).context("inspect dotfile destination"),
+            Err(error) => return Err(error).context("read dotfile destination metadata"),
         }
     } else if source_metadata.file_type().is_file() || source_metadata.file_type().is_symlink() {
         match fs::symlink_metadata(&target) {
             Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).context("inspect dotfile destination"),
+            Err(error) => return Err(error).context("read dotfile destination metadata"),
         }
     } else {
         bail!("unsupported dotfiles source type at {}", source.display());

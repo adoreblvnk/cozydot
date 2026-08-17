@@ -7,10 +7,10 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
 pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
-    if !host.run("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
+    if !host.output("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
         // legacy cleanup is best-effort so failures don't block install
-        let _ = host.run("systemctl", ["--user", "stop", "appimaged.service"]);
-        let _ = host.run("sudo", ["apt-get", "remove", "-qy", "appimagelauncher"]);
+        let _ = host.output("systemctl", ["--user", "stop", "appimaged.service"]);
+        let _ = host.output("sudo", ["apt-get", "remove", "-qy", "appimagelauncher"]);
 
         let home = host.home();
         let _ = remove_if_present(&home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service"));
@@ -19,14 +19,14 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
         let applications = home.join("Applications");
         fs::create_dir_all(&applications).context("create Applications directory")?;
         let destination = applications.join("appimaged.AppImage");
-        let url = resolve_asset(host, architecture)?;
+        let url = resolve_asset_url(host, architecture)?;
         host.curl(
             "download appimaged",
             &url,
             ["--output", destination.to_str().context("appimaged path is not UTF-8")?],
         )?;
         fs::set_permissions(&destination, fs::Permissions::from_mode(0o755)).context("make appimaged executable")?;
-        host.run_checked(
+        host.run(
             "launch appimaged",
             destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?,
             std::iter::empty::<&str>(),
@@ -36,7 +36,7 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
     ensure_fuse(host)
 }
 
-fn resolve_asset(host: &Host, architecture: Architecture) -> Result<String> {
+fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> {
     let output = host.curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
     let release: GithubRelease = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
     let suffix = match architecture {
@@ -79,10 +79,10 @@ fn remove_if_present(path: &Path) -> Result<()> {
 
 fn ensure_fuse(host: &Host) -> Result<()> {
     let package =
-        if host.run("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
-    if !host.run("dpkg", ["--status", package])?.status.success() {
-        host.run_checked("APT update for AppImages", "sudo", ["apt-get", "update", "-qq"])?;
-        host.run_checked("AppImage FUSE support install", "sudo", ["apt-get", "install", "-qq", package])?;
+        if host.output("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
+    if !host.output("dpkg", ["--status", package])?.status.success() {
+        host.run("APT update for AppImages", "sudo", ["apt-get", "update", "-qq"])?;
+        host.run("AppImage FUSE support install", "sudo", ["apt-get", "install", "-qq", package])?;
     }
     Ok(())
 }
