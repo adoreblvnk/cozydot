@@ -130,7 +130,8 @@ fn installer_rejects_unsupported_platform_before_download() {
 fn installer_checksum_failure_preserves_existing_binary() {
     let temp = tempfile::tempdir().unwrap();
     let fake_bin = temp.path().join("bin");
-    let install_dir = temp.path().join("install");
+    let home = temp.path().join("home");
+    let install_dir = home.join(".local/bin");
     fs::create_dir_all(&install_dir).unwrap();
     fs::write(install_dir.join("cozydot"), "existing\n").unwrap();
     write_executable(
@@ -153,7 +154,7 @@ esac
 
     Command::new("bash")
         .arg("install.sh")
-        .env("XDG_BIN_HOME", &install_dir)
+        .env("HOME", &home)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .assert()
         .failure()
@@ -355,7 +356,6 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --dir) dir=$2; shift 2 ;;
     --target) target=$2; shift 2 ;;
-    --stow) shift ;;
     --) package=$2; break ;;
   esac
 done
@@ -651,13 +651,13 @@ fn inapplicable_repos_have_no_side_effects() {
 #[cfg(target_os = "linux")]
 fn update_runs_only_the_selected_apt_upgrade_command() {
     for (policy, expected) in [
-        ("upgrade", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq --\n"),
+        ("upgrade", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq\n"),
         (
             "full-upgrade",
             concat!(
                 "sudo apt-get update -qq\n",
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq --\n",
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y -qq --\n"
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq\n",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y -qq\n"
             ),
         ),
     ] {

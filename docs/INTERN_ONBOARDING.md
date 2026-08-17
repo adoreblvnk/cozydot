@@ -56,7 +56,7 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 7. Add each applicable APT repo, then run one APT update.
 8. Purge aggregate repo conflicts and install aggregate repo packages.
 9. Add the Flathub remote and install configured Flatpak applications.
-10. Install rustup, the Rust toolchain, cargo-binstall, cargo-update, FNM, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
+10. Install rustup, the Rust toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
 11. Install configured Cargo crates and npm packages.
 12. Install applicable Deb binaries.
 13. Install appimaged, then applicable AppImages.
@@ -72,7 +72,7 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 3. Install Command Line Tools for Xcode when configured.
 4. Install Homebrew.
 5. Install configured formulae and casks, adding `stow` when dotfiles are configured.
-6. Install rustup, the Rust toolchain, cargo-binstall, cargo-update, FNM, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
+6. Install rustup, the Rust toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
 7. Install configured Cargo crates and npm packages.
 8. Install configured user Nerd Font families.
 9. Apply shared and macOS dotfile packages.
@@ -103,10 +103,10 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 1. Derive base prerequisites and add Flatpak when its update is enabled.
 2. When an APT policy is configured, run APT update followed by the selected `upgrade` or `full-upgrade` command.
 3. Install missing update prerequisites, running APT update immediately before install.
-4. Update installed Flatpak applications when enabled.
+4. Update installed Flatpak applications and runtimes when enabled.
 5. Install rustup and update Rust toolchains when enabled.
 6. Update the Go toolchain when enabled.
-7. Install FNM and update the Node.js version when enabled.
+7. Install fnm and update the Node.js version when enabled.
 8. Install uv and upgrade the Python versions when enabled.
 9. Update installed Cargo crates when enabled.
 10. Update global npm packages when enabled.
@@ -118,7 +118,7 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 2. Run Homebrew update and upgrade the selected formulae and casks when enabled.
 3. Install rustup and update Rust toolchains when enabled.
 4. Update the Go toolchain when enabled.
-5. Install FNM for a Node.js version or npm update, then update the Node.js version when enabled.
+5. Install fnm for a Node.js version or npm update, then update the Node.js version when enabled.
 6. Install uv and upgrade the Python versions when enabled.
 7. Update installed Cargo crates when enabled.
 8. Update global npm packages when enabled.

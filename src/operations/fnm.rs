@@ -20,12 +20,12 @@ pub fn install(host: &Host) -> Result<()> {
     if !regular_executable_file(&fnm_path) {
         let installer = TempPath::new(host, "fnm-install")?;
         host.curl(
-            "FNM installer download",
+            "fnm installer download",
             "https://fnm.vercel.app/install",
             ["--output", &installer.path().to_string_lossy()],
         )?;
         host.run(
-            "FNM install",
+            "fnm install",
             "env",
             [
                 format!("XDG_DATA_HOME={}", data_home.display()),
@@ -35,7 +35,7 @@ pub fn install(host: &Host) -> Result<()> {
             ],
         )?;
         if !regular_executable_file(&fnm_path) {
-            bail!("FNM installer did not publish executable {}", fnm_path.display());
+            bail!("fnm installer did not publish executable {}", fnm_path.display());
         }
     }
     append_shell(host, FNM_BASH_INIT)

@@ -23,7 +23,7 @@ impl Platform {
                 _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
             };
             return Ok(Self {
-                identity: PlatformIdentity::MacOs,
+                identity: PlatformIdentity::MacOS,
                 distro_codename: String::new(),
                 base_codename: String::new(),
                 desktop: DesktopKind::None,
@@ -67,7 +67,7 @@ impl Platform {
 #[serde(rename_all = "lowercase")]
 pub enum Distro {
     Ubuntu,
-    Linuxmint,
+    LinuxMint,
     Pop,
     Debian,
 }
@@ -76,7 +76,7 @@ impl Distro {
     fn from_os_release(value: &str) -> Result<Self> {
         match value {
             "ubuntu" => Ok(Self::Ubuntu),
-            "linuxmint" => Ok(Self::Linuxmint),
+            "linuxmint" => Ok(Self::LinuxMint),
             "pop" => Ok(Self::Pop),
             "debian" => Ok(Self::Debian),
             _ => bail!("unsupported distro: {value}"),
@@ -87,7 +87,7 @@ impl Distro {
         match self {
             Self::Ubuntu | Self::Pop => Ok(Family::Ubuntu),
             Self::Debian => Ok(Family::Debian),
-            Self::Linuxmint => {
+            Self::LinuxMint => {
                 let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
                 let ubuntu = families.clone().any(|family| family == "ubuntu");
                 let debian = families.any(|family| family == "debian");
@@ -106,7 +106,7 @@ impl Distro {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ubuntu => "ubuntu",
-            Self::Linuxmint => "linuxmint",
+            Self::LinuxMint => "linuxmint",
             Self::Pop => "pop",
             Self::Debian => "debian",
         }
@@ -121,7 +121,7 @@ pub enum Family {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformIdentity {
-    MacOs,
+    MacOS,
     Linux { distro: Distro, family: Family },
 }
 

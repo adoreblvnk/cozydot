@@ -1,20 +1,26 @@
 use super::Host;
-use super::parsers::GithubRelease;
+use super::parsers::GitHubRelease;
 use crate::platform::Architecture;
 use anyhow::{Context, Result};
-use std::{fs, path::Path};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
 pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
     if !host.output("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
-        // legacy cleanup is best-effort so failures don't block install
+        // https://github.com/probonopd/go-appimage/blob/master/src/appimaged/README.md#initial-setup
         let _ = host.output("systemctl", ["--user", "stop", "appimaged.service"]);
-        let _ = host.output("sudo", ["apt-get", "remove", "-qy", "appimagelauncher"]);
+        let _ = host.output("sudo", ["apt-get", "-y", "purge", "appimagelauncher"]);
 
         let home = host.home();
-        let _ = remove_if_present(&home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service"));
-        let _ = clear_cache(&home.join(".local/share/applications"));
+        let service = home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service");
+        host.run("remove conflicting appimaged service", "rm", ["-f".as_ref(), service.as_os_str()])?;
+        host.run("reload user services", "systemctl", ["--user", "daemon-reload"])?;
+        let cache = home.join(".local/share/applications");
+        host.run(
+            "clear AppImage cache",
+            "sh",
+            ["-c".as_ref(), r#"rm -f -- "$1"/appimage*"#.as_ref(), "sh".as_ref(), cache.as_os_str()],
+        )?;
 
         let applications = home.join("Applications");
         let destination = applications.join("appimaged.AppImage");
@@ -32,7 +38,7 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
 
 fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> {
     let output = host.curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
-    let release: GithubRelease = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
+    let release: GitHubRelease = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
     let suffix = match architecture {
         Architecture::Amd64 => "-x86_64.AppImage",
         Architecture::Arm64 | Architecture::DarwinArm64 => "-aarch64.AppImage",
@@ -44,31 +50,6 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
         .find(|asset| asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix))
         .map(|asset| asset.browser_download_url)
         .with_context(|| format!("appimaged release has no asset for {}", architecture.canonical()))
-}
-
-fn clear_cache(directory: &Path) -> Result<()> {
-    let Ok(entries) = fs::read_dir(directory) else {
-        return Ok(());
-    };
-    for entry in entries {
-        let path = entry?.path();
-        if path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("appimage")) {
-            if path.is_dir() {
-                fs::remove_dir_all(path)?;
-            } else {
-                fs::remove_file(path)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn remove_if_present(path: &Path) -> Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
 }
 
 fn ensure_fuse(host: &Host) -> Result<()> {

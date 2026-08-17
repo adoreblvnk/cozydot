@@ -19,18 +19,8 @@ use std::{
 
 const APT_PREREQS: [&str; 7] = ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
 
-#[derive(Default)]
-struct ToolInstallPlan {
-    rustup: bool,
-    fnm: bool,
-    uv: bool,
-    cargo_binstall: bool,
-    cargo_update: bool,
-}
-
 struct LinuxApplyPlan {
     apt_prereqs: BTreeSet<&'static str>,
-    tool_installs: ToolInstallPlan,
     flatpak_refs: Option<Vec<String>>,
     repos: Vec<AptRepo>,
     repo_packages_to_purge: Vec<String>,
@@ -41,21 +31,21 @@ struct LinuxApplyPlan {
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     match platform.identity {
-        PlatformIdentity::MacOs => macos_apply(config, platform.architecture, dotfiles_root),
+        PlatformIdentity::MacOS => macos_apply(config, platform.architecture, dotfiles_root),
         PlatformIdentity::Linux { distro, family } => linux_apply(config, platform, distro, family, dotfiles_root),
     }
 }
 
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     match platform.identity {
-        PlatformIdentity::MacOs => macos_update(config, platform.architecture),
+        PlatformIdentity::MacOS => macos_update(config, platform.architecture),
         PlatformIdentity::Linux { .. } => linux_update(config, platform),
     }
 }
 
 pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool) -> Result<()> {
     let platform_packages = match platform.identity {
-        PlatformIdentity::MacOs => &config.macos.dotfiles.packages,
+        PlatformIdentity::MacOS => &config.macos.dotfiles.packages,
         PlatformIdentity::Linux { .. } => &config.linux.dotfiles.packages,
     };
     if let Some(operation) = dotfiles_operation(config, platform_packages, root, replace) {
@@ -116,9 +106,9 @@ fn linux_apply(
     }
     if let Some(refs) = plan.flatpak_refs {
         run("Apply", Operation::FlatpakFlathubRemoteAdd)?;
-        run("Apply", Operation::FlatpakApplicationsInstall { refs })?;
+        run("Apply", Operation::FlatpakAppsInstall { refs })?;
     }
-    apply_tools(config, platform.architecture, &plan.tool_installs)?;
+    apply_tools(config, platform.architecture)?;
     apply_packages(config)?;
     for binary in plan.deb_binaries {
         run("Apply", Operation::BinaryPackageInstall(binary))?;
@@ -142,7 +132,6 @@ fn linux_apply(
 
 fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family: Family) -> LinuxApplyPlan {
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
-    let tool_installs = tool_install_plan(config);
     let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
@@ -161,14 +150,13 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family
         if let Some(operation) = binary_operation(binary, platform.architecture) {
             match binary.format {
                 BinaryFormat::Deb => deb_binaries.push(operation),
-                BinaryFormat::Appimage => appimages.push(operation),
+                BinaryFormat::AppImage => appimages.push(operation),
             }
         }
     }
     add_desktop_prereqs(config, platform, &mut apt_prereqs);
     LinuxApplyPlan {
         apt_prereqs,
-        tool_installs,
         flatpak_refs,
         repos,
         repo_packages_to_purge,
@@ -179,13 +167,12 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family
 }
 
 fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
-    let tools = tool_install_plan(config);
     let dotfiles = !config.shared.dotfiles.packages.is_empty() || !config.macos.dotfiles.packages.is_empty();
     let homebrew_packages =
         dotfiles || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
 
     if config.macos.system.validate_sudo_access == Some(true) {
-        run("Apply", Operation::MacosSudoAccessValidate)?;
+        run("Apply", Operation::MacOSSudoAccessValidate)?;
     }
     if config.macos.system.xcode.command_line_tools == Some(true) {
         run("Apply", Operation::CommandLineToolsForXcodeInstall)?;
@@ -198,7 +185,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
         }
         run("Apply", Operation::HomebrewPackagesInstall { formulae, casks: config.macos.homebrew.casks.clone() })?;
     }
-    apply_tools(config, arch, &tools)?;
+    apply_tools(config, arch)?;
     apply_packages(config)?;
     if let Some(families) = nerd_fonts(config) {
         run("Apply", Operation::UserNerdFontsInstall { families })?;
@@ -211,29 +198,19 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
     Ok(())
 }
 
-fn apply_tools(config: &Config, arch: Architecture, tools: &ToolInstallPlan) -> Result<()> {
-    if tools.rustup {
-        run("Apply", Operation::RustupInstall)?;
-    }
+fn apply_tools(config: &Config, arch: Architecture) -> Result<()> {
     if let Some(selector) = config.shared.tools.rust.as_deref() {
+        run("Apply", Operation::RustupInstall)?;
         run("Apply", Operation::RustToolchainInstall { selector: selector.to_owned() })?;
-    }
-    if tools.cargo_binstall {
         run("Apply", Operation::CargoBinstallInstall)?;
-    }
-    if tools.cargo_update {
         run("Apply", Operation::CargoUpdateInstall)?;
     }
-    if tools.fnm {
-        run("Apply", Operation::FnmInstall)?;
-    }
     if let Some(selector) = config.shared.tools.node.as_deref() {
+        run("Apply", Operation::FnmInstall)?;
         run("Apply", Operation::NodeVersionInstall { selector: selector.to_owned() })?;
     }
-    if tools.uv {
-        run("Apply", Operation::UvInstall)?;
-    }
     if let Some(selector) = &config.shared.tools.python {
+        run("Apply", Operation::UvInstall)?;
         run("Apply", Operation::PythonVersionInstall { selector: selector.clone() })?;
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
@@ -252,17 +229,6 @@ fn apply_packages(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn tool_install_plan(config: &Config) -> ToolInstallPlan {
-    let rust = config.shared.tools.rust.is_some();
-    ToolInstallPlan {
-        rustup: rust,
-        fnm: config.shared.tools.node.is_some(),
-        uv: config.shared.tools.python.is_some(),
-        cargo_binstall: rust,
-        cargo_update: rust,
-    }
-}
-
 fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
@@ -278,7 +244,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         Operation::AptPackagesInstall { packages: apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
-        run("Update", Operation::FlatpakApplicationsUpdate)?;
+        run("Update", Operation::FlatpakUpdate)?;
     }
     update_tools_and_packages(config, platform.architecture, false)?;
     if config.shared.updates.fonts == Some(true)
@@ -321,14 +287,14 @@ fn update_tools_and_packages(config: &Config, arch: Architecture, macos: bool) -
             },
         )?;
     }
-    // macOS resolves npm via Homebrew FNM, so npm-only updates must ensure its formula first
+    // macOS resolves npm via Homebrew fnm, so npm-only updates must ensure its formula first
     if updates.tools.node == Some(true) || (macos && updates.packages.npm == Some(true)) {
         run("Update", Operation::FnmInstall)?;
     }
     if updates.tools.node == Some(true) {
         run(
             "Update",
-            Operation::NodeVersionUpdate {
+            Operation::NodeVersionInstall {
                 selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".to_owned()),
             },
         )?;
@@ -394,8 +360,8 @@ fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey,
 
 fn binary_operation(binary: &crate::config::BinaryPackage, arch: Architecture) -> Option<BinaryPackageOperation> {
     let source = match &binary.source {
-        BinarySource::Github { repo, assets } => {
-            BinarySourceOperation::GithubLatest { repo: repo.clone(), asset_pattern: assets.get(arch)?.to_owned() }
+        BinarySource::GitHub { repo, assets } => {
+            BinarySourceOperation::GitHubLatest { repo: repo.clone(), asset_pattern: assets.get(arch)?.to_owned() }
         }
         BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(arch)?.to_owned() },
     };
