@@ -515,14 +515,14 @@ impl BinarySource {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArchitectureMap {
-    pub amd64: Option<String>,
-    pub arm64: Option<String>,
-    pub arm32: Option<String>,
+    pub x86_64: Option<String>,
+    pub aarch64: Option<String>,
+    pub arm: Option<String>,
 }
 
 impl ArchitectureMap {
     fn validate(&self, path: &str, kind: &str) -> Result<()> {
-        if self.amd64.is_none() && self.arm64.is_none() && self.arm32.is_none() {
+        if self.x86_64.is_none() && self.aarch64.is_none() && self.arm.is_none() {
             bail!("{path}: must contain at least one canonical architecture {kind}");
         }
         Ok(())
@@ -530,9 +530,9 @@ impl ArchitectureMap {
 
     pub fn get(&self, architecture: Architecture) -> Option<&str> {
         match architecture {
-            Architecture::Amd64 => self.amd64.as_deref(),
-            Architecture::Arm64 | Architecture::DarwinArm64 => self.arm64.as_deref(),
-            Architecture::Arm32 => self.arm32.as_deref(),
+            Architecture::X86_64 => self.x86_64.as_deref(),
+            Architecture::Aarch64 => self.aarch64.as_deref(),
+            Architecture::Arm => self.arm.as_deref(),
         }
     }
 }

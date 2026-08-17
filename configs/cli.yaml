@@ -97,17 +97,17 @@ linux:
           provider: github
           repo: fastfetch-cli/fastfetch
           assets:
-            amd64: ^fastfetch-linux-amd64\.deb$
-            arm64: ^fastfetch-linux-aarch64\.deb$
-            arm32: ^fastfetch-linux-armv7l.*\.deb$
+            x86_64: ^fastfetch-linux-amd64\.deb$
+            aarch64: ^fastfetch-linux-aarch64\.deb$
+            arm: ^fastfetch-linux-armv7l.*\.deb$
       - name: git-credential-manager
         format: deb
         source:
           provider: github
           repo: git-ecosystem/git-credential-manager
           assets:
-            amd64: ^gcm-linux-x64-.*\.deb$
-            arm64: ^gcm-linux-arm64-.*\.deb$
+            x86_64: ^gcm-linux-x64-.*\.deb$
+            aarch64: ^gcm-linux-arm64-.*\.deb$
   dotfiles:
     packages:
       - bash
