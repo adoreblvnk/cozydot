@@ -19,7 +19,7 @@ impl Platform {
             let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
             let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
             let architecture = match arch.as_str() {
-                "aarch64" | "arm64" => Architecture::DarwinArm64,
+                "aarch64" | "arm64" => Architecture::Aarch64,
                 _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
             };
             return Ok(Self {
@@ -161,54 +161,49 @@ impl DesktopKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
-    Amd64,
-    Arm64,
-    Arm32,
-    DarwinArm64,
+    X86_64,
+    Aarch64,
+    Arm,
 }
 
 impl Architecture {
     pub fn normalize(value: &str) -> Result<Self> {
         match value {
-            "x86_64" | "amd64" => Ok(Self::Amd64),
-            "aarch64" | "arm64" => Ok(Self::Arm64),
-            "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm32),
-            _ => bail!("unsupported architecture {value:?}; supported architectures: amd64, arm64, arm32"),
+            "x86_64" | "amd64" => Ok(Self::X86_64),
+            "aarch64" | "arm64" => Ok(Self::Aarch64),
+            "arm" | "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm),
+            _ => bail!("unsupported architecture {value:?}; supported architectures: x86_64, aarch64, arm"),
         }
     }
 
     pub fn canonical(self) -> &'static str {
         match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "arm64",
-            Self::Arm32 => "arm32",
-            Self::DarwinArm64 => "darwin-arm64",
+            Self::X86_64 => "x86_64",
+            Self::Aarch64 => "aarch64",
+            Self::Arm => "arm",
         }
     }
 
     pub fn debian(self) -> &'static str {
         match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "arm64",
-            Self::Arm32 => "armhf",
-            Self::DarwinArm64 => "arm64",
+            Self::X86_64 => "amd64",
+            Self::Aarch64 => "arm64",
+            Self::Arm => "armhf",
         }
     }
 
     pub fn go(self) -> &'static str {
         match self {
-            Self::Amd64 => "amd64",
-            Self::Arm64 => "arm64",
-            Self::Arm32 => "arm",
-            Self::DarwinArm64 => "arm64",
+            Self::X86_64 => "amd64",
+            Self::Aarch64 => "arm64",
+            Self::Arm => "arm",
         }
     }
 
     pub fn go_archive(self) -> &'static str {
         match self {
             // Go calls its 32-bit ARM archive armv6l; it also runs on ARMv7
-            Self::Arm32 => "armv6l",
-            Self::DarwinArm64 => "arm64",
+            Self::Arm => "armv6l",
             other => other.go(),
         }
     }

@@ -331,9 +331,9 @@ fn applicable_repos(
                 values.iter().any(|value| {
                     matches!(
                         (value, architecture),
-                        (AptArchitecture::Amd64, Architecture::Amd64)
-                            | (AptArchitecture::Arm64, Architecture::Arm64)
-                            | (AptArchitecture::Armhf, Architecture::Arm32)
+                        (AptArchitecture::Amd64, Architecture::X86_64)
+                            | (AptArchitecture::Arm64, Architecture::Aarch64)
+                            | (AptArchitecture::Armhf, Architecture::Arm)
                     )
                 })
             })

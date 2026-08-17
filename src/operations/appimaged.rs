@@ -40,9 +40,9 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
     let output = host.curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
     let release: GitHubRelease = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
     let suffix = match architecture {
-        Architecture::Amd64 => "-x86_64.AppImage",
-        Architecture::Arm64 | Architecture::DarwinArm64 => "-aarch64.AppImage",
-        Architecture::Arm32 => "-armhf.AppImage",
+        Architecture::X86_64 => "-x86_64.AppImage",
+        Architecture::Aarch64 => "-aarch64.AppImage",
+        Architecture::Arm => "-armhf.AppImage",
     };
     release
         .assets

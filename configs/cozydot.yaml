@@ -228,41 +228,41 @@ linux:
           provider: github
           repo: jgraph/drawio-desktop
           assets:
-            amd64: ^drawio-amd64-.*\.deb$
-            arm64: ^drawio-arm64-.*\.deb$
+            x86_64: ^drawio-amd64-.*\.deb$
+            aarch64: ^drawio-arm64-.*\.deb$
       - name: fastfetch
         format: deb
         source:
           provider: github
           repo: fastfetch-cli/fastfetch
           assets:
-            amd64: ^fastfetch-linux-amd64\.deb$
-            arm64: ^fastfetch-linux-aarch64\.deb$
-            arm32: ^fastfetch-linux-armv7l.*\.deb$
+            x86_64: ^fastfetch-linux-amd64\.deb$
+            aarch64: ^fastfetch-linux-aarch64\.deb$
+            arm: ^fastfetch-linux-armv7l.*\.deb$
       - name: git-credential-manager
         format: deb
         source:
           provider: github
           repo: git-ecosystem/git-credential-manager
           assets:
-            amd64: ^gcm-linux-x64-.*\.deb$
-            arm64: ^gcm-linux-arm64-.*\.deb$
+            x86_64: ^gcm-linux-x64-.*\.deb$
+            aarch64: ^gcm-linux-arm64-.*\.deb$
       - name: obsidian
         format: appimage
         source:
           provider: github
           repo: obsidianmd/obsidian-releases
           assets:
-            amd64: ^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$
-            arm64: ^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$
+            x86_64: ^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$
+            aarch64: ^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$
       - name: zen-browser
         format: appimage
         source:
           provider: github
           repo: zen-browser/desktop
           assets:
-            amd64: ^zen-x86_6[0-9]\.AppImage$
-            arm64: ^zen-aarch6[0-9]\.AppImage$
+            x86_64: ^zen-x86_6[0-9]\.AppImage$
+            aarch64: ^zen-aarch6[0-9]\.AppImage$
 
   dotfiles:
     packages:
