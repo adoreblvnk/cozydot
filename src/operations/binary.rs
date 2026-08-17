@@ -127,7 +127,7 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &BinaryPackageOp
         bail!(
             "binary package {:?} ({}) asset pattern matched {} assets",
             package.name,
-            package.architecture.canonical(),
+            package.architecture.as_str(),
             matches.len()
         );
     }
@@ -142,7 +142,7 @@ fn download_deb(host: &Host, package: &BinaryPackageOperation, url: &str) -> Res
 
 fn install_deb(host: &Host, temp: TempPath) -> Result<()> {
     host.run(
-        "binary Debian install",
+        "Deb package install",
         "sudo",
         [
             "DEBIAN_FRONTEND=noninteractive".as_ref(),

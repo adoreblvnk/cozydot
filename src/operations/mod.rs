@@ -106,7 +106,7 @@ impl Operation {
             Self::SudoGroupEnsure => "sudo group membership",
             Self::DebianAptComponentsAdd => "Debian APT component add",
             Self::AptUpdate => "APT update",
-            Self::UnattendedUpgradesSet { .. } => "unattended upgrades set",
+            Self::UnattendedUpgradesSet { .. } => "unattended-upgrades set",
             Self::SnapdSet { .. } => "snapd set",
             Self::AptPackagesInstall { .. } => "APT package install",
             Self::AptPackagesPurge { .. } => "APT package purge",

@@ -49,7 +49,7 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
         .into_iter()
         .find(|asset| asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix))
         .map(|asset| asset.browser_download_url)
-        .with_context(|| format!("appimaged release has no asset for {}", architecture.canonical()))
+        .with_context(|| format!("appimaged release has no asset for {}", architecture.as_str()))
 }
 
 fn ensure_fuse(host: &Host) -> Result<()> {

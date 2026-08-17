@@ -90,7 +90,7 @@ pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {
         return Ok(());
     }
     // launch Apple's interactive installer; success only means it started
-    host.run("Xcode command line tools", "xcode-select", ["--install"])?;
+    host.run("Command Line Tools for Xcode install", "xcode-select", ["--install"])?;
     Ok(())
 }
 
