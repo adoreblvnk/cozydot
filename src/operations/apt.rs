@@ -50,11 +50,6 @@ pub fn install_packages(host: &Host, packages: &[String]) -> Result<()> {
     install(host, "APT package install", missing)
 }
 
-pub fn purge_then_install_packages(host: &Host, purge_packages: &[String], install_packages: &[String]) -> Result<()> {
-    purge(host, purge_packages)?;
-    self::install_packages(host, install_packages)
-}
-
 fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
     let mut missing = Vec::new();
     for package in packages {
