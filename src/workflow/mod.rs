@@ -79,7 +79,6 @@ fn linux_apply(
         }
         run("Apply", Operation::DebianAptComponentsAdd)?;
     }
-    run("Apply", Operation::AptUpdate)?;
     if distro == Distro::Ubuntu
         && let Some(ubuntu) = &config.linux.system.ubuntu
     {
@@ -93,6 +92,7 @@ fn linux_apply(
             run("Apply", Operation::AptPackagesInstall { packages: vec!["ubuntu-restricted-extras".into()] })?;
         }
     }
+    run("Apply", Operation::AptUpdate)?;
     run(
         "Apply",
         Operation::AptPackagesInstall { packages: plan.apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
@@ -108,14 +108,11 @@ fn linux_apply(
         }
         run("Apply", Operation::AptUpdate)?;
     }
-    if !plan.repo_packages_to_purge.is_empty() || !plan.repo_packages_to_install.is_empty() {
-        run(
-            "Apply",
-            Operation::AptPackagesPurgeThenInstall {
-                purge: plan.repo_packages_to_purge,
-                install: plan.repo_packages_to_install,
-            },
-        )?;
+    if !plan.repo_packages_to_purge.is_empty() {
+        run("Apply", Operation::AptPackagesPurge { packages: plan.repo_packages_to_purge })?;
+    }
+    if !plan.repo_packages_to_install.is_empty() {
+        run("Apply", Operation::AptPackagesInstall { packages: plan.repo_packages_to_install })?;
     }
     if let Some(refs) = plan.flatpak_refs {
         run("Apply", Operation::FlatpakFlathubRemoteAdd)?;
