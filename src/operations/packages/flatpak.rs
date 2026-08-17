@@ -3,29 +3,12 @@ use anyhow::Result;
 
 const FLATHUB_NAME: &str = "flathub";
 const FLATHUB_DESCRIPTOR_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
-const FLATHUB_URL: &str = "https://dl.flathub.org/repo/";
 
 pub fn add_flathub_remote(host: &Host) -> Result<()> {
     host.run(
         "Flathub remote add",
         "flatpak",
         ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_DESCRIPTOR_URL],
-    )?;
-    let url_arg = format!("--url={FLATHUB_URL}");
-    host.run(
-        "Flathub remote modify",
-        "flatpak",
-        [
-            "--user",
-            "remote-modify",
-            &url_arg,
-            "--gpg-verify",
-            "--enumerate",
-            "--use-for-deps",
-            "--enable",
-            "--no-filter",
-            FLATHUB_NAME,
-        ],
     )?;
     Ok(())
 }
