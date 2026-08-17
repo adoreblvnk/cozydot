@@ -55,7 +55,7 @@ pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, arc
         bail!("downloaded Go archive checksum mismatch");
     }
     // remove whole tree so files missing from new release can't survive replacement
-    host.run("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
+    host.run("Go installation replacement", "sudo", ["rm", "-rf", "/usr/local/go"])?;
     host.run(
         "Go archive extraction",
         "sudo",
