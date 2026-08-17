@@ -47,7 +47,6 @@ pub enum Operation {
     UnattendedUpgradesSet { enabled: bool },
     SnapdSet { enabled: bool },
     AptPackagesInstall { packages: Vec<String> },
-    AptPackagesUpdateAndInstall { packages: Vec<String> },
     FlatpakFlathubRemoteAdd,
     RustupInstall,
     FnmInstall,
@@ -111,7 +110,6 @@ impl Operation {
             Self::UnattendedUpgradesSet { .. } => "unattended upgrades set",
             Self::SnapdSet { .. } => "snapd set",
             Self::AptPackagesInstall { .. } => "APT package install",
-            Self::AptPackagesUpdateAndInstall { .. } => "APT update and package install",
             Self::FlatpakFlathubRemoteAdd => "Flathub remote add",
             Self::RustupInstall => "rustup install",
             Self::FnmInstall => "FNM install",
@@ -172,9 +170,6 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         Operation::UnattendedUpgradesSet { enabled } => completed(apt::set_unattended_upgrades(&host, *enabled)),
         Operation::SnapdSet { enabled } => completed(snapd::set_enabled(&host, *enabled)),
         Operation::AptPackagesInstall { packages } => completed(apt::install_packages(&host, packages)),
-        Operation::AptPackagesUpdateAndInstall { packages } => {
-            completed(apt::update_and_install_packages(&host, packages))
-        }
         Operation::FlatpakFlathubRemoteAdd => completed(packages::flatpak::add_flathub_remote(&host)),
         Operation::RustupInstall => completed(rustup::install(&host)),
         Operation::FnmInstall => completed(fnm::install(&host)),
