@@ -31,21 +31,22 @@ jobs:
       - name: Smoke-test installed release
         run: |
           root="$(mktemp -d)"
-          mkdir -p "$root/mirror/download/v1.0.0" "$root/bin" "$root/elsewhere"
+          mkdir -p "$root/mirror/download/v1.0.0" "$root/elsewhere"
           cp target/cozydot-1.0.0-linux-amd64.tar.gz* "$root/mirror/download/v1.0.0/"
-          HOME="$root/home" XDG_BIN_HOME="$root/bin" XDG_CACHE_HOME="$root/cache" \
+          HOME="$root/home" XDG_CACHE_HOME="$root/cache" \
             COZYDOT_RELEASE_BASE_URL="file://$root/mirror" bash install.sh
+          binary="$root/home/.local/bin/cozydot"
           test ! -e "$root/config"
           test ! -e "$root/cache"
           rm -rf "$root/mirror"
           cd "$root/elsewhere"
           HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_CACHE_HOME="$root/cache" \
-            COZYDOT_RELEASE_BASE_URL="file:///does/not/exist" "$root/bin/cozydot" init
+            COZYDOT_RELEASE_BASE_URL="file:///does/not/exist" "$binary" init
           test -f "$root/config/cozydot/cozydot.yaml"
           test -f "$root/config/cozydot/dotfiles/bash/.bashrc"
           test -x "$root/config/cozydot/dotfiles/bin/.local/bin/round"
           test ! -e "$root/cache"
-          "$root/bin/cozydot" --version
+          "$binary" --version
       - run: bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
   stable:
     runs-on: ubuntu-latest
@@ -69,8 +70,8 @@ jobs:
       - name: Smoke-test installed release
         run: |
           root="$(mktemp -d)"
-          mkdir -p "$root/mirror/download/v1.0.0" "$root/bin"
+          mkdir -p "$root/mirror/download/v1.0.0"
           cp target/cozydot-1.0.0-macos-arm64.tar.gz* "$root/mirror/download/v1.0.0/"
-          HOME="$root/home" XDG_BIN_HOME="$root/bin" COZYDOT_RELEASE_BASE_URL="file://$root/mirror" \
+          HOME="$root/home" COZYDOT_RELEASE_BASE_URL="file://$root/mirror" \
             /bin/bash install.sh
-          "$root/bin/cozydot" --version | grep '1.0.0'
+          "$root/home/.local/bin/cozydot" --version | grep '1.0.0'
