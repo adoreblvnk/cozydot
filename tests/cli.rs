@@ -277,11 +277,16 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
+    let apt_log = temp.path().join("apt.log");
     write_config(&root, "{}", "{}");
     write_linux_host_fakes(&fake_bin);
-    for command in ["sudo", "curl", "gpg", "stow", "flatpak", "rustup"] {
+    for command in ["curl", "gpg", "stow", "flatpak", "rustup"] {
         write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
     }
+    write_executable(
+        &fake_bin.join("sudo"),
+        "#!/bin/sh\n[ \"$*\" = 'apt-get update -qq' ] || { : > \"$COZYDOT_TEST_MUTATION\"; exit 99; }\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_APT_LOG\"\n",
+    );
 
     let command = || {
         let mut command = cozydot();
@@ -289,11 +294,13 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
             .env("COZYDOT_TEST_MUTATION", &mutation)
+            .env("COZYDOT_TEST_APT_LOG", &apt_log)
             .env("PATH", &fake_bin);
         command
     };
-    command().arg("apply").assert().success().stdout("Apply: APT update and package install\n");
-    command().arg("update").assert().success().stdout("Update: APT update and package install\n");
+    command().arg("apply").assert().success().stdout("Apply: APT update\nApply: APT package install\n");
+    command().arg("update").assert().success().stdout("Update: APT update\nUpdate: APT package install\n");
+    assert_eq!(fs::read_to_string(apt_log).unwrap(), "apt-get update -qq\napt-get update -qq\n");
     assert!(!mutation.exists());
 }
 
@@ -309,7 +316,10 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     let mutation = temp.path().join("mutation");
     write_config(&root, "{}", "system:\n  sudo_group: true\n");
     write_linux_host_fakes(&fake_bin);
-    write_executable(&fake_bin.join("sudo"), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
+    write_executable(
+        &fake_bin.join("sudo"),
+        "#!/bin/sh\n[ \"$*\" = 'apt-get update -qq' ] && exit 0\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n",
+    );
 
     cozydot()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
@@ -318,7 +328,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
         .arg("apply")
         .assert()
         .success()
-        .stdout("Apply: APT update and package install\n");
+        .stdout("Apply: APT update\nApply: APT package install\n");
     assert!(!mutation.exists());
 }
 
@@ -617,9 +627,13 @@ fn inapplicable_repos_have_no_side_effects() {
             ),
         );
         write_linux_host_fakes(&fake_bin);
-        for command in ["curl", "gpg", "sudo"] {
+        for command in ["curl", "gpg"] {
             write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
         }
+        write_executable(
+            &fake_bin.join("sudo"),
+            "#!/bin/sh\n[ \"$*\" = 'apt-get update -qq' ] && exit 0\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n",
+        );
         cozydot()
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .env("XDG_CURRENT_DESKTOP", "gnome")
@@ -628,7 +642,7 @@ fn inapplicable_repos_have_no_side_effects() {
             .arg("apply")
             .assert()
             .success()
-            .stdout("Apply: APT update and package install\n");
+            .stdout("Apply: APT update\nApply: APT package install\n");
         assert!(!mutation.exists());
     }
 }

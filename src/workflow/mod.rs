@@ -32,7 +32,6 @@ struct LinuxApplyPlan {
     apt_prereqs: BTreeSet<&'static str>,
     tool_installs: ToolInstallPlan,
     flatpak_refs: Option<Vec<String>>,
-    update_apt: bool,
     repos: Vec<AptRepo>,
     repo_packages_to_purge: Vec<String>,
     repo_packages_to_install: Vec<String>,
@@ -80,6 +79,7 @@ fn linux_apply(
         }
         run("Apply", Operation::DebianAptComponentsAdd)?;
     }
+    run("Apply", Operation::AptUpdate)?;
     if distro == Distro::Ubuntu
         && let Some(ubuntu) = &config.linux.system.ubuntu
     {
@@ -93,14 +93,9 @@ fn linux_apply(
             run("Apply", Operation::AptPackagesInstall { packages: vec!["ubuntu-restricted-extras".into()] })?;
         }
     }
-    if plan.update_apt {
-        run("Apply", Operation::AptUpdate)?;
-    }
     run(
         "Apply",
-        Operation::AptPackagesUpdateAndInstall {
-            packages: plan.apt_prereqs.iter().map(|value| (*value).to_owned()).collect(),
-        },
+        Operation::AptPackagesInstall { packages: plan.apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
     if let Some(packages) =
         config.linux.packages.apt.as_ref().and_then(|apt| apt.install.as_ref()).filter(|packages| !packages.is_empty())
@@ -151,12 +146,6 @@ fn linux_apply(
 fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family: Family) -> LinuxApplyPlan {
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     let tool_installs = tool_install_plan(config);
-    let apt = config.linux.packages.apt.as_ref();
-    let mut update_apt = apt.and_then(|apt| apt.install.as_ref()).is_some_and(|values| !values.is_empty())
-        || (distro == Distro::Ubuntu
-            && config.linux.system.ubuntu.as_ref().is_some_and(|ubuntu| {
-                ubuntu.unattended_upgrades.is_some() || ubuntu.snapd.is_some() || ubuntu.restricted_extras
-            }));
     let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
@@ -174,10 +163,7 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family
     for binary in config.linux.packages.binaries.as_deref().unwrap_or_default() {
         if let Some(operation) = binary_operation(binary, platform.architecture) {
             match binary.format {
-                BinaryFormat::Deb => {
-                    update_apt = true;
-                    deb_binaries.push(operation);
-                }
+                BinaryFormat::Deb => deb_binaries.push(operation),
                 BinaryFormat::Appimage => appimages.push(operation),
             }
         }
@@ -187,7 +173,6 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family
         apt_prereqs,
         tool_installs,
         flatpak_refs,
-        update_apt,
         repos,
         repo_packages_to_purge,
         repo_packages_to_install,
@@ -287,15 +272,13 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         apt_prereqs.insert("flatpak");
     }
 
+    run("Update", Operation::AptUpdate)?;
     if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
-        run("Update", Operation::AptUpdate)?;
         run("Update", Operation::AptUpgrade { command: policy })?;
     }
     run(
         "Update",
-        Operation::AptPackagesUpdateAndInstall {
-            packages: apt_prereqs.iter().map(|value| (*value).to_owned()).collect(),
-        },
+        Operation::AptPackagesInstall { packages: apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
     if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
         run("Update", Operation::FlatpakApplicationsUpdate)?;

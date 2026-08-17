@@ -75,7 +75,6 @@ fn ensure_fuse(host: &Host) -> Result<()> {
     let package =
         if host.output("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
     if !host.output("dpkg", ["--status", package])?.status.success() {
-        host.run("APT update for AppImages", "sudo", ["apt-get", "update", "-qq"])?;
         host.run("AppImage FUSE support install", "sudo", ["apt-get", "install", "-qq", package])?;
     }
     Ok(())

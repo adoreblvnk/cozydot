@@ -39,15 +39,6 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
     Ok(())
 }
 
-pub fn update_and_install_packages(host: &Host, packages: &[String]) -> Result<()> {
-    let missing = missing_packages(host, packages)?;
-    if missing.is_empty() {
-        return Ok(());
-    }
-    host.run("APT update before install", "sudo", ["apt-get", "update", "-qq"])?;
-    install(host, "APT package install", missing)
-}
-
 pub fn install_packages(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
