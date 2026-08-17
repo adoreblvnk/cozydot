@@ -27,7 +27,6 @@ pub fn install(host: &Host, refs: &[String]) -> Result<()> {
     let mut args = vec![
         "--user".to_owned(),
         "install".into(),
-        "--app".into(),
         "--noninteractive".into(),
         "-y".into(),
         "flathub".into(),
@@ -39,6 +38,6 @@ pub fn install(host: &Host, refs: &[String]) -> Result<()> {
 }
 
 pub fn update(host: &Host) -> Result<()> {
-    host.run("Flatpak application update", "flatpak", ["--user", "update", "--app", "--noninteractive", "-y"])?;
+    host.run("Flatpak update", "flatpak", ["--user", "update", "--noninteractive", "-y"])?;
     Ok(())
 }

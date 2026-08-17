@@ -35,7 +35,7 @@ pub struct Config {
     pub version: ConfigVersion,
     pub shared: SharedConfig,
     pub linux: LinuxConfig,
-    pub macos: MacOsConfig,
+    pub macos: MacOSConfig,
 }
 
 impl Config {
@@ -188,7 +188,7 @@ pub struct LinuxUpdates {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacOsConfig {
+pub struct MacOSConfig {
     pub system: MacSystem,
     pub homebrew: Homebrew,
     pub dotfiles: Dotfiles,
@@ -271,7 +271,7 @@ pub struct MacHomebrewUpdates {
 pub enum DistroMapKey {
     Default,
     Ubuntu,
-    Linuxmint,
+    LinuxMint,
     Pop,
     Debian,
 }
@@ -280,7 +280,7 @@ impl DistroMapKey {
     fn from_distro(distro: Distro) -> Self {
         match distro {
             Distro::Ubuntu => Self::Ubuntu,
-            Distro::Linuxmint => Self::Linuxmint,
+            Distro::LinuxMint => Self::LinuxMint,
             Distro::Pop => Self::Pop,
             Distro::Debian => Self::Debian,
         }
@@ -477,7 +477,7 @@ pub fn selected_repo_codename(key: DistroMapKey, platform: &Platform, distro: Di
 #[serde(rename_all = "lowercase")]
 pub enum BinaryFormat {
     Deb,
-    Appimage,
+    AppImage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -499,14 +499,14 @@ impl BinaryPackage {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
-    Github { repo: String, assets: ArchitectureMap },
-    Url { urls: Box<ArchitectureMap> },
+    GitHub { repo: String, assets: ArchitectureMap },
+    Url { urls: ArchitectureMap },
 }
 
 impl BinarySource {
     fn validate(&self, path: &str) -> Result<()> {
         match self {
-            Self::Github { assets, .. } => assets.validate(&format!("{path}.assets"), "asset pattern"),
+            Self::GitHub { assets, .. } => assets.validate(&format!("{path}.assets"), "asset pattern"),
             Self::Url { urls } => urls.validate(&format!("{path}.urls"), "URL"),
         }
     }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::path::PathBuf;
 
-use super::parsers::GithubRelease;
+use super::parsers::GitHubRelease;
 
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
@@ -12,7 +12,7 @@ const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
-    GithubLatest { repo: String, asset_pattern: String },
+    GitHubLatest { repo: String, asset_pattern: String },
     Url { url: String },
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<(
     let url = resolve_url(host, package)?;
     match package.format {
         BinaryFormat::Deb => install_deb(host, download_deb(host, package, &url)?),
-        BinaryFormat::Appimage => {
+        BinaryFormat::AppImage => {
             super::appimage::install_appimage(host, "download binary package", &url, &appimage_path(host, package))
         }
     }
@@ -87,7 +87,7 @@ pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<(
 fn is_installed(host: &Host, package: &BinaryPackageOperation) -> bool {
     match package.format {
         BinaryFormat::Deb => host.executable_on_path(&package.name),
-        BinaryFormat::Appimage => appimage_path(host, package).exists(),
+        BinaryFormat::AppImage => appimage_path(host, package).exists(),
     }
 }
 
@@ -98,7 +98,7 @@ fn appimage_path(host: &Host, package: &BinaryPackageOperation) -> PathBuf {
 fn resolve_url(host: &Host, package: &BinaryPackageOperation) -> Result<String> {
     match &package.source {
         BinarySourceOperation::Url { url } => Ok(url.clone()),
-        BinarySourceOperation::GithubLatest { repo, asset_pattern } => {
+        BinarySourceOperation::GitHubLatest { repo, asset_pattern } => {
             let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
             let output = host.curl(
                 "resolve binary package release",
@@ -120,7 +120,7 @@ fn resolve_url(host: &Host, package: &BinaryPackageOperation) -> Result<String> 
 }
 
 fn select_asset_url(input: &[u8], asset_pattern: &str, package: &BinaryPackageOperation) -> Result<String> {
-    let release: GithubRelease = serde_json::from_slice(input).context("parse GitHub release JSON")?;
+    let release: GitHubRelease = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
     if matches.len() != 1 {

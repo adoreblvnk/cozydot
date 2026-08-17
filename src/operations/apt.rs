@@ -125,12 +125,12 @@ pub fn upgrade(host: &Host, command: AptUpgradeCommand) -> Result<()> {
         AptUpgradeCommand::Upgrade => ("APT upgrade", "upgrade"),
         AptUpgradeCommand::FullUpgrade => ("APT full-upgrade", "full-upgrade"),
     };
-    host.run(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq", "--"])?;
+    host.run(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq"])?;
     if command == AptUpgradeCommand::FullUpgrade {
         host.run(
             "APT purge autoremove",
             "sudo",
-            ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq", "--"],
+            ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq"],
         )?;
     }
     Ok(())

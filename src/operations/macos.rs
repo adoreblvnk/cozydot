@@ -61,7 +61,6 @@ fn is_installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool>
 }
 
 pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
-    install_homebrew(host)?;
     let brew = find_brew(host)?;
     if !is_installed(host, &brew, "--formula", formula)? {
         host.run("Homebrew formula install", &brew, ["install", formula])?;
@@ -78,14 +77,12 @@ pub(crate) fn formula_executable(host: &Host, formula: &str, executable: &str) -
 }
 
 fn find_brew(host: &Host) -> Result<String> {
-    for candidate in ["brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
+    for candidate in ["brew", "/opt/homebrew/bin/brew"] {
         if host.output(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {
             return Ok(candidate.to_owned());
         }
     }
-    bail!(
-        "Homebrew is unavailable after install; expected brew on PATH, /opt/homebrew/bin/brew, or /usr/local/bin/brew"
-    )
+    bail!("Homebrew is unavailable after install; expected brew on PATH or /opt/homebrew/bin/brew")
 }
 
 pub fn install_command_line_tools_for_xcode(host: &Host) -> Result<()> {

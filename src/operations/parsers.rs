@@ -1,12 +1,12 @@
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub(crate) struct GithubRelease {
-    pub assets: Vec<GithubAsset>,
+pub(crate) struct GitHubRelease {
+    pub assets: Vec<GitHubAsset>,
 }
 
 #[derive(Deserialize)]
-pub(crate) struct GithubAsset {
+pub(crate) struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,
 }

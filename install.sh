@@ -3,7 +3,7 @@ set -euo pipefail
 
 VERSION="${COZYDOT_VERSION:-1.0.0}"
 BASE_URL="${COZYDOT_RELEASE_BASE_URL:-https://github.com/adoreblvnk/cozydot/releases}"
-BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+BIN_DIR="$HOME/.local/bin"
 
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) PLATFORM=linux; ARCH=amd64 ;;

@@ -58,7 +58,6 @@ fn apply_package(host: &Host, root: &Path, package: &str, source: &Path) -> Resu
             root.as_os_str(),
             "--target".as_ref(),
             host.home().as_os_str(),
-            "--stow".as_ref(),
             "--".as_ref(),
             package.as_ref(),
         ],
