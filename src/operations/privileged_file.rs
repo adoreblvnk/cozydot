@@ -20,7 +20,7 @@ pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], lab
     let local_arg = local.path().as_os_str();
     let staged_arg = staged.as_os_str();
     let destination_arg = destination.as_os_str();
-    host.run_checked(
+    host.run(
         label,
         "sudo",
         [
@@ -38,7 +38,7 @@ pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], lab
     )?;
     // stage beside target for atomic rename, then sync file & parent
     let result = (|| {
-        host.run_checked(
+        host.run(
             label,
             "sudo",
             [
@@ -54,18 +54,14 @@ pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], lab
                 staged_arg,
             ],
         )?;
-        host.run_checked(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
-        host.run_checked(label, "sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg])?;
-        host.run_checked(
-            label,
-            "sudo",
-            [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg],
-        )?;
-        host.run_checked(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent_arg])?;
+        host.run(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
+        host.run(label, "sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg])?;
+        host.run(label, "sudo", [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg])?;
+        host.run(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent_arg])?;
         Ok(())
     })();
     if result.is_err() {
-        let _ = host.run("sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg]);
+        let _ = host.output("sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg]);
     }
     result
 }

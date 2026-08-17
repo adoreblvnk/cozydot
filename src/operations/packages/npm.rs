@@ -4,13 +4,13 @@ use super::super::{Host, executable_file};
 
 pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
     let Some(fnm) = resolve_fnm(host)? else {
-        bail!("npm package operation: managed fnm is unavailable after install");
+        bail!("npm install: managed fnm is unavailable after install");
     };
     let mut missing = Vec::new();
     for package in packages {
         let name = package_name(package);
         let output =
-            host.run(&fnm, ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name])?;
+            host.output(&fnm, ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name])?;
         if !output.status.success() {
             missing.push(package.clone());
         }
@@ -58,5 +58,5 @@ where
 {
     let mut args = vec!["exec".to_owned(), "--using=default".into(), "--".into(), "npm".into()];
     args.extend(npm_args.into_iter().map(|arg| arg.as_ref().to_owned()));
-    host.run_checked(label, fnm, args)
+    host.run(label, fnm, args)
 }

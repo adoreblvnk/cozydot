@@ -39,9 +39,9 @@ impl Platform {
 
     fn from_os_release(os: &OsRelease, desktop: &str, arch: &str) -> Result<Self> {
         let distro = Distro::from_os_release(os.id())?;
-        let upstream = distro.family(os.get_value("ID_LIKE"))?;
+        let family = distro.family(os.get_value("ID_LIKE"))?;
         let distro_codename = os.version_codename().unwrap_or_default().to_owned();
-        let base_codename = match upstream {
+        let base_codename = match family {
             Family::Ubuntu => os.get_value("UBUNTU_CODENAME"),
             Family::Debian => os.get_value("DEBIAN_CODENAME"),
         }
@@ -54,7 +54,7 @@ impl Platform {
             bail!("detected distribution codenames must fit on one line and contain no control characters");
         }
         Ok(Self {
-            identity: PlatformIdentity::Linux { distro, upstream },
+            identity: PlatformIdentity::Linux { distro, family },
             distro_codename,
             base_codename,
             desktop: DesktopKind::from_environment(desktop),
@@ -122,7 +122,7 @@ pub enum Family {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformIdentity {
     MacOs,
-    Linux { distro: Distro, upstream: Family },
+    Linux { distro: Distro, family: Family },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]

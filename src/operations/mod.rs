@@ -54,10 +54,10 @@ pub enum Operation {
     RustToolchainUpdate,
     GoToolchainInstall { selector: GoToolchainSelector, architecture: Architecture },
     GoToolchainUpdate { selector: GoToolchainSelector, architecture: Architecture },
-    NodeToolchainInstall { selector: String },
-    NodeToolchainUpdate { selector: String },
-    PythonToolchainInstall { selector: String },
-    PythonToolchainUpdate,
+    NodeVersionInstall { selector: String },
+    NodeVersionUpdate { selector: String },
+    PythonVersionInstall { selector: String },
+    PythonVersionUpgrade,
     CargoBinstallInstall,
     CargoUpdateInstall,
     AptRepoAdd(Box<AptRepo>),
@@ -118,10 +118,10 @@ impl Operation {
             Self::RustToolchainUpdate => "Rust toolchain update",
             Self::GoToolchainInstall { .. } => "Go toolchain install",
             Self::GoToolchainUpdate { .. } => "Go toolchain update",
-            Self::NodeToolchainInstall { .. } => "Node.js toolchain install",
-            Self::NodeToolchainUpdate { .. } => "Node.js toolchain update",
-            Self::PythonToolchainInstall { .. } => "Python toolchain install",
-            Self::PythonToolchainUpdate => "Python toolchain update",
+            Self::NodeVersionInstall { .. } => "Node.js version install",
+            Self::NodeVersionUpdate { .. } => "Node.js version update",
+            Self::PythonVersionInstall { .. } => "Python version install",
+            Self::PythonVersionUpgrade => "Python version upgrade",
             Self::CargoBinstallInstall => "cargo-binstall install",
             Self::CargoUpdateInstall => "cargo-update install",
             Self::AptRepoAdd(_) => "APT repo add",
@@ -164,7 +164,7 @@ pub(crate) fn run(operation: &Operation) -> Result<OperationOutcome> {
 
 fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
     match operation {
-        Operation::SudoGroupEnsure => completed(users::sudo_group(&host)),
+        Operation::SudoGroupEnsure => completed(users::ensure_in_sudo_group(&host)),
         Operation::DebianAptComponentsAdd => completed(repo::debian_components::add(&host)),
         Operation::AptUpdate => completed(apt::update(&host)),
         Operation::UnattendedUpgradesSet { enabled } => completed(apt::set_unattended_upgrades(&host, *enabled)),
@@ -185,10 +185,10 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         Operation::GoToolchainUpdate { selector, architecture } => {
             completed(go::update_toolchain(&host, selector, *architecture))
         }
-        Operation::NodeToolchainInstall { selector } => completed(fnm::install_toolchain(&host, selector)),
-        Operation::NodeToolchainUpdate { selector } => completed(fnm::install_toolchain(&host, selector)),
-        Operation::PythonToolchainInstall { selector } => completed(uv::install_toolchain(&host, selector)),
-        Operation::PythonToolchainUpdate => completed(uv::update_toolchain(&host)),
+        Operation::NodeVersionInstall { selector } => completed(fnm::install_version(&host, selector)),
+        Operation::NodeVersionUpdate { selector } => completed(fnm::install_version(&host, selector)),
+        Operation::PythonVersionInstall { selector } => completed(uv::install_py(&host, selector)),
+        Operation::PythonVersionUpgrade => completed(uv::upgrade_py_versions(&host)),
         Operation::CargoBinstallInstall => completed(binary::cargo_binstall::install(&host)),
         Operation::CargoUpdateInstall => completed(binary::cargo_binstall::install_cargo_update(&host)),
         Operation::AptRepoAdd(repo) => completed(repo::add(&host, repo)),
@@ -211,12 +211,12 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         Operation::DotfilesApply { root, packages, replace } => {
             completed(packages::dotfiles::apply(&host, root, packages, *replace))
         }
-        Operation::DockerGroupEnsure => completed(users::ensure_product_group(&host, "Docker", "docker", "docker")),
+        Operation::DockerGroupEnsure => completed(users::ensure_in_group(&host, "Docker", "docker", "docker")),
         Operation::DockerLocalLoggingDriverSet { max_size } => {
             completed(docker::set_local_logging_driver(&host, max_size.as_deref()))
         }
         Operation::VirtualBoxGroupEnsure => {
-            completed(users::ensure_product_group(&host, "VirtualBox", "VBoxManage", "vboxusers"))
+            completed(users::ensure_in_group(&host, "VirtualBox", "VBoxManage", "vboxusers"))
         }
         Operation::VsCodeExtensionsInstall { extensions } => completed(vscode::install_extensions(&host, extensions)),
         Operation::DesktopSettingSet { environment, setting } => completed(desktop::set(&host, *environment, setting)),

@@ -90,7 +90,7 @@ impl Config {
         if let Some(configured) = &self.linux.desktop
             && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
         {
-            if configured.has_neutral_intent() {
+            if configured.has_common_intent() {
                 bail!(
                     "linux.desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
                     desktop.as_str()
@@ -297,10 +297,10 @@ impl DistroMapKey {
 pub fn select_distro_map<T>(
     map: &BTreeMap<DistroMapKey, T>,
     distro: Distro,
-    upstream: Family,
+    family: Family,
 ) -> Option<(DistroMapKey, &T)> {
     let exact = DistroMapKey::from_distro(distro);
-    let family = DistroMapKey::from_family(upstream);
+    let family = DistroMapKey::from_family(family);
     map.get(&exact)
         .map(|value| (exact, value))
         .or_else(|| map.get(&family).map(|value| (family, value)))
@@ -397,7 +397,7 @@ impl AptPackages {
 #[serde(deny_unknown_fields)]
 pub struct Repo {
     pub name: String,
-    pub key: String,
+    pub key_url: String,
     pub key_path: String,
     pub urls: BTreeMap<DistroMapKey, String>,
     pub suite: String,
@@ -416,8 +416,8 @@ impl Repo {
         if self.urls.is_empty() {
             bail!("{path}.urls: must be a non-empty mapping");
         }
-        if self.key.chars().any(char::is_control) {
-            bail!("{path}.key: must contain no control characters");
+        if self.key_url.chars().any(char::is_control) {
+            bail!("{path}.key_url: must contain no control characters");
         }
         validate_repo_key_path(Path::new(&self.key_path))?;
         if self.suite.is_empty() {
@@ -634,14 +634,14 @@ impl Desktop {
         Ok(())
     }
 
-    pub fn has_neutral_intent(&self) -> bool {
+    pub fn has_common_intent(&self) -> bool {
         self.theme.is_some()
             || self.terminal.is_some()
             || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
     }
 
     pub fn has_intent(&self) -> bool {
-        self.has_neutral_intent() || self.gnome.as_ref().is_some_and(Gnome::has_intent)
+        self.has_common_intent() || self.gnome.as_ref().is_some_and(Gnome::has_intent)
     }
 }
 

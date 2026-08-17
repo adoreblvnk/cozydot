@@ -81,7 +81,7 @@ linux:
         - xz-utils
       repos:
         - name: github-cli
-          key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+          key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
           key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
           urls:
             default: https://cli.github.com/packages

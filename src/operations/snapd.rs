@@ -3,27 +3,27 @@ use std::path::Path;
 
 use super::{Host, apt, privileged_file::write_atomic};
 
-const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/cozydot-no-snap.pref";
+const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/nosnap.pref";
 
 pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
-        host.run_checked("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
+        host.run("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
         apt::install_packages(host, &["snapd".into()])?;
-        host.run_checked("Snap service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
+        host.run("Snap service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
         return Ok(());
     }
 
     remove_snaps(host)?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        let is_enabled = host.run("systemctl", ["is-enabled", unit])?.status.success();
-        let is_active = host.run("systemctl", ["is-active", unit])?.status.success();
+        let is_enabled = host.output("systemctl", ["is-enabled", unit])?.status.success();
+        let is_active = host.output("systemctl", ["is-active", unit])?.status.success();
         if is_enabled || is_active {
-            host.run_checked("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
+            host.run("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }
     apt::purge(host, &["snapd".into()])?;
     let home_snap = host.home().join("snap");
-    host.run_checked(
+    host.run(
         "Snap data removal",
         "sudo",
         [
@@ -42,23 +42,23 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
 }
 
 fn remove_snaps(host: &Host) -> Result<()> {
-    let output = host.run("snap", ["list"])?;
+    let output = host.output("snap", ["list"])?;
     if !output.status.success() {
         return Ok(());
     }
-    let output = std::str::from_utf8(&output.stdout).context("snap list returned non-UTF-8 state")?;
+    let output = std::str::from_utf8(&output.stdout).context("snap list returned non-UTF-8 output")?;
     let mut names = Vec::new();
     for line in output.lines().skip(1) {
         let name = line.split_ascii_whitespace().next().unwrap_or_default();
         if !valid_snap_name(name) {
-            bail!("snap list returned malformed package state");
+            bail!("snap list returned malformed package row");
         }
         names.push(name.to_owned());
     }
     // remove app snaps before base & runtime snaps
     names.sort_by_key(|name| matches!(name.as_str(), "snapd" | "bare") || name.starts_with("core"));
     for name in names {
-        host.run_checked("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
+        host.run("Snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
     }
     Ok(())
 }

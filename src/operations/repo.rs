@@ -66,7 +66,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
 
     let binary_keyring = TempPath::new_with_suffix(host, "repo-key-binary", ".gpg")?;
 
-    host.run_checked(
+    host.run(
         "repo key conversion",
         "gpg",
         [
@@ -81,7 +81,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
     )?;
 
     // parsing proves download contains a public key; configured URL remains identity trust boundary
-    let inspection = host.run_checked(
+    let key_list = host.run(
         "repo key validation",
         "gpg",
         [
@@ -94,7 +94,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
             "--list-keys",
         ],
     )?;
-    if !inspection
+    if !key_list
         .stdout
         .split(|byte| *byte == b'\n')
         .any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()))
@@ -118,22 +118,23 @@ pub(crate) mod debian_components {
     use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, path::Path};
 
-    const LEGACY_SOURCE: &str = "/etc/apt/sources.list";
-    const MODERN_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
+    const ONELINE_SOURCE: &str = "/etc/apt/sources.list";
+    const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
+    // TODO: review this
     pub(crate) fn add(host: &Host) -> Result<()> {
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
-            host.run_checked("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
+            host.run("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
         }
 
-        reject_symlink(host, MODERN_SOURCE)?;
-        let modern = probe_regular(host, MODERN_SOURCE)?;
-        if !modern {
-            host.run_checked("Debian APT modern source absence check", "sudo", ["test", "!", "-e", MODERN_SOURCE])?;
+        reject_symlink(host, DEB822_SOURCE)?;
+        let deb822 = probe_regular(host, DEB822_SOURCE)?;
+        if !deb822 {
+            host.run("Debian APT deb822 source absence check", "sudo", ["test", "!", "-e", DEB822_SOURCE])?;
         }
-        let source = if modern { MODERN_SOURCE } else { LEGACY_SOURCE };
-        if !modern {
+        let source = if deb822 { DEB822_SOURCE } else { ONELINE_SOURCE };
+        if !deb822 {
             reject_symlink(host, source)?;
             if !probe_regular(host, source)? {
                 bail!("Debian APT source file does not exist: {source}");
@@ -142,7 +143,7 @@ pub(crate) mod debian_components {
 
         let original = read(host, source)?;
         let text = std::str::from_utf8(&original).context("Debian APT source is not UTF-8")?;
-        let replacement = if modern { add_deb822_components(text) } else { add_list_components(text) };
+        let replacement = if deb822 { add_deb822_components(text) } else { add_oneline_components(text) };
         if replacement.as_bytes() == original {
             return Ok(());
         }
@@ -158,34 +159,28 @@ pub(crate) mod debian_components {
     }
 
     fn probe_regular(host: &Host, path: &str) -> Result<bool> {
-        let output = host.run("sudo", ["test", "-f", path])?;
+        let output = host.output("sudo", ["test", "-f", path])?;
         match output.status.code() {
             Some(0) => Ok(true),
             Some(1) => Ok(false),
-            _ => bail!("Debian APT source file inspection failed for {path}"),
+            _ => bail!("Debian APT source regular-file check failed for {path}"),
         }
     }
 
     fn reject_symlink(host: &Host, path: &str) -> Result<()> {
-        let output = host.run("sudo", ["test", "-L", path])?;
+        let output = host.output("sudo", ["test", "-L", path])?;
         match output.status.code() {
             Some(0) => bail!("Debian APT source path is a symlink: {path}"),
             Some(1) => Ok(()),
-            _ => bail!("Debian APT source symlink inspection failed for {path}"),
+            _ => bail!("Debian APT source symlink check failed for {path}"),
         }
     }
 
     fn read(host: &Host, path: &str) -> Result<Vec<u8>> {
-        Ok(host
-            .run_checked(
-                "Debian APT source inspection",
-                "sudo",
-                [OsStr::new("cat"), OsStr::new("--"), OsStr::new(path)],
-            )?
-            .stdout)
+        Ok(host.run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new("--"), OsStr::new(path)])?.stdout)
     }
 
-    fn add_list_components(text: &str) -> String {
+    fn add_oneline_components(text: &str) -> String {
         text.split_inclusive('\n')
             .map(|line| {
                 let body = line.strip_suffix('\n').unwrap_or(line);

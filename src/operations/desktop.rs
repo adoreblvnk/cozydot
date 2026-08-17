@@ -53,6 +53,6 @@ pub(crate) fn set(host: &Host, environment: DesktopEnvironment, setting: &Deskto
 }
 
 fn gsettings_set(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
-    host.run_checked("gsettings set", "gsettings", ["set", schema, key, value])?;
+    host.run("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }

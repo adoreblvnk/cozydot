@@ -55,8 +55,8 @@ pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, arc
         bail!("downloaded Go archive checksum mismatch");
     }
     // remove whole tree so files missing from new release can't survive replacement
-    host.run_checked("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
-    host.run_checked(
+    host.run("Go installation replacement", "sudo", ["rm", "-rf", "--", "/usr/local/go"])?;
+    host.run(
         "Go archive extraction",
         "sudo",
         ["tar", "-xzf", archive.path().to_str().context("Go archive path is not UTF-8")?, "-C", "/usr/local"],
@@ -124,7 +124,7 @@ fn inspect_installation(host: &Host, program: &str) -> Result<Option<Installatio
     if program.starts_with('/') && !regular_executable_file(Path::new(program)) {
         return Ok(None);
     }
-    let output = match host.run(program, ["version"]) {
+    let output = match host.output(program, ["version"]) {
         Ok(output) => output,
         Err(error)
             if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
@@ -151,12 +151,12 @@ fn parse_version_output(output: &[u8]) -> Result<Installation> {
         || !matches!(fields[3], "linux/amd64" | "linux/arm64" | "linux/arm" | "darwin/amd64" | "darwin/arm64")
         || !fields[3].starts_with(target_os)
     {
-        bail!("go returned malformed version state");
+        bail!("go version returned malformed output");
     }
     let version = fields[2]
         .strip_prefix("go")
         .filter(|version| numeric_version(version, 2, 3))
-        .context("go returned malformed version state")?;
+        .context("go version returned malformed output")?;
     Ok(Installation {
         version: version.to_owned(),
         architecture: fields[3].trim_start_matches(&format!("{target_os}/")).to_owned(),

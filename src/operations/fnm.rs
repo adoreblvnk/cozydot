@@ -16,15 +16,15 @@ pub fn install(host: &Host) -> Result<()> {
     }
 
     let data_home = host.home().join(".local/share");
-    let installed = data_home.join("fnm/fnm");
-    if !regular_executable_file(&installed) {
+    let fnm_path = data_home.join("fnm/fnm");
+    if !regular_executable_file(&fnm_path) {
         let installer = TempPath::new(host, "fnm-install")?;
         host.curl(
             "FNM installer download",
             "https://fnm.vercel.app/install",
             ["--output", &installer.path().to_string_lossy()],
         )?;
-        host.run_checked(
+        host.run(
             "FNM install",
             "env",
             [
@@ -34,25 +34,25 @@ pub fn install(host: &Host) -> Result<()> {
                 "--skip-shell".to_owned(),
             ],
         )?;
-        if !regular_executable_file(&installed) {
-            bail!("FNM installer did not publish executable {}", installed.display());
+        if !regular_executable_file(&fnm_path) {
+            bail!("FNM installer did not publish executable {}", fnm_path.display());
         }
     }
     append_shell(host, FNM_BASH_INIT)
 }
 
-pub(crate) fn install_toolchain(host: &Host, selector: &str) -> Result<()> {
+pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
     let fnm = resolve_fnm(host)?;
     fnm_install(host, &fnm, selector)?;
-    host.run_checked("fnm default", &fnm, ["default", "--", fnm_alias(selector)])?;
+    host.run("fnm default", &fnm, ["default", "--", fnm_alias(selector)])?;
     Ok(())
 }
 
 fn fnm_install(host: &Host, fnm: &str, selector: &str) -> Result<()> {
     if selector == "lts" {
-        host.run_checked("fnm install", fnm, ["install", "--progress", "never", "--lts"])?;
+        host.run("fnm install", fnm, ["install", "--progress", "never", "--lts"])?;
     } else {
-        host.run_checked("fnm install", fnm, ["install", "--progress", "never", "--", selector])?;
+        host.run("fnm install", fnm, ["install", "--progress", "never", "--", selector])?;
     }
     Ok(())
 }
@@ -66,7 +66,7 @@ fn resolve_fnm(host: &Host) -> Result<String> {
     if regular_executable_file(&managed) {
         return path_program(&managed, "managed fnm executable path");
     }
-    bail!("Node toolchain operation: fnm is unavailable after install")
+    bail!("fnm install: fnm is unavailable after install")
 }
 
 fn fnm_alias(selector: &str) -> &str {

@@ -20,7 +20,7 @@ use std::{
 const APT_PREREQS: [&str; 7] = ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
 
 #[derive(Default)]
-struct ManagerInstallPlan {
+struct ToolInstallPlan {
     rustup: bool,
     fnm: bool,
     uv: bool,
@@ -30,7 +30,7 @@ struct ManagerInstallPlan {
 
 struct LinuxApplyPlan {
     apt_prereqs: BTreeSet<&'static str>,
-    manager_installs: ManagerInstallPlan,
+    tool_installs: ToolInstallPlan,
     flatpak_refs: Option<Vec<String>>,
     update_apt: bool,
     repos: Vec<AptRepo>,
@@ -43,7 +43,7 @@ struct LinuxApplyPlan {
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     match platform.identity {
         PlatformIdentity::MacOs => macos_apply(config, platform.architecture, dotfiles_root),
-        PlatformIdentity::Linux { distro, upstream } => linux_apply(config, platform, distro, upstream, dotfiles_root),
+        PlatformIdentity::Linux { distro, family } => linux_apply(config, platform, distro, family, dotfiles_root),
     }
 }
 
@@ -69,10 +69,10 @@ fn linux_apply(
     config: &Config,
     platform: &Platform,
     distro: Distro,
-    upstream: Family,
+    family: Family,
     dotfiles_root: &Path,
 ) -> Result<()> {
-    let plan = plan_linux_apply(config, platform, distro, upstream);
+    let plan = plan_linux_apply(config, platform, distro, family);
 
     if distro == Distro::Debian {
         if config.linux.system.sudo_group == Some(true) {
@@ -126,7 +126,7 @@ fn linux_apply(
         run("Apply", Operation::FlatpakFlathubRemoteAdd)?;
         run("Apply", Operation::FlatpakApplicationsInstall { refs })?;
     }
-    apply_tools(config, platform.architecture, &plan.manager_installs)?;
+    apply_tools(config, platform.architecture, &plan.tool_installs)?;
     apply_packages(config)?;
     for binary in plan.deb_binaries {
         run("Apply", Operation::BinaryPackageInstall(binary))?;
@@ -148,9 +148,9 @@ fn linux_apply(
     Ok(())
 }
 
-fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, upstream: Family) -> LinuxApplyPlan {
+fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family: Family) -> LinuxApplyPlan {
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
-    let manager_installs = manager_install_plan(config);
+    let tool_installs = tool_install_plan(config);
     let apt = config.linux.packages.apt.as_ref();
     let mut update_apt = apt.and_then(|apt| apt.install.as_ref()).is_some_and(|values| !values.is_empty())
         || (distro == Distro::Ubuntu
@@ -160,7 +160,7 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, upstre
     let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
-    for (repo, key, source_url) in applicable_repos(config, distro, upstream, platform.architecture) {
+    for (repo, key, source_url) in applicable_repos(config, distro, family, platform.architecture) {
         repos.push(add_repo(repo, platform, distro, key, source_url));
         repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
         repo_packages_to_install.extend(repo.packages.iter().cloned());
@@ -185,7 +185,7 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, upstre
     add_desktop_prereqs(config, platform, &mut apt_prereqs);
     LinuxApplyPlan {
         apt_prereqs,
-        manager_installs,
+        tool_installs,
         flatpak_refs,
         update_apt,
         repos,
@@ -197,7 +197,7 @@ fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, upstre
 }
 
 fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
-    let managers = manager_install_plan(config);
+    let tools = tool_install_plan(config);
     let dotfiles = !config.shared.dotfiles.packages.is_empty() || !config.macos.dotfiles.packages.is_empty();
     let homebrew_packages =
         dotfiles || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
@@ -216,7 +216,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
         }
         run("Apply", Operation::HomebrewPackagesInstall { formulae, casks: config.macos.homebrew.casks.clone() })?;
     }
-    apply_tools(config, arch, &managers)?;
+    apply_tools(config, arch, &tools)?;
     apply_packages(config)?;
     if let Some(families) = nerd_fonts(config) {
         run("Apply", Operation::UserNerdFontsInstall { families })?;
@@ -229,30 +229,30 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
     Ok(())
 }
 
-fn apply_tools(config: &Config, arch: Architecture, managers: &ManagerInstallPlan) -> Result<()> {
-    if managers.rustup {
+fn apply_tools(config: &Config, arch: Architecture, tools: &ToolInstallPlan) -> Result<()> {
+    if tools.rustup {
         run("Apply", Operation::RustupInstall)?;
     }
     if let Some(selector) = config.shared.tools.rust.as_deref() {
         run("Apply", Operation::RustToolchainInstall { selector: selector.to_owned() })?;
     }
-    if managers.cargo_binstall {
+    if tools.cargo_binstall {
         run("Apply", Operation::CargoBinstallInstall)?;
     }
-    if managers.cargo_update {
+    if tools.cargo_update {
         run("Apply", Operation::CargoUpdateInstall)?;
     }
-    if managers.fnm {
+    if tools.fnm {
         run("Apply", Operation::FnmInstall)?;
     }
     if let Some(selector) = config.shared.tools.node.as_deref() {
-        run("Apply", Operation::NodeToolchainInstall { selector: selector.to_owned() })?;
+        run("Apply", Operation::NodeVersionInstall { selector: selector.to_owned() })?;
     }
-    if managers.uv {
+    if tools.uv {
         run("Apply", Operation::UvInstall)?;
     }
     if let Some(selector) = &config.shared.tools.python {
-        run("Apply", Operation::PythonToolchainInstall { selector: selector.clone() })?;
+        run("Apply", Operation::PythonVersionInstall { selector: selector.clone() })?;
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
         run("Apply", Operation::GoToolchainInstall { selector: go_selector(selector), architecture: arch })?;
@@ -270,9 +270,9 @@ fn apply_packages(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn manager_install_plan(config: &Config) -> ManagerInstallPlan {
+fn tool_install_plan(config: &Config) -> ToolInstallPlan {
     let rust = config.shared.tools.rust.is_some();
-    ManagerInstallPlan {
+    ToolInstallPlan {
         rustup: rust,
         fnm: config.shared.tools.node.is_some(),
         uv: config.shared.tools.python.is_some(),
@@ -348,14 +348,14 @@ fn update_tools_and_packages(config: &Config, arch: Architecture, macos: bool) -
     if updates.tools.node == Some(true) {
         run(
             "Update",
-            Operation::NodeToolchainUpdate {
+            Operation::NodeVersionUpdate {
                 selector: config.shared.tools.node.clone().unwrap_or_else(|| "latest".to_owned()),
             },
         )?;
     }
     if updates.tools.python == Some(true) {
         run("Update", Operation::UvInstall)?;
-        run("Update", Operation::PythonToolchainUpdate)?;
+        run("Update", Operation::PythonVersionUpgrade)?;
     }
     if updates.packages.cargo == Some(true) {
         run("Update", Operation::CargoCratesUpdate)?;
@@ -369,7 +369,7 @@ fn update_tools_and_packages(config: &Config, arch: Architecture, macos: bool) -
 fn applicable_repos(
     config: &Config,
     distro: Distro,
-    upstream: Family,
+    family: Family,
     architecture: Architecture,
 ) -> impl Iterator<Item = (&Repo, DistroMapKey, &String)> {
     config
@@ -392,7 +392,7 @@ fn applicable_repos(
                 })
             })
         })
-        .filter_map(move |repo| select_distro_map(&repo.urls, distro, upstream).map(|(key, url)| (repo, key, url)))
+        .filter_map(move |repo| select_distro_map(&repo.urls, distro, family).map(|(key, url)| (repo, key, url)))
 }
 
 fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_url: &str) -> AptRepo {
@@ -403,7 +403,7 @@ fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey,
     };
     AptRepo::new(
         repo.name.clone(),
-        repo.key.clone(),
+        repo.key_url.clone(),
         source_url.to_owned(),
         platform.architecture,
         suite,

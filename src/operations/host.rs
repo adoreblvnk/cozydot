@@ -17,7 +17,7 @@ impl Host {
         Ok(Self { home })
     }
 
-    pub fn run<I, S>(&self, program: &str, args: I) -> Result<Output>
+    pub fn output<I, S>(&self, program: &str, args: I) -> Result<Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -25,19 +25,25 @@ impl Host {
         let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
         let mut command = Command::new(program);
         command.args(&args);
-        command.output().with_context(|| format!("{program} operation: start {}", display(program, &args)))
+        command.output().with_context(|| format!("start command {}", display(program, &args)))
     }
 
-    pub fn run_checked<I, S>(&self, label: &str, program: &str, args: I) -> Result<Output>
+    pub fn run<I, S>(&self, label: &str, program: &str, args: I) -> Result<Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let output = self.run(program, args)?;
+        let output = self.output(program, args)?;
         if !output.status.success() {
             bail!("{label}: {program} failed ({}): {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
         }
         Ok(output)
+    }
+
+    pub fn require_cli(&self, label: &str, program: &str) -> Result<()> {
+        self.run(&format!("{label} CLI version check"), program, ["--version"])
+            .with_context(|| format!("{label} integration requires an existing usable {program} CLI"))?;
+        Ok(())
     }
 
     pub fn curl<I, S>(&self, label: &str, url: &str, args: I) -> Result<Output>
@@ -52,7 +58,7 @@ impl Host {
         curl_args.extend(args.into_iter().map(|arg| arg.as_ref().to_os_string()));
         // keep URL after `--` so a leading hyphen can't become a curl option
         curl_args.extend([OsString::from("--"), OsString::from(url)]);
-        self.run_checked(label, "curl", curl_args)
+        self.run(label, "curl", curl_args)
     }
 
     pub fn home(&self) -> PathBuf {
@@ -115,7 +121,7 @@ impl TempPath {
             .suffix(suffix)
             .tempfile_in(parent)
             .map(|file| Self(file.into_temp_path()))
-            .context("create operation temporary file")
+            .context("create temporary file")
     }
 
     pub fn path(&self) -> &Path {
