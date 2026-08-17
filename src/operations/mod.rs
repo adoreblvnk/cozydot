@@ -1,5 +1,6 @@
 //! Define & run typed host operations.
 
+mod appimage;
 mod appimaged;
 mod apt;
 mod binary;

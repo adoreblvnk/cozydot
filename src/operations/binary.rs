@@ -2,7 +2,7 @@ use super::{Host, TempPath};
 use crate::{config::BinaryFormat, platform::Architecture};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::path::PathBuf;
 
 use super::parsers::GithubRelease;
 
@@ -76,10 +76,11 @@ pub(crate) fn install(host: &Host, package: &BinaryPackageOperation) -> Result<(
         return Ok(());
     }
     let url = resolve_url(host, package)?;
-    let temp = download(host, package, &url)?;
     match package.format {
-        BinaryFormat::Deb => install_deb(host, temp),
-        BinaryFormat::Appimage => install_appimage(host, package, temp),
+        BinaryFormat::Deb => install_deb(host, download_deb(host, package, &url)?),
+        BinaryFormat::Appimage => {
+            super::appimage::install_appimage(host, "download binary package", &url, &appimage_path(host, package))
+        }
     }
 }
 
@@ -133,16 +134,8 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &BinaryPackageOp
     Ok(matches[0].browser_download_url.clone())
 }
 
-fn download(host: &Host, package: &BinaryPackageOperation, url: &str) -> Result<TempPath> {
-    let temp = match package.format {
-        BinaryFormat::Deb => TempPath::new_with_suffix(host, &package.name, ".deb")?,
-        BinaryFormat::Appimage => {
-            let applications = host.home().join("Applications");
-            fs::create_dir_all(&applications).context("create Applications directory")?;
-            // stage beside destination so final rename can't cross filesystems
-            TempPath::new_in_with_suffix(&applications, &format!("{}-", package.name), ".part")?
-        }
-    };
+fn download_deb(host: &Host, package: &BinaryPackageOperation, url: &str) -> Result<TempPath> {
+    let temp = TempPath::new_with_suffix(host, &package.name, ".deb")?;
     host.curl("download binary package", url, ["--output".as_ref(), temp.path().as_os_str()])?;
     Ok(temp)
 }
@@ -162,9 +155,4 @@ fn install_deb(host: &Host, temp: TempPath) -> Result<()> {
         ],
     )?;
     Ok(())
-}
-
-fn install_appimage(host: &Host, package: &BinaryPackageOperation, temp: TempPath) -> Result<()> {
-    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o755))?;
-    fs::rename(temp.path(), appimage_path(host, package)).context("publish AppImage into Applications")
 }

@@ -2,7 +2,7 @@ use super::Host;
 use super::parsers::GithubRelease;
 use crate::platform::Architecture;
 use anyhow::{Context, Result};
-use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+use std::{fs, path::Path};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
@@ -17,15 +17,9 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
         let _ = clear_cache(&home.join(".local/share/applications"));
 
         let applications = home.join("Applications");
-        fs::create_dir_all(&applications).context("create Applications directory")?;
         let destination = applications.join("appimaged.AppImage");
         let url = resolve_asset_url(host, architecture)?;
-        host.curl(
-            "download appimaged",
-            &url,
-            ["--output", destination.to_str().context("appimaged path is not UTF-8")?],
-        )?;
-        fs::set_permissions(&destination, fs::Permissions::from_mode(0o755)).context("make appimaged executable")?;
+        super::appimage::install_appimage(host, "download appimaged", &url, &destination)?;
         host.run(
             "launch appimaged",
             destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?,
