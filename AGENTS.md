@@ -14,7 +14,7 @@
 ## Project conventions
 
 - When adapting official documentation or an established implementation, preserve its structure and line order where practical. Make the smallest project-required diff, keep local terminology, cite the source, and explain only non-obvious deviations.
-- Treat Cozydot as a safe typed execution layer. Preserve upstream-documented names, values, paths, and identifiers so users can understand, troubleshoot, and maintain installed software from official documentation alone, without depending on Cozydot.
+- Preserve upstream-documented names, values, paths, and identifiers so users can understand, troubleshoot, and maintain installed software from official documentation alone, without depending on Cozydot. Shorten names when no precision is lost.
 
 ## Supported platforms
 
