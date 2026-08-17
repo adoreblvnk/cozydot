@@ -686,7 +686,7 @@ pub struct Gnome {
 }
 
 impl Gnome {
-    fn has_intent(&self) -> bool {
+    pub(crate) fn has_intent(&self) -> bool {
         self.extensions.as_ref().is_some_and(|extensions| !extensions.is_empty())
             || self.dash_to_dock == Some(true)
             || self.rounded_window_corners == Some(true)

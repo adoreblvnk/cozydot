@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
-use super::{Host, apt, privileged_file::write_atomic};
+use super::{Host, apt, privileged_file::write_atomic, systemd};
 
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/nosnap.pref";
 
@@ -15,9 +15,7 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
 
     remove_snaps(host)?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        let is_enabled = host.output("systemctl", ["is-enabled", unit])?.status.success();
-        let is_active = host.output("systemctl", ["is-active", unit])?.status.success();
-        if is_enabled || is_active {
+        if systemd::enabled_or_active(host, unit)? {
             host.run("Snap service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }
