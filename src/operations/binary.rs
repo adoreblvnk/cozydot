@@ -60,7 +60,7 @@ pub(crate) mod cargo_binstall {
                 .with_context(|| format!("cargo-binstall executable path is not UTF-8: {}", binstall.display()))?
                 .to_owned()
         };
-        host.run("cargo-update install", &program, ["--no-confirm", "--", "cargo-update"])?;
+        host.run("cargo-update install", &program, ["--no-confirm", "cargo-update"])?;
         Ok(())
     }
 }

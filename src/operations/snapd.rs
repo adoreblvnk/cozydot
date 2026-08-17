@@ -7,7 +7,7 @@ const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/nosnap.pref";
 
 pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
     if enabled {
-        host.run("no-Snap APT pin removal", "sudo", ["rm", "-f", "--", NO_SNAP_PIN])?;
+        host.run("no-Snap APT pin removal", "sudo", ["rm", "-f", NO_SNAP_PIN])?;
         apt::install_packages(host, &["snapd".into()])?;
         host.run("Snap service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
         return Ok(());

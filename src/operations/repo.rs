@@ -177,7 +177,7 @@ pub(crate) mod debian_components {
     }
 
     fn read(host: &Host, path: &str) -> Result<Vec<u8>> {
-        Ok(host.run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new("--"), OsStr::new(path)])?.stdout)
+        Ok(host.run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new(path)])?.stdout)
     }
 
     fn add_oneline_components(text: &str) -> String {

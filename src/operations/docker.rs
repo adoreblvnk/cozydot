@@ -25,7 +25,7 @@ pub(crate) fn set_local_logging_driver(host: &Host, max_size: Option<&str>) -> R
 }
 
 fn read_daemon_config(host: &Host) -> Result<Map<String, Value>> {
-    let stat_output = host.output("sudo", ["stat", "--format=%f", "--", DOCKER_DAEMON_CONFIG])?;
+    let stat_output = host.output("sudo", ["stat", "--format=%f", DOCKER_DAEMON_CONFIG])?;
     if !stat_output.status.success() {
         host.run("Docker daemon config absence check", "sudo", ["test", "!", "-e", DOCKER_DAEMON_CONFIG])?;
         host.run("Docker daemon config symlink absence check", "sudo", ["test", "!", "-L", DOCKER_DAEMON_CONFIG])?;
@@ -36,7 +36,7 @@ fn read_daemon_config(host: &Host) -> Result<Map<String, Value>> {
     if mode & 0o170000 != 0o100000 {
         bail!("Docker daemon config destination is not a regular file");
     }
-    let output = host.run("Docker daemon config read", "sudo", ["cat", "--", DOCKER_DAEMON_CONFIG])?;
+    let output = host.run("Docker daemon config read", "sudo", ["cat", DOCKER_DAEMON_CONFIG])?;
     let text = std::str::from_utf8(&output.stdout).context("Docker daemon config is not valid UTF-8")?;
     serde_json::from_str(text).context("Docker daemon config must be a JSON object")
 }
