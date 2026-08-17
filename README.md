@@ -1,7 +1,33 @@
-# cozydot
+# Cozydot
 
-Cozydot provisions packages, development tools, dotfiles, integrations, desktop
-settings, and updates on Linux and macOS from one active configuration file.
+Cozydot is an idempotent post-install and dotfile manager for Linux and macOS.
+It provisions packages, development tools, dotfiles, integrations, desktop
+settings, and updates from one declarative YAML file.
+
+## Why Cozydot?
+
+### Carry one configuration between machines
+
+A new laptop should not require a new setup process. Cozydot keeps the software
+and configuration you want in a readable YAML file that can be reused across
+machines. The file shows what Cozydot will install and configure without hiding
+the setup inside a shell script.
+
+Running Cozydot again converges the host on that configuration. State that is
+already correct is left alone, and software you did not configure is not
+removed.
+
+### Keep the machine native
+
+Cozydot uses the host's established package managers, configuration locations,
+and upstream conventions. APT packages remain APT packages, Homebrew formulae
+remain Homebrew formulae, and dotfiles remain ordinary files and links in their
+standard locations.
+
+This keeps Cozydot non-intrusive. Removing the Cozydot binary does not leave the
+machine dependent on a custom runtime, package store, or configuration layout.
+The installed software and configuration remain usable and can still be managed
+with their official documentation.
 
 Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
 `aarch64` (`arm64`), and 32-bit ARMv7 (`arm32`), plus macOS on Apple Silicon
