@@ -26,7 +26,6 @@ mod vscode;
 pub use binary::{BinaryPackageOperation, BinarySourceOperation};
 pub use desktop::{DesktopEnvironment, DesktopSetting};
 pub use go::GoToolchainSelector;
-pub use packages::fonts::NerdFontsMode;
 pub use repo::AptRepo;
 
 pub(crate) use host::{
@@ -68,8 +67,7 @@ pub enum Operation {
     NpmPackagesUpdate,
     AppimagedInstall { architecture: Architecture },
     BinaryPackageInstall(BinaryPackageOperation),
-    NerdFontsInstall { families: Vec<String> },
-    NerdFontsUpdate { families: Vec<String> },
+    NerdFontsApply { families: Vec<String>, force: bool },
     DotfilesApply { root: PathBuf, packages: Vec<String>, replace: bool },
     DockerGroupEnsure,
     DockerLocalLoggingDriverSet { max_size: Option<String> },
@@ -133,12 +131,7 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         Operation::NpmPackagesUpdate => completed(packages::npm::update(&host)),
         Operation::AppimagedInstall { architecture } => completed(appimaged::install(&host, *architecture)),
         Operation::BinaryPackageInstall(package) => completed(binary::install(&host, package)),
-        Operation::NerdFontsInstall { families } => {
-            completed(packages::fonts::apply(&host, families, NerdFontsMode::Install))
-        }
-        Operation::NerdFontsUpdate { families } => {
-            completed(packages::fonts::apply(&host, families, NerdFontsMode::Update))
-        }
+        Operation::NerdFontsApply { families, force } => completed(packages::fonts::apply(&host, families, *force)),
         Operation::DotfilesApply { root, packages, replace } => {
             completed(packages::dotfiles::apply(&host, root, packages, *replace))
         }
