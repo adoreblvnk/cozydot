@@ -20,12 +20,12 @@ pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, arc
     };
     let program = "/usr/local/go/bin/go";
     let expected = format!("go version go{version} {target_os}/{}", architecture.go());
-    let current = regular_executable_file(program.as_ref())
-        && host.output(program, ["version"]).is_ok_and(|output| {
+    // verify that Go is executable & go version output matches expected version & platform
+    if !regular_executable_file(program.as_ref())
+        || !host.output(program, ["version"]).is_ok_and(|output| {
             output.status.success() && std::str::from_utf8(&output.stdout).is_ok_and(|stdout| stdout.trim() == expected)
-        });
-
-    if !current {
+        })
+    {
         let archive = TempPath::new_with_suffix(host, "go", ".tar.gz")?;
         let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go_archive());
         let url = format!("https://go.dev/dl/{filename}");
