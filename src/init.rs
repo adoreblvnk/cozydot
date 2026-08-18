@@ -19,7 +19,10 @@ pub enum Preset {
 
 /// Create `cozydot.yaml` & `dotfiles` dir without overwriting user-managed changes.
 pub fn init(preset: Preset) -> Result<PathBuf> {
-    let mut init = Init::resolve_and_validate_configuration_root()?;
+    let root = config_root()?;
+    ensure_directory_path(&root, Path::new(""))?;
+    let managed = read_manifest(&root.join(".managed-files"))?;
+    let mut init = Init { root, managed };
     let preset = match preset {
         Preset::Cozydot => COZYDOT_PRESET,
         Preset::Cli => CLI_PRESET,
@@ -53,18 +56,11 @@ struct Init {
 }
 
 impl Init {
-    fn resolve_and_validate_configuration_root() -> Result<Self> {
-        let root = config_root()?;
-        ensure_directory_path(&root, Path::new(""))?;
-        let managed = read_manifest(&root.join(".managed-files"))?;
-        Ok(Self { root, managed })
-    }
-
     fn sync_bundled_dotfiles(&mut self) -> Result<()> {
         let mut packages = BTreeMap::<PathBuf, Vec<&Record>>::new();
         for record in RECORDS {
             let relative = PathBuf::from(record.path);
-            let package = bundled_dotfile_package(&relative);
+            let package = relative.components().take(2).collect();
             packages.entry(package).or_default().push(record);
         }
         for (package, records) in packages {
@@ -86,12 +82,13 @@ impl Init {
         Ok(())
     }
 
-    // TODO: consider using a simpler approach?
     fn dotfile_package_is_unmodified(&self, package: &Path) -> Result<bool> {
         let managed = self
             .managed
             .iter()
-            .filter(|(relative, _)| dotfile_package(relative).as_deref() == Some(package))
+            .filter(|(relative, _)| {
+                relative.strip_prefix(package).is_ok_and(|suffix| suffix.components().next().is_some())
+            })
             .collect::<Vec<_>>();
         let dest = self.root.join(package);
         match fs::symlink_metadata(&dest) {
@@ -106,8 +103,7 @@ impl Init {
         if !collect_real_files(&dest, &self.root, &mut files)? {
             return Ok(false);
         }
-        let expected = managed.iter().map(|(relative, _)| (*relative).clone()).collect::<BTreeSet<_>>();
-        if files != expected {
+        if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
             return Ok(false);
         }
         Ok(managed
@@ -174,20 +170,6 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn dotfile_package(path: &Path) -> Option<PathBuf> {
-    let mut components = path.components();
-    let Component::Normal(root) = components.next()? else { return None };
-    let Component::Normal(package) = components.next()? else { return None };
-    if root != "dotfiles" || components.next().is_none() {
-        return None;
-    }
-    Some(PathBuf::from(root).join(package))
-}
-
-fn bundled_dotfile_package(path: &Path) -> PathBuf {
-    path.components().take(2).collect()
 }
 
 fn collect_real_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {

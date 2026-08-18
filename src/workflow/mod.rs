@@ -19,16 +19,6 @@ use std::{
 
 const APT_PREREQS: [&str; 7] = ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
 
-struct LinuxApplyPlan {
-    apt_prereqs: BTreeSet<&'static str>,
-    flatpak_refs: Option<Vec<String>>,
-    repos: Vec<AptRepo>,
-    repo_packages_to_purge: Vec<String>,
-    repo_packages_to_install: Vec<String>,
-    deb_binaries: Vec<BinaryPackageOperation>,
-    appimages: Vec<BinaryPackageOperation>,
-}
-
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     match platform.identity {
         PlatformIdentity::MacOS => macos_apply(config, platform.architecture, dotfiles_root),
@@ -61,7 +51,30 @@ fn linux_apply(
     family: Family,
     dotfiles_root: &Path,
 ) -> Result<()> {
-    let plan = plan_linux_apply(config, platform, distro, family);
+    let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
+    let mut repos = Vec::new();
+    let mut repo_packages_to_purge = Vec::new();
+    let mut repo_packages_to_install = Vec::new();
+    for (repo, key, source_url) in applicable_repos(config, distro, family, platform.architecture) {
+        repos.push(add_repo(repo, platform, distro, key, source_url));
+        repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
+        repo_packages_to_install.extend(repo.packages.iter().cloned());
+    }
+    let flatpak_refs = config.linux.packages.flatpak.as_ref().filter(|values| !values.is_empty()).cloned();
+    if flatpak_refs.is_some() {
+        apt_prereqs.insert("flatpak");
+    }
+    let mut deb_binaries = Vec::new();
+    let mut appimages = Vec::new();
+    for binary in config.linux.packages.binaries.as_deref().unwrap_or_default() {
+        if let Some(operation) = binary_operation(binary, platform.architecture) {
+            match binary.format {
+                BinaryFormat::Deb => deb_binaries.push(operation),
+                BinaryFormat::AppImage => appimages.push(operation),
+            }
+        }
+    }
+    add_desktop_prereqs(config, platform, &mut apt_prereqs);
 
     if distro == Distro::Debian {
         if config.linux.system.sudo_group == Some(true) {
@@ -94,37 +107,37 @@ fn linux_apply(
     run(
         "Apply",
         "APT package install",
-        Operation::AptPackagesInstall { packages: plan.apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
+        Operation::AptPackagesInstall { packages: apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
     if let Some(packages) =
         config.linux.packages.apt.as_ref().and_then(|apt| apt.install.as_ref()).filter(|packages| !packages.is_empty())
     {
         run("Apply", "APT package install", Operation::AptPackagesInstall { packages: packages.clone() })?;
     }
-    if !plan.repos.is_empty() {
-        for repo in plan.repos {
+    if !repos.is_empty() {
+        for repo in repos {
             run("Apply", "APT repo add", Operation::AptRepoAdd(Box::new(repo)))?;
         }
         run("Apply", "APT update", Operation::AptUpdate)?;
     }
-    if !plan.repo_packages_to_purge.is_empty() {
-        run("Apply", "APT package purge", Operation::AptPackagesPurge { packages: plan.repo_packages_to_purge })?;
+    if !repo_packages_to_purge.is_empty() {
+        run("Apply", "APT package purge", Operation::AptPackagesPurge { packages: repo_packages_to_purge })?;
     }
-    if !plan.repo_packages_to_install.is_empty() {
-        run("Apply", "APT package install", Operation::AptPackagesInstall { packages: plan.repo_packages_to_install })?;
+    if !repo_packages_to_install.is_empty() {
+        run("Apply", "APT package install", Operation::AptPackagesInstall { packages: repo_packages_to_install })?;
     }
-    if let Some(refs) = plan.flatpak_refs {
+    if let Some(refs) = flatpak_refs {
         run("Apply", "Flathub remote add", Operation::FlatpakFlathubRemoteAdd)?;
         run("Apply", "Flatpak app install", Operation::FlatpakAppsInstall { refs })?;
     }
     apply_tools(config, platform.architecture)?;
     apply_packages(config)?;
-    for binary in plan.deb_binaries {
+    for binary in deb_binaries {
         run("Apply", "binary package install", Operation::BinaryPackageInstall(binary))?;
     }
-    if !plan.appimages.is_empty() {
+    if !appimages.is_empty() {
         run("Apply", "appimaged install", Operation::AppimagedInstall { architecture: platform.architecture })?;
-        for binary in plan.appimages {
+        for binary in appimages {
             run("Apply", "binary package install", Operation::BinaryPackageInstall(binary))?;
         }
     }
@@ -137,42 +150,6 @@ fn linux_apply(
     linux_integrations(config)?;
     linux_desktop(config, platform)?;
     Ok(())
-}
-
-fn plan_linux_apply(config: &Config, platform: &Platform, distro: Distro, family: Family) -> LinuxApplyPlan {
-    let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
-    let mut repos = Vec::new();
-    let mut repo_packages_to_purge = Vec::new();
-    let mut repo_packages_to_install = Vec::new();
-    for (repo, key, source_url) in applicable_repos(config, distro, family, platform.architecture) {
-        repos.push(add_repo(repo, platform, distro, key, source_url));
-        repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
-        repo_packages_to_install.extend(repo.packages.iter().cloned());
-    }
-    let flatpak_refs = config.linux.packages.flatpak.as_ref().filter(|values| !values.is_empty()).cloned();
-    if flatpak_refs.is_some() {
-        apt_prereqs.insert("flatpak");
-    }
-    let mut deb_binaries = Vec::new();
-    let mut appimages = Vec::new();
-    for binary in config.linux.packages.binaries.as_deref().unwrap_or_default() {
-        if let Some(operation) = binary_operation(binary, platform.architecture) {
-            match binary.format {
-                BinaryFormat::Deb => deb_binaries.push(operation),
-                BinaryFormat::AppImage => appimages.push(operation),
-            }
-        }
-    }
-    add_desktop_prereqs(config, platform, &mut apt_prereqs);
-    LinuxApplyPlan {
-        apt_prereqs,
-        flatpak_refs,
-        repos,
-        repo_packages_to_purge,
-        repo_packages_to_install,
-        deb_binaries,
-        appimages,
-    }
 }
 
 fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {

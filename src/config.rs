@@ -2,7 +2,6 @@
 
 use crate::platform::{Architecture, DesktopKind, Distro, Family, Platform, PlatformIdentity};
 use anyhow::{Context, Result, bail};
-use regex::Regex;
 use serde::{Deserialize, Deserializer, de};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -555,7 +554,7 @@ pub struct Fonts {
 impl Fonts {
     fn validate(&self) -> Result<()> {
         let Some(families) = self.nerd.as_deref() else { return Ok(()) };
-        validate_string_values(families, "shared.fonts.nerd", validate_definition_name)
+        validate_definition_names(families, "shared.fonts.nerd")
     }
 }
 
@@ -567,7 +566,7 @@ pub struct Dotfiles {
 
 impl Dotfiles {
     fn validate(&self, path: &str) -> Result<()> {
-        validate_string_values(&self.packages, &format!("{path}.packages"), validate_definition_name)
+        validate_definition_names(&self.packages, &format!("{path}.packages"))
     }
 }
 
@@ -716,17 +715,19 @@ pub struct PackageUpdates {
     pub npm: Option<bool>,
 }
 
-fn validate_string_values(values: &[String], path: &str, validator: fn(&str, &str) -> Result<()>) -> Result<()> {
+fn validate_definition_names(values: &[String], path: &str) -> Result<()> {
     for (index, value) in values.iter().enumerate() {
         let item_path = format!("{path}[{index}]");
-        validator(value, &item_path)?;
+        validate_definition_name(value, &item_path)?;
     }
     Ok(())
 }
 
 fn validate_definition_name(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$").unwrap();
-    if !re.is_match(value) {
+    let valid = value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    if !valid {
         bail!(
             "{path}: invalid value {value:?}; must start and end with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', or '-'"
         );
@@ -735,8 +736,9 @@ fn validate_definition_name(value: &str, path: &str) -> Result<()> {
 }
 
 fn validate_executable(value: &str, path: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._+-]*$").unwrap();
-    if !re.is_match(value) {
+    let valid = value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'));
+    if !valid {
         bail!(
             "{path}: invalid executable basename {value:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'"
         );

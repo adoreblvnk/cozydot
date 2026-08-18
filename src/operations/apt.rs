@@ -46,16 +46,6 @@ pub fn install_packages(host: &Host, packages: &[String]) -> Result<()> {
     install(host, "APT package install", packages)
 }
 
-fn installed_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
-    let mut installed = Vec::new();
-    for package in packages {
-        if is_package_installed(host, package)? {
-            installed.push(package.clone());
-        }
-    }
-    Ok(installed)
-}
-
 fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
     let output = host.output("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
     if !output.status.success() {
@@ -99,7 +89,12 @@ pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
-    let installed = installed_packages(host, packages)?;
+    let mut installed = Vec::new();
+    for package in packages {
+        if is_package_installed(host, package)? {
+            installed.push(package.clone());
+        }
+    }
     if installed.is_empty() {
         return Ok(());
     }

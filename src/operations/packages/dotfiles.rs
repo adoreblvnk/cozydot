@@ -46,8 +46,8 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
         backup_conflicts(host, &conflicts)?;
     }
 
-    for (_, source) in sources {
-        prepare_gnupg_home(&source, &home)?;
+    if sources.iter().any(|(_, source)| source.join(".gnupg").is_dir()) {
+        prepare_gnupg_home(&home)?;
     }
     args.push(OsStr::new("--"));
     args.extend(packages.iter().map(OsStr::new));
@@ -55,12 +55,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
     Ok(())
 }
 
-fn prepare_gnupg_home(source: &Path, home: &Path) -> Result<()> {
-    let source = source.join(".gnupg");
-    if !source.is_dir() {
-        return Ok(());
-    }
-
+fn prepare_gnupg_home(home: &Path) -> Result<()> {
     // keep ~/.gnupg as real 0700 dir instead of letting Stow fold it into symlink
     let target = home.join(".gnupg");
     if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {

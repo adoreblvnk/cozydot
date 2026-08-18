@@ -46,35 +46,26 @@ fn main() -> Result<()> {
     };
     match command {
         Command::Init { preset } => println!("Initialized cozydot in {}", init::init(preset)?.display()),
-        Command::Apply => apply()?,
-        Command::Check => check()?,
-        Command::Dotfiles { replace } => dotfiles(replace)?,
-        Command::Update => update()?,
+        Command::Apply => {
+            let host = ActiveHost::load()?;
+            workflow::apply(&host.config, &host.platform, &host.root.join("dotfiles"))?;
+        }
+        Command::Check => {
+            let path = init::config_root()?.join("cozydot.yaml");
+            config::Config::load(&path)
+                .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+            println!("Checked {}", path.display());
+        }
+        Command::Dotfiles { replace } => {
+            let host = ActiveHost::load()?;
+            workflow::dotfiles(&host.config, &host.platform, &host.root.join("dotfiles"), replace)?;
+        }
+        Command::Update => {
+            let host = ActiveHost::load()?;
+            workflow::update(&host.config, &host.platform)?;
+        }
     }
     Ok(())
-}
-
-fn check() -> Result<()> {
-    let path = init::config_root()?.join("cozydot.yaml");
-    config::Config::load(&path)
-        .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
-    println!("Checked {}", path.display());
-    Ok(())
-}
-
-fn apply() -> Result<()> {
-    let host = ActiveHost::load()?;
-    workflow::apply(&host.config, &host.platform, &host.root.join("dotfiles"))
-}
-
-fn dotfiles(replace: bool) -> Result<()> {
-    let host = ActiveHost::load()?;
-    workflow::dotfiles(&host.config, &host.platform, &host.root.join("dotfiles"), replace)
-}
-
-fn update() -> Result<()> {
-    let host = ActiveHost::load()?;
-    workflow::update(&host.config, &host.platform)
 }
 
 struct ActiveHost {
