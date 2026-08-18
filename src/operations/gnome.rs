@@ -1,25 +1,31 @@
 use anyhow::{Context, Result, bail};
 
-use super::{Host, OperationOutcome, TempPath};
+use super::{Host, TempPath};
+
+#[derive(PartialEq)]
+pub(crate) enum Outcome {
+    Completed,
+    LoginRequired,
+}
 
 const DASH_TO_DOCK_UUID: &str = "dash-to-dock@micxgx.gmail.com";
 const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
 const ROUNDED_CORNERS_SETTINGS: &str =
     "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings";
 
-pub(crate) fn apply_extensions(host: &Host, extensions: &[String]) -> Result<OperationOutcome> {
-    let mut outcome = OperationOutcome::Completed;
+pub(crate) fn apply_extensions(host: &Host, extensions: &[String]) -> Result<Outcome> {
+    let mut outcome = Outcome::Completed;
     for extension in extensions {
-        if install_or_enable_extension(host, extension)? == OperationOutcome::LoginRequired {
-            outcome = OperationOutcome::LoginRequired;
+        if install_or_enable_extension(host, extension)? == Outcome::LoginRequired {
+            outcome = Outcome::LoginRequired;
         }
     }
     Ok(outcome)
 }
 
-pub(crate) fn install_dash_to_dock(host: &Host) -> Result<OperationOutcome> {
-    if install_or_enable_extension(host, DASH_TO_DOCK_UUID)? == OperationOutcome::LoginRequired {
-        return Ok(OperationOutcome::LoginRequired);
+pub(crate) fn install_dash_to_dock(host: &Host) -> Result<Outcome> {
+    if install_or_enable_extension(host, DASH_TO_DOCK_UUID)? == Outcome::LoginRequired {
+        return Ok(Outcome::LoginRequired);
     }
     let settings = [
         ("dock-position", "'BOTTOM'"),
@@ -36,27 +42,27 @@ pub(crate) fn install_dash_to_dock(host: &Host) -> Result<OperationOutcome> {
         let path = format!("/org/gnome/shell/extensions/dash-to-dock/{key}");
         host.run("dconf write", "dconf", ["write", &path, value])?;
     }
-    Ok(OperationOutcome::Completed)
+    Ok(Outcome::Completed)
 }
 
-pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<OperationOutcome> {
-    if install_or_enable_extension(host, ROUNDED_CORNERS_UUID)? == OperationOutcome::LoginRequired {
-        return Ok(OperationOutcome::LoginRequired);
+pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<Outcome> {
+    if install_or_enable_extension(host, ROUNDED_CORNERS_UUID)? == Outcome::LoginRequired {
+        return Ok(Outcome::LoginRequired);
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
     host.run("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
-    Ok(OperationOutcome::Completed)
+    Ok(Outcome::Completed)
 }
 
-fn install_or_enable_extension(host: &Host, extension: &str) -> Result<OperationOutcome> {
+fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Outcome> {
     validate_extension(extension)?;
     if !host.output("gnome-extensions", ["info", extension])?.status.success() {
         install_extension(host, extension)?;
         // GNOME only finds newly installed extensions after next login
-        return Ok(OperationOutcome::LoginRequired);
+        return Ok(Outcome::LoginRequired);
     }
     host.run("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
-    Ok(OperationOutcome::Completed)
+    Ok(Outcome::Completed)
 }
 
 fn install_extension(host: &Host, extension: &str) -> Result<()> {

@@ -12,7 +12,7 @@ pub(crate) struct Host {
 }
 
 impl Host {
-    pub(super) fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
         Ok(Self { home })
     }
