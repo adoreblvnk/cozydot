@@ -9,7 +9,7 @@ fi"#;
 pub fn install(host: &Host) -> Result<()> {
     let uv_path = host.home().join(".local/bin/uv");
     if !regular_executable_file(&uv_path) {
-        let installer = TempPath::new(host, "uv-install")?;
+        let installer = TempPath::new("uv-install")?;
         host.curl(
             "uv installer download",
             "https://astral.sh/uv/install.sh",

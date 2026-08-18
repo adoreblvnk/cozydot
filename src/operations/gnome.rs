@@ -69,7 +69,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
         std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
         &shell_version,
     )?;
-    let archive = TempPath::new_with_suffix(host, "gnome-extension", ".zip")?;
+    let archive = TempPath::new_with_suffix("gnome-extension", ".zip")?;
     let name = extension.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
     host.curl("GNOME extension download", &url, ["--output", &archive.path().to_string_lossy()])?;

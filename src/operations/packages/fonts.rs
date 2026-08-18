@@ -32,7 +32,7 @@ pub(crate) fn apply(host: &Host, families: &[String], force: bool) -> Result<()>
 }
 
 fn install(host: &Host, family: &str, destination: &Path) -> Result<()> {
-    let archive = TempPath::new_with_suffix(host, "nerd-font", ".tar.xz")?;
+    let archive = TempPath::new_with_suffix("nerd-font", ".tar.xz")?;
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
     host.curl(
         "Nerd Font archive download",
