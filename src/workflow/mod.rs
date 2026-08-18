@@ -342,7 +342,7 @@ fn applicable_repos(
 }
 
 fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_url: &str) -> AptRepo {
-    let suite = if repo.suite == "system" {
+    let suite = if repo.suite == "codename" {
         selected_repo_codename(key, platform, distro).to_owned()
     } else {
         repo.suite.clone()

@@ -124,7 +124,7 @@ linux:
           urls:
             ubuntu: https://download.docker.com/linux/ubuntu
             debian: https://download.docker.com/linux/debian
-          suite: system
+          suite: codename
           components:
             - stable
           conflicts:
@@ -182,7 +182,7 @@ linux:
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
           urls:
             default: https://download.virtualbox.org/virtualbox/debian
-          suite: system
+          suite: codename
           components:
             - contrib
           arch:
