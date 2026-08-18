@@ -9,23 +9,10 @@ use std::{
     path::Path,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ConfigVersion;
-
-impl<'de> Deserialize<'de> for ConfigVersion {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        if value == "1.0.0" {
-            Ok(Self)
-        } else {
-            Err(de::Error::custom(format!(
-                "unsupported configuration version {value:?}; only version \"1.0.0\" is supported"
-            )))
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum ConfigVersion {
+    #[serde(rename = "1.0.0")]
+    V1_0_0,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
