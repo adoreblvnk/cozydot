@@ -2,21 +2,17 @@ use crate::platform::Architecture;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use super::{Host, TempPath, regular_executable_file, shell::append_profile};
+use super::{
+    host::{Host, TempPath, regular_executable_file},
+    shell::append_profile,
+};
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 
-pub enum GoToolchainSelector {
-    Latest,
-    Version(String),
-}
-
-pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
+pub(crate) fn install_toolchain(host: &Host, selector: &str, architecture: Architecture) -> Result<()> {
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
-    let version = match selector {
-        GoToolchainSelector::Latest => latest_version(host)?,
-        GoToolchainSelector::Version(version) => version.clone(),
-    };
+    let latest = if selector == "latest" { Some(latest_version(host)?) } else { None };
+    let version = latest.as_deref().unwrap_or(selector);
     let program = "/usr/local/go/bin/go";
     let expected = format!("go version go{version} {target_os}/{}", architecture.go());
     // verify that Go is executable & go version output matches expected version & platform
@@ -44,8 +40,8 @@ pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, arc
     append_profile(host, GO_PATH_INIT)
 }
 
-pub(crate) fn update_toolchain(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
-    if matches!(selector, GoToolchainSelector::Version(_)) {
+pub(crate) fn update_toolchain(host: &Host, selector: &str, architecture: Architecture) -> Result<()> {
+    if selector != "latest" {
         eprintln!("warning: Go update skipped because shared.tools.go is pinned to an exact version");
         return Ok(());
     }

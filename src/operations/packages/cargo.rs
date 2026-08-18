@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 
 use std::path::Path;
 
-use super::super::{Host, executable_file, path_program};
+use super::super::host::{Host, executable_file, path_program};
 
 pub(crate) fn install_crates(host: &Host, crates: &[String]) -> Result<()> {
     let cargo_home = host.home().join(".cargo");

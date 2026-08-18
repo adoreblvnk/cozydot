@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
-use super::Host;
+use super::host::Host;
 
 pub(super) fn append_profile(host: &Host, snippet: &str) -> Result<()> {
     let name = if cfg!(target_os = "macos") { ".zprofile" } else { ".profile" };

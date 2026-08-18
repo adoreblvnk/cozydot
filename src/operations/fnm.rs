@@ -1,6 +1,9 @@
 use anyhow::{Result, bail};
 
-use super::{Host, TempPath, path_program, regular_executable_file, shell::append_shell};
+use super::{
+    host::{Host, TempPath, path_program, regular_executable_file},
+    shell::append_shell,
+};
 
 const FNM_BASH_INIT: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
 if [ -d "$FNM_PATH" ]; then

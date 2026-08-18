@@ -1,4 +1,4 @@
-use super::{Host, TempPath};
+use super::host::{Host, TempPath};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::PathBuf};
@@ -113,7 +113,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
 }
 
 pub(crate) mod debian_components {
-    use super::super::{Host, privileged_file};
+    use super::super::{host::Host, privileged_file};
     use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, path::Path};
 

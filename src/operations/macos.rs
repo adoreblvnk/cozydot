@@ -1,16 +1,6 @@
-use super::{Host, TempPath};
+use super::host::{Host, TempPath};
+use crate::config::{MacDesktop, Theme};
 use anyhow::{Result, bail};
-
-pub enum MacDefault {
-    DarkMode(bool),
-    DockAutohide(bool),
-    DockRecentApplications(bool),
-    ShowAllFilenameExtensions(bool),
-    FinderHiddenFiles(bool),
-    KeyRepeat(i32),
-    InitialKeyRepeat(i32),
-    TrackpadTapToClick(bool),
-}
 
 pub fn validate_sudo_access(host: &Host) -> Result<()> {
     host.run("macOS sudo access", "sudo", ["-v"])?;
@@ -105,33 +95,43 @@ pub fn update_and_upgrade(host: &Host, formulae: bool, casks: bool) -> Result<()
     Ok(())
 }
 
-pub fn write_defaults(host: &Host, settings: &[MacDefault]) -> Result<()> {
-    for setting in settings {
-        match setting {
-            MacDefault::DarkMode(dark) => {
-                if *dark {
-                    host.run(
-                        "macOS appearance",
-                        "defaults",
-                        ["write", "-g", "AppleInterfaceStyle", "-string", "Dark"],
-                    )?;
-                } else {
-                    // ignore deletion errors because a missing preference already means light mode
-                    host.output("defaults", ["delete", "-g", "AppleInterfaceStyle"]).ok();
-                }
-            }
-            MacDefault::DockAutohide(value) => write_bool(host, "com.apple.dock", "autohide", *value)?,
-            MacDefault::DockRecentApplications(value) => write_bool(host, "com.apple.dock", "show-recents", *value)?,
-            MacDefault::ShowAllFilenameExtensions(value) => {
-                write_bool(host, "NSGlobalDomain", "AppleShowAllExtensions", *value)?
-            }
-            MacDefault::FinderHiddenFiles(value) => write_bool(host, "com.apple.finder", "AppleShowAllFiles", *value)?,
-            MacDefault::KeyRepeat(value) => write_int(host, "NSGlobalDomain", "KeyRepeat", *value)?,
-            MacDefault::InitialKeyRepeat(value) => write_int(host, "NSGlobalDomain", "InitialKeyRepeat", *value)?,
-            MacDefault::TrackpadTapToClick(value) => {
-                write_bool(host, "com.apple.AppleMultitouchTrackpad", "Clicking", *value)?
-            }
+pub fn write_defaults(host: &Host, desktop: &MacDesktop) -> Result<()> {
+    if let Some(appearance) = desktop.appearance {
+        if appearance == Theme::Dark {
+            host.run("macOS appearance", "defaults", ["write", "-g", "AppleInterfaceStyle", "-string", "Dark"])?;
+        } else {
+            // ignore deletion errors because a missing preference already means light mode
+            host.output("defaults", ["delete", "-g", "AppleInterfaceStyle"]).ok();
         }
+    }
+    if let Some(dock) = &desktop.dock {
+        if let Some(value) = dock.autohide {
+            write_bool(host, "com.apple.dock", "autohide", value)?;
+        }
+        if let Some(value) = dock.show_recent_applications {
+            write_bool(host, "com.apple.dock", "show-recents", value)?;
+        }
+    }
+    if let Some(finder) = &desktop.finder {
+        if let Some(value) = finder.show_filename_extensions {
+            write_bool(host, "NSGlobalDomain", "AppleShowAllExtensions", value)?;
+        }
+        if let Some(value) = finder.show_hidden_files {
+            write_bool(host, "com.apple.finder", "AppleShowAllFiles", value)?;
+        }
+    }
+    if let Some(keyboard) = &desktop.keyboard {
+        if let Some(value) = keyboard.key_repeat {
+            write_int(host, "NSGlobalDomain", "KeyRepeat", value)?;
+        }
+        if let Some(value) = keyboard.initial_key_repeat {
+            write_int(host, "NSGlobalDomain", "InitialKeyRepeat", value)?;
+        }
+    }
+    if let Some(trackpad) = &desktop.trackpad
+        && let Some(value) = trackpad.tap_to_click
+    {
+        write_bool(host, "com.apple.AppleMultitouchTrackpad", "Clicking", value)?;
     }
     // ignore restart errors when Dock or Finder isn't running
     host.run("Dock restart", "killall", ["Dock"]).ok();

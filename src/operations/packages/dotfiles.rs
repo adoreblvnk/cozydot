@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::super::Host;
+use super::super::host::Host;
 
 pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool) -> Result<()> {
     let root = fs::canonicalize(root).with_context(|| format!("canonicalize dotfiles root {}", root.display()))?;

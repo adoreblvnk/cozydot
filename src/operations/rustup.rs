@@ -1,6 +1,9 @@
 use anyhow::{Result, bail};
 
-use super::{Host, TempPath, regular_executable_file, require_regular_executable, shell::append_profile};
+use super::{
+    host::{Host, TempPath, regular_executable_file, require_regular_executable},
+    shell::append_profile,
+};
 
 const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi"#;
 

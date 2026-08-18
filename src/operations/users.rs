@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::{Host, host::one_record};
+use super::host::{Host, one_record};
 
 pub(crate) fn ensure_in_sudo_group(host: &Host) -> Result<()> {
     let username = effective_user(host)?;
