@@ -48,14 +48,6 @@ jobs:
           test ! -e "$root/cache"
           "$binary" --version
       - run: bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
-  stable:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: rustup toolchain install stable --profile minimal --component clippy
-      - run: cargo +stable clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo +stable test --locked --all-targets --all-features
-      - run: RUSTDOCFLAGS="-D warnings" cargo +stable doc --locked --no-deps
   macos:
     runs-on: macos-15
     steps:

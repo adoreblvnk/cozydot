@@ -64,7 +64,6 @@ linux:
         - bash-completion
         - build-essential
         - cmake
-        - curl
         - default-jdk
         - figlet
         - fzf
@@ -76,9 +75,7 @@ linux:
         - pinentry-tty
         - trash-cli
         - ttf-mscorefonts-installer
-        - unzip
         - vim
-        - xz-utils
       repos:
         - name: github-cli
           key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
@@ -134,7 +131,6 @@ macos:
       - pandoc
       - pass
       - pinentry-mac
-      - stow
       - trash
       - vim
     casks:

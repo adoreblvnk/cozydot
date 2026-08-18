@@ -43,7 +43,7 @@ on Ubuntu and supported derivatives are left unchanged.
 On a supported host:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh | bash
 ```
 
 The installer selects the `amd64`, `arm64`, or `arm32` release, verifies its
@@ -60,7 +60,7 @@ These environment variables override the defaults:
 Pass overrides to the shell running the installer, for example:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh \
   | COZYDOT_VERSION=1.0.0 COZYDOT_RELEASE_BASE_URL=https://mirror.example/cozydot bash
 ```
 
