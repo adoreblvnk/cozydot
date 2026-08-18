@@ -43,17 +43,12 @@ pub fn install(host: &Host) -> Result<()> {
 
 pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
     let fnm = resolve_fnm(host)?;
-    fnm_install(host, &fnm, selector)?;
-    host.run("fnm default", &fnm, ["default", "--", fnm_alias(selector)])?;
-    Ok(())
-}
-
-fn fnm_install(host: &Host, fnm: &str, selector: &str) -> Result<()> {
     if selector == "lts" {
-        host.run("fnm install", fnm, ["install", "--progress", "never", "--lts"])?;
+        host.run("fnm install", &fnm, ["install", "--progress", "never", "--lts"])?;
     } else {
-        host.run("fnm install", fnm, ["install", "--progress", "never", "--", selector])?;
+        host.run("fnm install", &fnm, ["install", "--progress", "never", "--", selector])?;
     }
+    host.run("fnm default", &fnm, ["default", "--", if selector == "lts" { "lts-latest" } else { selector }])?;
     Ok(())
 }
 
@@ -67,11 +62,4 @@ fn resolve_fnm(host: &Host) -> Result<String> {
         return path_program(&managed, "managed fnm executable path");
     }
     bail!("fnm install: fnm is unavailable after install")
-}
-
-fn fnm_alias(selector: &str) -> &str {
-    match selector {
-        "lts" => "lts-latest",
-        value => value,
-    }
 }
