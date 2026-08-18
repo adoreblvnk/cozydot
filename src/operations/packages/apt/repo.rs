@@ -1,4 +1,4 @@
-use super::host::{Host, TempPath};
+use crate::operations::host::{Host, TempPath, privileged_file};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::PathBuf};
@@ -48,8 +48,8 @@ pub(crate) fn add(host: &Host, repo: &AptRepo) -> Result<()> {
     let key = processed_key(host, &repo.key_url, preserve_armor)?;
     let source = repo.render_source().into_bytes();
 
-    super::privileged_file::write_atomic(host, &repo.key_path, &key, "APT repo key write")?;
-    super::privileged_file::write_atomic(host, &repo.source_list_path, &source, "APT repo source write")?;
+    privileged_file::write_atomic(host, &repo.key_path, &key, "APT repo key write")?;
+    privileged_file::write_atomic(host, &repo.source_list_path, &source, "APT repo source write")?;
 
     Ok(())
 }
@@ -113,7 +113,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
 }
 
 pub(crate) mod debian_components {
-    use super::super::{host::Host, privileged_file};
+    use crate::operations::host::{Host, privileged_file};
     use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, path::Path};
 

@@ -2,10 +2,7 @@ use crate::platform::Architecture;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use super::{
-    host::{Host, TempPath, regular_executable_file},
-    shell::append_profile,
-};
+use crate::operations::host::{Host, TempPath, regular_executable_file, shell::append_profile};
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 

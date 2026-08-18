@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
-use super::{apt, host::Host, privileged_file::write_atomic, systemd};
+use crate::operations::{
+    host::{Host, privileged_file::write_atomic, systemd},
+    packages::apt,
+};
 
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/nosnap.pref";
 

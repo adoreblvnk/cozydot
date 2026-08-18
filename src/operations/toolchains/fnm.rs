@@ -1,8 +1,9 @@
 use anyhow::{Result, bail};
 
-use super::{
+use crate::operations::{
+    host::shell::append_shell,
     host::{Host, TempPath, path_program, regular_executable_file},
-    shell::append_shell,
+    packages::homebrew,
 };
 
 const FNM_BASH_INIT: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
@@ -14,7 +15,7 @@ const FNM_ZSH_INIT: &str = r#"eval "$(fnm env --use-on-cd --shell zsh)""#;
 
 pub fn install(host: &Host) -> Result<()> {
     if cfg!(target_os = "macos") {
-        super::macos::install_formula(host, "fnm")?;
+        homebrew::install_formula(host, "fnm")?;
         return append_shell(host, FNM_ZSH_INIT);
     }
 
@@ -59,7 +60,7 @@ pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
 
 pub(crate) fn find_executable(host: &Host) -> Result<Option<String>> {
     if cfg!(target_os = "macos") {
-        return super::macos::formula_executable(host, "fnm", "fnm").map(Some);
+        return homebrew::formula_executable(host, "fnm", "fnm").map(Some);
     }
     let managed = host.home().join(".local/share/fnm/fnm");
     if regular_executable_file(&managed) {

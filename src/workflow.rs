@@ -6,13 +6,19 @@ use crate::{
         select_distro_map, selected_repo_codename,
     },
     operations::{
-        appimaged, apt, binary,
-        desktop::{self, DesktopEnvironment},
-        docker, fnm, gnome, go,
-        host::Host,
-        macos, packages,
-        repo::{self, AptRepo},
-        rustup, snapd, users, uv, vscode,
+        desktop::{self, DesktopEnvironment, fonts, gnome, macos as macos_defaults},
+        dotfiles,
+        host::{Host, macos as macos_host, users},
+        integrations::{docker, vscode},
+        packages::{
+            apt::{
+                self,
+                repo::{self, AptRepo},
+            },
+            binary::{self, appimaged},
+            cargo, flatpak, homebrew, npm, snapd,
+        },
+        toolchains::{fnm, go, rustup, uv},
     },
     platform::{Architecture, DesktopKind, Distro, Family, Platform, PlatformIdentity},
 };
@@ -49,7 +55,7 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
     };
     if let Some(dotfiles) = dotfiles_packages(config, platform_packages) {
         let host = Host::new()?;
-        run("Apply", "dotfiles apply", || packages::dotfiles::apply(&host, root, &dotfiles, replace))?;
+        run("Apply", "dotfiles apply", || dotfiles::apply(&host, root, &dotfiles, replace))?;
     }
     Ok(())
 }
@@ -136,8 +142,8 @@ fn linux_apply(
         run("Apply", "APT package install", || apt::install(host, &repo_packages_to_install))?;
     }
     if let Some(refs) = flatpak_refs {
-        run("Apply", "Flathub remote add", || packages::flatpak::add_flathub_remote(host))?;
-        run("Apply", "Flatpak app install", || packages::flatpak::install(host, refs))?;
+        run("Apply", "Flathub remote add", || flatpak::add_flathub_remote(host))?;
+        run("Apply", "Flatpak app install", || flatpak::install(host, refs))?;
     }
     // install shared tools before binaries and user configuration
     apply_tools(host, config, platform.architecture)?;
@@ -152,10 +158,10 @@ fn linux_apply(
         }
     }
     if let Some(families) = nerd_fonts(config) {
-        run("Apply", "Nerd Fonts install", || packages::fonts::apply(host, families, false))?;
+        run("Apply", "Nerd Fonts install", || fonts::apply(host, families, false))?;
     }
     if let Some(dotfiles) = dotfiles_packages(config, &config.linux.dotfiles.packages) {
-        run("Apply", "dotfiles apply", || packages::dotfiles::apply(host, dotfiles_root, &dotfiles, false))?;
+        run("Apply", "dotfiles apply", || dotfiles::apply(host, dotfiles_root, &dotfiles, false))?;
     }
     linux_integrations(host, config)?;
     linux_desktop(host, config, platform)?;
@@ -168,29 +174,31 @@ fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: 
         dotfiles.is_some() || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
 
     if config.macos.system.validate_sudo_access == Some(true) {
-        run("Apply", "macOS sudo access validation", || macos::validate_sudo_access(host))?;
+        run("Apply", "macOS sudo access validation", || macos_host::validate_sudo_access(host))?;
     }
     if config.macos.system.xcode.command_line_tools == Some(true) {
-        run("Apply", "Command Line Tools for Xcode install", || macos::install_command_line_tools_for_xcode(host))?;
+        run("Apply", "Command Line Tools for Xcode install", || {
+            macos_host::install_command_line_tools_for_xcode(host)
+        })?;
     }
     // install Homebrew and Stow before applying package-backed user configuration
-    run("Apply", "Homebrew install", || macos::install_homebrew(host))?;
+    run("Apply", "Homebrew install", || homebrew::install(host))?;
     if homebrew_packages {
         let mut formulae = config.macos.homebrew.formulae.clone();
         if dotfiles.is_some() && !formulae.iter().any(|formula| formula == "stow") {
             formulae.push("stow".into());
         }
         run("Apply", "Homebrew package install", || {
-            macos::install_packages(host, &formulae, &config.macos.homebrew.casks)
+            homebrew::install_packages(host, &formulae, &config.macos.homebrew.casks)
         })?;
     }
     apply_tools(host, config, arch)?;
     apply_packages(host, config)?;
     if let Some(families) = nerd_fonts(config) {
-        run("Apply", "Nerd Fonts install", || packages::fonts::apply(host, families, false))?;
+        run("Apply", "Nerd Fonts install", || fonts::apply(host, families, false))?;
     }
     if let Some(dotfiles) = dotfiles {
-        run("Apply", "dotfiles apply", || packages::dotfiles::apply(host, dotfiles_root, &dotfiles, false))?;
+        run("Apply", "dotfiles apply", || dotfiles::apply(host, dotfiles_root, &dotfiles, false))?;
     }
     vscode_extensions(host, config)?;
     macos_desktop(host, config)?;
@@ -200,8 +208,8 @@ fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: 
 fn apply_tools(host: &Host, config: &Config, arch: Architecture) -> Result<()> {
     if let Some(selector) = config.shared.tools.rust.as_deref() {
         run("Apply", "Rust install", || rustup::install(host, selector))?;
-        run("Apply", "cargo-binstall install", || binary::cargo_binstall::install(host))?;
-        run("Apply", "cargo-update install", || binary::cargo_binstall::install_cargo_update(host))?;
+        run("Apply", "cargo-binstall install", || cargo::install_binstall(host))?;
+        run("Apply", "cargo-update install", || cargo::install_cargo_update(host))?;
     }
     if let Some(selector) = config.shared.tools.node.as_deref() {
         run("Apply", "fnm install", || fnm::install(host))?;
@@ -219,10 +227,10 @@ fn apply_tools(host: &Host, config: &Config, arch: Architecture) -> Result<()> {
 
 fn apply_packages(host: &Host, config: &Config) -> Result<()> {
     if let Some(crates) = config.shared.packages.cargo.as_ref().filter(|values| !values.is_empty()) {
-        run("Apply", "Cargo crate install", || packages::cargo::install_crates(host, crates))?;
+        run("Apply", "Cargo crate install", || cargo::install_crates(host, crates))?;
     }
     if let Some(npm_packages) = config.shared.packages.npm.as_ref().filter(|values| !values.is_empty()) {
-        run("Apply", "npm package install", || packages::npm::install(host, npm_packages))?;
+        run("Apply", "npm package install", || npm::install(host, npm_packages))?;
     }
     Ok(())
 }
@@ -244,13 +252,13 @@ fn linux_update(host: &Host, config: &Config, platform: &Platform) -> Result<()>
         apt::install(host, &apt_prereqs.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>())
     })?;
     if flatpak {
-        run("Update", "Flatpak update", || packages::flatpak::update(host))?;
+        run("Update", "Flatpak update", || flatpak::update(host))?;
     }
     update_tools_and_packages(host, config, platform.architecture, false)?;
     if config.shared.updates.fonts == Some(true)
         && let Some(families) = nerd_fonts(config)
     {
-        run("Update", "Nerd Fonts update", || packages::fonts::apply(host, families, true))?;
+        run("Update", "Nerd Fonts update", || fonts::apply(host, families, true))?;
     }
     Ok(())
 }
@@ -259,17 +267,17 @@ fn macos_update(host: &Host, config: &Config, arch: Architecture) -> Result<()> 
     let homebrew_formulae = config.macos.updates.homebrew.formulae == Some(true);
     let homebrew_casks = config.macos.updates.homebrew.casks == Some(true);
 
-    run("Update", "Homebrew install", || macos::install_homebrew(host))?;
+    run("Update", "Homebrew install", || homebrew::install(host))?;
     if homebrew_formulae || homebrew_casks {
         run("Update", "Homebrew update and upgrade", || {
-            macos::update_and_upgrade(host, homebrew_formulae, homebrew_casks)
+            homebrew::update_and_upgrade(host, homebrew_formulae, homebrew_casks)
         })?;
     }
     update_tools_and_packages(host, config, arch, true)?;
     if config.shared.updates.fonts == Some(true)
         && let Some(families) = nerd_fonts(config)
     {
-        run("Update", "Nerd Fonts update", || packages::fonts::apply(host, families, true))?;
+        run("Update", "Nerd Fonts update", || fonts::apply(host, families, true))?;
     }
     Ok(())
 }
@@ -301,10 +309,10 @@ fn update_tools_and_packages(host: &Host, config: &Config, arch: Architecture, m
         run("Update", "Python version upgrade", || uv::upgrade_py_versions(host))?;
     }
     if updates.packages.cargo == Some(true) {
-        run("Update", "Cargo crate update", || packages::cargo::update_crates(host))?;
+        run("Update", "Cargo crate update", || cargo::update_crates(host))?;
     }
     if updates.packages.npm == Some(true) {
-        run("Update", "npm package update", || packages::npm::update(host))?;
+        run("Update", "npm package update", || npm::update(host))?;
     }
     Ok(())
 }
@@ -444,7 +452,7 @@ fn linux_desktop(host: &Host, config: &Config, platform: &Platform) -> Result<()
 fn macos_desktop(host: &Host, config: &Config) -> Result<()> {
     let desktop = &config.macos.desktop;
     if desktop.has_intent() {
-        run("Apply", "macOS defaults write", || macos::write_defaults(host, desktop))?;
+        run("Apply", "macOS defaults write", || macos_defaults::write_defaults(host, desktop))?;
     }
     Ok(())
 }

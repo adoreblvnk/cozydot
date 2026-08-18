@@ -4,6 +4,39 @@ use std::path::Path;
 
 use super::super::host::{Host, executable_file, path_program};
 
+pub(crate) fn install_binstall(host: &Host) -> Result<()> {
+    if cfg!(target_os = "macos") {
+        return super::homebrew::install_formula(host, "cargo-binstall");
+    }
+    let cargo_home = host.home().join(".cargo");
+    let cargo_binstall = cargo_home.join("bin/cargo-binstall");
+    if executable_file(&cargo_binstall) {
+        return Ok(());
+    }
+    let cargo = cargo_home.join("bin/cargo");
+    let program = cargo.to_str().with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo.display()))?;
+    host.run("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
+    Ok(())
+}
+
+pub(crate) fn install_cargo_update(host: &Host) -> Result<()> {
+    let cargo_home = host.home().join(".cargo");
+    if executable_file(&cargo_home.join("bin/cargo-install-update")) {
+        return Ok(());
+    }
+    let binstall = cargo_home.join("bin/cargo-binstall");
+    let program = if cfg!(target_os = "macos") {
+        super::homebrew::formula_executable(host, "cargo-binstall", "cargo-binstall")?
+    } else {
+        binstall
+            .to_str()
+            .with_context(|| format!("cargo-binstall executable path is not UTF-8: {}", binstall.display()))?
+            .to_owned()
+    };
+    host.run("cargo-update install", &program, ["--no-confirm", "cargo-update"])?;
+    Ok(())
+}
+
 pub(crate) fn install_crates(host: &Host, crates: &[String]) -> Result<()> {
     let cargo_home = host.home().join(".cargo");
     let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
@@ -62,7 +95,7 @@ fn crate_name(name: &str) -> &str {
 
 fn resolve_binstall(host: &Host, cargo_home: &Path) -> Result<String> {
     if cfg!(target_os = "macos") {
-        return super::super::macos::formula_executable(host, "cargo-binstall", "cargo-binstall");
+        return super::homebrew::formula_executable(host, "cargo-binstall", "cargo-binstall");
     }
     let managed = cargo_home.join("bin/cargo-binstall");
     if executable_file(&managed) {

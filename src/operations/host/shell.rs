@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
-use super::host::Host;
+use super::Host;
 
-pub(super) fn append_profile(host: &Host, snippet: &str) -> Result<()> {
+pub(crate) fn append_profile(host: &Host, snippet: &str) -> Result<()> {
     let name = if cfg!(target_os = "macos") { ".zprofile" } else { ".profile" };
     append_once(&host.home().join(name), snippet)
 }
 
-pub(super) fn append_shell(host: &Host, snippet: &str) -> Result<()> {
+pub(crate) fn append_shell(host: &Host, snippet: &str) -> Result<()> {
     let name = if cfg!(target_os = "macos") { ".zshrc" } else { ".bashrc" };
     append_once(&host.home().join(name), snippet)
 }

@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::super::{fnm, host::Host};
+use crate::operations::{host::Host, toolchains::fnm};
 
 pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
     let Some(fnm) = fnm::find_executable(host)? else {
