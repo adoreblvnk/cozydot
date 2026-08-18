@@ -18,7 +18,7 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
         b"APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n".as_slice()
     };
     if enabled {
-        install_packages(host, &["unattended-upgrades".into()])?;
+        install(host, &["unattended-upgrades".into()])?;
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
         host.run(
             "unattended-upgrades service enablement",
@@ -39,11 +39,16 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
     Ok(())
 }
 
-pub fn install_packages(host: &Host, packages: &[String]) -> Result<()> {
+pub fn install(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
-    install(host, "APT package install", packages)
+    change_packages(
+        host,
+        "APT package install",
+        &["install", "--no-upgrade"],
+        packages.iter().map(|package| format!("{package}+")),
+    )
 }
 
 fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
@@ -65,10 +70,6 @@ fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
         | b"triggers-pending\n" => Ok(false),
         _ => anyhow::bail!("dpkg-query returned unrecognized package status for {package:?}"),
     }
-}
-
-fn install(host: &Host, label: &str, packages: &[String]) -> Result<()> {
-    change_packages(host, label, &["install", "--no-upgrade"], packages.iter().map(|package| format!("{package}+")))
 }
 
 fn change_packages(

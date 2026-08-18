@@ -95,17 +95,14 @@ pub enum OperationOutcome {
 }
 
 pub(crate) fn run(operation: &Operation) -> Result<OperationOutcome> {
-    run_on(operation, Host::new()?)
-}
-
-fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
+    let host = Host::new()?;
     match operation {
         Operation::SudoGroupEnsure => completed(users::ensure_in_sudo_group(&host)),
         Operation::DebianAptComponentsAdd => completed(repo::debian_components::add(&host)),
         Operation::AptUpdate => completed(apt::update(&host)),
         Operation::UnattendedUpgradesSet { enabled } => completed(apt::set_unattended_upgrades(&host, *enabled)),
         Operation::SnapdSet { enabled } => completed(snapd::set_enabled(&host, *enabled)),
-        Operation::AptPackagesInstall { packages } => completed(apt::install_packages(&host, packages)),
+        Operation::AptPackagesInstall { packages } => completed(apt::install(&host, packages)),
         Operation::AptPackagesPurge { packages } => completed(apt::purge(&host, packages)),
         Operation::FlatpakFlathubRemoteAdd => completed(packages::flatpak::add_flathub_remote(&host)),
         Operation::RustInstall { selector } => completed(rustup::install(&host, selector)),
