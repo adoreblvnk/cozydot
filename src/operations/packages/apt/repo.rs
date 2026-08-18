@@ -157,21 +157,21 @@ pub(crate) mod debian_components {
         Ok(())
     }
 
-    fn probe_regular(host: &Host, path: &str) -> Result<bool> {
-        let output = host.output("sudo", ["test", "-f", path])?;
-        match output.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => bail!("Debian APT source regular-file check failed for {path}"),
-        }
-    }
-
     fn reject_symlink(host: &Host, path: &str) -> Result<()> {
         let output = host.output("sudo", ["test", "-L", path])?;
         match output.status.code() {
             Some(0) => bail!("Debian APT source path is a symlink: {path}"),
             Some(1) => Ok(()),
             _ => bail!("Debian APT source symlink check failed for {path}"),
+        }
+    }
+
+    fn probe_regular(host: &Host, path: &str) -> Result<bool> {
+        let output = host.output("sudo", ["test", "-f", path])?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => bail!("Debian APT source regular-file check failed for {path}"),
         }
     }
 

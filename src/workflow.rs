@@ -40,14 +40,6 @@ pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resu
     }
 }
 
-pub fn update(config: &Config, platform: &Platform) -> Result<()> {
-    let host = Host::new()?;
-    match platform.identity {
-        PlatformIdentity::MacOS => macos_update(&host, config, platform.architecture),
-        PlatformIdentity::Linux { .. } => linux_update(&host, config, platform),
-    }
-}
-
 pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool) -> Result<()> {
     let platform_packages = match platform.identity {
         PlatformIdentity::MacOS => &config.macos.dotfiles.packages,
@@ -58,6 +50,14 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
         run("Apply", "dotfiles apply", || dotfiles::apply(&host, root, &dotfiles, replace))?;
     }
     Ok(())
+}
+
+pub fn update(config: &Config, platform: &Platform) -> Result<()> {
+    let host = Host::new()?;
+    match platform.identity {
+        PlatformIdentity::MacOS => macos_update(&host, config, platform.architecture),
+        PlatformIdentity::Linux { .. } => linux_update(&host, config, platform),
+    }
 }
 
 fn linux_apply(

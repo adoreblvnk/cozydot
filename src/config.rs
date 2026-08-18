@@ -135,6 +135,15 @@ pub struct SharedConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Tools {
+    pub rust: Option<String>,
+    pub go: Option<String>,
+    pub node: Option<String>,
+    pub python: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SharedPackages {
     pub cargo: Option<Vec<String>>,
     pub npm: Option<Vec<String>>,
@@ -142,8 +151,39 @@ pub struct SharedPackages {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Fonts {
+    pub nerd: Option<Vec<String>>,
+}
+
+impl Fonts {
+    fn validate(&self) -> Result<()> {
+        let Some(families) = self.nerd.as_deref() else { return Ok(()) };
+        validate_definition_names(families, "shared.fonts.nerd")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dotfiles {
+    pub packages: Vec<String>,
+}
+
+impl Dotfiles {
+    fn validate(&self, path: &str) -> Result<()> {
+        validate_definition_names(&self.packages, &format!("{path}.packages"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SharedIntegrations {
     pub vscode: VsCodeIntegration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VsCodeIntegration {
+    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -156,6 +196,22 @@ pub struct SharedUpdates {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ToolUpdates {
+    pub rust: Option<bool>,
+    pub go: Option<bool>,
+    pub node: Option<bool>,
+    pub python: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageUpdates {
+    pub cargo: Option<bool>,
+    pub npm: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinuxConfig {
     pub system: System,
     pub packages: Packages,
@@ -163,150 +219,6 @@ pub struct LinuxConfig {
     pub integrations: Integrations,
     pub desktop: Option<Desktop>,
     pub updates: Option<LinuxUpdates>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LinuxUpdates {
-    pub apt: Option<AptUpgradeCommand>,
-    pub flatpak: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacOSConfig {
-    pub system: MacSystem,
-    pub homebrew: Homebrew,
-    pub dotfiles: Dotfiles,
-    pub desktop: MacDesktop,
-    pub updates: MacUpdates,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacSystem {
-    pub validate_sudo_access: Option<bool>,
-    pub xcode: MacXcode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacXcode {
-    pub command_line_tools: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Homebrew {
-    pub formulae: Vec<String>,
-    pub casks: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacDesktop {
-    pub appearance: Option<Theme>,
-    pub dock: Option<MacDock>,
-    pub finder: Option<MacFinder>,
-    pub keyboard: Option<MacKeyboard>,
-    pub trackpad: Option<MacTrackpad>,
-}
-
-impl MacDesktop {
-    pub(crate) fn has_intent(&self) -> bool {
-        self.appearance.is_some()
-            || self.dock.as_ref().is_some_and(|dock| dock.autohide.is_some() || dock.show_recent_applications.is_some())
-            || self
-                .finder
-                .as_ref()
-                .is_some_and(|finder| finder.show_filename_extensions.is_some() || finder.show_hidden_files.is_some())
-            || self
-                .keyboard
-                .as_ref()
-                .is_some_and(|keyboard| keyboard.key_repeat.is_some() || keyboard.initial_key_repeat.is_some())
-            || self.trackpad.as_ref().is_some_and(|trackpad| trackpad.tap_to_click.is_some())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacDock {
-    pub autohide: Option<bool>,
-    pub show_recent_applications: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacFinder {
-    pub show_filename_extensions: Option<bool>,
-    pub show_hidden_files: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacKeyboard {
-    pub key_repeat: Option<i32>,
-    pub initial_key_repeat: Option<i32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacTrackpad {
-    pub tap_to_click: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacUpdates {
-    pub homebrew: MacHomebrewUpdates,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacHomebrewUpdates {
-    pub formulae: Option<bool>,
-    pub casks: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DistroMapKey {
-    Default,
-    Ubuntu,
-    LinuxMint,
-    Pop,
-    Debian,
-}
-
-impl DistroMapKey {
-    fn from_distro(distro: Distro) -> Self {
-        match distro {
-            Distro::Ubuntu => Self::Ubuntu,
-            Distro::LinuxMint => Self::LinuxMint,
-            Distro::Pop => Self::Pop,
-            Distro::Debian => Self::Debian,
-        }
-    }
-
-    fn from_family(family: Family) -> Self {
-        match family {
-            Family::Ubuntu => Self::Ubuntu,
-            Family::Debian => Self::Debian,
-        }
-    }
-}
-
-pub fn select_distro_map<T>(
-    map: &BTreeMap<DistroMapKey, T>,
-    distro: Distro,
-    family: Family,
-) -> Option<(DistroMapKey, &T)> {
-    let exact = DistroMapKey::from_distro(distro);
-    let family = DistroMapKey::from_family(family);
-    map.get(&exact)
-        .map(|value| (exact, value))
-        .or_else(|| map.get(&family).map(|value| (family, value)))
-        .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -393,6 +305,47 @@ impl AptPackages {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DistroMapKey {
+    Default,
+    Ubuntu,
+    LinuxMint,
+    Pop,
+    Debian,
+}
+
+impl DistroMapKey {
+    fn from_distro(distro: Distro) -> Self {
+        match distro {
+            Distro::Ubuntu => Self::Ubuntu,
+            Distro::LinuxMint => Self::LinuxMint,
+            Distro::Pop => Self::Pop,
+            Distro::Debian => Self::Debian,
+        }
+    }
+
+    fn from_family(family: Family) -> Self {
+        match family {
+            Family::Ubuntu => Self::Ubuntu,
+            Family::Debian => Self::Debian,
+        }
+    }
+}
+
+pub fn select_distro_map<T>(
+    map: &BTreeMap<DistroMapKey, T>,
+    distro: Distro,
+    family: Family,
+) -> Option<(DistroMapKey, &T)> {
+    let exact = DistroMapKey::from_distro(distro);
+    let family = DistroMapKey::from_family(family);
+    map.get(&exact)
+        .map(|value| (exact, value))
+        .or_else(|| map.get(&family).map(|value| (family, value)))
+        .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -541,40 +494,6 @@ impl ArchitectureMap {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Tools {
-    pub rust: Option<String>,
-    pub go: Option<String>,
-    pub node: Option<String>,
-    pub python: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Fonts {
-    pub nerd: Option<Vec<String>>,
-}
-
-impl Fonts {
-    fn validate(&self) -> Result<()> {
-        let Some(families) = self.nerd.as_deref() else { return Ok(()) };
-        validate_definition_names(families, "shared.fonts.nerd")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Dotfiles {
-    pub packages: Vec<String>,
-}
-
-impl Dotfiles {
-    fn validate(&self, path: &str) -> Result<()> {
-        validate_definition_names(&self.packages, &format!("{path}.packages"))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Integrations {
     pub docker: Option<DockerIntegration>,
     pub virtualbox: Option<VirtualBoxIntegration>,
@@ -604,12 +523,6 @@ pub struct DockerLogging {
 #[serde(deny_unknown_fields)]
 pub struct VirtualBoxIntegration {
     pub group: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VsCodeIntegration {
-    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -695,6 +608,13 @@ impl Gnome {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxUpdates {
+    pub apt: Option<AptUpgradeCommand>,
+    pub flatpak: Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AptUpgradeCommand {
@@ -704,18 +624,98 @@ pub enum AptUpgradeCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ToolUpdates {
-    pub rust: Option<bool>,
-    pub go: Option<bool>,
-    pub node: Option<bool>,
-    pub python: Option<bool>,
+pub struct MacOSConfig {
+    pub system: MacSystem,
+    pub homebrew: Homebrew,
+    pub dotfiles: Dotfiles,
+    pub desktop: MacDesktop,
+    pub updates: MacUpdates,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PackageUpdates {
-    pub cargo: Option<bool>,
-    pub npm: Option<bool>,
+pub struct MacSystem {
+    pub validate_sudo_access: Option<bool>,
+    pub xcode: MacXcode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacXcode {
+    pub command_line_tools: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Homebrew {
+    pub formulae: Vec<String>,
+    pub casks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacDesktop {
+    pub appearance: Option<Theme>,
+    pub dock: Option<MacDock>,
+    pub finder: Option<MacFinder>,
+    pub keyboard: Option<MacKeyboard>,
+    pub trackpad: Option<MacTrackpad>,
+}
+
+impl MacDesktop {
+    pub(crate) fn has_intent(&self) -> bool {
+        self.appearance.is_some()
+            || self.dock.as_ref().is_some_and(|dock| dock.autohide.is_some() || dock.show_recent_applications.is_some())
+            || self
+                .finder
+                .as_ref()
+                .is_some_and(|finder| finder.show_filename_extensions.is_some() || finder.show_hidden_files.is_some())
+            || self
+                .keyboard
+                .as_ref()
+                .is_some_and(|keyboard| keyboard.key_repeat.is_some() || keyboard.initial_key_repeat.is_some())
+            || self.trackpad.as_ref().is_some_and(|trackpad| trackpad.tap_to_click.is_some())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacDock {
+    pub autohide: Option<bool>,
+    pub show_recent_applications: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacFinder {
+    pub show_filename_extensions: Option<bool>,
+    pub show_hidden_files: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacKeyboard {
+    pub key_repeat: Option<i32>,
+    pub initial_key_repeat: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacTrackpad {
+    pub tap_to_click: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacUpdates {
+    pub homebrew: MacHomebrewUpdates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacHomebrewUpdates {
+    pub formulae: Option<bool>,
+    pub casks: Option<bool>,
 }
 
 fn validate_definition_names(values: &[String], path: &str) -> Result<()> {

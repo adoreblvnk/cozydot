@@ -67,10 +67,6 @@ pub(crate) fn update_and_upgrade(host: &Host, formulae: bool, casks: bool) -> Re
     Ok(())
 }
 
-fn is_installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
-    Ok(host.output(brew, ["list", kind, name])?.status.success())
-}
-
 fn find_brew(host: &Host) -> Result<String> {
     for candidate in ["brew", "/opt/homebrew/bin/brew"] {
         if host.output(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {
@@ -78,4 +74,8 @@ fn find_brew(host: &Host) -> Result<String> {
         }
     }
     bail!("Homebrew is unavailable after install; expected brew on PATH or /opt/homebrew/bin/brew")
+}
+
+fn is_installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
+    Ok(host.output(brew, ["list", kind, name])?.status.success())
 }

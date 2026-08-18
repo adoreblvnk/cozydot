@@ -3,15 +3,15 @@ use crate::{
     config::{BinaryFormat, BinaryPackage, BinarySource},
     platform::Architecture,
 };
-
-mod appimage;
-pub(crate) mod appimaged;
-mod github;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::path::PathBuf;
 
 use self::github::Release;
+
+mod appimage;
+pub(crate) mod appimaged;
+mod github;
 
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";

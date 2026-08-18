@@ -1,5 +1,6 @@
-use super::Host;
 use anyhow::Result;
+
+use super::Host;
 
 pub(crate) fn validate_sudo_access(host: &Host) -> Result<()> {
     host.run("macOS sudo access", "sudo", ["-v"])?;

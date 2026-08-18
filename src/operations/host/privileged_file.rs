@@ -1,6 +1,8 @@
-use super::{Host, TempPath};
-use anyhow::{Context, Result};
 use std::{ffi::OsStr, fs, io::Write, path::Path};
+
+use anyhow::{Context, Result};
+
+use super::{Host, TempPath};
 
 pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], label: &str) -> Result<()> {
     let local = TempPath::new("privileged-write")?;

@@ -1,5 +1,6 @@
-use anyhow::{Context, Result};
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
+
+use anyhow::{Context, Result};
 
 use super::Host;
 
