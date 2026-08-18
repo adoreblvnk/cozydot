@@ -12,11 +12,6 @@ pub enum GoToolchainSelector {
     Version(String),
 }
 
-#[derive(Deserialize)]
-struct ReleaseMetadata {
-    version: String,
-}
-
 pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, architecture: Architecture) -> Result<()> {
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
     let version = match selector {
@@ -59,8 +54,13 @@ pub(crate) fn update_toolchain(host: &Host, selector: &GoToolchainSelector, arch
 }
 
 fn latest_version(host: &Host) -> Result<String> {
+    #[derive(Deserialize)]
+    struct Release {
+        version: String,
+    }
+
     let metadata = host.curl("Go release resolution", "https://go.dev/dl/?mode=json", ["--proto", "=https"])?;
-    let releases: Vec<ReleaseMetadata> = serde_json::from_slice(&metadata.stdout).context("parse Go release JSON")?;
+    let releases: Vec<Release> = serde_json::from_slice(&metadata.stdout).context("parse Go release JSON")?;
     releases
         .first()
         .context("Go metadata has no stable release")?
