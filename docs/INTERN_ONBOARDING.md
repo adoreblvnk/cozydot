@@ -50,13 +50,13 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 1. Derive applicable repos, aggregate repo package changes, APT requirements, tool installations, binary mappings, and desktop prerequisites.
 2. On Debian, ensure configured `sudo` group membership and add official APT components.
 3. On Ubuntu, set unattended upgrades and snapd state, then install restricted extras when configured.
-4. Run the early APT update when required by configured APT, Ubuntu, or Deb binary state.
-5. Install missing base and derived prerequisites, running APT update immediately before install.
-6. Install configured direct APT packages.
+4. Run APT update.
+5. Ensure base and derived prerequisites without upgrading installed packages.
+6. Ensure configured direct APT packages without upgrading installed packages.
 7. Add each applicable APT repo, then run one APT update.
 8. Purge aggregate repo conflicts and install aggregate repo packages.
 9. Add the Flathub remote and install configured Flatpak applications.
-10. Install rustup, the Rust toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
+10. Install Rust with the configured toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
 11. Install configured Cargo crates and npm packages.
 12. Install applicable Deb binaries.
 13. Install appimaged, then applicable AppImages.
@@ -72,7 +72,7 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 3. Install Command Line Tools for Xcode when configured.
 4. Install Homebrew.
 5. Install configured formulae and casks, adding `stow` when dotfiles are configured.
-6. Install rustup, the Rust toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
+6. Install Rust with the configured toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
 7. Install configured Cargo crates and npm packages.
 8. Install configured user Nerd Font families.
 9. Apply shared and macOS dotfile packages.
@@ -86,11 +86,10 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 1. Combine shared and platform dotfile packages in declaration order.
 2. Stop without an operation when no packages are configured.
 3. Verify the dotfiles root and every selected package directory.
-4. Resolve intended destinations and collect all unmanaged conflicts before mutation.
-5. Report every conflict and change nothing when `--replace` is absent.
-6. Verify GNU Stow is available.
-7. With `--replace`, move conflicts under `${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups`.
-8. Apply each package with Stow in declaration order.
+4. Verify GNU Stow is available.
+5. Without `--replace`, simulate one Stow transaction for every package so Stow reports conflicts before mutation.
+6. With `--replace`, collect and move conflicts under `${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups`.
+7. Prepare the GnuPG home when configured, then apply every package in one Stow transaction.
 
 `cozydot apply` uses the same dotfiles operation without replacement.
 
@@ -102,9 +101,9 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 
 1. Derive base prerequisites and add Flatpak when its update is enabled.
 2. When an APT policy is configured, run APT update followed by the selected `upgrade` or `full-upgrade` command.
-3. Install missing update prerequisites, running APT update immediately before install.
+3. Ensure update prerequisites without upgrading installed packages.
 4. Update installed Flatpak applications and runtimes when enabled.
-5. Install rustup and update Rust toolchains when enabled.
+5. Ensure Rust with the configured or stable toolchain, then update Rust toolchains when enabled.
 6. Update the Go toolchain when enabled.
 7. Install fnm and update the Node.js version when enabled.
 8. Install uv and upgrade the Python versions when enabled.
@@ -116,7 +115,7 @@ Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspe
 
 1. Install Homebrew.
 2. Run Homebrew update and upgrade the selected formulae and casks when enabled.
-3. Install rustup and update Rust toolchains when enabled.
+3. Ensure Rust with the configured or stable toolchain, then update Rust toolchains when enabled.
 4. Update the Go toolchain when enabled.
 5. Install fnm for a Node.js version or npm update, then update the Node.js version when enabled.
 6. Install uv and upgrade the Python versions when enabled.

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::{
+    ffi::OsStr,
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -25,43 +26,32 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
         sources.push((package, source));
     }
 
-    let mut conflicts = Vec::new();
-    for (package, source) in &sources {
-        collect_conflicts(source, host.home(), package, &mut conflicts)?;
-    }
-    conflicts.sort_by(|left, right| left.1.cmp(&right.1));
-    conflicts.dedup_by(|left, right| left.1 == right.1);
-    if !conflicts.is_empty() && !replace {
-        let paths = conflicts.iter().map(|(_, path)| format!("  {}", path.display())).collect::<Vec<_>>().join("\n");
-        bail!(
-            "unmanaged dotfile conflicts:\n{paths}\nno dotfiles were changed; rerun with `cozydot dotfiles --replace`"
-        );
-    }
     host.require_cli("GNU Stow", "stow").context("dotfiles require GNU Stow")?;
+    let home = host.home();
+    let mut args = vec![OsStr::new("--dir"), root.as_os_str(), OsStr::new("--target"), home.as_os_str()];
+    if !replace {
+        let mut check_args = args.clone();
+        check_args.extend([OsStr::new("--simulate"), OsStr::new("--")]);
+        check_args.extend(packages.iter().map(OsStr::new));
+        host.run("stow package check", "stow", check_args)?;
+    }
+
+    let mut conflicts = Vec::new();
     if replace {
+        for (package, source) in &sources {
+            collect_conflicts(source, home.clone(), package, &mut conflicts)?;
+        }
+        conflicts.sort_by(|left, right| left.1.cmp(&right.1));
+        conflicts.dedup_by(|left, right| left.1 == right.1);
         backup_conflicts(host, &conflicts)?;
     }
 
-    for (package, source) in sources {
-        apply_package(host, &root, package, &source)?;
+    for (_, source) in sources {
+        prepare_gnupg_home(&source, &home)?;
     }
-    Ok(())
-}
-
-fn apply_package(host: &Host, root: &Path, package: &str, source: &Path) -> Result<()> {
-    prepare_gnupg_home(source, &host.home())?;
-    host.run(
-        "stow package install",
-        "stow",
-        [
-            "--dir".as_ref(),
-            root.as_os_str(),
-            "--target".as_ref(),
-            host.home().as_os_str(),
-            "--".as_ref(),
-            package.as_ref(),
-        ],
-    )?;
+    args.push(OsStr::new("--"));
+    args.extend(packages.iter().map(OsStr::new));
+    host.run("stow package install", "stow", args)?;
     Ok(())
 }
 

@@ -100,8 +100,8 @@ state, and leaves unconfigured software unchanged. It does not upgrade present
 software merely because a newer release exists.
 
 `cozydot dotfiles` applies only shared dotfile packages and those configured for
-the current platform. It reports every unmanaged destination conflict and exits
-without changing dotfiles. `cozydot dotfiles --replace` (or `-r`) first backs
+the current platform. It uses Stow's simulation mode to reject destination
+conflicts without changing dotfiles. `cozydot dotfiles --replace` (or `-r`) first backs
 conflicts up under
 `${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups`, then applies
 Cozydot's links. The command requires GNU Stow to be installed and never adopts
@@ -109,9 +109,9 @@ destination files into Cozydot's source. `apply` uses the same conservative
 conflict behavior.
 
 `cozydot update` runs each enabled update category independently from apply
-intent. Flatpak updates installed user applications; Cargo updates installed
-registry crates; npm updates global packages. Rust updates all installed
-rustup toolchains when no selector is configured. Selectorless Go, Node, and
+intent. Flatpak updates installed user applications and runtimes; Cargo updates installed
+registry crates; npm updates global packages. Rust ensures the configured or stable
+toolchain, then updates all installed rustup toolchains. Selectorless Go, Node, and
 Python updates use `latest`, `latest`, and `3` respectively. Font updates still
 redownload configured Nerd Font families because fonts have no native manager;
 an absent family list is a no-op.
@@ -130,7 +130,7 @@ packages or repositories.
 Direct APT packages are ensured before third-party repositories. Cozydot publishes
 every repository applicable to the detected distribution and optional APT-native
 `arch` list, runs `apt-get update` once, purges all installed repository conflicts,
-then installs all missing repository packages in one operation. An omitted `arch`
+then ensures all repository packages without upgrading installed versions. An omitted `arch`
 supports every Cozydot Linux architecture; supported values are `amd64`, `arm64`,
 and `armhf`.
 
