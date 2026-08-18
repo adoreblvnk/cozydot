@@ -22,7 +22,7 @@ pub fn install_homebrew(host: &Host) -> Result<()> {
     if find_brew(host).is_ok() {
         return Ok(());
     }
-    let script = TempPath::new(host, "homebrew-install")?;
+    let script = TempPath::new("homebrew-install")?;
     host.curl(
         "Homebrew installer download",
         "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",

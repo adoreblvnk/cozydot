@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use std::{ffi::OsStr, fs, io::Write, path::Path};
 
 pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], label: &str) -> Result<()> {
-    let local = TempPath::new(host, "privileged-write")?;
+    let local = TempPath::new("privileged-write")?;
     let mut file = fs::OpenOptions::new()
         .write(true)
         .truncate(true)

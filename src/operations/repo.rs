@@ -56,7 +56,7 @@ pub(crate) fn add(host: &Host, repo: &AptRepo) -> Result<()> {
 }
 
 fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
-    let downloaded = TempPath::new(host, "repo-key-download")?;
+    let downloaded = TempPath::new("repo-key-download")?;
     host.curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.path().to_string_lossy()])?;
 
     let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repo key")?;
@@ -64,7 +64,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
         bail!("repo key download produced empty output");
     }
 
-    let binary_keyring = TempPath::new_with_suffix(host, "repo-key-binary", ".gpg")?;
+    let binary_keyring = TempPath::new_with_suffix("repo-key-binary", ".gpg")?;
 
     host.run(
         "repo key conversion",

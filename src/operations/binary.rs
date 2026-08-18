@@ -135,7 +135,7 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &BinaryPackageOp
 }
 
 fn download_deb(host: &Host, package: &BinaryPackageOperation, url: &str) -> Result<TempPath> {
-    let temp = TempPath::new_with_suffix(host, &package.name, ".deb")?;
+    let temp = TempPath::new_with_suffix(&package.name, ".deb")?;
     host.curl("download binary package", url, ["--output".as_ref(), temp.path().as_os_str()])?;
     Ok(temp)
 }

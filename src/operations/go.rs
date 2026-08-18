@@ -26,7 +26,7 @@ pub(crate) fn install_toolchain(host: &Host, selector: &GoToolchainSelector, arc
             output.status.success() && std::str::from_utf8(&output.stdout).is_ok_and(|stdout| stdout.trim() == expected)
         })
     {
-        let archive = TempPath::new_with_suffix(host, "go", ".tar.gz")?;
+        let archive = TempPath::new_with_suffix("go", ".tar.gz")?;
         let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go_archive());
         let url = format!("https://go.dev/dl/{filename}");
         host.curl(

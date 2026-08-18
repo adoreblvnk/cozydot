@@ -65,10 +65,6 @@ impl Host {
         self.home.clone()
     }
 
-    pub fn temp_dir(&self) -> PathBuf {
-        std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
-    }
-
     pub fn executable_on_path(&self, name: &str) -> bool {
         std::env::var_os("PATH")
             .is_some_and(|path| std::env::split_paths(&path).any(|directory| executable_file(&directory.join(name))))
@@ -107,12 +103,17 @@ pub(crate) fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> 
 pub(crate) struct TempPath(tempfile::TempPath);
 
 impl TempPath {
-    pub fn new(host: &Host, stem: &str) -> Result<Self> {
-        Self::new_with_suffix(host, stem, "")
+    pub fn new(stem: &str) -> Result<Self> {
+        Self::new_with_suffix(stem, "")
     }
 
-    pub fn new_with_suffix(host: &Host, stem: &str, suffix: &str) -> Result<Self> {
-        Self::new_in_with_suffix(&host.temp_dir(), stem, suffix)
+    pub fn new_with_suffix(stem: &str, suffix: &str) -> Result<Self> {
+        tempfile::Builder::new()
+            .prefix(stem)
+            .suffix(suffix)
+            .tempfile()
+            .map(|file| Self(file.into_temp_path()))
+            .context("create temporary file")
     }
 
     pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
