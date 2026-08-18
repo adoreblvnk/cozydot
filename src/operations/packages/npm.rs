@@ -1,9 +1,9 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
-use super::super::{Host, executable_file};
+use super::super::{Host, fnm};
 
 pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
-    let Some(fnm) = resolve_fnm(host)? else {
+    let Some(fnm) = fnm::resolve(host)? else {
         bail!("npm install: managed fnm is unavailable after install");
     };
     let mut missing = Vec::new();
@@ -25,7 +25,7 @@ pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
 }
 
 pub(crate) fn update(host: &Host) -> Result<()> {
-    let Some(fnm) = resolve_fnm(host)? else { return Ok(()) };
+    let Some(fnm) = fnm::resolve(host)? else { return Ok(()) };
     run_npm_checked(host, &fnm, "npm package update", ["update", "--global"])?;
     Ok(())
 }
@@ -37,18 +37,6 @@ fn package_name(package: &str) -> &str {
         return version.map_or(package, |index| &package[..index]);
     }
     package.split_once('@').map_or(package, |(name, _)| name)
-}
-
-fn resolve_fnm(host: &Host) -> Result<Option<String>> {
-    if cfg!(target_os = "macos") {
-        return super::super::macos::formula_executable(host, "fnm", "fnm").map(Some);
-    }
-    let data_home = host.home().join(".local/share");
-    let managed = data_home.join("fnm/fnm");
-    if executable_file(&managed) {
-        return managed.to_str().map(str::to_owned).map(Some).context("managed fnm executable path is not UTF-8");
-    }
-    Ok(None)
 }
 
 fn run_npm_checked<I, S>(host: &Host, fnm: &str, label: &str, npm_args: I) -> Result<std::process::Output>
