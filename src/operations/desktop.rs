@@ -3,13 +3,12 @@ use anyhow::{Result, bail};
 use super::Host;
 use crate::config::Theme;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum DesktopEnvironment {
     Gnome,
     Cinnamon,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DesktopSetting {
     ColorScheme(Theme),
     Terminal(String),

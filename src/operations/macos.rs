@@ -1,7 +1,6 @@
 use super::{Host, TempPath};
 use anyhow::{Result, bail};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MacDefault {
     DarkMode(bool),
     DockAutohide(bool),

@@ -5,7 +5,6 @@ use std::{ffi::OsStr, fs, path::PathBuf};
 
 const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AptRepo {
     key_url: String,
     source_url: String,

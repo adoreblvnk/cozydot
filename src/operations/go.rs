@@ -6,7 +6,6 @@ use super::{Host, TempPath, regular_executable_file, shell::append_profile};
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoToolchainSelector {
     Latest,
     Version(String),

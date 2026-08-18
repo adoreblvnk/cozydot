@@ -10,13 +10,11 @@ const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
 const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinarySourceOperation {
     GitHubLatest { repo: String, asset_pattern: String },
     Url { url: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BinaryPackageOperation {
     name: String,
     format: BinaryFormat,
