@@ -62,7 +62,6 @@ linux:
         - bash-completion
         - build-essential
         - cmake
-        - curl
         - default-jdk
         - ffmpeg
         - figlet
@@ -76,10 +75,8 @@ linux:
         - pinentry-tty
         - trash-cli
         - ttf-mscorefonts-installer
-        - unzip
         - vim
         - vlc
-        - xz-utils
       repos:
         - name: vscode
           key_url: https://packages.microsoft.com/keys/microsoft.asc
@@ -160,7 +157,6 @@ macos:
       - pandoc
       - pass
       - pinentry-mac
-      - stow
       - trash
       - vim
     casks:

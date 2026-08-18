@@ -99,7 +99,6 @@ linux:
         - bash-completion
         - build-essential
         - cmake
-        - curl
         - default-jdk
         - ffmpeg
         - figlet
@@ -113,10 +112,8 @@ linux:
         - pinentry-tty
         - trash-cli
         - ttf-mscorefonts-installer
-        - unzip
         - vim
         - vlc
-        - xz-utils
       repos:
         - name: docker
           key_url: https://download.docker.com/linux/ubuntu/gpg
@@ -315,7 +312,6 @@ macos:
       - pandoc
       - pass
       - pinentry-mac
-      - stow
       - trash
       - vim
     casks:
