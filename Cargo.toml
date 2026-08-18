@@ -22,7 +22,6 @@ sha2 = "0.10"
 tempfile = "3"
 regex = "1"
 rustix = { version = "1.1", features = ["process"] }
-url = "2.5"
 etc-os-release = "0.1.1"
 
 [dev-dependencies]

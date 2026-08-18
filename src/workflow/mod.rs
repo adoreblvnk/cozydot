@@ -178,7 +178,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
     apply_tools(config, arch)?;
     apply_packages(config)?;
     if let Some(families) = nerd_fonts(config) {
-        run("Apply", "user Nerd Fonts install", Operation::UserNerdFontsInstall { families })?;
+        run("Apply", "Nerd Fonts install", Operation::NerdFontsInstall { families })?;
     }
     if let Some(operation) = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false) {
         run("Apply", "dotfiles apply", operation)?;
@@ -265,7 +265,7 @@ fn macos_update(config: &Config, arch: Architecture) -> Result<()> {
     if config.shared.updates.fonts == Some(true)
         && let Some(families) = nerd_fonts(config)
     {
-        run("Update", "user Nerd Fonts update", Operation::UserNerdFontsUpdate { families })?;
+        run("Update", "Nerd Fonts update", Operation::NerdFontsUpdate { families })?;
     }
     Ok(())
 }

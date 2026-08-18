@@ -85,8 +85,6 @@ pub enum Operation {
     HomebrewPackagesInstall { formulae: Vec<String>, casks: Vec<String> },
     MacOSSudoAccessValidate,
     CommandLineToolsForXcodeInstall,
-    UserNerdFontsInstall { families: Vec<String> },
-    UserNerdFontsUpdate { families: Vec<String> },
     MacDefaultsWrite { settings: Vec<macos::MacDefault> },
     HomebrewUpdateAndUpgrade { formulae: bool, casks: bool },
 }
@@ -164,12 +162,6 @@ fn run_on(operation: &Operation, host: Host) -> Result<OperationOutcome> {
         }
         Operation::MacOSSudoAccessValidate => completed(macos::validate_sudo_access(&host)),
         Operation::CommandLineToolsForXcodeInstall => completed(macos::install_command_line_tools_for_xcode(&host)),
-        Operation::UserNerdFontsInstall { families } => {
-            completed(packages::fonts::apply_user(&host, families, NerdFontsMode::Install))
-        }
-        Operation::UserNerdFontsUpdate { families } => {
-            completed(packages::fonts::apply_user(&host, families, NerdFontsMode::Update))
-        }
         Operation::MacDefaultsWrite { settings } => completed(macos::write_defaults(&host, settings)),
         Operation::HomebrewUpdateAndUpgrade { formulae, casks } => {
             completed(macos::update_and_upgrade(&host, *formulae, *casks))
