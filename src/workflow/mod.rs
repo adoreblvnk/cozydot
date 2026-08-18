@@ -153,9 +153,9 @@ fn linux_apply(
 }
 
 fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
-    let dotfiles = !config.shared.dotfiles.packages.is_empty() || !config.macos.dotfiles.packages.is_empty();
+    let dotfiles = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false);
     let homebrew_packages =
-        dotfiles || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
+        dotfiles.is_some() || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
 
     if config.macos.system.validate_sudo_access == Some(true) {
         run("Apply", "macOS sudo access validation", Operation::MacOSSudoAccessValidate)?;
@@ -166,7 +166,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
     run("Apply", "Homebrew install", Operation::HomebrewInstall)?;
     if homebrew_packages {
         let mut formulae = config.macos.homebrew.formulae.clone();
-        if dotfiles && !formulae.iter().any(|formula| formula == "stow") {
+        if dotfiles.is_some() && !formulae.iter().any(|formula| formula == "stow") {
             formulae.push("stow".into());
         }
         run(
@@ -180,7 +180,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
     if let Some(families) = nerd_fonts(config) {
         run("Apply", "Nerd Fonts install", Operation::NerdFontsApply { families, force: false })?;
     }
-    if let Some(operation) = dotfiles_operation(config, &config.macos.dotfiles.packages, dotfiles_root, false) {
+    if let Some(operation) = dotfiles {
         run("Apply", "dotfiles apply", operation)?;
     }
     vscode_extensions(config)?;
@@ -223,13 +223,15 @@ fn apply_packages(config: &Config) -> Result<()> {
 }
 
 fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
+    let updates = config.linux.updates.as_ref();
+    let flatpak = updates.and_then(|updates| updates.flatpak) == Some(true);
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
-    if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
+    if flatpak {
         apt_prereqs.insert("flatpak");
     }
 
     run("Update", "APT update", Operation::AptUpdate)?;
-    if let Some(policy) = config.linux.updates.as_ref().and_then(|updates| updates.apt) {
+    if let Some(policy) = updates.and_then(|updates| updates.apt) {
         run("Update", "APT upgrade", Operation::AptUpgrade { command: policy })?;
     }
     run(
@@ -237,7 +239,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
         "APT package install",
         Operation::AptPackagesInstall { packages: apt_prereqs.iter().map(|value| (*value).to_owned()).collect() },
     )?;
-    if config.linux.updates.as_ref().and_then(|updates| updates.flatpak) == Some(true) {
+    if flatpak {
         run("Update", "Flatpak update", Operation::FlatpakUpdate)?;
     }
     update_tools_and_packages(config, platform.architecture, false)?;
