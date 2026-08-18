@@ -1,5 +1,5 @@
 use super::github::Release;
-use super::{apt, host::Host};
+use crate::operations::{host::Host, packages::apt};
 use crate::platform::Architecture;
 use anyhow::{Context, Result};
 

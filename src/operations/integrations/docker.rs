@@ -2,10 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-use super::{
-    host::{Host, one_record},
-    privileged_file::write_atomic,
-};
+use crate::operations::host::{Host, one_record, privileged_file::write_atomic};
 
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 

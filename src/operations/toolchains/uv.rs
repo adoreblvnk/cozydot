@@ -1,8 +1,7 @@
 use anyhow::{Context, Result, bail};
 
-use super::{
-    host::{Host, TempPath, regular_executable_file, require_regular_executable},
-    shell::append_profile,
+use crate::operations::host::{
+    Host, TempPath, regular_executable_file, require_regular_executable, shell::append_profile,
 };
 
 const UV_INIT: &str = r#"if [ -f "$HOME/.local/bin/env" ]; then

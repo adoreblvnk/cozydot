@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use super::host::{Host, TempPath};
+use crate::operations::host::{Host, TempPath};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {

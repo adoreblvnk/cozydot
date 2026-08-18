@@ -1,58 +1,21 @@
-use super::host::{Host, TempPath};
+use crate::operations::host::{Host, TempPath};
 use crate::{
     config::{BinaryFormat, BinaryPackage, BinarySource},
     platform::Architecture,
 };
+
+mod appimage;
+pub(crate) mod appimaged;
+mod github;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::path::PathBuf;
 
-use super::github::Release;
+use self::github::Release;
 
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
 const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
-
-pub(crate) mod cargo_binstall {
-    use super::super::host::{Host, executable_file};
-    use anyhow::{Context, Result};
-
-    pub(crate) fn install(host: &Host) -> Result<()> {
-        if cfg!(target_os = "macos") {
-            return super::super::macos::install_formula(host, "cargo-binstall");
-        }
-        let cargo_home = host.home().join(".cargo");
-        let cargo_binstall_path = cargo_home.join("bin/cargo-binstall");
-        if executable_file(&cargo_binstall_path) {
-            return Ok(());
-        }
-        let cargo_bin = cargo_home.join("bin/cargo");
-        let program = cargo_bin
-            .to_str()
-            .with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo_bin.display()))?;
-
-        host.run("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
-        Ok(())
-    }
-
-    pub(crate) fn install_cargo_update(host: &Host) -> Result<()> {
-        let cargo_home = host.home().join(".cargo");
-        if executable_file(&cargo_home.join("bin/cargo-install-update")) {
-            return Ok(());
-        }
-        let binstall = cargo_home.join("bin/cargo-binstall");
-        let program = if cfg!(target_os = "macos") {
-            super::super::macos::formula_executable(host, "cargo-binstall", "cargo-binstall")?
-        } else {
-            binstall
-                .to_str()
-                .with_context(|| format!("cargo-binstall executable path is not UTF-8: {}", binstall.display()))?
-                .to_owned()
-        };
-        host.run("cargo-update install", &program, ["--no-confirm", "cargo-update"])?;
-        Ok(())
-    }
-}
 
 pub(crate) fn install(host: &Host, package: &BinaryPackage, architecture: Architecture) -> Result<()> {
     if is_installed(host, package) {
@@ -62,7 +25,7 @@ pub(crate) fn install(host: &Host, package: &BinaryPackage, architecture: Archit
     match package.format {
         BinaryFormat::Deb => install_deb(host, download_deb(host, package, &url)?),
         BinaryFormat::AppImage => {
-            super::appimage::install_appimage(host, "download binary package", &url, &appimage_path(host, package))
+            appimage::install_appimage(host, "download binary package", &url, &appimage_path(host, package))
         }
     }
 }

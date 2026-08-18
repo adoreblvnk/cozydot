@@ -1,8 +1,10 @@
 use anyhow::Result;
 use std::path::Path;
 
-use super::{host::Host, privileged_file::write_atomic, systemd};
+pub(crate) mod repo;
+
 use crate::config::AptUpgradeCommand;
+use crate::operations::host::{Host, privileged_file::write_atomic, systemd};
 
 const AUTO_UPGRADES: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
 

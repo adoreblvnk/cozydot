@@ -3,6 +3,10 @@ use anyhow::{Result, bail};
 use super::host::Host;
 use crate::config::Theme;
 
+pub(crate) mod fonts;
+pub(crate) mod gnome;
+pub(crate) mod macos;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum DesktopEnvironment {
     Gnome,

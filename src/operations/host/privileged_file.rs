@@ -1,4 +1,4 @@
-use super::host::{Host, TempPath};
+use super::{Host, TempPath};
 use anyhow::{Context, Result};
 use std::{ffi::OsStr, fs, io::Write, path::Path};
 

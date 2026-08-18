@@ -7,6 +7,12 @@ use std::{
     process::{Command, Output},
 };
 
+pub(crate) mod macos;
+pub(crate) mod privileged_file;
+pub(crate) mod shell;
+pub(crate) mod systemd;
+pub(crate) mod users;
+
 pub(crate) struct Host {
     home: PathBuf,
 }
