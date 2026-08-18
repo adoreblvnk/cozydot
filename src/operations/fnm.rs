@@ -42,7 +42,7 @@ pub fn install(host: &Host) -> Result<()> {
 }
 
 pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
-    let Some(fnm) = resolve(host)? else {
+    let Some(fnm) = find_executable(host)? else {
         bail!("fnm install: fnm is unavailable after install");
     };
     if selector == "lts" {
@@ -54,7 +54,7 @@ pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn resolve(host: &Host) -> Result<Option<String>> {
+pub(crate) fn find_executable(host: &Host) -> Result<Option<String>> {
     if cfg!(target_os = "macos") {
         return super::macos::formula_executable(host, "fnm", "fnm").map(Some);
     }
