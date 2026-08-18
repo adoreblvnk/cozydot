@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use super::super::{Host, fnm};
 
 pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
-    let Some(fnm) = fnm::resolve(host)? else {
+    let Some(fnm) = fnm::find_executable(host)? else {
         bail!("npm install: managed fnm is unavailable after install");
     };
     let mut missing = Vec::new();
@@ -25,7 +25,7 @@ pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
 }
 
 pub(crate) fn update(host: &Host) -> Result<()> {
-    let Some(fnm) = fnm::resolve(host)? else { return Ok(()) };
+    let Some(fnm) = fnm::find_executable(host)? else { return Ok(()) };
     run_npm_checked(host, &fnm, "npm package update", ["update", "--global"])?;
     Ok(())
 }
