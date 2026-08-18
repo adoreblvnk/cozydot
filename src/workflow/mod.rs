@@ -200,8 +200,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
 
 fn apply_tools(config: &Config, arch: Architecture) -> Result<()> {
     if let Some(selector) = config.shared.tools.rust.as_deref() {
-        run("Apply", Operation::RustupInstall)?;
-        run("Apply", Operation::RustToolchainInstall { selector: selector.to_owned() })?;
+        run("Apply", Operation::RustInstall { selector: selector.to_owned() })?;
         run("Apply", Operation::CargoBinstallInstall)?;
         run("Apply", Operation::CargoUpdateInstall)?;
     }
@@ -275,7 +274,12 @@ fn macos_update(config: &Config, arch: Architecture) -> Result<()> {
 fn update_tools_and_packages(config: &Config, arch: Architecture, macos: bool) -> Result<()> {
     let updates = &config.shared.updates;
     if updates.tools.rust == Some(true) {
-        run("Update", Operation::RustupInstall)?;
+        run(
+            "Update",
+            Operation::RustInstall {
+                selector: config.shared.tools.rust.clone().unwrap_or_else(|| "stable".to_owned()),
+            },
+        )?;
         run("Update", Operation::RustToolchainUpdate)?;
     }
     if updates.tools.go == Some(true) {

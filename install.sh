@@ -21,24 +21,15 @@ BIN_TMP=""
 cleanup() { rm -rf "$WORK"; [[ -z $BIN_TMP ]] || rm -f "$BIN_TMP"; }
 trap cleanup EXIT
 
-valid_pair() {
-  local archive=$1 checksum=$2 expected actual
-  [[ -f $archive && -f $checksum ]] || return 1
-  read -r expected _ <"$checksum" || return 1
-  [[ $expected =~ ^[[:xdigit:]]{64}$ ]] || return 1
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$archive")"
-  else
-    actual="$(shasum -a 256 "$archive")"
-  fi
-  [[ ${actual%% *} == "$expected" ]]
-}
-
-ARCHIVE="$WORK/release.tar.gz"
-CHECKSUM="$WORK/release.tar.gz.sha256"
+ARCHIVE="$WORK/$ASSET"
+CHECKSUM="$ARCHIVE.sha256"
 curl -fsSL "$URL/$ASSET" -o "$ARCHIVE"
 curl -fsSL "$URL/$ASSET.sha256" -o "$CHECKSUM"
-valid_pair "$ARCHIVE" "$CHECKSUM" || {
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$WORK" && sha256sum -c "$ASSET.sha256")
+else
+  (cd "$WORK" && shasum -a 256 -c "$ASSET.sha256")
+fi || {
   printf 'cozydot: checksum verification failed\n' >&2
   exit 1
 }

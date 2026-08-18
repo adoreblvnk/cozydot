@@ -286,7 +286,13 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
     }
     write_executable(
         &fake_bin.join("sudo"),
-        "#!/bin/sh\n[ \"$*\" = 'apt-get update -qq' ] || { : > \"$COZYDOT_TEST_MUTATION\"; exit 99; }\nprintf '%s\\n' \"$*\" >> \"$COZYDOT_TEST_APT_LOG\"\n",
+        r#"#!/bin/sh
+case "$*" in
+  "apt-get update -qq"|"DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+") ;;
+  *) : > "$COZYDOT_TEST_MUTATION"; exit 99 ;;
+esac
+printf '%s\n' "$*" >> "$COZYDOT_TEST_APT_LOG"
+"#,
     );
 
     let command = || {
@@ -301,7 +307,15 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
     };
     command().arg("apply").assert().success().stdout("Apply: APT update\nApply: APT package install\n");
     command().arg("update").assert().success().stdout("Update: APT update\nUpdate: APT package install\n");
-    assert_eq!(fs::read_to_string(apt_log).unwrap(), "apt-get update -qq\napt-get update -qq\n");
+    assert_eq!(
+        fs::read_to_string(apt_log).unwrap(),
+        concat!(
+            "apt-get update -qq\n",
+            "DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n",
+            "apt-get update -qq\n",
+            "DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n"
+        )
+    );
     assert!(!mutation.exists());
 }
 
@@ -319,7 +333,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     write_linux_host_fakes(&fake_bin);
     write_executable(
         &fake_bin.join("sudo"),
-        "#!/bin/sh\n[ \"$*\" = 'apt-get update -qq' ] && exit 0\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n",
+        "#!/bin/sh\ncase \"$*\" in 'apt-get update -qq'|DEBIAN_FRONTEND=noninteractive\\ apt-get\\ install\\ --no-upgrade\\ *) exit 0 ;; esac\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n",
     );
 
     cozydot()
@@ -352,13 +366,16 @@ fn dotfiles_refuse_conflicts_and_replace_only_when_explicit() {
         &fake_bin.join("stow"),
         r#"#!/bin/sh
 [ "${1-}" = "--version" ] && exit 0
+simulate=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dir) dir=$2; shift 2 ;;
     --target) target=$2; shift 2 ;;
+    --simulate) simulate=true; shift ;;
     --) package=$2; break ;;
   esac
 done
+$simulate && { [ ! -e "$target/.bashrc" ]; exit; }
 ln -s "$dir/$package/.bashrc" "$target/.bashrc"
 "#,
     );
@@ -382,11 +399,7 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
     assert!(!state.exists());
 
     write_config(&root, "dotfiles:\n  packages: [bash]\n", "{}");
-    command()
-        .arg("dotfiles")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("unmanaged dotfile conflicts").and(predicate::str::contains("--replace")));
+    command().arg("dotfiles").assert().failure().stderr(predicate::str::contains("stow package check"));
     assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
     assert!(!state.exists());
 
@@ -573,7 +586,7 @@ fn apply_writes_repo_files_and_installs_packages_in_order() {
     let first = fs::read_to_string(&log).unwrap();
     let lines = first.lines().collect::<Vec<_>>();
     let position = |needle: &str| lines.iter().position(|line| line.contains(needle)).unwrap();
-    let direct_install = position("apt-get install -y -qq -- direct-package+");
+    let direct_install = position("apt-get install --no-upgrade -y -qq -- direct-package+");
     let repo_download = position("curl ");
     let source_list_write = position("/etc/apt/sources.list.d/armored.list");
     let apt_update = lines
@@ -583,7 +596,7 @@ fn apply_writes_repo_files_and_installs_packages_in_order() {
         .map(|(index, _)| index)
         .unwrap();
     let purge = position("apt-get purge -y -qq -- old-package");
-    let install = position("apt-get install -y -qq -- vendor-one+ vendor-two+");
+    let install = position("apt-get install --no-upgrade -y -qq -- vendor-one+ vendor-two+");
     assert!(direct_install < repo_download);
     assert!(repo_download < source_list_write && source_list_write < apt_update);
     assert!(apt_update < purge && purge < install);
@@ -603,7 +616,7 @@ fn apply_writes_repo_files_and_installs_packages_in_order() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let second = fs::read_to_string(log).unwrap();
     assert_eq!(second.matches("sudo apt-get update -qq\n").count(), 2);
-    assert!(!second.contains(" apt-get install "));
+    assert_eq!(second.matches(" apt-get install --no-upgrade ").count(), 3);
     assert!(!second.contains(" apt-get purge "));
 }
 
@@ -632,7 +645,7 @@ fn inapplicable_repos_have_no_side_effects() {
         }
         write_executable(
             &fake_bin.join("sudo"),
-            "#!/bin/sh\n[ \"$*\" = 'apt-get update -qq' ] && exit 0\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n",
+            "#!/bin/sh\ncase \"$*\" in 'apt-get update -qq'|DEBIAN_FRONTEND=noninteractive\\ apt-get\\ install\\ --no-upgrade\\ *) exit 0 ;; esac\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n",
         );
         cozydot()
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
@@ -651,13 +664,21 @@ fn inapplicable_repos_have_no_side_effects() {
 #[cfg(target_os = "linux")]
 fn update_runs_only_the_selected_apt_upgrade_command() {
     for (policy, expected) in [
-        ("upgrade", "sudo apt-get update -qq\nsudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq\n"),
+        (
+            "upgrade",
+            concat!(
+                "sudo apt-get update -qq\n",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq\n",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n"
+            ),
+        ),
         (
             "full-upgrade",
             concat!(
                 "sudo apt-get update -qq\n",
                 "sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq\n",
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y -qq\n"
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y -qq\n",
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n"
             ),
         ),
     ] {

@@ -14,14 +14,7 @@ pub fn add_flathub_remote(host: &Host) -> Result<()> {
 }
 
 pub fn install(host: &Host, refs: &[String]) -> Result<()> {
-    let mut missing = Vec::new();
-    for reference in refs {
-        let output = host.output("flatpak", ["--user", "info", "--show-ref", "--", reference])?;
-        if !output.status.success() {
-            missing.push(reference.clone());
-        }
-    }
-    if missing.is_empty() {
+    if refs.is_empty() {
         return Ok(());
     }
     let mut args = vec![
@@ -32,7 +25,7 @@ pub fn install(host: &Host, refs: &[String]) -> Result<()> {
         "flathub".into(),
         "--".into(),
     ];
-    args.extend(missing);
+    args.extend(refs.iter().cloned());
     host.run("Flatpak application install", "flatpak", args)?;
     Ok(())
 }

@@ -1,5 +1,5 @@
-use super::Host;
 use super::parsers::GitHubRelease;
+use super::{Host, apt};
 use crate::platform::Architecture;
 use anyhow::{Context, Result};
 
@@ -55,8 +55,5 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
 fn ensure_fuse(host: &Host) -> Result<()> {
     let package =
         if host.output("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
-    if !host.output("dpkg", ["--status", package])?.status.success() {
-        host.run("AppImage FUSE support install", "sudo", ["apt-get", "install", "-qq", package])?;
-    }
-    Ok(())
+    apt::install_packages(host, &[package.into()])
 }

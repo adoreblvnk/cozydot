@@ -43,21 +43,7 @@ pub fn install_packages(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
-    let missing = missing_packages(host, packages)?;
-    if missing.is_empty() {
-        return Ok(());
-    }
-    install(host, "APT package install", missing)
-}
-
-fn missing_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
-    let mut missing = Vec::new();
-    for package in packages {
-        if !is_package_installed(host, package)? {
-            missing.push(package.clone());
-        }
-    }
-    Ok(missing)
+    install(host, "APT package install", packages)
 }
 
 fn installed_packages(host: &Host, packages: &[String]) -> Result<Vec<String>> {
@@ -91,19 +77,19 @@ fn is_package_installed(host: &Host, package: &str) -> Result<bool> {
     }
 }
 
-fn install(host: &Host, label: &str, packages: Vec<String>) -> Result<()> {
-    change_packages(host, label, "install", packages.into_iter().map(|package| format!("{package}+")))
+fn install(host: &Host, label: &str, packages: &[String]) -> Result<()> {
+    change_packages(host, label, &["install", "--no-upgrade"], packages.iter().map(|package| format!("{package}+")))
 }
 
-fn change_packages(host: &Host, label: &str, command: &str, packages: impl IntoIterator<Item = String>) -> Result<()> {
-    let mut args = vec![
-        "DEBIAN_FRONTEND=noninteractive".to_owned(),
-        "apt-get".to_owned(),
-        command.to_owned(),
-        "-y".into(),
-        "-qq".into(),
-        "--".into(),
-    ];
+fn change_packages(
+    host: &Host,
+    label: &str,
+    command: &[&str],
+    packages: impl IntoIterator<Item = String>,
+) -> Result<()> {
+    let mut args = vec!["DEBIAN_FRONTEND=noninteractive".to_owned(), "apt-get".to_owned()];
+    args.extend(command.iter().map(|value| (*value).to_owned()));
+    args.extend(["-y".into(), "-qq".into(), "--".into()]);
     args.extend(packages);
     host.run(label, "sudo", args)?;
     Ok(())
@@ -117,7 +103,7 @@ pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
     if installed.is_empty() {
         return Ok(());
     }
-    change_packages(host, "APT package purge", "purge", installed)
+    change_packages(host, "APT package purge", &["purge"], installed)
 }
 
 pub fn upgrade(host: &Host, command: AptUpgradeCommand) -> Result<()> {
