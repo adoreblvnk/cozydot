@@ -15,8 +15,8 @@ pub fn install(host: &Host) -> Result<()> {
         return append_shell(host, FNM_ZSH_INIT);
     }
 
-    let data_home = host.home().join(".local/share");
-    let fnm_path = data_home.join("fnm/fnm");
+    let install_dir = host.home().join(".local/share/fnm");
+    let fnm_path = install_dir.join("fnm");
     if !regular_executable_file(&fnm_path) {
         let installer = TempPath::new(host, "fnm-install")?;
         host.curl(
@@ -26,11 +26,11 @@ pub fn install(host: &Host) -> Result<()> {
         )?;
         host.run(
             "fnm install",
-            "env",
+            "bash",
             [
-                format!("XDG_DATA_HOME={}", data_home.display()),
-                "bash".to_owned(),
                 installer.path().to_string_lossy().into_owned(),
+                "--install-dir".to_owned(),
+                install_dir.to_string_lossy().into_owned(),
                 "--skip-shell".to_owned(),
             ],
         )?;
@@ -56,8 +56,7 @@ fn resolve_fnm(host: &Host) -> Result<String> {
     if cfg!(target_os = "macos") {
         return super::macos::formula_executable(host, "fnm", "fnm");
     }
-    let data_home = host.home().join(".local/share");
-    let managed = data_home.join("fnm/fnm");
+    let managed = host.home().join(".local/share/fnm/fnm");
     if regular_executable_file(&managed) {
         return path_program(&managed, "managed fnm executable path");
     }
