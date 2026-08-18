@@ -98,62 +98,6 @@ pub enum OperationOutcome {
     LoginRequired,
 }
 
-impl Operation {
-    /// Get label used in progress messages & errors.
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::SudoGroupEnsure => "sudo group membership",
-            Self::DebianAptComponentsAdd => "Debian APT component add",
-            Self::AptUpdate => "APT update",
-            Self::UnattendedUpgradesSet { .. } => "unattended-upgrades set",
-            Self::SnapdSet { .. } => "snapd set",
-            Self::AptPackagesInstall { .. } => "APT package install",
-            Self::AptPackagesPurge { .. } => "APT package purge",
-            Self::FlatpakFlathubRemoteAdd => "Flathub remote add",
-            Self::RustInstall { .. } => "Rust install",
-            Self::FnmInstall => "fnm install",
-            Self::UvInstall => "uv install",
-            Self::RustToolchainUpdate => "Rust toolchain update",
-            Self::GoToolchainInstall { .. } => "Go toolchain install",
-            Self::GoToolchainUpdate { .. } => "Go toolchain update",
-            Self::NodeVersionInstall { .. } => "Node.js version install",
-            Self::PythonVersionInstall { .. } => "Python version install",
-            Self::PythonVersionUpgrade => "Python version upgrade",
-            Self::CargoBinstallInstall => "cargo-binstall install",
-            Self::CargoUpdateInstall => "cargo-update install",
-            Self::AptRepoAdd(_) => "APT repo add",
-            Self::FlatpakAppsInstall { .. } => "Flatpak app install",
-            Self::CargoCratesInstall { .. } => "Cargo crate install",
-            Self::CargoCratesUpdate => "Cargo crate update",
-            Self::NpmPackagesInstall { .. } => "npm package install",
-            Self::NpmPackagesUpdate => "npm package update",
-            Self::AppimagedInstall { .. } => "appimaged install",
-            Self::BinaryPackageInstall(_) => "binary package install",
-            Self::NerdFontsInstall { .. } => "Nerd Fonts install",
-            Self::NerdFontsUpdate { .. } => "Nerd Fonts update",
-            Self::DotfilesApply { .. } => "dotfiles apply",
-            Self::DockerGroupEnsure => "Docker group membership",
-            Self::DockerLocalLoggingDriverSet { .. } => "Docker local logging driver set",
-            Self::VirtualBoxGroupEnsure => "VirtualBox group membership",
-            Self::VsCodeExtensionsInstall { .. } => "Visual Studio Code extension install",
-            Self::DesktopSettingSet { .. } => "desktop setting set",
-            Self::GnomeExtensionsApply { .. } => "GNOME extension apply",
-            Self::GnomeDashToDockInstall => "Dash to Dock install",
-            Self::GnomeRoundedWindowCornersInstall => "Rounded Window Corners install",
-            Self::AptUpgrade { .. } => "APT upgrade",
-            Self::FlatpakUpdate => "Flatpak update",
-            Self::HomebrewInstall => "Homebrew install",
-            Self::HomebrewPackagesInstall { .. } => "Homebrew package install",
-            Self::MacOSSudoAccessValidate => "macOS sudo access validation",
-            Self::CommandLineToolsForXcodeInstall => "Command Line Tools for Xcode install",
-            Self::UserNerdFontsInstall { .. } => "user Nerd Fonts install",
-            Self::UserNerdFontsUpdate { .. } => "user Nerd Fonts update",
-            Self::MacDefaultsWrite { .. } => "macOS defaults write",
-            Self::HomebrewUpdateAndUpgrade { .. } => "Homebrew update and upgrade",
-        }
-    }
-}
-
 pub(crate) fn run(operation: &Operation) -> Result<OperationOutcome> {
     run_on(operation, Host::new()?)
 }
