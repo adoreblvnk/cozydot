@@ -42,7 +42,9 @@ pub fn install(host: &Host) -> Result<()> {
 }
 
 pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
-    let fnm = resolve_fnm(host)?;
+    let Some(fnm) = resolve(host)? else {
+        bail!("fnm install: fnm is unavailable after install");
+    };
     if selector == "lts" {
         host.run("fnm install", &fnm, ["install", "--progress", "never", "--lts"])?;
     } else {
@@ -52,13 +54,13 @@ pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
     Ok(())
 }
 
-fn resolve_fnm(host: &Host) -> Result<String> {
+pub(crate) fn resolve(host: &Host) -> Result<Option<String>> {
     if cfg!(target_os = "macos") {
-        return super::macos::formula_executable(host, "fnm", "fnm");
+        return super::macos::formula_executable(host, "fnm", "fnm").map(Some);
     }
     let managed = host.home().join(".local/share/fnm/fnm");
     if regular_executable_file(&managed) {
-        return path_program(&managed, "managed fnm executable path");
+        return path_program(&managed, "managed fnm executable path").map(Some);
     }
-    bail!("fnm install: fnm is unavailable after install")
+    Ok(None)
 }
