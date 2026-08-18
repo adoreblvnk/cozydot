@@ -2,15 +2,14 @@
 
 use crate::{
     config::{
-        AptArchitecture, BinaryFormat, BinarySource, Config, DistroMapKey, EnabledDisabled, Gnome, Repo, Theme,
+        AptArchitecture, BinaryFormat, BinarySource, Config, DistroMapKey, EnabledDisabled, Gnome, Repo,
         select_distro_map, selected_repo_codename,
     },
     operations::{
-        Host, appimaged, apt,
-        binary::{self, BinaryPackageOperation, BinarySourceOperation},
-        desktop::{self, DesktopEnvironment, DesktopSetting},
-        docker, fnm, gnome,
-        go::{self, GoToolchainSelector},
+        appimaged, apt, binary,
+        desktop::{self, DesktopEnvironment},
+        docker, fnm, gnome, go,
+        host::Host,
         macos, packages,
         repo::{self, AptRepo},
         rustup, snapd, users, uv, vscode,
@@ -79,10 +78,14 @@ fn linux_apply(
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
     for binary in config.linux.packages.binaries.as_deref().unwrap_or_default() {
-        if let Some(operation) = binary_operation(binary, platform.architecture) {
+        let supported = match &binary.source {
+            BinarySource::GitHub { assets, .. } => assets.get(platform.architecture).is_some(),
+            BinarySource::Url { urls } => urls.get(platform.architecture).is_some(),
+        };
+        if supported {
             match binary.format {
-                BinaryFormat::Deb => deb_binaries.push(operation),
-                BinaryFormat::AppImage => appimages.push(operation),
+                BinaryFormat::Deb => deb_binaries.push(binary),
+                BinaryFormat::AppImage => appimages.push(binary),
             }
         }
     }
@@ -140,12 +143,12 @@ fn linux_apply(
     apply_tools(host, config, platform.architecture)?;
     apply_packages(host, config)?;
     for package in deb_binaries {
-        run("Apply", "binary package install", || binary::install(host, &package))?;
+        run("Apply", "binary package install", || binary::install(host, package, platform.architecture))?;
     }
     if !appimages.is_empty() {
         run("Apply", "appimaged install", || appimaged::install(host, platform.architecture))?;
         for package in appimages {
-            run("Apply", "binary package install", || binary::install(host, &package))?;
+            run("Apply", "binary package install", || binary::install(host, package, platform.architecture))?;
         }
     }
     if let Some(families) = nerd_fonts(config) {
@@ -209,7 +212,7 @@ fn apply_tools(host: &Host, config: &Config, arch: Architecture) -> Result<()> {
         run("Apply", "Python version install", || uv::install_py(host, selector))?;
     }
     if let Some(selector) = config.shared.tools.go.as_deref() {
-        run("Apply", "Go toolchain install", || go::install_toolchain(host, &go_selector(selector), arch))?;
+        run("Apply", "Go toolchain install", || go::install_toolchain(host, selector, arch))?;
     }
     Ok(())
 }
@@ -281,7 +284,7 @@ fn update_tools_and_packages(host: &Host, config: &Config, arch: Architecture, m
     }
     if updates.tools.go == Some(true) {
         run("Update", "Go toolchain update", || {
-            go::update_toolchain(host, &go_selector(config.shared.tools.go.as_deref().unwrap_or("latest")), arch)
+            go::update_toolchain(host, config.shared.tools.go.as_deref().unwrap_or("latest"), arch)
         })?;
     }
     // macOS resolves npm via Homebrew fnm, so npm-only updates must ensure its formula first
@@ -352,16 +355,6 @@ fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey,
     )
 }
 
-fn binary_operation(binary: &crate::config::BinaryPackage, arch: Architecture) -> Option<BinaryPackageOperation> {
-    let source = match &binary.source {
-        BinarySource::GitHub { repo, assets } => {
-            BinarySourceOperation::GitHubLatest { repo: repo.clone(), asset_pattern: assets.get(arch)?.to_owned() }
-        }
-        BinarySource::Url { urls } => BinarySourceOperation::Url { url: urls.get(arch)?.to_owned() },
-    };
-    Some(BinaryPackageOperation::new(binary.name.clone(), binary.format, arch, source))
-}
-
 fn nerd_fonts(config: &Config) -> Option<&[String]> {
     config.shared.fonts.nerd.as_deref().filter(|families| !families.is_empty())
 }
@@ -417,21 +410,17 @@ fn linux_desktop(host: &Host, config: &Config, platform: &Platform) -> Result<()
         return Ok(());
     };
     if let Some(theme) = desktop.theme {
-        run("Apply", "desktop setting set", || desktop::set(host, environment, &DesktopSetting::ColorScheme(theme)))?;
+        run("Apply", "desktop setting set", || desktop::set_color_scheme(host, environment, theme))?;
     }
     if let Some(executable) = &desktop.terminal {
-        run("Apply", "desktop setting set", || {
-            desktop::set(host, environment, &DesktopSetting::Terminal(executable.clone()))
-        })?;
+        run("Apply", "desktop setting set", || desktop::set_terminal(host, environment, executable))?;
     }
     if let Some(idle) = &desktop.idle {
         if let Some(timeout) = idle.timeout {
-            run("Apply", "desktop setting set", || {
-                desktop::set(host, environment, &DesktopSetting::IdleDelaySeconds(timeout.seconds()))
-            })?;
+            run("Apply", "desktop setting set", || desktop::set_idle_delay(host, environment, timeout.seconds()))?;
         }
         if let Some(enabled) = idle.dim {
-            run("Apply", "desktop setting set", || desktop::set(host, environment, &DesktopSetting::IdleDim(enabled)))?;
+            run("Apply", "desktop setting set", || desktop::set_idle_dim(host, environment, enabled))?;
         }
     }
     if environment == DesktopEnvironment::Gnome
@@ -454,47 +443,10 @@ fn linux_desktop(host: &Host, config: &Config, platform: &Platform) -> Result<()
 
 fn macos_desktop(host: &Host, config: &Config) -> Result<()> {
     let desktop = &config.macos.desktop;
-    let mut settings = Vec::new();
-    if let Some(value) = desktop.appearance {
-        settings.push(macos::MacDefault::DarkMode(value == Theme::Dark));
-    }
-    if let Some(dock) = &desktop.dock {
-        if let Some(value) = dock.autohide {
-            settings.push(macos::MacDefault::DockAutohide(value));
-        }
-        if let Some(value) = dock.show_recent_applications {
-            settings.push(macos::MacDefault::DockRecentApplications(value));
-        }
-    }
-    if let Some(finder) = &desktop.finder {
-        if let Some(value) = finder.show_filename_extensions {
-            settings.push(macos::MacDefault::ShowAllFilenameExtensions(value));
-        }
-        if let Some(value) = finder.show_hidden_files {
-            settings.push(macos::MacDefault::FinderHiddenFiles(value));
-        }
-    }
-    if let Some(keyboard) = &desktop.keyboard {
-        if let Some(value) = keyboard.key_repeat {
-            settings.push(macos::MacDefault::KeyRepeat(value));
-        }
-        if let Some(value) = keyboard.initial_key_repeat {
-            settings.push(macos::MacDefault::InitialKeyRepeat(value));
-        }
-    }
-    if let Some(trackpad) = &desktop.trackpad
-        && let Some(value) = trackpad.tap_to_click
-    {
-        settings.push(macos::MacDefault::TrackpadTapToClick(value));
-    }
-    if !settings.is_empty() {
-        run("Apply", "macOS defaults write", || macos::write_defaults(host, &settings))?;
+    if desktop.has_intent() {
+        run("Apply", "macOS defaults write", || macos::write_defaults(host, desktop))?;
     }
     Ok(())
-}
-
-fn go_selector(value: &str) -> GoToolchainSelector {
-    if value == "latest" { GoToolchainSelector::Latest } else { GoToolchainSelector::Version(value.to_owned()) }
 }
 
 fn run(progress: &str, label: &str, operation: impl FnOnce() -> Result<()>) -> Result<()> {

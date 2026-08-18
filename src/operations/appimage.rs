@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
-use super::{Host, TempPath};
+use super::host::{Host, TempPath};
 
 pub(super) fn install_appimage(host: &Host, label: &str, url: &str, destination: &Path) -> Result<()> {
     let parent = destination

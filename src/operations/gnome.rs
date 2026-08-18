@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
+use std::collections::HashMap;
 
-use super::{Host, TempPath};
+use super::host::{Host, TempPath};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {
@@ -69,9 +71,8 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host.run("GNOME extension shell version", "gnome-shell", ["--version"])?;
-    let shell_version =
-        super::gnome_shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
-    let version = super::select_gnome_extension_version(
+    let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
+    let version = select_extension_version(
         std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
         &shell_version,
     )?;
@@ -97,4 +98,42 @@ fn validate_extension(value: &str) -> Result<()> {
 
 fn valid_uuid_part(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+}
+
+fn select_extension_version(input: &str, shell_version: &str) -> Result<u64> {
+    #[derive(Deserialize)]
+    struct Response {
+        shell_version_map: HashMap<String, ExtensionVersion>,
+    }
+
+    #[derive(Deserialize)]
+    struct ExtensionVersion {
+        version: u64,
+    }
+
+    let response: Response = serde_json::from_str(input).context("parse GNOME extension JSON")?;
+    let mut candidate = shell_version;
+    loop {
+        if let Some(extension) = response.shell_version_map.get(candidate) {
+            return Ok(extension.version);
+        }
+        let Some((parent, _)) = candidate.rsplit_once('.') else {
+            bail!("GNOME response has no extension version for shell {shell_version}");
+        };
+        candidate = parent;
+    }
+}
+
+fn shell_version(input: &str) -> Result<String> {
+    input
+        .split_whitespace()
+        .map(|part| part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.'))
+        .find(|part| {
+            !part.is_empty()
+                && part
+                    .split('.')
+                    .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .map(str::to_owned)
+        .context("GNOME Shell version output has no numeric version")
 }

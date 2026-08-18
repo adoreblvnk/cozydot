@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::Path};
 
-use super::super::{Host, TempPath};
+use super::super::host::{Host, TempPath};
 
 pub(crate) fn apply(host: &Host, families: &[String], force: bool) -> Result<()> {
     let parent = host.home().join(if cfg!(target_os = "macos") { "Library/Fonts" } else { ".local/share/fonts" });

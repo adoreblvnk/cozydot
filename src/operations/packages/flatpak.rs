@@ -1,4 +1,4 @@
-use super::super::Host;
+use super::super::host::Host;
 use anyhow::Result;
 
 const FLATHUB_NAME: &str = "flathub";

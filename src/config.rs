@@ -212,6 +212,22 @@ pub struct MacDesktop {
     pub trackpad: Option<MacTrackpad>,
 }
 
+impl MacDesktop {
+    pub(crate) fn has_intent(&self) -> bool {
+        self.appearance.is_some()
+            || self.dock.as_ref().is_some_and(|dock| dock.autohide.is_some() || dock.show_recent_applications.is_some())
+            || self
+                .finder
+                .as_ref()
+                .is_some_and(|finder| finder.show_filename_extensions.is_some() || finder.show_hidden_files.is_some())
+            || self
+                .keyboard
+                .as_ref()
+                .is_some_and(|keyboard| keyboard.key_repeat.is_some() || keyboard.initial_key_repeat.is_some())
+            || self.trackpad.as_ref().is_some_and(|trackpad| trackpad.tap_to_click.is_some())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacDock {

@@ -1,5 +1,5 @@
-use super::parsers::GitHubRelease;
-use super::{Host, apt};
+use super::github::Release;
+use super::{apt, host::Host};
 use crate::platform::Architecture;
 use anyhow::{Context, Result};
 
@@ -38,7 +38,7 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
 
 fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> {
     let output = host.curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
-    let release: GitHubRelease = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
+    let release: Release = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
     let suffix = match architecture {
         Architecture::X86_64 => "-x86_64.AppImage",
         Architecture::Aarch64 => "-aarch64.AppImage",
