@@ -1,4 +1,3 @@
-use anyhow::{Context, Result, bail};
 use std::{
     ffi::{OsStr, OsString},
     fs,
@@ -6,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
 };
+
+use anyhow::{Context, Result, bail};
 
 pub(crate) mod macos;
 pub(crate) mod privileged_file;
@@ -77,35 +78,6 @@ impl Host {
     }
 }
 
-pub(crate) fn executable_file(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-}
-
-pub(crate) fn regular_executable_file(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
-}
-
-pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
-    path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
-}
-
-pub(crate) fn require_regular_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
-    if !regular_executable_file(path) {
-        bail!("{unavailable}");
-    }
-    path_program(path, description)
-}
-
-pub(crate) fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
-    let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
-    let record = output.strip_suffix('\n').unwrap_or(output);
-    if record.is_empty() || record.contains(['\n', '\r']) {
-        bail!("{command} returned malformed record output");
-    }
-    Ok(record)
-}
-
 pub(crate) struct TempPath(tempfile::TempPath);
 
 impl TempPath {
@@ -134,6 +106,35 @@ impl TempPath {
     pub fn path(&self) -> &Path {
         self.0.as_ref()
     }
+}
+
+pub(crate) fn executable_file(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+pub(crate) fn regular_executable_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
+    path.to_str().map(str::to_owned).with_context(|| format!("{description} is not UTF-8: {}", path.display()))
+}
+
+pub(crate) fn require_regular_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
+    if !regular_executable_file(path) {
+        bail!("{unavailable}");
+    }
+    path_program(path, description)
+}
+
+pub(crate) fn one_record<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
+    let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
+    let record = output.strip_suffix('\n').unwrap_or(output);
+    if record.is_empty() || record.contains(['\n', '\r']) {
+        bail!("{command} returned malformed record output");
+    }
+    Ok(record)
 }
 
 fn display(program: &str, args: &[OsString]) -> String {

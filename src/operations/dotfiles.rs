@@ -55,17 +55,6 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
     Ok(())
 }
 
-fn prepare_gnupg_home(home: &Path) -> Result<()> {
-    // keep ~/.gnupg as real 0700 dir instead of letting Stow fold it into symlink
-    let target = home.join(".gnupg");
-    if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        fs::remove_file(&target).context("replace folded GnuPG dotfiles directory")?;
-    }
-    fs::create_dir_all(&target).context("create GnuPG home")?;
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
-    Ok(())
-}
-
 fn collect_conflicts(
     source: &Path,
     target: PathBuf,
@@ -101,6 +90,10 @@ fn collect_conflicts(
     Ok(())
 }
 
+fn resolves_to(target: &Path, source: &Path) -> bool {
+    fs::canonicalize(target).and_then(|target| fs::canonicalize(source).map(|source| target == source)).unwrap_or(false)
+}
+
 fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> {
     if conflicts.is_empty() {
         return Ok(());
@@ -129,6 +122,13 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
     Ok(())
 }
 
-fn resolves_to(target: &Path, source: &Path) -> bool {
-    fs::canonicalize(target).and_then(|target| fs::canonicalize(source).map(|source| target == source)).unwrap_or(false)
+fn prepare_gnupg_home(home: &Path) -> Result<()> {
+    // keep ~/.gnupg as real 0700 dir instead of letting Stow fold it into symlink
+    let target = home.join(".gnupg");
+    if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        fs::remove_file(&target).context("replace folded GnuPG dotfiles directory")?;
+    }
+    fs::create_dir_all(&target).context("create GnuPG home")?;
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
+    Ok(())
 }

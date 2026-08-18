@@ -56,6 +56,25 @@ struct Init {
 }
 
 impl Init {
+    fn sync_cozydot_yaml(&mut self, preset: &'static [u8]) -> Result<()> {
+        let record = Record { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
+        let relative = PathBuf::from(record.path);
+        let dest = self.root.join(&relative);
+        let new_hash = hash_bytes(record.bytes);
+        let old_hash = self.managed.get(&relative);
+        let write = match fs::symlink_metadata(&dest) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => true,
+            Err(e) => return Err(e.into()),
+            Ok(metadata) if !metadata.file_type().is_file() => false,
+            Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).ok().as_ref() == Some(hash)),
+        };
+        if write {
+            write_file(&self.root, &record, &relative)?;
+            self.managed.insert(relative, new_hash);
+        }
+        Ok(())
+    }
+
     fn sync_bundled_dotfiles(&mut self) -> Result<()> {
         let mut packages = BTreeMap::<PathBuf, Vec<&Record>>::new();
         for record in RECORDS {
@@ -109,25 +128,6 @@ impl Init {
         Ok(managed
             .iter()
             .all(|(relative, hash)| hash_file(&self.root.join(relative)).is_ok_and(|current| &current == *hash)))
-    }
-
-    fn sync_cozydot_yaml(&mut self, preset: &'static [u8]) -> Result<()> {
-        let record = Record { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
-        let relative = PathBuf::from(record.path);
-        let dest = self.root.join(&relative);
-        let new_hash = hash_bytes(record.bytes);
-        let old_hash = self.managed.get(&relative);
-        let write = match fs::symlink_metadata(&dest) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => true,
-            Err(e) => return Err(e.into()),
-            Ok(metadata) if !metadata.file_type().is_file() => false,
-            Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).ok().as_ref() == Some(hash)),
-        };
-        if write {
-            write_file(&self.root, &record, &relative)?;
-            self.managed.insert(relative, new_hash);
-        }
-        Ok(())
     }
 }
 

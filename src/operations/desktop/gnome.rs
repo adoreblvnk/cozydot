@@ -67,6 +67,22 @@ fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Outcome> 
     Ok(Outcome::Completed)
 }
 
+fn validate_extension(value: &str) -> Result<()> {
+    // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
+    let mut parts = value.split('@');
+    if !valid_uuid_part(parts.next().unwrap_or_default())
+        || !valid_uuid_part(parts.next().unwrap_or_default())
+        || parts.next().is_some()
+    {
+        bail!("invalid GNOME extension UUID {value:?}");
+    }
+    Ok(())
+}
+
+fn valid_uuid_part(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+}
+
 fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
@@ -84,20 +100,18 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_extension(value: &str) -> Result<()> {
-    // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
-    let mut parts = value.split('@');
-    if !valid_uuid_part(parts.next().unwrap_or_default())
-        || !valid_uuid_part(parts.next().unwrap_or_default())
-        || parts.next().is_some()
-    {
-        bail!("invalid GNOME extension UUID {value:?}");
-    }
-    Ok(())
-}
-
-fn valid_uuid_part(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+fn shell_version(input: &str) -> Result<String> {
+    input
+        .split_whitespace()
+        .map(|part| part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.'))
+        .find(|part| {
+            !part.is_empty()
+                && part
+                    .split('.')
+                    .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .map(str::to_owned)
+        .context("GNOME Shell version output has no numeric version")
 }
 
 fn select_extension_version(input: &str, shell_version: &str) -> Result<u64> {
@@ -122,18 +136,4 @@ fn select_extension_version(input: &str, shell_version: &str) -> Result<u64> {
         };
         candidate = parent;
     }
-}
-
-fn shell_version(input: &str) -> Result<String> {
-    input
-        .split_whitespace()
-        .map(|part| part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.'))
-        .find(|part| {
-            !part.is_empty()
-                && part
-                    .split('.')
-                    .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
-        })
-        .map(str::to_owned)
-        .context("GNOME Shell version output has no numeric version")
 }

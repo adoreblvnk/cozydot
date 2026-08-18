@@ -13,25 +13,6 @@ pub enum DesktopEnvironment {
     Cinnamon,
 }
 
-fn prefix(environment: DesktopEnvironment) -> &'static str {
-    match environment {
-        DesktopEnvironment::Gnome => "org.gnome",
-        DesktopEnvironment::Cinnamon => "org.cinnamon",
-    }
-}
-
-pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, color_scheme: Theme) -> Result<()> {
-    gsettings_set(
-        host,
-        &format!("{}.desktop.interface", prefix(environment)),
-        "color-scheme",
-        match color_scheme {
-            Theme::Light => "'prefer-light'",
-            Theme::Dark => "'prefer-dark'",
-        },
-    )
-}
-
 pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executable: &str) -> Result<()> {
     if !host.executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
@@ -53,6 +34,25 @@ pub(crate) fn set_idle_dim(host: &Host, environment: DesktopEnvironment, enabled
         "idle-dim",
         if enabled { "true" } else { "false" },
     )
+}
+
+pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, color_scheme: Theme) -> Result<()> {
+    gsettings_set(
+        host,
+        &format!("{}.desktop.interface", prefix(environment)),
+        "color-scheme",
+        match color_scheme {
+            Theme::Light => "'prefer-light'",
+            Theme::Dark => "'prefer-dark'",
+        },
+    )
+}
+
+fn prefix(environment: DesktopEnvironment) -> &'static str {
+    match environment {
+        DesktopEnvironment::Gnome => "org.gnome",
+        DesktopEnvironment::Cinnamon => "org.cinnamon",
+    }
 }
 
 fn gsettings_set(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
