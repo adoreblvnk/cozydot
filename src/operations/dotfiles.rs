@@ -46,8 +46,15 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
         backup_conflicts(host, &conflicts)?;
     }
 
-    if sources.iter().any(|(_, source)| source.join(".gnupg").is_dir()) {
-        prepare_gnupg_home(&home)?;
+    if packages.iter().any(|package| package == "gnupg") {
+        // keep GnuPG state outside the repository by preventing Stow from folding this directory
+        let target = home.join(".gnupg");
+        fs::create_dir_all(&target).context("create GnuPG home")?;
+        // require ~/.gnupg to be a non-symlink dir
+        if !fs::symlink_metadata(&target)?.file_type().is_dir() {
+            bail!("GnuPG home is not a real directory: {}", target.display());
+        }
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
     }
     args.push(OsStr::new("--"));
     args.extend(packages.iter().map(OsStr::new));
@@ -119,16 +126,5 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
             bail!("dotfiles conflict backup did not move {} to {}", conflict.display(), backup.display());
         }
     }
-    Ok(())
-}
-
-fn prepare_gnupg_home(home: &Path) -> Result<()> {
-    // keep ~/.gnupg as real 0700 dir instead of letting Stow fold it into symlink
-    let target = home.join(".gnupg");
-    if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        fs::remove_file(&target).context("replace folded GnuPG dotfiles directory")?;
-    }
-    fs::create_dir_all(&target).context("create GnuPG home")?;
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
     Ok(())
 }
