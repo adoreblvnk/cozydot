@@ -117,8 +117,8 @@ pub(crate) mod debian_components {
     use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, path::Path};
 
-    const ONELINE_SOURCE: &str = "/etc/apt/sources.list";
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
+    const ONELINE_SOURCE: &str = "/etc/apt/sources.list";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
     // TODO: review this
@@ -179,6 +179,23 @@ pub(crate) mod debian_components {
         Ok(host.run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new(path)])?.stdout)
     }
 
+    fn add_deb822_components(text: &str) -> String {
+        text.split_inclusive('\n')
+            .map(|line| {
+                let body = line.strip_suffix('\n').unwrap_or(line);
+                let Some((name, values)) = body.split_once(':') else { return line.to_owned() };
+                if !name.eq_ignore_ascii_case("Components") {
+                    return line.to_owned();
+                }
+                let values = values.split_ascii_whitespace().collect::<Vec<_>>();
+                if !values.contains(&"main") {
+                    return line.to_owned();
+                }
+                append_missing(body, body.len(), &values, line.ends_with('\n'))
+            })
+            .collect()
+    }
+
     fn add_oneline_components(text: &str) -> String {
         text.split_inclusive('\n')
             .map(|line| {
@@ -209,23 +226,6 @@ pub(crate) mod debian_components {
             "https://security.debian.org/debian-security",
         ]
         .contains(&uri.trim_end_matches('/'))
-    }
-
-    fn add_deb822_components(text: &str) -> String {
-        text.split_inclusive('\n')
-            .map(|line| {
-                let body = line.strip_suffix('\n').unwrap_or(line);
-                let Some((name, values)) = body.split_once(':') else { return line.to_owned() };
-                if !name.eq_ignore_ascii_case("Components") {
-                    return line.to_owned();
-                }
-                let values = values.split_ascii_whitespace().collect::<Vec<_>>();
-                if !values.contains(&"main") {
-                    return line.to_owned();
-                }
-                append_missing(body, body.len(), &values, line.ends_with('\n'))
-            })
-            .collect()
     }
 
     fn append_missing(body: &str, end: usize, existing: &[&str], newline: bool) -> String {

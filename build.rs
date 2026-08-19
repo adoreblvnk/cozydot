@@ -67,6 +67,14 @@ fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathB
     Ok(())
 }
 
+fn validate_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
+    let name = name.to_str().ok_or_else(|| invalid(source, "asset path is not UTF-8"))?;
+    if name.is_empty() || name.contains(['\t', '\n', '\r']) {
+        return Err(invalid(source, "asset path contains an unsafe character"));
+    }
+    Ok(name)
+}
+
 fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathBuf, u32)>) -> io::Result<()> {
     println!("cargo:rerun-if-changed={}", source.display());
     let metadata = fs::symlink_metadata(source)?;
@@ -80,14 +88,6 @@ fn add_file(source: &Path, destination: &Path, records: &mut BTreeMap<String, (P
         return Err(invalid(source, &format!("duplicate destination {destination}")));
     }
     Ok(())
-}
-
-fn validate_name<'a>(name: &'a OsStr, source: &Path) -> io::Result<&'a str> {
-    let name = name.to_str().ok_or_else(|| invalid(source, "asset path is not UTF-8"))?;
-    if name.is_empty() || name.contains(['\t', '\n', '\r']) {
-        return Err(invalid(source, "asset path contains an unsafe character"));
-    }
-    Ok(name)
 }
 
 fn validate_destination(destination: &Path, source: &Path) -> io::Result<String> {

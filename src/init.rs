@@ -236,12 +236,6 @@ fn validate_hash(hash: &str) -> Result<()> {
     }
     Ok(())
 }
-fn hash_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-fn hash_file(path: &Path) -> Result<String> {
-    Ok(hash_bytes(&fs::read(path)?))
-}
 fn validate_relative(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty()
         || path.components().any(|c| !matches!(c, Component::Normal(_)))
@@ -250,4 +244,10 @@ fn validate_relative(path: &Path) -> Result<()> {
         bail!("unsafe managed path: {}", path.display());
     }
     Ok(())
+}
+fn hash_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+fn hash_file(path: &Path) -> Result<String> {
+    Ok(hash_bytes(&fs::read(path)?))
 }
