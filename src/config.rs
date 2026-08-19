@@ -45,6 +45,35 @@ impl Config {
         })
     }
 
+    fn validate(&self) -> Result<()> {
+        self.linux.packages.validate()?;
+        self.shared.fonts.validate()?;
+        self.shared.dotfiles.validate("shared.dotfiles")?;
+        self.linux.dotfiles.validate("linux.dotfiles")?;
+        self.macos.dotfiles.validate("macos.dotfiles")?;
+        if let Some(desktop) = &self.linux.desktop {
+            desktop.validate()?;
+        }
+        if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
+            && self.shared.tools.rust.is_none()
+        {
+            bail!("shared.packages.cargo: requires shared.tools.rust");
+        }
+        if self.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty())
+            && self.shared.tools.node.is_none()
+        {
+            bail!("shared.packages.npm: requires shared.tools.node");
+        }
+        if let Some(go) = self.shared.tools.go.as_deref() {
+            let exact = go.split('.').count() == 3
+                && go.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+            if go != "latest" && !exact {
+                bail!("shared.tools.go: expected `latest` or an exact version such as `1.24.6`");
+            }
+        }
+        Ok(())
+    }
+
     /// Validate config intent that depends on the detected `platform`.
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         let PlatformIdentity::Linux { distro, .. } = platform.identity else { return Ok(()) };
@@ -87,35 +116,6 @@ impl Config {
                     "linux.desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
                     desktop.as_str()
                 );
-            }
-        }
-        Ok(())
-    }
-
-    fn validate(&self) -> Result<()> {
-        self.linux.packages.validate()?;
-        self.shared.fonts.validate()?;
-        self.shared.dotfiles.validate("shared.dotfiles")?;
-        self.linux.dotfiles.validate("linux.dotfiles")?;
-        self.macos.dotfiles.validate("macos.dotfiles")?;
-        if let Some(desktop) = &self.linux.desktop {
-            desktop.validate()?;
-        }
-        if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
-            && self.shared.tools.rust.is_none()
-        {
-            bail!("shared.packages.cargo: requires shared.tools.rust");
-        }
-        if self.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty())
-            && self.shared.tools.node.is_none()
-        {
-            bail!("shared.packages.npm: requires shared.tools.node");
-        }
-        if let Some(go) = self.shared.tools.go.as_deref() {
-            let exact = go.split('.').count() == 3
-                && go.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
-            if go != "latest" && !exact {
-                bail!("shared.tools.go: expected `latest` or an exact version such as `1.24.6`");
             }
         }
         Ok(())

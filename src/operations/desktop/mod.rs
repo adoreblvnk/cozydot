@@ -13,6 +13,18 @@ pub enum DesktopEnvironment {
     Cinnamon,
 }
 
+pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, color_scheme: Theme) -> Result<()> {
+    gsettings_set(
+        host,
+        &format!("{}.desktop.interface", prefix(environment)),
+        "color-scheme",
+        match color_scheme {
+            Theme::Light => "'prefer-light'",
+            Theme::Dark => "'prefer-dark'",
+        },
+    )
+}
+
 pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executable: &str) -> Result<()> {
     if !host.executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
@@ -33,18 +45,6 @@ pub(crate) fn set_idle_dim(host: &Host, environment: DesktopEnvironment, enabled
         &format!("{prefix}.settings-daemon.plugins.power"),
         "idle-dim",
         if enabled { "true" } else { "false" },
-    )
-}
-
-pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, color_scheme: Theme) -> Result<()> {
-    gsettings_set(
-        host,
-        &format!("{}.desktop.interface", prefix(environment)),
-        "color-scheme",
-        match color_scheme {
-            Theme::Light => "'prefer-light'",
-            Theme::Dark => "'prefer-dark'",
-        },
     )
 }
 
