@@ -516,7 +516,7 @@ esac
     );
 }
 
-fn run_terminal_apply(desktop: &str, terminal_key: bool, custom_keybindings: &str) -> Vec<String> {
+fn run_terminal_apply(desktop: &str, terminal_key: bool, custom_keybindings: &str) -> (Vec<String>, String, bool) {
     let temp = tempfile::tempdir().unwrap();
     let root = config_root(&temp);
     let fake_bin = temp.path().join("bin");
@@ -528,6 +528,10 @@ fn run_terminal_apply(desktop: &str, terminal_key: bool, custom_keybindings: &st
     write_config(&root, "{}", "desktop:\n  terminal: wezterm\n");
     write_apt_fakes(&fake_bin);
     write_executable(&fake_bin.join("wezterm"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &fake_bin.join("xdg-terminal-exec"),
+        "#!/bin/sh\n[ -f \"$COZYDOT_TEST_STATE/packages/xdg-terminal-exec\" ] || exit 99\n[ \"$1\" = --print-id ] && printf 'wezterm.desktop\\n'\n",
+    );
     write_executable(
         &fake_bin.join("gsettings"),
         r#"#!/bin/sh
@@ -554,7 +558,14 @@ esac
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    fs::read_to_string(log).unwrap().lines().filter(|line| line.starts_with("gsettings ")).map(str::to_owned).collect()
+    let calls = fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("gsettings "))
+        .map(str::to_owned)
+        .collect();
+    let preference = fs::read_to_string(temp.path().join("config/xdg-terminals.list")).unwrap_or_default();
+    (calls, preference, state.join("packages/xdg-terminal-exec").exists())
 }
 
 #[test]
@@ -564,40 +575,51 @@ fn terminal_configuration_handles_desktop_shortcut_capabilities() {
     const CUSTOM_PATH: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
     let custom_schema = format!("{MEDIA_KEYS}.custom-keybinding:{CUSTOM_PATH}");
 
+    let (calls, preference, prerequisite) = run_terminal_apply("gnome", true, "@as []");
     assert_eq!(
-        run_terminal_apply("gnome", true, "@as []"),
+        calls,
         [
-            "gsettings set org.gnome.desktop.default-applications.terminal exec 'wezterm'",
-            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''",
+            "gsettings set org.gnome.desktop.default-applications.terminal exec 'xdg-terminal-exec'",
+            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg '--'",
             "gsettings get org.gnome.settings-daemon.plugins.media-keys terminal",
         ]
     );
+    assert_eq!(preference, "wezterm.desktop\n");
+    assert!(prerequisite);
+
+    let (calls, preference, prerequisite) = run_terminal_apply(
+        "gnome",
+        false,
+        "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']",
+    );
     assert_eq!(
-        run_terminal_apply(
-            "gnome",
-            false,
-            "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
-        ),
+        calls,
         [
-            "gsettings set org.gnome.desktop.default-applications.terminal exec 'wezterm'".to_owned(),
-            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''".to_owned(),
+            "gsettings set org.gnome.desktop.default-applications.terminal exec 'xdg-terminal-exec'".to_owned(),
+            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg '--'".to_owned(),
             "gsettings get org.gnome.settings-daemon.plugins.media-keys terminal".to_owned(),
             "gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings".to_owned(),
             format!("gsettings set {custom_schema} name 'Terminal'"),
-            format!("gsettings set {custom_schema} command 'wezterm'"),
+            format!("gsettings set {custom_schema} command 'xdg-terminal-exec'"),
             format!("gsettings set {custom_schema} binding '<Primary><Alt>T'"),
             format!(
                 "gsettings set {MEDIA_KEYS} custom-keybindings ['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/', '{CUSTOM_PATH}']"
             ),
         ]
     );
+    assert_eq!(preference, "wezterm.desktop\n");
+    assert!(prerequisite);
+
+    let (calls, preference, prerequisite) = run_terminal_apply("cinnamon", false, "@as []");
     assert_eq!(
-        run_terminal_apply("cinnamon", false, "@as []"),
+        calls,
         [
             "gsettings set org.cinnamon.desktop.default-applications.terminal exec 'wezterm'",
             "gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''",
         ]
     );
+    assert!(preference.is_empty());
+    assert!(!prerequisite);
 }
 
 fn run_apt(

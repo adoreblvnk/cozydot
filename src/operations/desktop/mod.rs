@@ -1,4 +1,10 @@
 use anyhow::{Result, bail};
+use std::{
+    env,
+    fs::{self, File},
+    io::Write,
+    path::PathBuf,
+};
 
 use super::host::{Host, one_record};
 use crate::config::Theme;
@@ -33,14 +39,41 @@ pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executa
     if !host.executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
     }
+    let command = if environment == DesktopEnvironment::Gnome {
+        set_xdg_terminal(host, executable)?;
+        "xdg-terminal-exec"
+    } else {
+        executable
+    };
     let schema = format!("{}.desktop.default-applications.terminal", prefix(environment));
-    gsettings_set(host, &schema, "exec", &format!("'{executable}'"))?;
-    gsettings_set(host, &schema, "exec-arg", "''")?;
+    gsettings_set(host, &schema, "exec", &format!("'{command}'"))?;
+    gsettings_set(host, &schema, "exec-arg", if environment == DesktopEnvironment::Gnome { "'--'" } else { "''" })?;
     // Ubuntu provides this media key; upstream GNOME needs a custom binding.
     if environment == DesktopEnvironment::Gnome
         && !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success())
     {
-        ensure_gnome_terminal_shortcut(host, executable)?;
+        ensure_gnome_terminal_shortcut(host, command)?;
+    }
+    Ok(())
+}
+
+fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
+    let config_home = env::var_os("XDG_CONFIG_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| host.home().join(".config"));
+    fs::create_dir_all(&config_home)?;
+    let destination = config_home.join("xdg-terminals.list");
+    let entry = format!("{executable}.desktop");
+    let mut temp = tempfile::Builder::new().prefix(".xdg-terminals.").tempfile_in(&config_home)?;
+    writeln!(temp, "{entry}")?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(destination).map_err(|error| error.error)?;
+    File::open(config_home)?.sync_all()?;
+
+    let output = host.run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
+    if one_record(&output.stdout, "xdg-terminal-exec --print-id")? != entry {
+        bail!("xdg-terminal-exec did not select {entry:?}");
     }
     Ok(())
 }
