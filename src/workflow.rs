@@ -28,7 +28,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const APT_PREREQS: [&str; 7] = ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xz-utils"];
+const APT_PREREQS: [&str; 8] =
+    ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xdg-terminal-exec", "xz-utils"];
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     let host = Host::new()?;
@@ -387,13 +388,8 @@ fn vscode_extensions(host: &Host, config: &Config) -> Result<()> {
 fn add_desktop_prereqs(config: &Config, platform: &Platform, apt_prereqs: &mut BTreeSet<&'static str>) {
     let Some(desktop) = config.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return };
     apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
-    if platform.desktop == DesktopKind::Gnome {
-        if desktop.terminal.is_some() {
-            apt_prereqs.insert("xdg-terminal-exec");
-        }
-        if desktop.gnome.as_ref().is_some_and(Gnome::has_intent) {
-            apt_prereqs.insert("gnome-shell");
-        }
+    if platform.desktop == DesktopKind::Gnome && desktop.gnome.as_ref().is_some_and(Gnome::has_intent) {
+        apt_prereqs.insert("gnome-shell");
     }
 }
 
