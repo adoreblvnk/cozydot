@@ -288,7 +288,7 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
         &fake_bin.join("sudo"),
         r#"#!/bin/sh
 case "$*" in
-  "apt-get update -qq"|"DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+") ;;
+  "apt-get update -qq"|"DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xdg-terminal-exec+ xz-utils+") ;;
   *) : > "$COZYDOT_TEST_MUTATION"; exit 99 ;;
 esac
 printf '%s\n' "$*" >> "$COZYDOT_TEST_APT_LOG"
@@ -311,9 +311,9 @@ printf '%s\n' "$*" >> "$COZYDOT_TEST_APT_LOG"
         fs::read_to_string(apt_log).unwrap(),
         concat!(
             "apt-get update -qq\n",
-            "DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n",
+            "DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xdg-terminal-exec+ xz-utils+\n",
             "apt-get update -qq\n",
-            "DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n"
+            "DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xdg-terminal-exec+ xz-utils+\n"
         )
     );
     assert!(!mutation.exists());
@@ -619,7 +619,7 @@ fn terminal_configuration_handles_desktop_shortcut_capabilities() {
         ]
     );
     assert!(preference.is_empty());
-    assert!(!prerequisite);
+    assert!(prerequisite);
 }
 
 fn run_apt(
@@ -775,7 +775,7 @@ fn update_runs_only_the_selected_apt_upgrade_command() {
             concat!(
                 "sudo apt-get update -qq\n",
                 "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq\n",
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n"
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xdg-terminal-exec+ xz-utils+\n"
             ),
         ),
         (
@@ -784,7 +784,7 @@ fn update_runs_only_the_selected_apt_upgrade_command() {
                 "sudo apt-get update -qq\n",
                 "sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq\n",
                 "sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y -qq\n",
-                "sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xz-utils+\n"
+                "sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-upgrade -y -qq -- ca-certificates+ curl+ fontconfig+ gnupg+ stow+ unzip+ xdg-terminal-exec+ xz-utils+\n"
             ),
         ),
     ] {
