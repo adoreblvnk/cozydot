@@ -39,22 +39,19 @@ pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executa
     if !host.executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
     }
-    let command = if environment == DesktopEnvironment::Gnome {
+    if environment == DesktopEnvironment::Gnome {
         set_xdg_terminal(host, executable)?;
-        "xdg-terminal-exec"
-    } else {
-        executable
-    };
-    let schema = format!("{}.desktop.default-applications.terminal", prefix(environment));
-    gsettings_set(host, &schema, "exec", &format!("'{command}'"))?;
-    gsettings_set(host, &schema, "exec-arg", if environment == DesktopEnvironment::Gnome { "'--'" } else { "''" })?;
-    // Ubuntu provides this media key; upstream GNOME needs a custom binding.
-    if environment == DesktopEnvironment::Gnome
-        && !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success())
-    {
-        ensure_gnome_terminal_shortcut(host, command)?;
+        // Ubuntu provides this media key; upstream GNOME needs a custom binding.
+        if !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success())
+        {
+            ensure_gnome_terminal_shortcut(host, "xdg-terminal-exec")?;
+        }
+        return Ok(());
     }
-    Ok(())
+
+    let schema = format!("{}.desktop.default-applications.terminal", prefix(environment));
+    gsettings_set(host, &schema, "exec", &format!("'{executable}'"))?;
+    gsettings_set(host, &schema, "exec-arg", "''")
 }
 
 fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
