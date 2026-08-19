@@ -135,19 +135,16 @@ pub enum DesktopKind {
 
 impl DesktopKind {
     fn from_environment(value: &str) -> Self {
-        value
-            .split(':')
-            .find_map(|token| {
-                let token = token.to_ascii_lowercase();
-                if token.contains("gnome") {
-                    Some(Self::Gnome)
-                } else if token.contains("cinnamon") {
-                    Some(Self::Cinnamon)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(Self::None)
+        for token in value.split(':') {
+            let token = token.to_ascii_lowercase();
+            if token.contains("gnome") {
+                return Self::Gnome;
+            }
+            if token.contains("cinnamon") {
+                return Self::Cinnamon;
+            }
+        }
+        Self::None
     }
 
     pub fn as_str(self) -> &'static str {

@@ -1,7 +1,7 @@
 use super::github::Release;
 use crate::operations::{host::Host, packages::apt};
 use crate::platform::Architecture;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
@@ -44,12 +44,12 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
         Architecture::Aarch64 => "-aarch64.AppImage",
         Architecture::Arm => "-armhf.AppImage",
     };
-    release
-        .assets
-        .into_iter()
-        .find(|asset| asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix))
-        .map(|asset| asset.browser_download_url)
-        .with_context(|| format!("appimaged release has no asset for {}", architecture.as_str()))
+    for asset in release.assets {
+        if asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix) {
+            return Ok(asset.browser_download_url);
+        }
+    }
+    bail!("appimaged release has no asset for {}", architecture.as_str())
 }
 
 fn ensure_fuse(host: &Host) -> Result<()> {

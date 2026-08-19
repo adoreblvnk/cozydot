@@ -1,17 +1,14 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::operations::host::Host;
 
 pub(crate) fn install_extensions(host: &Host, extensions: &[String]) -> Result<()> {
     let program = if cfg!(target_os = "macos") {
-        [
-            "code",
-            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-            "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code",
-        ]
-        .into_iter()
-        .find(|candidate| host.output(candidate, ["--version"]).is_ok_and(|output| output.status.success()))
-        .context("VS Code integration requires the VS Code CLI; install the `code` shell command or the visual-studio-code cask")?
+        if host.output("code", ["--version"]).is_ok_and(|output| output.status.success()) {
+            "code"
+        } else {
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+        }
     } else {
         "code"
     };
