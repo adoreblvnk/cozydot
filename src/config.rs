@@ -384,13 +384,10 @@ impl Repo {
         if self.arch.as_ref().is_some_and(Vec::is_empty) {
             bail!("{path}.arch: must not be empty when present");
         }
-        if self
-            .urls
-            .values()
-            .map(String::as_str)
-            .chain(std::iter::once(self.suite.as_str()))
-            .chain(self.components.iter().map(String::as_str))
-            .any(|value| value.chars().any(char::is_control))
+        let has_control = |value: &str| value.chars().any(char::is_control);
+        if self.urls.values().any(|value| has_control(value))
+            || has_control(&self.suite)
+            || self.components.iter().any(|value| has_control(value))
         {
             bail!("{path}: source values must fit on one line and contain no control characters");
         }

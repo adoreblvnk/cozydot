@@ -72,10 +72,23 @@ fn linux_apply(
     let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
     let mut repo_packages_to_install = Vec::new();
-    for (repo, key, source_url) in applicable_repos(config, distro, family, platform.architecture) {
-        repos.push(add_repo(repo, platform, distro, key, source_url));
-        repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
-        repo_packages_to_install.extend(repo.packages.iter().cloned());
+    let apt_architecture = match platform.architecture {
+        Architecture::X86_64 => AptArchitecture::Amd64,
+        Architecture::Aarch64 => AptArchitecture::Arm64,
+        Architecture::Arm => AptArchitecture::Armhf,
+    };
+    if let Some(apt) = &config.linux.packages.apt
+        && let Some(configured_repos) = &apt.repos
+    {
+        for repo in configured_repos {
+            if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_architecture)) {
+                continue;
+            }
+            let Some((key, source_url)) = select_distro_map(&repo.urls, distro, family) else { continue };
+            repos.push(add_repo(repo, platform, distro, key, source_url));
+            repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
+            repo_packages_to_install.extend(repo.packages.iter().cloned());
+        }
     }
     let flatpak_refs = config.linux.packages.flatpak.as_deref().filter(|values| !values.is_empty());
     if flatpak_refs.is_some() {
@@ -315,35 +328,6 @@ fn update_tools_and_packages(host: &Host, config: &Config, arch: Architecture, m
         run("Update", "npm package update", || npm::update(host))?;
     }
     Ok(())
-}
-
-fn applicable_repos(
-    config: &Config,
-    distro: Distro,
-    family: Family,
-    architecture: Architecture,
-) -> impl Iterator<Item = (&Repo, DistroMapKey, &String)> {
-    config
-        .linux
-        .packages
-        .apt
-        .as_ref()
-        .and_then(|apt| apt.repos.as_deref())
-        .unwrap_or_default()
-        .iter()
-        .filter(move |repo| {
-            repo.arch.as_ref().is_none_or(|values| {
-                values.iter().any(|value| {
-                    matches!(
-                        (value, architecture),
-                        (AptArchitecture::Amd64, Architecture::X86_64)
-                            | (AptArchitecture::Arm64, Architecture::Aarch64)
-                            | (AptArchitecture::Armhf, Architecture::Arm)
-                    )
-                })
-            })
-        })
-        .filter_map(move |repo| select_distro_map(&repo.urls, distro, family).map(|(key, url)| (repo, key, url)))
 }
 
 fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_url: &str) -> AptRepo {

@@ -101,17 +101,17 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
 }
 
 fn shell_version(input: &str) -> Result<String> {
-    input
-        .split_whitespace()
-        .map(|part| part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.'))
-        .find(|part| {
-            !part.is_empty()
-                && part
-                    .split('.')
-                    .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
-        })
-        .map(str::to_owned)
-        .context("GNOME Shell version output has no numeric version")
+    for part in input.split_whitespace() {
+        let part = part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
+        if !part.is_empty()
+            && part
+                .split('.')
+                .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return Ok(part.to_owned());
+        }
+    }
+    bail!("GNOME Shell version output has no numeric version")
 }
 
 fn select_extension_version(input: &str, shell_version: &str) -> Result<u64> {
