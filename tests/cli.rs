@@ -516,6 +516,90 @@ esac
     );
 }
 
+fn run_terminal_apply(desktop: &str, terminal_key: bool, custom_keybindings: &str) -> Vec<String> {
+    let temp = tempfile::tempdir().unwrap();
+    let root = config_root(&temp);
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    let log = temp.path().join("apply.log");
+    fs::create_dir_all(state.join("files")).unwrap();
+    fs::create_dir_all(state.join("packages")).unwrap();
+    fs::write(state.join("files/debian.sources"), "Components: main\n").unwrap();
+    write_config(&root, "{}", "desktop:\n  terminal: wezterm\n");
+    write_apt_fakes(&fake_bin);
+    write_executable(&fake_bin.join("wezterm"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &fake_bin.join("gsettings"),
+        r#"#!/bin/sh
+printf 'gsettings %s\n' "$*" >> "$COZYDOT_TEST_LOG"
+case "$1:$2:$3" in
+  get:org.gnome.settings-daemon.plugins.media-keys:terminal)
+    [ "${COZYDOT_TEST_TERMINAL_KEY-}" = true ] || exit 1
+    printf "'<Primary><Alt>t'\n" ;;
+  get:org.gnome.settings-daemon.plugins.media-keys:custom-keybindings)
+    printf '%s\n' "$COZYDOT_TEST_CUSTOM_KEYBINDINGS" ;;
+esac
+"#,
+    );
+
+    let output = cozydot()
+        .env("XDG_CONFIG_HOME", temp.path().join("config"))
+        .env("XDG_CURRENT_DESKTOP", desktop)
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("COZYDOT_TEST_STATE", &state)
+        .env("COZYDOT_TEST_TERMINAL_KEY", terminal_key.to_string())
+        .env("COZYDOT_TEST_CUSTOM_KEYBINDINGS", custom_keybindings)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    fs::read_to_string(log).unwrap().lines().filter(|line| line.starts_with("gsettings ")).map(str::to_owned).collect()
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn terminal_configuration_handles_desktop_shortcut_capabilities() {
+    const MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
+    const CUSTOM_PATH: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
+    let custom_schema = format!("{MEDIA_KEYS}.custom-keybinding:{CUSTOM_PATH}");
+
+    assert_eq!(
+        run_terminal_apply("gnome", true, "@as []"),
+        [
+            "gsettings set org.gnome.desktop.default-applications.terminal exec 'wezterm'",
+            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''",
+            "gsettings get org.gnome.settings-daemon.plugins.media-keys terminal",
+        ]
+    );
+    assert_eq!(
+        run_terminal_apply(
+            "gnome",
+            false,
+            "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
+        ),
+        [
+            "gsettings set org.gnome.desktop.default-applications.terminal exec 'wezterm'".to_owned(),
+            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''".to_owned(),
+            "gsettings get org.gnome.settings-daemon.plugins.media-keys terminal".to_owned(),
+            "gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings".to_owned(),
+            format!("gsettings set {custom_schema} name 'Terminal'"),
+            format!("gsettings set {custom_schema} command 'wezterm'"),
+            format!("gsettings set {custom_schema} binding '<Primary><Alt>T'"),
+            format!(
+                "gsettings set {MEDIA_KEYS} custom-keybindings ['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/', '{CUSTOM_PATH}']"
+            ),
+        ]
+    );
+    assert_eq!(
+        run_terminal_apply("cinnamon", false, "@as []"),
+        [
+            "gsettings set org.cinnamon.desktop.default-applications.terminal exec 'wezterm'",
+            "gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''",
+        ]
+    );
+}
+
 fn run_apt(
     config_home: &Path,
     fake_bin: &Path,

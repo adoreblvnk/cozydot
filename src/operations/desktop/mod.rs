@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::host::Host;
+use super::host::{Host, one_record};
 use crate::config::Theme;
 
 pub(crate) mod fonts;
@@ -12,6 +12,10 @@ pub enum DesktopEnvironment {
     Gnome,
     Cinnamon,
 }
+
+const GNOME_MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
+const GNOME_TERMINAL_SHORTCUT: &str =
+    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
 
 pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, color_scheme: Theme) -> Result<()> {
     gsettings_set(
@@ -31,7 +35,41 @@ pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executa
     }
     let schema = format!("{}.desktop.default-applications.terminal", prefix(environment));
     gsettings_set(host, &schema, "exec", &format!("'{executable}'"))?;
-    gsettings_set(host, &schema, "exec-arg", "''")
+    gsettings_set(host, &schema, "exec-arg", "''")?;
+    // Ubuntu provides this media key; upstream GNOME needs a custom binding.
+    if environment == DesktopEnvironment::Gnome
+        && !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success())
+    {
+        ensure_gnome_terminal_shortcut(host, executable)?;
+    }
+    Ok(())
+}
+
+fn ensure_gnome_terminal_shortcut(host: &Host, executable: &str) -> Result<()> {
+    let output = host.run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
+    let keybindings = one_record(&output.stdout, "gsettings get custom-keybindings")?;
+    let quoted_path = format!("'{GNOME_TERMINAL_SHORTCUT}'");
+    let updated = if keybindings.contains(&quoted_path) {
+        None
+    } else if matches!(keybindings, "[]" | "@as []") {
+        Some(format!("[{quoted_path}]"))
+    } else if keybindings.starts_with('[')
+        && let Some(existing) = keybindings.strip_suffix(']')
+    {
+        Some(format!("{existing}, {quoted_path}]"))
+    } else {
+        bail!("gsettings get custom-keybindings returned malformed output");
+    };
+
+    let schema = format!("{GNOME_MEDIA_KEYS}.custom-keybinding:{GNOME_TERMINAL_SHORTCUT}");
+    // Complete the binding before publishing its path to GNOME.
+    gsettings_set(host, &schema, "name", "'Terminal'")?;
+    gsettings_set(host, &schema, "command", &format!("'{executable}'"))?;
+    gsettings_set(host, &schema, "binding", "'<Primary><Alt>T'")?;
+    if let Some(updated) = updated {
+        gsettings_set(host, GNOME_MEDIA_KEYS, "custom-keybindings", &updated)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn set_idle_delay(host: &Host, environment: DesktopEnvironment, seconds: u32) -> Result<()> {
