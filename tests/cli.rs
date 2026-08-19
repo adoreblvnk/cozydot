@@ -576,14 +576,7 @@ fn terminal_configuration_handles_desktop_shortcut_capabilities() {
     let custom_schema = format!("{MEDIA_KEYS}.custom-keybinding:{CUSTOM_PATH}");
 
     let (calls, preference, prerequisite) = run_terminal_apply("gnome", true, "@as []");
-    assert_eq!(
-        calls,
-        [
-            "gsettings set org.gnome.desktop.default-applications.terminal exec 'xdg-terminal-exec'",
-            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg '--'",
-            "gsettings get org.gnome.settings-daemon.plugins.media-keys terminal",
-        ]
-    );
+    assert_eq!(calls, ["gsettings get org.gnome.settings-daemon.plugins.media-keys terminal"]);
     assert_eq!(preference, "wezterm.desktop\n");
     assert!(prerequisite);
 
@@ -595,8 +588,6 @@ fn terminal_configuration_handles_desktop_shortcut_capabilities() {
     assert_eq!(
         calls,
         [
-            "gsettings set org.gnome.desktop.default-applications.terminal exec 'xdg-terminal-exec'".to_owned(),
-            "gsettings set org.gnome.desktop.default-applications.terminal exec-arg '--'".to_owned(),
             "gsettings get org.gnome.settings-daemon.plugins.media-keys terminal".to_owned(),
             "gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings".to_owned(),
             format!("gsettings set {custom_schema} name 'Terminal'"),
