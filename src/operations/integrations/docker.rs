@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-use crate::operations::host::{Host, one_record, privileged_file::write_atomic};
+use crate::operations::host::{Host, privileged_file::write_atomic, stdout_line};
 
 const DOCKER_DAEMON_CONFIG: &str = "/etc/docker/daemon.json";
 
@@ -31,7 +31,7 @@ fn read_daemon_config(host: &Host) -> Result<Map<String, Value>> {
         host.run("Docker daemon config symlink absence check", "sudo", ["test", "!", "-L", DOCKER_DAEMON_CONFIG])?;
         return Ok(Map::new());
     }
-    let mode = one_record(&stat_output.stdout, "sudo stat")?;
+    let mode = stdout_line(&stat_output.stdout, "sudo stat")?;
     let mode = u32::from_str_radix(mode, 16).context("sudo stat returned malformed mode output")?;
     if mode & 0o170000 != 0o100000 {
         bail!("Docker daemon config destination is not a regular file");

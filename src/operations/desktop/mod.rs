@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use super::host::{Host, one_record};
+use super::host::{Host, stdout_line};
 use crate::config::Theme;
 
 pub(crate) mod fonts;
@@ -69,7 +69,8 @@ fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
     File::open(config_home)?.sync_all()?;
 
     let output = host.run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
-    if one_record(&output.stdout, "xdg-terminal-exec --print-id")? != entry {
+    let selected = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
+    if selected != entry.as_bytes() {
         bail!("xdg-terminal-exec did not select {entry:?}");
     }
     Ok(())
@@ -77,7 +78,7 @@ fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
 
 fn ensure_gnome_terminal_shortcut(host: &Host, executable: &str) -> Result<()> {
     let output = host.run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
-    let keybindings = one_record(&output.stdout, "gsettings get custom-keybindings")?;
+    let keybindings = stdout_line(&output.stdout, "gsettings get custom-keybindings")?;
     let quoted_path = format!("'{GNOME_TERMINAL_SHORTCUT}'");
     let updated = if keybindings.contains(&quoted_path) {
         None
