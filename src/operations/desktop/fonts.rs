@@ -34,11 +34,8 @@ pub(crate) fn apply(host: &Host, families: &[String], force: bool) -> Result<()>
 fn install(host: &Host, family: &str, destination: &Path) -> Result<()> {
     let archive = TempPath::new_with_suffix("nerd-font", ".tar.xz")?;
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
-    host.curl(
-        "Nerd Font archive download",
-        &url,
-        ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.path().as_os_str()],
-    )?;
+    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.path().as_os_str()];
+    host.curl("Nerd Font archive download", &url, args)?;
     let path = destination.to_str().context("font path is not UTF-8")?;
     let archive_path = archive.path().to_str().context("font archive path is not UTF-8")?;
     host.run("Nerd Font destination replacement", "rm", ["-rf", path])?;

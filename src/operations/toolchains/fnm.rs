@@ -1,11 +1,9 @@
-use anyhow::{Result, bail};
-use std::ffi::OsStr;
-
 use crate::operations::{
     host::shell::append_shell,
     host::{Host, TempPath, path_program, regular_executable_file},
     packages::homebrew,
 };
+use anyhow::{Result, bail};
 
 const FNM_BASH_INIT: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
 if [ -d "$FNM_PATH" ]; then
@@ -24,21 +22,10 @@ pub fn install(host: &Host) -> Result<()> {
     let fnm_path = install_dir.join("fnm");
     if !regular_executable_file(&fnm_path) {
         let installer = TempPath::new("fnm-install")?;
-        host.curl(
-            "fnm installer download",
-            "https://fnm.vercel.app/install",
-            [OsStr::new("--output"), installer.path().as_os_str()],
-        )?;
-        host.run(
-            "fnm install",
-            "bash",
-            [
-                installer.path().as_os_str(),
-                OsStr::new("--install-dir"),
-                install_dir.as_os_str(),
-                OsStr::new("--skip-shell"),
-            ],
-        )?;
+        let path = installer.path().as_os_str();
+        host.curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
+        let install_dir = install_dir.as_os_str();
+        host.run("fnm install", "bash", [path, "--install-dir".as_ref(), install_dir, "--skip-shell".as_ref()])?;
         if !regular_executable_file(&fnm_path) {
             bail!("fnm installer did not publish executable {}", fnm_path.display());
         }

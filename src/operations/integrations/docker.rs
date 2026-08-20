@@ -11,11 +11,8 @@ pub(crate) fn set_local_logging_driver(host: &Host, max_size: Option<&str>) -> R
     let mut daemon_config = read_daemon_config(host)?;
     daemon_config.insert("log-driver".into(), Value::String("local".into()));
     if let Some(max_size) = max_size {
-        let log_options = daemon_config
-            .entry("log-opts")
-            .or_insert_with(|| Value::Object(Map::new()))
-            .as_object_mut()
-            .context("Docker daemon config log-opts must be a JSON object")?;
+        let log_options = daemon_config.entry("log-opts").or_insert_with(|| Value::Object(Map::new()));
+        let log_options = log_options.as_object_mut().context("Docker daemon config log-opts must be a JSON object")?;
         log_options.insert("max-size".into(), Value::String(max_size.to_owned()));
     }
     let mut bytes = serde_json::to_vec_pretty(&daemon_config).context("serialize Docker daemon configuration")?;

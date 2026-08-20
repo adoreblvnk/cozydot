@@ -5,11 +5,8 @@ const FLATHUB_NAME: &str = "flathub";
 const FLATHUB_REPO_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
 
 pub fn add_flathub_remote(host: &Host) -> Result<()> {
-    host.run(
-        "Flathub remote add",
-        "flatpak",
-        ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_REPO_URL],
-    )?;
+    let args = ["--user", "remote-add", "--if-not-exists", FLATHUB_NAME, FLATHUB_REPO_URL];
+    host.run("Flathub remote add", "flatpak", args)?;
     Ok(())
 }
 

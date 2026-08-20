@@ -158,12 +158,8 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
         };
         current.push(name);
         match fs::symlink_metadata(&current) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                bail!("refusing symlinked config path: {}", current.display())
-            }
-            Ok(meta) if !meta.is_dir() => {
-                bail!("refusing non-directory config path: {}", current.display())
-            }
+            Ok(meta) if meta.file_type().is_symlink() => bail!("refusing symlinked config path: {}", current.display()),
+            Ok(meta) if !meta.is_dir() => bail!("refusing non-directory config path: {}", current.display()),
             Ok(_) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => fs::create_dir(&current)?,
             Err(e) => return Err(e.into()),

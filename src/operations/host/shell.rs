@@ -26,11 +26,8 @@ fn append_once(path: &Path, snippet: &str) -> Result<()> {
     if current.contains(snippet) {
         return Ok(());
     }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("open shell profile {}", path.display()))?;
+    let context = || format!("open shell profile {}", path.display());
+    let mut file = OpenOptions::new().create(true).append(true).open(path).with_context(context)?;
     if !current.is_empty() && !current.ends_with('\n') {
         writeln!(file)?;
     }

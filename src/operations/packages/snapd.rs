@@ -51,12 +51,12 @@ fn remove_snaps(host: &Host) -> Result<()> {
     let mut names = Vec::new();
     for line in output.lines().skip(1) {
         let name = line.split_ascii_whitespace().next().unwrap_or_default();
-        names.push(name.to_owned());
+        names.push(name);
     }
-    // remove app snaps before base & runtime snaps
-    names.sort_by_key(|name| matches!(name.as_str(), "snapd" | "bare") || name.starts_with("core"));
+    // sort snaps so snapd, bare & core are last
+    names.sort_by_key(|name| matches!(*name, "snapd" | "bare") || name.starts_with("core"));
     for name in names {
-        host.run("snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
+        host.run("snap package removal", "sudo", ["snap", "remove", "--purge", name])?;
     }
     Ok(())
 }

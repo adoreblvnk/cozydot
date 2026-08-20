@@ -47,20 +47,10 @@ fn resolve_url(host: &Host, package: &BinaryPackage, architecture: Architecture)
         BinarySource::GitHub { repo, assets } => {
             let Some(asset_pattern) = assets.get(architecture) else { return Ok(None) };
             let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
-            let output = host.curl(
-                "resolve binary package release",
-                &endpoint,
-                [
-                    "--proto",
-                    "=https",
-                    "--header",
-                    GITHUB_ACCEPT,
-                    "--header",
-                    GITHUB_API_VERSION,
-                    "--header",
-                    USER_AGENT,
-                ],
-            )?;
+            let accept = GITHUB_ACCEPT;
+            let version = GITHUB_API_VERSION;
+            let args = ["--proto", "=https", "--header", accept, "--header", version, "--header", USER_AGENT];
+            let output = host.curl("resolve binary package release", &endpoint, args)?;
             select_asset_url(&output.stdout, asset_pattern, &package.name, architecture).map(Some)
         }
     }
@@ -71,12 +61,8 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, architectu
     let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
     if matches.len() != 1 {
-        bail!(
-            "binary package {:?} ({}) asset pattern matched {} assets",
-            package,
-            architecture.as_str(),
-            matches.len()
-        );
+        let architecture = architecture.as_str();
+        bail!("binary package {:?} ({}) asset pattern matched {} assets", package, architecture, matches.len());
     }
     Ok(matches[0].browser_download_url.clone())
 }

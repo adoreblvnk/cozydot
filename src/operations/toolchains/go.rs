@@ -21,18 +21,12 @@ pub(crate) fn install_toolchain(host: &Host, selector: &str, architecture: Archi
         let archive = TempPath::new_with_suffix("go", ".tar.gz")?;
         let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go_archive());
         let url = format!("https://go.dev/dl/{filename}");
-        host.curl(
-            "Go archive download",
-            &url,
-            ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.path().as_os_str()],
-        )?;
+        let output = archive.path().as_os_str();
+        host.curl("Go archive download", &url, ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), output])?;
         // remove whole tree so files missing from new release can't survive replacement
         host.run("Go installation replacement", "sudo", ["rm", "-rf", "/usr/local/go"])?;
-        host.run(
-            "Go archive extraction",
-            "sudo",
-            ["tar", "-xzf", archive.path().to_str().context("Go archive path is not UTF-8")?, "-C", "/usr/local"],
-        )?;
+        let archive = archive.path().to_str().context("Go archive path is not UTF-8")?;
+        host.run("Go archive extraction", "sudo", ["tar", "-xzf", archive, "-C", "/usr/local"])?;
     }
     append_profile(host, GO_PATH_INIT)
 }
@@ -53,11 +47,6 @@ fn latest_version(host: &Host) -> Result<String> {
 
     let metadata = host.curl("Go release resolution", "https://go.dev/dl/?mode=json", ["--proto", "=https"])?;
     let releases: Vec<Release> = serde_json::from_slice(&metadata.stdout).context("parse Go release JSON")?;
-    releases
-        .first()
-        .context("Go metadata has no stable release")?
-        .version
-        .strip_prefix("go")
-        .map(str::to_owned)
-        .context("Go metadata returned malformed release version")
+    let version = &releases.first().context("Go metadata has no stable release")?.version;
+    version.strip_prefix("go").map(str::to_owned).context("Go metadata returned malformed release version")
 }

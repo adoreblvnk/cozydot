@@ -1,9 +1,7 @@
-use anyhow::{Result, bail};
-use std::ffi::OsStr;
-
 use crate::operations::host::{
     Host, TempPath, regular_executable_file, require_regular_executable, shell::append_profile,
 };
+use anyhow::{Result, bail};
 
 const UV_INIT: &str = r#"if [ -f "$HOME/.local/bin/env" ]; then
   . "$HOME/.local/bin/env"
@@ -13,16 +11,9 @@ pub fn install(host: &Host) -> Result<()> {
     let uv_path = host.home().join(".local/bin/uv");
     if !regular_executable_file(&uv_path) {
         let installer = TempPath::new("uv-install")?;
-        host.curl(
-            "uv installer download",
-            "https://astral.sh/uv/install.sh",
-            [OsStr::new("--output"), installer.path().as_os_str()],
-        )?;
-        host.run(
-            "uv install",
-            "env",
-            [OsStr::new("UV_NO_MODIFY_PATH=1"), OsStr::new("sh"), installer.path().as_os_str()],
-        )?;
+        let path = installer.path().as_os_str();
+        host.curl("uv installer download", "https://astral.sh/uv/install.sh", ["--output".as_ref(), path])?;
+        host.run("uv install", "env", ["UV_NO_MODIFY_PATH=1".as_ref(), "sh".as_ref(), path])?;
         if !regular_executable_file(&uv_path) {
             bail!("uv installer did not publish executable {}", uv_path.display());
         }
