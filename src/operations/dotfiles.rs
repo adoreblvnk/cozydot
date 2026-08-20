@@ -113,9 +113,8 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
         .as_nanos();
     let backup_root = state_home.join("cozydot/dotfile-backups").join(format!("{timestamp}-{}", std::process::id()));
     for (package, conflict) in conflicts {
-        let relative = conflict
-            .strip_prefix(host.home())
-            .with_context(|| format!("dotfiles conflict escaped the home directory: {}", conflict.display()))?;
+        let context = || format!("dotfiles conflict escaped the home directory: {}", conflict.display());
+        let relative = conflict.strip_prefix(host.home()).with_context(context)?;
         let backup = backup_root.join(package).join(relative);
         let parent = backup.parent().context("dotfiles backup has no parent")?;
         fs::create_dir_all(parent).context("create dotfiles backup directory")?;

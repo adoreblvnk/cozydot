@@ -22,19 +22,13 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
     if enabled {
         install(host, &["unattended-upgrades".into()])?;
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        host.run(
-            "unattended-upgrades service enablement",
-            "sudo",
-            ["systemctl", "enable", "--now", "unattended-upgrades.service"],
-        )?;
+        let args = ["systemctl", "enable", "--now", "unattended-upgrades.service"];
+        host.run("unattended-upgrades service enablement", "sudo", args)?;
     } else {
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
         if systemd::enabled_or_active(host, "unattended-upgrades.service")? {
-            host.run(
-                "unattended-upgrades service disablement",
-                "sudo",
-                ["systemctl", "disable", "--now", "unattended-upgrades.service"],
-            )?;
+            let args = ["systemctl", "disable", "--now", "unattended-upgrades.service"];
+            host.run("unattended-upgrades service disablement", "sudo", args)?;
         }
         purge(host, &["unattended-upgrades".into()])?;
     }
@@ -45,12 +39,8 @@ pub fn install(host: &Host, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
-    change_packages(
-        host,
-        "APT package install",
-        &["install", "--no-upgrade"],
-        packages.iter().map(|package| format!("{package}+")),
-    )
+    let packages = packages.iter().map(|package| format!("{package}+"));
+    change_packages(host, "APT package install", &["install", "--no-upgrade"], packages)
 }
 
 pub fn purge(host: &Host, packages: &[String]) -> Result<()> {
@@ -76,11 +66,8 @@ pub fn upgrade(host: &Host, command: AptUpgradeCommand) -> Result<()> {
     };
     host.run(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq"])?;
     if command == AptUpgradeCommand::FullUpgrade {
-        host.run(
-            "APT purge autoremove",
-            "sudo",
-            ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq"],
-        )?;
+        let args = ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq"];
+        host.run("APT purge autoremove", "sudo", args)?;
     }
     Ok(())
 }

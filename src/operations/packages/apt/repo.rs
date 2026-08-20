@@ -32,12 +32,9 @@ impl AptRepo {
     }
 
     pub fn render_source(&self) -> String {
-        let prefix = format!(
-            "deb [arch={} signed-by={}] {} ",
-            self.architecture.debian(),
-            self.key_path.display(),
-            self.source_url
-        );
+        let architecture = self.architecture.debian();
+        let key_path = self.key_path.display();
+        let prefix = format!("deb [arch={architecture} signed-by={key_path}] {} ", self.source_url);
         format!("{prefix}{} {}\n", self.suite, self.components.join(" "))
     }
 }
@@ -62,39 +59,19 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
 
     let binary_keyring = TempPath::new_with_suffix("repo-key-binary", ".gpg")?;
 
-    host.run(
-        "repo key conversion",
-        "gpg",
-        [
-            "--no-options",
-            "--batch",
-            "--yes",
-            "--output",
-            &binary_keyring.path().to_string_lossy(),
-            "--dearmor",
-            &downloaded.path().to_string_lossy(),
-        ],
-    )?;
+    let key = binary_keyring.path().to_string_lossy();
+    let input = downloaded.path().to_string_lossy();
+    let args = ["--no-options", "--batch", "--yes", "--output", key.as_ref(), "--dearmor", input.as_ref()];
+    host.run("repo key conversion", "gpg", args)?;
 
     // parsing proves download contains a public key; configured URL remains identity trust boundary
-    let key_list = host.run(
-        "repo key validation",
-        "gpg",
-        [
-            "--no-options",
-            "--batch",
-            "--no-default-keyring",
-            "--keyring",
-            &binary_keyring.path().to_string_lossy(),
-            "--with-colons",
-            "--list-keys",
-        ],
-    )?;
-    if !key_list
-        .stdout
-        .split(|byte| *byte == b'\n')
-        .any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()))
-    {
+    let key = binary_keyring.path().to_string_lossy();
+    let no_default = "--no-default-keyring";
+    let args = ["--no-options", "--batch", no_default, "--keyring", key.as_ref(), "--with-colons", "--list-keys"];
+    let key_list = host.run("repo key validation", "gpg", args)?;
+    let mut lines = key_list.stdout.split(|byte| *byte == b'\n');
+    let public_key = lines.any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()));
+    if !public_key {
         bail!("repo key validation found no public key");
     }
 
@@ -224,12 +201,7 @@ pub(crate) mod debian_components {
             return format!("{body}{}", if newline { "\n" } else { "" });
         }
         let active_end = body[..end].trim_end().len();
-        format!(
-            "{} {}{}{}",
-            &body[..active_end],
-            missing.join(" "),
-            &body[active_end..],
-            if newline { "\n" } else { "" }
-        )
+        let newline = if newline { "\n" } else { "" };
+        format!("{} {}{}{}", &body[..active_end], missing.join(" "), &body[active_end..], newline)
     }
 }

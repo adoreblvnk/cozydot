@@ -55,10 +55,9 @@ pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executa
 }
 
 fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
-    let config_home = env::var_os("XDG_CONFIG_HOME")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| host.home().join(".config"));
+    let config_home = env::var_os("XDG_CONFIG_HOME");
+    let fallback = || host.home().join(".config");
+    let config_home = config_home.filter(|path| !path.is_empty()).map(PathBuf::from).unwrap_or_else(fallback);
     fs::create_dir_all(&config_home)?;
     let destination = config_home.join("xdg-terminals.list");
     let entry = format!("{executable}.desktop");
@@ -69,8 +68,7 @@ fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
     File::open(config_home)?.sync_all()?;
 
     let output = host.run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
-    let selected = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
-    if selected != entry.as_bytes() {
+    if stdout_line(&output.stdout, "xdg-terminal-exec --print-id")? != entry.as_str() {
         bail!("xdg-terminal-exec did not select {entry:?}");
     }
     Ok(())
@@ -109,12 +107,8 @@ pub(crate) fn set_idle_delay(host: &Host, environment: DesktopEnvironment, secon
 
 pub(crate) fn set_idle_dim(host: &Host, environment: DesktopEnvironment, enabled: bool) -> Result<()> {
     let prefix = prefix(environment);
-    gsettings_set(
-        host,
-        &format!("{prefix}.settings-daemon.plugins.power"),
-        "idle-dim",
-        if enabled { "true" } else { "false" },
-    )
+    let value = if enabled { "true" } else { "false" };
+    gsettings_set(host, &format!("{prefix}.settings-daemon.plugins.power"), "idle-dim", value)
 }
 
 fn prefix(environment: DesktopEnvironment) -> &'static str {

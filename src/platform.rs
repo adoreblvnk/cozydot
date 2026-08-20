@@ -88,16 +88,13 @@ impl Distro {
             Self::Ubuntu | Self::Pop => Ok(Family::Ubuntu),
             Self::Debian => Ok(Family::Debian),
             Self::LinuxMint => {
-                let mut families = id_like.unwrap_or_default().split_ascii_whitespace();
-                let ubuntu = families.clone().any(|family| family == "ubuntu");
-                let debian = families.any(|family| family == "debian");
+                let id_like = id_like.unwrap_or_default();
+                let ubuntu = id_like.split_ascii_whitespace().any(|family| family == "ubuntu");
+                let debian = id_like.split_ascii_whitespace().any(|family| family == "debian");
                 match (ubuntu, debian) {
                     (true, _) => Ok(Family::Ubuntu),
                     (false, true) => Ok(Family::Debian),
-                    _ => bail!(
-                        "unsupported linuxmint base family in ID_LIKE {:?}; expected ubuntu or debian",
-                        id_like.unwrap_or_default()
-                    ),
+                    _ => bail!("unsupported linuxmint base family in ID_LIKE {id_like:?}; expected ubuntu or debian"),
                 }
             }
         }

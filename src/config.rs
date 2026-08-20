@@ -80,21 +80,15 @@ impl Config {
         let desktop = platform.desktop;
 
         if let Some(allowed_platforms) = self.linux.system.allowed_platforms.as_ref() {
-            if allowed_platforms
-                .distros
-                .as_ref()
-                .is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro))
-            {
+            let distros = allowed_platforms.distros.as_ref();
+            if distros.is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
                 bail!(
                     "linux.system.allowed_platforms.distros: detected distribution {:?} is not allowed",
                     distro.as_str()
                 );
             }
-            if allowed_platforms
-                .desktops
-                .as_ref()
-                .is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop))
-            {
+            let desktops = allowed_platforms.desktops.as_ref();
+            if desktops.is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
                 bail!(
                     "linux.system.allowed_platforms.desktops: detected desktop {:?} is not allowed",
                     desktop.as_str()
@@ -342,10 +336,7 @@ pub fn select_distro_map<T>(
 ) -> Option<(DistroMapKey, &T)> {
     let exact_key = DistroMapKey::from_distro(distro);
     let family_key = DistroMapKey::from_family(family);
-    map.get(&exact_key)
-        .map(|value| (exact_key, value))
-        .or_else(|| map.get(&family_key).map(|value| (family_key, value)))
-        .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
+    [exact_key, family_key, DistroMapKey::Default].into_iter().find_map(|key| map.get(&key).map(|value| (key, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -661,16 +652,11 @@ pub struct MacDesktop {
 
 impl MacDesktop {
     pub(crate) fn has_intent(&self) -> bool {
-        let dock =
-            self.dock.as_ref().is_some_and(|dock| dock.autohide.is_some() || dock.show_recent_applications.is_some());
-        let finder = self
-            .finder
-            .as_ref()
-            .is_some_and(|finder| finder.show_filename_extensions.is_some() || finder.show_hidden_files.is_some());
-        let keyboard = self
-            .keyboard
-            .as_ref()
-            .is_some_and(|keyboard| keyboard.key_repeat.is_some() || keyboard.initial_key_repeat.is_some());
+        let dock = self.dock.as_ref().is_some_and(|d| d.autohide.is_some() || d.show_recent_applications.is_some());
+        let finder = self.finder.as_ref();
+        let finder = finder.is_some_and(|f| f.show_filename_extensions.is_some() || f.show_hidden_files.is_some());
+        let keyboard = self.keyboard.as_ref();
+        let keyboard = keyboard.is_some_and(|k| k.key_repeat.is_some() || k.initial_key_repeat.is_some());
         let trackpad = self.trackpad.as_ref().is_some_and(|trackpad| trackpad.tap_to_click.is_some());
         self.appearance.is_some() || dock || finder || keyboard || trackpad
     }

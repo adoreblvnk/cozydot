@@ -25,7 +25,11 @@
 - Prefer chained combinators when they fit on one line. Use a direct `if` instead of wrapping the chain across lines.
 - Extract long argument lists into variables so operation calls remain short.
 - Keep assignments on one line. If that is too long, extract a meaningful intermediate variable instead of leaving `=` at the end of a line.
-- Write plain, lowercase comments that directly state intent.
+- Keep comments plain and directly useful.
+- Avoid sentence case and trailing periods in comments.
+- Use numerals instead of spelling out numbers.
+- Prefer `&` / `/` over `and` / `or` in comments.
+- Write comments in code-reading order, e.g. `// sort snaps so snapd, bare & core are last`.
 - Prefer visually simple code over denser, more idiomatic code.
 
 ## Collaboration

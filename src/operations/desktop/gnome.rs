@@ -29,7 +29,7 @@ pub(crate) fn install_dash_to_dock(host: &Host) -> Result<Outcome> {
     if install_or_enable_extension(host, DASH_TO_DOCK_UUID)? == Outcome::LoginRequired {
         return Ok(Outcome::LoginRequired);
     }
-    let settings = [
+    for (key, value) in [
         ("dock-position", "'BOTTOM'"),
         ("dash-max-icon-size", "32"),
         ("dock-fixed", "false"),
@@ -39,8 +39,7 @@ pub(crate) fn install_dash_to_dock(host: &Host) -> Result<Outcome> {
         ("intellihide-mode", "'FOCUS_APPLICATION_WINDOWS'"),
         ("extend-height", "false"),
         ("click-action", "'minimize-or-previews'"),
-    ];
-    for (key, value) in settings {
+    ] {
         let path = format!("/org/gnome/shell/extensions/dash-to-dock/{key}");
         host.run("dconf write", "dconf", ["write", &path, value])?;
     }
@@ -85,10 +84,8 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host.run("GNOME extension shell version", "gnome-shell", ["--version"])?;
     let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
-    let version = select_extension_version(
-        std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
-        shell_version,
-    )?;
+    let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
+    let version = select_extension_version(metadata, shell_version)?;
     let archive = TempPath::new_with_suffix("gnome-extension", ".zip")?;
     let name = extension.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");

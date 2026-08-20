@@ -6,11 +6,8 @@ use super::{Host, TempPath};
 
 pub(crate) fn write_atomic(host: &Host, destination: &Path, contents: &[u8], label: &str) -> Result<()> {
     let local = TempPath::new("privileged-write")?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(local.path())
-        .context("open local atomic-write staging file")?;
+    let context = "open local atomic-write staging file";
+    let mut file = fs::OpenOptions::new().write(true).truncate(true).open(local.path()).context(context)?;
     file.write_all(contents).context("write local atomic-write staging file")?;
     file.sync_all().context("sync local atomic-write staging file")?;
     drop(file);
