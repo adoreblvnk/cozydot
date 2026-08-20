@@ -147,52 +147,64 @@ pub(crate) mod debian_components {
     }
 
     fn add_deb822_components(text: &str) -> String {
-        text.split_inclusive('\n')
-            .map(|line| {
-                let body = line.strip_suffix('\n').unwrap_or(line);
-                let Some((name, values)) = body.split_once(':') else { return line.to_owned() };
-                if !name.eq_ignore_ascii_case("Components") {
-                    return line.to_owned();
-                }
-                let values = values.split_ascii_whitespace().collect::<Vec<_>>();
-                if !values.contains(&"main") {
-                    return line.to_owned();
-                }
-                append_missing(body, body.len(), &values, line.ends_with('\n'))
-            })
-            .collect()
+        let mut replacement = String::with_capacity(text.len());
+        for line in text.split_inclusive('\n') {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let Some((name, values)) = body.split_once(':') else {
+                replacement.push_str(line);
+                continue;
+            };
+            if !name.eq_ignore_ascii_case("Components") {
+                replacement.push_str(line);
+                continue;
+            }
+            let values = values.split_ascii_whitespace().collect::<Vec<_>>();
+            if !values.contains(&"main") {
+                replacement.push_str(line);
+                continue;
+            }
+            let line = append_missing(body, body.len(), &values, line.ends_with('\n'));
+            replacement.push_str(&line);
+        }
+        replacement
     }
 
     fn add_oneline_components(text: &str) -> String {
-        text.split_inclusive('\n')
-            .map(|line| {
-                let body = line.strip_suffix('\n').unwrap_or(line);
-                let comment = body.find('#').unwrap_or(body.len());
-                let active = body[..comment].trim();
-                let fields = active.split_ascii_whitespace().collect::<Vec<_>>();
-                if fields.first() != Some(&"deb") {
-                    return line.to_owned();
-                }
-                let uri = fields.iter().position(|field| field.starts_with("http://") || field.starts_with("https://"));
-                let Some(uri) = uri else { return line.to_owned() };
-                if !debian_uri(fields[uri]) || fields.len() <= uri + 2 || !fields[uri + 2..].contains(&"main") {
-                    return line.to_owned();
-                }
-                append_missing(body, comment, &fields[uri + 2..], line.ends_with('\n'))
-            })
-            .collect()
+        let mut replacement = String::with_capacity(text.len());
+        for line in text.split_inclusive('\n') {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let comment = body.find('#').unwrap_or(body.len());
+            let active = body[..comment].trim();
+            let fields = active.split_ascii_whitespace().collect::<Vec<_>>();
+            if fields.first() != Some(&"deb") {
+                replacement.push_str(line);
+                continue;
+            }
+            let uri = fields.iter().position(|field| field.starts_with("http://") || field.starts_with("https://"));
+            let Some(uri) = uri else {
+                replacement.push_str(line);
+                continue;
+            };
+            if !debian_uri(fields[uri]) || fields.len() <= uri + 2 || !fields[uri + 2..].contains(&"main") {
+                replacement.push_str(line);
+                continue;
+            }
+            let line = append_missing(body, comment, &fields[uri + 2..], line.ends_with('\n'));
+            replacement.push_str(&line);
+        }
+        replacement
     }
 
     fn debian_uri(uri: &str) -> bool {
-        [
+        let supported = [
             "http://deb.debian.org/debian",
             "https://deb.debian.org/debian",
             "http://deb.debian.org/debian-security",
             "https://deb.debian.org/debian-security",
             "http://security.debian.org/debian-security",
             "https://security.debian.org/debian-security",
-        ]
-        .contains(&uri.trim_end_matches('/'))
+        ];
+        supported.contains(&uri.trim_end_matches('/'))
     }
 
     fn append_missing(body: &str, end: usize, existing: &[&str], newline: bool) -> String {

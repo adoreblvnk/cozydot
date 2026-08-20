@@ -98,19 +98,27 @@ fn collect_conflicts(
 }
 
 fn resolves_to(target: &Path, source: &Path) -> bool {
-    fs::canonicalize(target).and_then(|target| fs::canonicalize(source).map(|source| target == source)).unwrap_or(false)
+    let Ok(target) = fs::canonicalize(target) else {
+        return false;
+    };
+    let Ok(source) = fs::canonicalize(source) else {
+        return false;
+    };
+    target == source
 }
 
 fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> {
     if conflicts.is_empty() {
         return Ok(());
     }
-    let state_home =
-        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|| host.home().join(".local/state"));
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("dotfiles backup timestamp is before the Unix epoch")?
-        .as_nanos();
+    let state_home = match std::env::var_os("XDG_STATE_HOME") {
+        Some(path) => PathBuf::from(path),
+        None => host.home().join(".local/state"),
+    };
+    let timestamp_context = "dotfiles backup timestamp is before the Unix epoch";
+    let now = SystemTime::now();
+    let elapsed = now.duration_since(UNIX_EPOCH).context(timestamp_context)?;
+    let timestamp = elapsed.as_nanos();
     let backup_root = state_home.join("cozydot/dotfile-backups").join(format!("{timestamp}-{}", std::process::id()));
     for (package, conflict) in conflicts {
         let context = || format!("dotfiles conflict escaped the home directory: {}", conflict.display());

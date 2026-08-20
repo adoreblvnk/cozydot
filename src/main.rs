@@ -65,8 +65,8 @@ fn main() -> Result<()> {
         Command::Init { preset } => println!("Initialized cozydot in {}", init::init(preset)?.display()),
         Command::Check => {
             let path = init::config_root()?.join("cozydot.yaml");
-            config::Config::load(&path)
-                .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+            let context = "active configuration is missing or invalid; run 'cozydot init' first";
+            config::Config::load(&path).with_context(|| context)?;
             println!("Checked {}", path.display());
         }
         Command::Apply => {

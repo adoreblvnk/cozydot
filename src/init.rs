@@ -102,13 +102,15 @@ impl Init {
     }
 
     fn dotfile_package_is_unmodified(&self, package: &Path) -> Result<bool> {
-        let managed = self
-            .managed
-            .iter()
-            .filter(|(relative, _)| {
-                relative.strip_prefix(package).is_ok_and(|suffix| suffix.components().next().is_some())
-            })
-            .collect::<Vec<_>>();
+        let mut managed = Vec::new();
+        for (relative, hash) in &self.managed {
+            let Ok(suffix) = relative.strip_prefix(package) else {
+                continue;
+            };
+            if suffix.components().next().is_some() {
+                managed.push((relative, hash));
+            }
+        }
         let dest = self.root.join(package);
         match fs::symlink_metadata(&dest) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(managed.is_empty()),
@@ -125,9 +127,16 @@ impl Init {
         if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
             return Ok(false);
         }
-        Ok(managed
-            .iter()
-            .all(|(relative, hash)| hash_file(&self.root.join(relative)).is_ok_and(|current| &current == *hash)))
+        for (relative, hash) in managed {
+            let path = self.root.join(relative);
+            let Ok(current) = hash_file(&path) else {
+                return Ok(false);
+            };
+            if &current != hash {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 

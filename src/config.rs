@@ -574,9 +574,9 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
         if duration.subsec_nanos() != 0 {
             return Err(de::Error::custom("duration must resolve to a whole number of seconds"));
         }
-        u32::try_from(duration.as_secs())
-            .map(Self)
-            .map_err(|_| de::Error::custom("duration exceeds the supported uint32 seconds range"))
+        let seconds = u32::try_from(duration.as_secs());
+        let seconds = seconds.map_err(|_| de::Error::custom("duration exceeds the supported uint32 seconds range"))?;
+        Ok(Self(seconds))
     }
 }
 

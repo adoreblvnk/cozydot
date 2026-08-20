@@ -68,8 +68,10 @@ fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Outcome> 
 
 fn validate_extension(value: &str) -> Result<()> {
     // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
-    let valid = value.split_once('@').is_some_and(|(left, right)| valid_uuid_part(left) && valid_uuid_part(right));
-    if !valid {
+    let Some((left, right)) = value.split_once('@') else {
+        bail!("invalid GNOME extension UUID {value:?}");
+    };
+    if !valid_uuid_part(left) || !valid_uuid_part(right) {
         bail!("invalid GNOME extension UUID {value:?}");
     }
     Ok(())
@@ -80,6 +82,7 @@ fn valid_uuid_part(value: &str) -> bool {
 }
 
 fn install_extension(host: &Host, extension: &str) -> Result<()> {
+    // TODO: can we simplify this?
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
     let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host.run("GNOME extension shell version", "gnome-shell", ["--version"])?;
@@ -95,14 +98,18 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
 }
 
 fn shell_version(input: &str) -> Result<&str> {
-    for part in input.split_whitespace() {
-        let part = part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
-        if !part.is_empty()
-            && part
-                .split('.')
-                .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
-        {
-            return Ok(part);
+    // TODO: can we simplify this?
+    for token in input.split_whitespace() {
+        let candidate = token.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
+        let mut is_version = !candidate.is_empty();
+        for component in candidate.split('.') {
+            if component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit()) {
+                is_version = false;
+                break;
+            }
+        }
+        if is_version {
+            return Ok(candidate);
         }
     }
     bail!("GNOME Shell version output has no numeric version")

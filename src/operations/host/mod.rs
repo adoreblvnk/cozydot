@@ -48,8 +48,8 @@ impl Host {
     }
 
     pub fn require_cli(&self, label: &str, program: &str) -> Result<()> {
-        self.run(&format!("{label} CLI version check"), program, ["--version"])
-            .with_context(|| format!("{label} integration requires an existing usable {program} CLI"))?;
+        let version_check = self.run(&format!("{label} CLI version check"), program, ["--version"]);
+        version_check.with_context(|| format!("{label} integration requires an existing usable {program} CLI"))?;
         Ok(())
     }
 
@@ -58,11 +58,11 @@ impl Host {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut curl_args = ["--location", "--fail", "--silent", "--show-error", "--retry", "3", "--retry-all-errors"]
-            .into_iter()
-            .map(OsString::from)
-            .collect::<Vec<_>>();
-        curl_args.extend(args.into_iter().map(|arg| arg.as_ref().to_os_string()));
+        let options = ["--location", "--fail", "--silent", "--show-error", "--retry", "3", "--retry-all-errors"];
+        let mut curl_args = options.map(OsString::from).to_vec();
+        for arg in args {
+            curl_args.push(arg.as_ref().to_os_string());
+        }
         // keep URL after `--` so a leading hyphen can't become a curl option
         curl_args.extend([OsString::from("--"), OsString::from(url)]);
         self.run(label, "curl", curl_args)
@@ -73,8 +73,15 @@ impl Host {
     }
 
     pub fn executable_on_path(&self, name: &str) -> bool {
-        std::env::var_os("PATH")
-            .is_some_and(|path| std::env::split_paths(&path).any(|directory| executable_file(&directory.join(name))))
+        let Some(path) = std::env::var_os("PATH") else {
+            return false;
+        };
+        for directory in std::env::split_paths(&path) {
+            if executable_file(&directory.join(name)) {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -85,22 +92,21 @@ impl TempPath {
         Self::new_with_suffix(stem, "")
     }
 
+    // TODO: in the future we can use tempfile directly instead of wrapping it?
     pub fn new_with_suffix(stem: &str, suffix: &str) -> Result<Self> {
-        tempfile::Builder::new()
-            .prefix(stem)
-            .suffix(suffix)
-            .tempfile()
-            .map(|file| Self(file.into_temp_path()))
-            .context("create temporary file")
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(stem);
+        builder.suffix(suffix);
+        let file = builder.tempfile().context("create temporary file")?;
+        Ok(Self(file.into_temp_path()))
     }
 
     pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
-        tempfile::Builder::new()
-            .prefix(stem)
-            .suffix(suffix)
-            .tempfile_in(parent)
-            .map(|file| Self(file.into_temp_path()))
-            .context("create temporary file")
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(stem);
+        builder.suffix(suffix);
+        let file = builder.tempfile_in(parent).context("create temporary file")?;
+        Ok(Self(file.into_temp_path()))
     }
 
     pub fn path(&self) -> &Path {
@@ -113,8 +119,10 @@ pub(crate) fn executable_file(path: &Path) -> bool {
 }
 
 pub(crate) fn regular_executable_file(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0)
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    metadata.file_type().is_file() && metadata.permissions().mode() & 0o111 != 0
 }
 
 pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
@@ -139,9 +147,10 @@ pub(crate) fn stdout_line<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str>
 }
 
 fn display(program: &str, args: &[OsString]) -> String {
-    std::iter::once(OsStr::new(program))
-        .chain(args.iter().map(OsString::as_os_str))
-        .map(|part| part.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(OsStr::new(program).to_string_lossy());
+    for arg in args {
+        parts.push(arg.to_string_lossy());
+    }
+    parts.join(" ")
 }

@@ -53,7 +53,7 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
 }
 
 fn ensure_fuse(host: &Host) -> Result<()> {
-    let package =
-        if host.output("apt-cache", ["show", "libfuse2t64"])?.status.success() { "libfuse2t64" } else { "libfuse2" };
+    let output = host.output("apt-cache", ["show", "libfuse2t64"])?;
+    let package = if output.status.success() { "libfuse2t64" } else { "libfuse2" };
     apt::install(host, &[package.into()])
 }
