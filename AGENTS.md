@@ -14,7 +14,19 @@
 ## Project conventions
 
 - When adapting official documentation or an established implementation, preserve its structure and line order where practical. Make the smallest project-required diff, keep local terminology, cite the source, and explain only non-obvious deviations.
+
+## Cozydot conventions
+
 - Preserve upstream-documented names, values, paths, and identifiers so users can understand, troubleshoot, and maintain installed software from official documentation alone, without depending on Cozydot. Shorten names when no precision is lost.
+
+## Code style
+
+- Inline helpers used only once.
+- Prefer chained combinators when they fit on one line. Use a direct `if` instead of wrapping the chain across lines.
+- Extract long argument lists into variables so operation calls remain short.
+- Keep assignments on one line. If that is too long, extract a meaningful intermediate variable instead of leaving `=` at the end of a line.
+- Write plain, lowercase comments that directly state intent.
+- Prefer visually simple code over denser, more idiomatic code.
 
 ## Supported platforms
 
