@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
@@ -31,10 +31,10 @@ fn config(shared: &str, linux: &str) -> String {
             "updates": {"homebrew": {}}
         }
     });
-    let shared: Value = yaml_serde::from_str(shared).unwrap();
-    let linux: Value = yaml_serde::from_str(linux).unwrap();
-    value["shared"].as_object_mut().unwrap().extend(shared.as_object().unwrap().clone());
-    value["linux"].as_object_mut().unwrap().extend(linux.as_object().unwrap().clone());
+    let shared: Map<String, Value> = yaml_serde::from_str(shared).unwrap();
+    let linux: Map<String, Value> = yaml_serde::from_str(linux).unwrap();
+    value["shared"].as_object_mut().unwrap().extend(shared);
+    value["linux"].as_object_mut().unwrap().extend(linux);
     serde_json::to_string(&value).unwrap()
 }
 
@@ -195,7 +195,7 @@ fn init_preserves_entire_dotfile_package_when_one_file_changes() {
     let previous = b"previous bundled theme\n";
     fs::write(&sibling, previous).unwrap();
     let relative = "dotfiles/yazi/.config/yazi/theme.toml";
-    let hash = format!("{:x}", Sha256::digest(previous));
+    let hash = hex::encode(Sha256::digest(previous));
     let manifest = fs::read_to_string(root.join(".managed-files"))
         .unwrap()
         .lines()
@@ -248,8 +248,8 @@ fn validation_happens_before_platform_detection_or_mutation() {
         )
     };
     for (linux, error) in [
-        (repo("        path: /\n"), "unknown field `path`"),
-        (repo("        arch: [arm32]\n"), "unknown variant `arm32`"),
+        (repo("        path: /\n"), "linux.packages.apt.repos[0]: unknown field `path`"),
+        (repo("        arch: [arm32]\n"), "linux.packages.apt.repos[0].arch[0]: unknown variant `arm32`"),
         (repo("        arch: []\n"), "arch: must not be empty"),
         (repo("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
         (

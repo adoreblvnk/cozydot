@@ -1,11 +1,9 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result};
 
 use crate::operations::{host::Host, toolchains::fnm};
 
 pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
-    let Some(fnm) = fnm::find_executable(host)? else {
-        bail!("npm install: managed fnm is unavailable after install");
-    };
+    let fnm = fnm::find_executable(host)?.context("npm install: managed fnm is unavailable after install")?;
     let mut missing = Vec::new();
     for package in packages {
         // get package name without the trailing version / tag

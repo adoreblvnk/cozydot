@@ -1,5 +1,5 @@
 use crate::operations::host::{Host, TempPath};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::ffi::OsStr;
 
 pub(crate) fn install(host: &Host) -> Result<()> {
@@ -37,7 +37,7 @@ pub(crate) fn formula_executable(host: &Host, formula: &str, executable: &str) -
     let output = host.run("Homebrew formula prefix", brew, ["--prefix", formula])?;
     let prefix = std::str::from_utf8(&output.stdout)?.trim();
     let program = std::path::Path::new(prefix).join("bin").join(executable);
-    program.to_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("Homebrew executable path is not UTF-8"))
+    program.to_str().map(str::to_owned).context("Homebrew executable path is not UTF-8")
 }
 
 pub(crate) fn update_and_upgrade(host: &Host, formulae: bool, casks: bool) -> Result<()> {

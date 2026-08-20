@@ -94,18 +94,16 @@ impl TempPath {
 
     // TODO: in the future we can use tempfile directly instead of wrapping it?
     pub fn new_with_suffix(stem: &str, suffix: &str) -> Result<Self> {
-        let mut builder = tempfile::Builder::new();
-        builder.prefix(stem);
-        builder.suffix(suffix);
-        let file = builder.tempfile().context("create temporary file")?;
+        let file = tempfile::Builder::new().prefix(stem).suffix(suffix).tempfile().context("create temporary file")?;
         Ok(Self(file.into_temp_path()))
     }
 
     pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
-        let mut builder = tempfile::Builder::new();
-        builder.prefix(stem);
-        builder.suffix(suffix);
-        let file = builder.tempfile_in(parent).context("create temporary file")?;
+        let file = tempfile::Builder::new()
+            .prefix(stem)
+            .suffix(suffix)
+            .tempfile_in(parent)
+            .context("create temporary file")?;
         Ok(Self(file.into_temp_path()))
     }
 

@@ -3,7 +3,7 @@ use crate::operations::{
     host::{Host, TempPath, path_program, regular_executable_file},
     packages::homebrew,
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 const FNM_BASH_INIT: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
 if [ -d "$FNM_PATH" ]; then
@@ -34,9 +34,7 @@ pub fn install(host: &Host) -> Result<()> {
 }
 
 pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
-    let Some(fnm) = find_executable(host)? else {
-        bail!("fnm install: fnm is unavailable after install");
-    };
+    let fnm = find_executable(host)?.context("fnm install: fnm is unavailable after install")?;
     if selector == "lts" {
         host.run("fnm install", &fnm, ["install", "--progress", "never", "--lts"])?;
     } else {

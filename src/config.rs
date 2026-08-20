@@ -37,12 +37,7 @@ impl Config {
     }
 
     fn deserialize_str(text: &str) -> Result<Self> {
-        let deserializer = yaml_serde::Deserializer::from_str(text);
-        serde_path_to_error::deserialize(deserializer).map_err(|error| {
-            let path = error.path().to_string();
-            let path = if path == "." { "config" } else { path.as_str() };
-            anyhow::anyhow!("{path}: {}", error.inner())
-        })
+        yaml_serde::from_str(text).context("config")
     }
 
     fn validate(&self) -> Result<()> {

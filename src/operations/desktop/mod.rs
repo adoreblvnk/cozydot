@@ -62,7 +62,7 @@ fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
     fs::create_dir_all(&config_home)?;
     let destination = config_home.join("xdg-terminals.list");
     let entry = format!("{executable}.desktop");
-    let mut temp = tempfile::Builder::new().prefix(".xdg-terminals.").tempfile_in(&config_home)?;
+    let mut temp = tempfile::NamedTempFile::with_prefix_in(".xdg-terminals.", &config_home)?;
     writeln!(temp, "{entry}")?;
     temp.as_file_mut().sync_all()?;
     temp.persist(destination).map_err(|error| error.error)?;

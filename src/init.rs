@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
 use sha2::{Digest, Sha256};
 use std::{
@@ -145,7 +145,7 @@ fn write_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
     ensure_directory_path(root, parent)?;
     let dest = root.join(relative);
     let dest_parent = required_parent(&dest)?;
-    let mut temp = tempfile::Builder::new().prefix(".cozydot.").tempfile_in(dest_parent)?;
+    let mut temp = tempfile::NamedTempFile::with_prefix_in(".cozydot.", dest_parent)?;
     temp.write_all(record.bytes)?;
     temp.as_file_mut().sync_all()?;
     temp.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
@@ -216,7 +216,7 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
 // TODO: do we really need this where we're going?
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
     let parent = required_parent(path)?;
-    let mut temp = tempfile::Builder::new().prefix(".managed-files.").tempfile_in(parent)?;
+    let mut temp = tempfile::NamedTempFile::with_prefix_in(".managed-files.", parent)?;
     for (relative, hash) in managed {
         writeln!(temp, "{}\t{}", hash, relative.display())?;
     }
@@ -236,9 +236,7 @@ fn sync_dir(path: &Path) -> Result<()> {
 }
 
 fn validate_hash(hash: &str) -> Result<()> {
-    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("invalid SHA-256 record");
-    }
+    ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()), "invalid SHA-256 record");
     Ok(())
 }
 fn validate_relative(path: &Path) -> Result<()> {
@@ -251,7 +249,7 @@ fn validate_relative(path: &Path) -> Result<()> {
     Ok(())
 }
 fn hash_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 fn hash_file(path: &Path) -> Result<String> {
     Ok(hash_bytes(&fs::read(path)?))

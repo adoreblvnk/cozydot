@@ -59,12 +59,7 @@ fn resolve_url(host: &Host, package: &BinaryPackage, architecture: Architecture)
 fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, architecture: Architecture) -> Result<String> {
     let release: Release = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
-    let mut matches = Vec::new();
-    for asset in &release.assets {
-        if pattern.is_match(&asset.name) {
-            matches.push(asset);
-        }
-    }
+    let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
     if matches.len() != 1 {
         let architecture = architecture.as_str();
         bail!("binary package {:?} ({}) asset pattern matched {} assets", package, architecture, matches.len());
