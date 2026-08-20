@@ -4,9 +4,8 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 use crate::operations::host::{Host, TempPath};
 
 pub(super) fn install_appimage(host: &Host, label: &str, url: &str, destination: &Path) -> Result<()> {
-    let parent = destination
-        .parent()
-        .with_context(|| format!("AppImage destination has no parent: {}", destination.display()))?;
+    let parent = destination.parent();
+    let parent = parent.with_context(|| format!("AppImage destination has no parent: {}", destination.display()))?;
     fs::create_dir_all(parent).context("create AppImage destination directory")?;
     let temp = TempPath::new_in_with_suffix(parent, ".appimage-", ".part")?;
     host.curl(label, url, ["--output".as_ref(), temp.path().as_os_str()])?;

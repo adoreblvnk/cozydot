@@ -44,9 +44,8 @@ impl Platform {
         let base_codename = match family {
             Family::Ubuntu => os.get_value("UBUNTU_CODENAME"),
             Family::Debian => os.get_value("DEBIAN_CODENAME"),
-        }
-        .unwrap_or(&distro_codename)
-        .to_owned();
+        };
+        let base_codename = base_codename.unwrap_or(&distro_codename).to_owned();
         if distro == Distro::Debian && !matches!(distro_codename.as_str(), "bookworm" | "trixie") {
             bail!("unsupported Debian release {distro_codename:?}; supported releases are bookworm and trixie");
         }

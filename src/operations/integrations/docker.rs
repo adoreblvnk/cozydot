@@ -28,8 +28,8 @@ fn read_daemon_config(host: &Host) -> Result<Map<String, Value>> {
         host.run("Docker daemon config symlink absence check", "sudo", ["test", "!", "-L", DOCKER_DAEMON_CONFIG])?;
         return Ok(Map::new());
     }
-    let mode = stdout_line(&stat_output.stdout, "sudo stat")?;
-    let mode = u32::from_str_radix(mode, 16).context("sudo stat returned malformed mode output")?;
+    let mode_hex = stdout_line(&stat_output.stdout, "sudo stat")?;
+    let mode = u32::from_str_radix(mode_hex, 16).context("sudo stat returned malformed mode output")?;
     if mode & 0o170000 != 0o100000 {
         bail!("Docker daemon config destination is not a regular file");
     }

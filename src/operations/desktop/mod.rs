@@ -55,9 +55,10 @@ pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executa
 }
 
 fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
-    let config_home = env::var_os("XDG_CONFIG_HOME");
-    let fallback = || host.home().join(".config");
-    let config_home = config_home.filter(|path| !path.is_empty()).map(PathBuf::from).unwrap_or_else(fallback);
+    let config_home = match env::var_os("XDG_CONFIG_HOME") {
+        Some(path) if !path.is_empty() => PathBuf::from(path),
+        _ => host.home().join(".config"),
+    };
     fs::create_dir_all(&config_home)?;
     let destination = config_home.join("xdg-terminals.list");
     let entry = format!("{executable}.desktop");

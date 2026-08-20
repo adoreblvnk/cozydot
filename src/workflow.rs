@@ -185,6 +185,7 @@ fn linux_apply(
 
 fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
     let dotfiles = dotfiles_packages(config, &config.macos.dotfiles.packages);
+    // TODO: refine & shorten variable name + simplify conditionals?
     let homebrew_packages =
         dotfiles.is_some() || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
 
