@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use anyhow::{Context, Result, bail};
 use etc_os_release::OsRelease;
 use serde::Deserialize;
@@ -15,10 +13,13 @@ pub struct Platform {
 
 impl Platform {
     pub fn detect() -> Result<Self> {
+        let uname = rustix::system::uname();
+        let arch = uname.machine().to_str().context("uname machine architecture is not UTF-8")?;
+        if arch.is_empty() {
+            bail!("uname returned an empty machine architecture");
+        }
         if cfg!(target_os = "macos") {
-            let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
-            let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
-            let architecture = match arch.as_str() {
+            let architecture = match arch {
                 "aarch64" | "arm64" => Architecture::Aarch64,
                 _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
             };
@@ -31,10 +32,8 @@ impl Platform {
             });
         }
         let os = OsRelease::open().context("read os-release")?;
-        let uname = Command::new("uname").arg("-m").output().context("run uname -m")?;
-        let arch = parse_uname_machine(uname.status.success(), &uname.stdout)?;
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-        Self::from_os_release(&os, &desktop, &arch)
+        Self::from_os_release(&os, &desktop, arch)
     }
 
     fn from_os_release(os: &OsRelease, desktop: &str, arch: &str) -> Result<Self> {
@@ -200,15 +199,4 @@ impl Architecture {
             other => other.go(),
         }
     }
-}
-
-fn parse_uname_machine(success: bool, stdout: &[u8]) -> Result<String> {
-    if !success {
-        bail!("uname -m failed");
-    }
-    let machine = std::str::from_utf8(stdout).context("uname -m output is not UTF-8")?.trim();
-    if machine.is_empty() {
-        bail!("uname -m returned an empty machine architecture");
-    }
-    Ok(machine.into())
 }

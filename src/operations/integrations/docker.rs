@@ -34,6 +34,5 @@ fn read_daemon_config(host: &Host) -> Result<Map<String, Value>> {
         bail!("Docker daemon config destination is not a regular file");
     }
     let output = host.run("Docker daemon config read", "sudo", ["cat", DOCKER_DAEMON_CONFIG])?;
-    let text = std::str::from_utf8(&output.stdout).context("Docker daemon config is not valid UTF-8")?;
-    serde_json::from_str(text).context("Docker daemon config must be a JSON object")
+    serde_json::from_slice(&output.stdout).context("Docker daemon config must be a JSON object")
 }
