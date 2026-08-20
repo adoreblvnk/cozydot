@@ -340,11 +340,11 @@ pub fn select_distro_map<T>(
     distro: Distro,
     family: Family,
 ) -> Option<(DistroMapKey, &T)> {
-    let exact = DistroMapKey::from_distro(distro);
-    let family = DistroMapKey::from_family(family);
-    map.get(&exact)
-        .map(|value| (exact, value))
-        .or_else(|| map.get(&family).map(|value| (family, value)))
+    let exact_key = DistroMapKey::from_distro(distro);
+    let family_key = DistroMapKey::from_family(family);
+    map.get(&exact_key)
+        .map(|value| (exact_key, value))
+        .or_else(|| map.get(&family_key).map(|value| (family_key, value)))
         .or_else(|| map.get(&DistroMapKey::Default).map(|value| (DistroMapKey::Default, value)))
 }
 

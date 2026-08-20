@@ -13,21 +13,13 @@ pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
         let name = if name.is_empty() { package } else { name };
         let args = ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name];
         if !host.output(&fnm, args)?.status.success() {
-            missing.push(package.clone());
+            missing.push(package.as_str());
         }
     }
     if missing.is_empty() {
         return Ok(());
     }
-    let mut args = vec![
-        "exec".to_owned(),
-        "--using=default".into(),
-        "--".into(),
-        "npm".into(),
-        "install".into(),
-        "--global".into(),
-        "--".into(),
-    ];
+    let mut args = vec!["exec", "--using=default", "--", "npm", "install", "--global", "--"];
     args.extend(missing);
     host.run("npm package install", &fnm, args)?;
     Ok(())

@@ -59,9 +59,6 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
     host.curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.path().to_string_lossy()])?;
 
     let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repo key")?;
-    if downloaded_bytes.is_empty() {
-        bail!("repo key download produced empty output");
-    }
 
     let binary_keyring = TempPath::new_with_suffix("repo-key-binary", ".gpg")?;
 
@@ -104,11 +101,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
     if preserve_armor {
         Ok(downloaded_bytes)
     } else {
-        let bytes = fs::read(binary_keyring.path()).context("read dearmored repo key")?;
-        if bytes.is_empty() {
-            bail!("repo key conversion produced empty output");
-        }
-        Ok(bytes)
+        fs::read(binary_keyring.path()).context("read dearmored repo key")
     }
 }
 

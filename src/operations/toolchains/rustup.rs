@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
+use std::ffi::OsStr;
 
 use crate::operations::host::{
-    Host, TempPath, regular_executable_file, require_regular_executable, shell::append_profile,
+    Host, TempPath, path_program, regular_executable_file, require_regular_executable, shell::append_profile,
 };
 
 const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi"#;
@@ -13,28 +14,30 @@ pub fn install(host: &Host, selector: &str) -> Result<()> {
         host.curl(
             "rustup installer download",
             "https://sh.rustup.rs",
-            ["--proto", "=https", "--tlsv1.2", "--output", &installer.path().to_string_lossy()],
+            [
+                OsStr::new("--proto"),
+                OsStr::new("=https"),
+                OsStr::new("--tlsv1.2"),
+                OsStr::new("--output"),
+                installer.path().as_os_str(),
+            ],
         )?;
         host.run(
             "rustup install",
             "sh",
             [
-                installer.path().to_string_lossy().into_owned(),
-                "-y".to_owned(),
-                "--no-modify-path".to_owned(),
-                "--default-toolchain".to_owned(),
-                selector.to_owned(),
+                installer.path().as_os_str(),
+                OsStr::new("-y"),
+                OsStr::new("--no-modify-path"),
+                OsStr::new("--default-toolchain"),
+                OsStr::new(selector),
             ],
         )?;
         if !regular_executable_file(&rustup_path) {
             bail!("rustup installer did not publish the managed rustup executable");
         }
     } else {
-        let rustup = require_regular_executable(
-            &rustup_path,
-            "managed tool executable path",
-            "rustup toolchain install: rustup is unavailable after install",
-        )?;
+        let rustup = path_program(&rustup_path, "managed tool executable path")?;
         host.run("rustup toolchain install", &rustup, ["toolchain", "install", "--no-update", "--", selector])?;
         host.run("rustup default", &rustup, ["default", "--", selector])?;
     }

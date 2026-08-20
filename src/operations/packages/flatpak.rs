@@ -17,15 +17,8 @@ pub fn install(host: &Host, refs: &[String]) -> Result<()> {
     if refs.is_empty() {
         return Ok(());
     }
-    let mut args = vec![
-        "--user".to_owned(),
-        "install".into(),
-        "--noninteractive".into(),
-        "-y".into(),
-        "flathub".into(),
-        "--".into(),
-    ];
-    args.extend(refs.iter().cloned());
+    let mut args = vec!["--user", "install", "--noninteractive", "-y", "flathub", "--"];
+    args.extend(refs.iter().map(String::as_str));
     host.run("Flatpak application install", "flatpak", args)?;
     Ok(())
 }

@@ -39,7 +39,7 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
     let mut conflicts = Vec::new();
     if replace {
         for (package, source) in &sources {
-            collect_conflicts(source, home.clone(), package, &mut conflicts)?;
+            collect_conflicts(source, home.to_path_buf(), package, &mut conflicts)?;
         }
         conflicts.sort_by(|left, right| left.1.cmp(&right.1));
         conflicts.dedup_by(|left, right| left.1 == right.1);

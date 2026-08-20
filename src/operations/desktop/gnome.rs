@@ -87,7 +87,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
     let version = select_extension_version(
         std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?,
-        &shell_version,
+        shell_version,
     )?;
     let archive = TempPath::new_with_suffix("gnome-extension", ".zip")?;
     let name = extension.replace('@', "");
@@ -97,7 +97,7 @@ fn install_extension(host: &Host, extension: &str) -> Result<()> {
     Ok(())
 }
 
-fn shell_version(input: &str) -> Result<String> {
+fn shell_version(input: &str) -> Result<&str> {
     for part in input.split_whitespace() {
         let part = part.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
         if !part.is_empty()
@@ -105,7 +105,7 @@ fn shell_version(input: &str) -> Result<String> {
                 .split('.')
                 .all(|component| !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit()))
         {
-            return Ok(part.to_owned());
+            return Ok(part);
         }
     }
     bail!("GNOME Shell version output has no numeric version")

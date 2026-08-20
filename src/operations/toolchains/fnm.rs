@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use std::ffi::OsStr;
 
 use crate::operations::{
     host::shell::append_shell,
@@ -26,16 +27,16 @@ pub fn install(host: &Host) -> Result<()> {
         host.curl(
             "fnm installer download",
             "https://fnm.vercel.app/install",
-            ["--output", &installer.path().to_string_lossy()],
+            [OsStr::new("--output"), installer.path().as_os_str()],
         )?;
         host.run(
             "fnm install",
             "bash",
             [
-                installer.path().to_string_lossy().into_owned(),
-                "--install-dir".to_owned(),
-                install_dir.to_string_lossy().into_owned(),
-                "--skip-shell".to_owned(),
+                installer.path().as_os_str(),
+                OsStr::new("--install-dir"),
+                install_dir.as_os_str(),
+                OsStr::new("--skip-shell"),
             ],
         )?;
         if !regular_executable_file(&fnm_path) {

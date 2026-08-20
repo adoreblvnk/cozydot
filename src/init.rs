@@ -63,10 +63,10 @@ impl Init {
         let new_hash = hash_bytes(record.bytes);
         let old_hash = self.managed.get(&relative);
         let write = match fs::symlink_metadata(&dest) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => true,
-            Err(e) => return Err(e.into()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+            Err(error) => return Err(error.into()),
             Ok(metadata) if !metadata.file_type().is_file() => false,
-            Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).ok().as_ref() == Some(hash)),
+            Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).is_ok_and(|current| &current == hash)),
         };
         if write {
             write_file(&self.root, &record, &relative)?;
