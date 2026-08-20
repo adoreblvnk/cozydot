@@ -19,7 +19,7 @@ Behavior-changing suggestions are separated from clear violations. Small allocat
 
 | Location | Finding | Smallest correction |
 |---|---|---|
-| `src/operations/packages/snapd.rs:51-63` | Copies parsed snap names into `String`s although the command output remains alive through sorting and removal. | Store `&str` slices in `names` and pass them directly to `host.run`. |
+| `src/operations/packages/snapd.rs:51-60` | Copies parsed snap names into `String`s although the command output remains alive through sorting and removal. | Store `&str` slices in `names` and pass them directly to `host.run`. |
 
 ## Behavioral candidates
 
@@ -28,7 +28,6 @@ These resemble the preferred style but change observable behavior and need an ex
 | Location | Tradeoff |
 |---|---|
 | `src/operations/host/users.rs:11-20` | Removing the `id -nG` membership query simplifies the function because `groupadd -f` and `usermod -aG` are idempotent, but existing members would still incur CLI validation and privileged commands. |
-| `src/operations/desktop/mod.rs:71-74` | Removing the post-write `xdg-terminal-exec --print-id` check trusts persistence, but loses verification that the external selector interprets the file as intended. |
 | `src/operations/toolchains/fnm.rs:42-44` | Removing the post-installer executable check trusts a successful official installer, but defers a missing-output failure to later use. |
 | `src/operations/toolchains/rustup.rs:36-38` | Removing the post-installer executable check trusts a successful official installer, but defers a missing-output failure to later use. |
 | `src/operations/toolchains/uv.rs:26-28` | Removing the post-installer executable check trusts a successful official installer, but defers a missing-output failure to later use. |
@@ -62,10 +61,10 @@ These comments contain useful information but do not match the established wordi
 | `src/operations/dotfiles.rs:122` | Uses an ampersand and omits an article. | `// rename makes each backup atomic, requiring HOME and XDG_STATE_HOME on the same filesystem` |
 | `src/operations/toolchains/go.rs:15` | Uses two ampersands. | `// verify that Go is executable and go version output matches the expected version and platform` |
 | `src/operations/desktop/gnome.rs:71` | Uses an ampersand. | `// UUIDs enter request URLs and archive names, so accept only GNOME's path-safe form` |
-| `src/operations/packages/snapd.rs:59` | Uses an ampersand. | `// remove app snaps before base and runtime snaps` |
+| `src/operations/packages/snapd.rs:56` | Uses an ampersand. | `// remove app snaps before base and runtime snaps` |
 | `src/operations/host/privileged_file.rs:41` | Uses an ampersand. | `// stage beside target for atomic rename, then sync file and parent` |
 | `src/operations/desktop/mod.rs:44` | Ends with punctuation. | `// Ubuntu provides this media key; upstream GNOME needs a custom binding` |
-| `src/operations/desktop/mod.rs:95` | Starts uppercase and ends with punctuation. | `// complete the binding before publishing its path to GNOME` |
+| `src/operations/desktop/mod.rs:96` | Starts uppercase and ends with punctuation. | `// complete the binding before publishing its path to GNOME` |
 | `src/operations/packages/binary/appimaged.rs:10` | Bare URL does not state why the block exists. | `// appimaged requires removing conflicting tools and stale cache before first launch` |
 
 ## CLI help wording

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::operations::{
@@ -51,9 +51,6 @@ fn remove_snaps(host: &Host) -> Result<()> {
     let mut names = Vec::new();
     for line in output.lines().skip(1) {
         let name = line.split_ascii_whitespace().next().unwrap_or_default();
-        if !valid_snap_name(name) {
-            bail!("snap list returned malformed package row");
-        }
         names.push(name.to_owned());
     }
     // remove app snaps before base & runtime snaps
@@ -62,10 +59,4 @@ fn remove_snaps(host: &Host) -> Result<()> {
         host.run("snap package removal", "sudo", ["snap", "remove", "--purge", &name])?;
     }
     Ok(())
-}
-
-fn valid_snap_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    bytes.next().is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
