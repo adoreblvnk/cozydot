@@ -12,8 +12,7 @@ pub(crate) fn install(host: &Host, packages: &[String]) -> Result<()> {
         let name = package.rsplit_once('@').map_or(package.as_str(), |(name, _)| name);
         let name = if name.is_empty() { package } else { name };
         let args = ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name];
-        let output = host.output(&fnm, args)?;
-        if !output.status.success() {
+        if !host.output(&fnm, args)?.status.success() {
             missing.push(package.clone());
         }
     }
