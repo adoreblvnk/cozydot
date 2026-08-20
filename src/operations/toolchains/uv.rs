@@ -1,4 +1,5 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use std::ffi::OsStr;
 
 use crate::operations::host::{
     Host, TempPath, regular_executable_file, require_regular_executable, shell::append_profile,
@@ -15,12 +16,12 @@ pub fn install(host: &Host) -> Result<()> {
         host.curl(
             "uv installer download",
             "https://astral.sh/uv/install.sh",
-            ["--output", &installer.path().to_string_lossy()],
+            [OsStr::new("--output"), installer.path().as_os_str()],
         )?;
         host.run(
             "uv install",
             "env",
-            ["UV_NO_MODIFY_PATH=1", "sh", installer.path().to_str().context("uv installer path is not UTF-8")?],
+            [OsStr::new("UV_NO_MODIFY_PATH=1"), OsStr::new("sh"), installer.path().as_os_str()],
         )?;
         if !regular_executable_file(&uv_path) {
             bail!("uv installer did not publish executable {}", uv_path.display());

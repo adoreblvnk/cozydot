@@ -68,8 +68,8 @@ impl Host {
         self.run(label, "curl", curl_args)
     }
 
-    pub fn home(&self) -> PathBuf {
-        self.home.clone()
+    pub fn home(&self) -> &Path {
+        &self.home
     }
 
     pub fn executable_on_path(&self, name: &str) -> bool {
