@@ -28,6 +28,11 @@
 - Write plain, lowercase comments that directly state intent.
 - Prefer visually simple code over denser, more idiomatic code.
 
+## Collaboration
+
+- Treat questions, suggestions, reviews, and brainstorming as exploratory unless the user explicitly requests implementation.
+- Briefly challenge incorrect, risky, or needlessly complex implementation details and recommend the simplest sound alternative. After the user makes an informed explicit choice, follow it unless it conflicts with safety, repository constraints, or feasibility.
+
 ## Supported platforms
 
 Cozydot supports these Linux distributions:

@@ -223,7 +223,7 @@ fn apply_tools(host: &Host, config: &Config, arch: Architecture) -> Result<()> {
     if let Some(selector) = config.shared.tools.rust.as_deref() {
         run("Apply", "Rust install", || rustup::install(host, selector))?;
         run("Apply", "cargo-binstall install", || cargo::install_binstall(host))?;
-        run("Apply", "cargo-update install", || cargo::install_cargo_update(host))?;
+        run("Apply", "cargo-update install", || cargo::install_crates(host, &["cargo-update".to_owned()]))?;
     }
     if let Some(selector) = config.shared.tools.node.as_deref() {
         run("Apply", "fnm install", || fnm::install(host))?;

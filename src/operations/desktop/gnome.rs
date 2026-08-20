@@ -69,11 +69,8 @@ fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Outcome> 
 
 fn validate_extension(value: &str) -> Result<()> {
     // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
-    let mut parts = value.split('@');
-    if !valid_uuid_part(parts.next().unwrap_or_default())
-        || !valid_uuid_part(parts.next().unwrap_or_default())
-        || parts.next().is_some()
-    {
+    let valid = value.split_once('@').is_some_and(|(left, right)| valid_uuid_part(left) && valid_uuid_part(right));
+    if !valid {
         bail!("invalid GNOME extension UUID {value:?}");
     }
     Ok(())

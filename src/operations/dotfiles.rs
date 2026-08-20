@@ -122,9 +122,6 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
         // rename makes each backup atomic, requiring HOME & XDG_STATE_HOME on same filesystem
         fs::rename(conflict, &backup)
             .with_context(|| format!("move dotfiles conflict {} to {}", conflict.display(), backup.display()))?;
-        if fs::symlink_metadata(conflict).is_ok() || fs::symlink_metadata(&backup).is_err() {
-            bail!("dotfiles conflict backup did not move {} to {}", conflict.display(), backup.display());
-        }
     }
     Ok(())
 }
