@@ -21,15 +21,6 @@ Behavior-changing suggestions are separated from clear violations. Small allocat
 |---|---|---|
 | `src/operations/packages/snapd.rs:51-63` | Copies parsed snap names into `String`s although the command output remains alive through sorting and removal. | Store `&str` slices in `names` and pass them directly to `host.run`. |
 
-## Readability candidates
-
-These preserve behavior but require a judgment about whether named locals are clearer than the current expression.
-
-| Location | Finding | Possible correction |
-|---|---|---|
-| `src/config.rs:663-676` | `MacDesktop::has_intent` is one long disjunction containing four nested `Option` predicates. | Name the dock, Finder, keyboard, and trackpad predicates before combining them. |
-| `src/workflow.rs:140-144` | A wrapped `if let` combines three operations while hiding the two decisions: whether APT config exists and whether its package list is non-empty. | Bind the APT config and non-empty package list in direct steps while retaining the `run` boundary. |
-
 ## Behavioral candidates
 
 These resemble the preferred style but change observable behavior and need an explicit decision.

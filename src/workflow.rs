@@ -137,8 +137,9 @@ fn linux_apply(
     run("Apply", "APT package install", || {
         apt::install(host, &apt_prereqs.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>())
     })?;
-    if let Some(packages) =
-        config.linux.packages.apt.as_ref().and_then(|apt| apt.install.as_ref()).filter(|packages| !packages.is_empty())
+    if let Some(apt) = &config.linux.packages.apt
+        && let Some(packages) = &apt.install
+        && !packages.is_empty()
     {
         run("Apply", "APT package install", || apt::install(host, packages))?;
     }
