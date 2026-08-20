@@ -151,9 +151,6 @@ pub(crate) mod debian_components {
             bail!("Debian APT source changed concurrently before write");
         }
         privileged_file::write_atomic(host, Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
-        if read(host, source)? != replacement.as_bytes() {
-            bail!("Debian APT component write did not establish the required postcondition");
-        }
         Ok(())
     }
 
