@@ -26,23 +26,18 @@ pub(crate) fn install(host: &Host) -> Result<()> {
 
 pub(crate) fn install_packages(host: &Host, formulae: &[String], casks: &[String]) -> Result<()> {
     let brew = find_brew(host)?;
-    for formula in formulae {
-        if !is_installed(host, &brew, "--formula", formula)? {
-            host.run("Homebrew formula install", &brew, ["install", formula])?;
-        }
+    let install_args = ["HOMEBREW_NO_INSTALL_UPGRADE=1", brew.as_str(), "install"];
+    // keep upgrades in the explicit update workflow
+    if !formulae.is_empty() {
+        let mut args = install_args.to_vec();
+        args.extend(formulae.iter().map(String::as_str));
+        host.run("Homebrew formula install", "/usr/bin/env", args)?;
     }
-    for cask in casks {
-        if !is_installed(host, &brew, "--cask", cask)? {
-            host.run("Homebrew cask install", &brew, ["install", "--cask", cask])?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn install_formula(host: &Host, formula: &str) -> Result<()> {
-    let brew = find_brew(host)?;
-    if !is_installed(host, &brew, "--formula", formula)? {
-        host.run("Homebrew formula install", &brew, ["install", formula])?;
+    if !casks.is_empty() {
+        let mut args = install_args.to_vec();
+        args.push("--cask");
+        args.extend(casks.iter().map(String::as_str));
+        host.run("Homebrew cask install", "/usr/bin/env", args)?;
     }
     Ok(())
 }
@@ -74,8 +69,4 @@ fn find_brew(host: &Host) -> Result<String> {
         }
     }
     bail!("Homebrew is unavailable after install; expected brew on PATH or /opt/homebrew/bin/brew")
-}
-
-fn is_installed(host: &Host, brew: &str, kind: &str, name: &str) -> Result<bool> {
-    Ok(host.output(brew, ["list", kind, name])?.status.success())
 }

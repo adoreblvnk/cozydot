@@ -15,7 +15,7 @@ const FNM_ZSH_INIT: &str = r#"eval "$(fnm env --use-on-cd --shell zsh)""#;
 
 pub fn install(host: &Host) -> Result<()> {
     if cfg!(target_os = "macos") {
-        homebrew::install_formula(host, "fnm")?;
+        homebrew::install_packages(host, &["fnm".to_owned()], &[])?;
         return append_shell(host, FNM_ZSH_INIT);
     }
 

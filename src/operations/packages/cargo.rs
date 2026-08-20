@@ -6,7 +6,7 @@ use super::super::host::{Host, executable_file, path_program};
 
 pub(crate) fn install_binstall(host: &Host) -> Result<()> {
     if cfg!(target_os = "macos") {
-        return super::homebrew::install_formula(host, "cargo-binstall");
+        return super::homebrew::install_packages(host, &["cargo-binstall".to_owned()], &[]);
     }
     let cargo_home = host.home().join(".cargo");
     let cargo_binstall = cargo_home.join("bin/cargo-binstall");
