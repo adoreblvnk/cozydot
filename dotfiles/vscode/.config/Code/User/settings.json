@@ -15,9 +15,6 @@
   "editor.multiCursorModifier": "ctrlCmd",
   "editor.tabCompletion": "on",
   "editor.wordWrap": "on",
-  "evenBetterToml.schema.associations": {
-    ".*/Cargo\\.toml$": "https://www.schemastore.org/cargo.json"
-  },
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
   "files.exclude": { "**/.DS_Store": false, "**/.git": false },
