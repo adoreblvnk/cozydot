@@ -184,8 +184,10 @@ fn linux_apply(
 
 fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
     let dotfiles = dotfiles_packages(config, &config.macos.dotfiles.packages);
-    let needs_homebrew_packages =
-        dotfiles.is_some() || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
+    let mut formulae = config.macos.homebrew.formulae.clone();
+    if !formulae.iter().any(|formula| formula == "stow") {
+        formulae.push("stow".into());
+    }
 
     if config.macos.system.validate_sudo_access == Some(true) {
         run("Apply", "macOS sudo access validation", || macos_host::validate_sudo_access(host))?;
@@ -197,15 +199,9 @@ fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: 
     }
     // install Homebrew and Stow before applying package-backed user configuration
     run("Apply", "Homebrew install", || homebrew::install(host))?;
-    if needs_homebrew_packages {
-        let mut formulae = config.macos.homebrew.formulae.clone();
-        if dotfiles.is_some() && !formulae.iter().any(|formula| formula == "stow") {
-            formulae.push("stow".into());
-        }
-        run("Apply", "Homebrew package install", || {
-            homebrew::install_packages(host, &formulae, &config.macos.homebrew.casks)
-        })?;
-    }
+    run("Apply", "Homebrew package install", || {
+        homebrew::install_packages(host, &formulae, &config.macos.homebrew.casks)
+    })?;
     apply_tools(host, config, arch)?;
     apply_packages(host, config)?;
     if let Some(families) = nerd_fonts(config) {
