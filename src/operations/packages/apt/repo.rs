@@ -1,4 +1,4 @@
-use crate::operations::host::{self, TempPath, privileged_file};
+use crate::operations::host::{self, privileged_file, temp_path, temp_path_with_suffix};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::PathBuf};
@@ -52,20 +52,20 @@ pub(crate) fn add(repo: &AptRepo) -> Result<()> {
 }
 
 fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
-    let downloaded = TempPath::new("repo-key-download")?;
-    host::curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.path().to_string_lossy()])?;
+    let downloaded = temp_path("repo-key-download")?;
+    host::curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.to_string_lossy()])?;
 
-    let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repo key")?;
+    let downloaded_bytes = fs::read(&downloaded).context("read downloaded repo key")?;
 
-    let binary_keyring = TempPath::new_with_suffix("repo-key-binary", ".gpg")?;
+    let binary_keyring = temp_path_with_suffix("repo-key-binary", ".gpg")?;
 
-    let key = binary_keyring.path().to_string_lossy();
-    let input = downloaded.path().to_string_lossy();
+    let key = binary_keyring.to_string_lossy();
+    let input = downloaded.to_string_lossy();
     let args = ["--no-options", "--batch", "--yes", "--output", key.as_ref(), "--dearmor", input.as_ref()];
     host::run("repo key conversion", "gpg", args)?;
 
     // parsing proves download contains a public key; configured URL remains identity trust boundary
-    let key = binary_keyring.path().to_string_lossy();
+    let key = binary_keyring.to_string_lossy();
     let no_default = "--no-default-keyring";
     let args = ["--no-options", "--batch", no_default, "--keyring", key.as_ref(), "--with-colons", "--list-keys"];
     let key_list = host::run("repo key validation", "gpg", args)?;
@@ -75,11 +75,7 @@ fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
         bail!("repo key validation found no public key");
     }
 
-    if preserve_armor {
-        Ok(downloaded_bytes)
-    } else {
-        fs::read(binary_keyring.path()).context("read dearmored repo key")
-    }
+    if preserve_armor { Ok(downloaded_bytes) } else { fs::read(&binary_keyring).context("read dearmored repo key") }
 }
 
 pub(crate) mod debian_components {

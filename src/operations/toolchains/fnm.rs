@@ -1,6 +1,6 @@
 use crate::operations::{
     host::shell::append_shell_rc,
-    host::{self, TempPath, is_regular_executable, path_program},
+    host::{self, is_regular_executable, path_program, temp_path},
     packages::homebrew,
 };
 use anyhow::{Context, Result, bail};
@@ -21,8 +21,8 @@ pub fn install() -> Result<()> {
     let install_dir = host::home()?.join(".local/share/fnm");
     let fnm_path = install_dir.join("fnm");
     if !is_regular_executable(&fnm_path) {
-        let installer = TempPath::new("fnm-install")?;
-        let path = installer.path().as_os_str();
+        let installer = temp_path("fnm-install")?;
+        let path = installer.as_os_str();
         host::curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
         let install_dir = install_dir.as_os_str();
         host::run("fnm install", "bash", [path, "--install-dir".as_ref(), install_dir, "--skip-shell".as_ref()])?;

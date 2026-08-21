@@ -323,9 +323,9 @@ impl DistroMapKey {
 
 pub fn select_distro_entry<T>(
     map: &BTreeMap<DistroMapKey, T>,
-    distro: Distro,
-    family: Family,
+    identity: PlatformIdentity,
 ) -> Option<(DistroMapKey, &T)> {
+    let PlatformIdentity::Linux { distro, family } = identity else { return None };
     let exact_key = DistroMapKey::from_distro(distro);
     let family_key = DistroMapKey::from_family(family);
     [exact_key, family_key, DistroMapKey::Default].into_iter().find_map(|key| map.get(&key).map(|value| (key, value)))
@@ -399,12 +399,12 @@ pub enum AptArchitecture {
     Arm64,
 }
 
-pub fn select_repo_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
-    if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
-        &platform.distro_codename
-    } else {
-        &platform.base_codename
-    }
+pub fn select_repo_codename(key: DistroMapKey, platform: &Platform) -> &str {
+    let exact = match platform.identity {
+        PlatformIdentity::Linux { distro, .. } => key == DistroMapKey::from_distro(distro),
+        PlatformIdentity::Macos => false,
+    };
+    if key == DistroMapKey::Default || exact { &platform.distro_codename } else { &platform.base_codename }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

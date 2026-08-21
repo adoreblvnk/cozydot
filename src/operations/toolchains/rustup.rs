@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use std::ffi::OsStr;
 
 use crate::operations::host::{
-    self, TempPath, is_regular_executable, path_program, require_regular_executable, shell::append_profile,
+    self, is_regular_executable, path_program, require_regular_executable, shell::append_profile, temp_path,
 };
 
 const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi"#;
@@ -10,7 +10,7 @@ const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/e
 pub fn install(selector: &str) -> Result<()> {
     let rustup_path = host::home()?.join(".cargo/bin/rustup");
     if !is_regular_executable(&rustup_path) {
-        let installer = TempPath::new("rustup")?;
+        let installer = temp_path("rustup")?;
         host::curl(
             "rustup installer download",
             "https://sh.rustup.rs",
@@ -19,14 +19,14 @@ pub fn install(selector: &str) -> Result<()> {
                 OsStr::new("=https"),
                 OsStr::new("--tlsv1.2"),
                 OsStr::new("--output"),
-                installer.path().as_os_str(),
+                installer.as_os_str(),
             ],
         )?;
         host::run(
             "rustup install",
             "sh",
             [
-                installer.path().as_os_str(),
+                installer.as_os_str(),
                 OsStr::new("-y"),
                 OsStr::new("--no-modify-path"),
                 OsStr::new("--default-toolchain"),

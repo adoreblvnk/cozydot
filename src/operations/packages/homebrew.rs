@@ -1,4 +1,4 @@
-use crate::operations::host::{self, TempPath};
+use crate::operations::host::{self, temp_path};
 use anyhow::{Context, Result};
 use std::ffi::OsStr;
 
@@ -9,11 +9,11 @@ pub(crate) fn install() -> Result<()> {
     if find_executable()?.is_some() {
         return Ok(());
     }
-    let script = TempPath::new("homebrew-install")?;
+    let script = temp_path("homebrew-install")?;
     let url = "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh";
-    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), script.path().as_os_str()];
+    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), script.as_os_str()];
     host::curl("Homebrew installer download", url, args)?;
-    host::run("Homebrew install", "/bin/bash", [script.path().as_os_str()])?;
+    host::run("Homebrew install", "/bin/bash", [script.as_os_str()])?;
     Ok(())
 }
 
