@@ -21,7 +21,7 @@ pub struct Config {
     pub version: ConfigVersion,
     pub shared: SharedConfig,
     pub linux: LinuxConfig,
-    pub macos: MacOSConfig,
+    pub macos: MacosConfig,
 }
 
 impl Config {
@@ -340,7 +340,7 @@ pub struct Repo {
     pub name: String,
     pub key_url: String,
     pub key_path: String,
-    pub urls: BTreeMap<DistroMapKey, String>,
+    pub uris: BTreeMap<DistroMapKey, String>,
     pub suite: String,
     pub components: Vec<String>,
     pub arch: Option<Vec<AptArchitecture>>,
@@ -354,8 +354,8 @@ impl Repo {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("linux.packages.apt.repos[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        if self.urls.is_empty() {
-            bail!("{path}.urls: must be a non-empty mapping");
+        if self.uris.is_empty() {
+            bail!("{path}.uris: must be a non-empty mapping");
         }
         if self.key_url.chars().any(char::is_control) {
             bail!("{path}.key_url: must contain no control characters");
@@ -371,7 +371,7 @@ impl Repo {
             bail!("{path}.arch: must not be empty when present");
         }
         let has_control = |value: &str| value.chars().any(char::is_control);
-        if self.urls.values().any(|value| has_control(value))
+        if self.uris.values().any(|value| has_control(value))
             || has_control(&self.suite)
             || self.components.iter().any(|value| has_control(value))
         {
@@ -455,12 +455,12 @@ impl BinarySource {
 pub struct ArchitectureMap {
     pub x86_64: Option<String>,
     pub aarch64: Option<String>,
-    pub arm: Option<String>,
+    pub armv7: Option<String>,
 }
 
 impl ArchitectureMap {
     fn validate(&self, path: &str, kind: &str) -> Result<()> {
-        if self.x86_64.is_none() && self.aarch64.is_none() && self.arm.is_none() {
+        if self.x86_64.is_none() && self.aarch64.is_none() && self.armv7.is_none() {
             bail!("{path}: must contain at least one canonical architecture {kind}");
         }
         Ok(())
@@ -470,7 +470,7 @@ impl ArchitectureMap {
         match architecture {
             Architecture::X86_64 => self.x86_64.as_deref(),
             Architecture::Aarch64 => self.aarch64.as_deref(),
-            Architecture::Arm => self.arm.as_deref(),
+            Architecture::Armv7 => self.armv7.as_deref(),
         }
     }
 }
@@ -607,7 +607,7 @@ pub enum AptUpgradeCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacOSConfig {
+pub struct MacosConfig {
     pub system: MacSystem,
     pub homebrew: Homebrew,
     pub dotfiles: Dotfiles,

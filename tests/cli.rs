@@ -38,7 +38,7 @@ fn config(shared: &str, linux: &str) -> String {
     serde_json::to_string(&value).unwrap()
 }
 
-fn config_root(temp: &tempfile::TempDir) -> std::path::PathBuf {
+fn config_dir(temp: &tempfile::TempDir) -> std::path::PathBuf {
     let root = temp.path().join("config/cozydot");
     fs::create_dir_all(&root).unwrap();
     root
@@ -103,6 +103,16 @@ fn cli_contracts() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid value 'unknown'"));
+}
+
+#[test]
+fn cli_rejects_relative_xdg_config_home() {
+    cozydot()
+        .env("XDG_CONFIG_HOME", "relative")
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("XDG_CONFIG_HOME must be an absolute path"));
 }
 
 #[test]
@@ -220,7 +230,7 @@ fn init_preserves_entire_dotfile_package_when_one_file_changes() {
 #[cfg(target_os = "linux")]
 fn validation_happens_before_platform_detection_or_mutation() {
     let temp = tempfile::tempdir().unwrap();
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let probe = temp.path().join("platform-probe");
     let mutation = temp.path().join("mutation");
@@ -244,7 +254,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
 
     let repo = |extra: &str| {
         format!(
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
         )
     };
     for (linux, error) in [
@@ -253,11 +263,11 @@ fn validation_happens_before_platform_detection_or_mutation() {
         (repo("        arch: []\n"), "arch: must not be empty"),
         (repo("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
         (
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        components: [main]\n".to_owned(),
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {default: source}\n        components: [main]\n".to_owned(),
             "missing field `suite`",
         ),
         (
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: source}\n        suite: stable\n".to_owned(),
+            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {default: source}\n        suite: stable\n".to_owned(),
             "missing field `components`",
         ),
     ] {
@@ -275,7 +285,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
 #[cfg(target_os = "linux")]
 fn empty_apply_and_update_establish_the_linux_baseline() {
     let temp = tempfile::tempdir().unwrap();
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
     let apt_log = temp.path().join("apt.log");
@@ -326,7 +336,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
         return;
     }
     let temp = tempfile::tempdir().unwrap();
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
     write_config(&root, "{}", "system:\n  sudo_group: true\n");
@@ -353,7 +363,7 @@ fn dotfiles_refuse_conflicts_and_replace_only_when_explicit() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let state = temp.path().join("state");
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let source = root.join("dotfiles/bash/.bashrc");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
@@ -420,7 +430,7 @@ fn repo_config() -> String {
       - name: armored
         key_url: https://example.com/armored
         key_path: /etc/apt/keyrings/armored.asc
-        urls: {default: https://example.com/armored}
+        uris: {default: https://example.com/armored}
         suite: stable
         components: [main]
         conflicts: [old-package, absent-conflict]
@@ -428,7 +438,7 @@ fn repo_config() -> String {
       - name: binary
         key_url: https://example.com/binary
         key_path: /usr/share/keyrings/binary.gpg
-        urls: {default: https://example.com/binary}
+        uris: {default: https://example.com/binary}
         suite: vendor-suite
         components: [vendor-component]
         packages: [vendor-two]
@@ -518,7 +528,7 @@ esac
 
 fn run_terminal_apply(desktop: &str, terminal_key: bool, custom_keybindings: &str) -> (Vec<String>, String, bool) {
     let temp = tempfile::tempdir().unwrap();
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let state = temp.path().join("state");
     let log = temp.path().join("apply.log");
@@ -639,7 +649,7 @@ fn run_apt(
 #[cfg(target_os = "linux")]
 fn repo_key_validation_precedes_repo_file_write() {
     let temp = tempfile::tempdir().unwrap();
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let state = temp.path().join("state");
     let log = temp.path().join("apt.log");
@@ -651,7 +661,7 @@ fn repo_key_validation_precedes_repo_file_write() {
     write_config(
         &root,
         "{}",
-        "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        urls: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
+        "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
     );
     write_apt_fakes(&fake_bin);
 
@@ -666,7 +676,7 @@ fn repo_key_validation_precedes_repo_file_write() {
 #[cfg(target_os = "linux")]
 fn apply_writes_repo_files_and_installs_packages_in_order() {
     let temp = tempfile::tempdir().unwrap();
-    let root = config_root(&temp);
+    let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let state = temp.path().join("state");
     let log = temp.path().join("apt.log");
@@ -726,14 +736,14 @@ fn inapplicable_repos_have_no_side_effects() {
         format!("          {inapplicable_distro}: https://example.com/repo"),
     ] {
         let temp = tempfile::tempdir().unwrap();
-        let root = config_root(&temp);
+        let root = config_dir(&temp);
         let fake_bin = temp.path().join("bin");
         let mutation = temp.path().join("mutation");
         write_config(
             &root,
             "{}",
             &format!(
-                "packages:\n  apt:\n    repos:\n      - name: skipped\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        urls:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
+                "packages:\n  apt:\n    repos:\n      - name: skipped\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        uris:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
             ),
         );
         write_linux_host_fakes(&fake_bin);
@@ -780,7 +790,7 @@ fn update_runs_only_the_selected_apt_upgrade_command() {
         ),
     ] {
         let temp = tempfile::tempdir().unwrap();
-        let root = config_root(&temp);
+        let root = config_dir(&temp);
         let fake_bin = temp.path().join("bin");
         let log = temp.path().join("update.log");
         write_config(&root, "{}", &format!("updates:\n  apt: {policy}\n"));

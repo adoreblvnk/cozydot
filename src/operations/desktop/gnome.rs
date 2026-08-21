@@ -17,8 +17,8 @@ const ROUNDED_CORNERS_SETTINGS: &str =
 
 pub(crate) fn apply_extensions(host: &Host, extensions: &[String]) -> Result<Outcome> {
     let mut outcome = Outcome::Completed;
-    for extension in extensions {
-        if install_or_enable_extension(host, extension)? == Outcome::LoginRequired {
+    for uuid in extensions {
+        if install_or_enable_extension(host, uuid)? == Outcome::LoginRequired {
             outcome = Outcome::LoginRequired;
         }
     }
@@ -55,18 +55,18 @@ pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<Outcome> {
     Ok(Outcome::Completed)
 }
 
-fn install_or_enable_extension(host: &Host, extension: &str) -> Result<Outcome> {
-    validate_extension(extension)?;
-    if !host.output("gnome-extensions", ["info", extension])?.status.success() {
-        install_extension(host, extension)?;
+fn install_or_enable_extension(host: &Host, uuid: &str) -> Result<Outcome> {
+    validate_uuid(uuid)?;
+    if !host.output("gnome-extensions", ["info", uuid])?.status.success() {
+        install_extension(host, uuid)?;
         // GNOME only finds newly installed extensions after next login
         return Ok(Outcome::LoginRequired);
     }
-    host.run("GNOME extension enable", "gnome-extensions", ["enable", extension])?;
+    host.run("GNOME extension enable", "gnome-extensions", ["enable", uuid])?;
     Ok(Outcome::Completed)
 }
 
-fn validate_extension(value: &str) -> Result<()> {
+fn validate_uuid(value: &str) -> Result<()> {
     // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
     let Some((left, right)) = value.split_once('@') else {
         bail!("invalid GNOME extension UUID {value:?}");
@@ -81,16 +81,16 @@ fn valid_uuid_part(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
 }
 
-fn install_extension(host: &Host, extension: &str) -> Result<()> {
+fn install_extension(host: &Host, uuid: &str) -> Result<()> {
     // TODO: can we simplify this?
-    let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={extension}");
+    let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={uuid}");
     let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host.run("GNOME extension shell version", "gnome-shell", ["--version"])?;
     let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
     let archive = TempPath::new_with_suffix("gnome-extension", ".zip")?;
-    let name = extension.replace('@', "");
+    let name = uuid.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
     host.curl("GNOME extension download", &url, ["--output", &archive.path().to_string_lossy()])?;
     host.run("GNOME extension install", "gnome-extensions", ["install", "--force", &archive.path().to_string_lossy()])?;

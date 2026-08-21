@@ -24,7 +24,7 @@ impl Platform {
                 _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
             };
             return Ok(Self {
-                identity: PlatformIdentity::MacOS,
+                identity: PlatformIdentity::Macos,
                 distro_codename: String::new(),
                 base_codename: String::new(),
                 desktop: DesktopKind::None,
@@ -116,7 +116,7 @@ pub enum Family {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformIdentity {
-    MacOS,
+    Macos,
     Linux { distro: Distro, family: Family },
 }
 
@@ -155,7 +155,7 @@ impl DesktopKind {
 pub enum Architecture {
     X86_64,
     Aarch64,
-    Arm,
+    Armv7,
 }
 
 impl Architecture {
@@ -163,8 +163,8 @@ impl Architecture {
         match value {
             "x86_64" | "amd64" => Ok(Self::X86_64),
             "aarch64" | "arm64" => Ok(Self::Aarch64),
-            "arm" | "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Arm),
-            _ => bail!("unsupported architecture {value:?}; supported architectures: x86_64, aarch64, arm"),
+            "arm" | "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Armv7),
+            _ => bail!("unsupported architecture {value:?}; supported architectures: x86_64, aarch64, armv7"),
         }
     }
 
@@ -172,7 +172,7 @@ impl Architecture {
         match self {
             Self::X86_64 => "x86_64",
             Self::Aarch64 => "aarch64",
-            Self::Arm => "arm",
+            Self::Armv7 => "armv7",
         }
     }
 
@@ -180,7 +180,7 @@ impl Architecture {
         match self {
             Self::X86_64 => "amd64",
             Self::Aarch64 => "arm64",
-            Self::Arm => "armhf",
+            Self::Armv7 => "armhf",
         }
     }
 
@@ -188,14 +188,14 @@ impl Architecture {
         match self {
             Self::X86_64 => "amd64",
             Self::Aarch64 => "arm64",
-            Self::Arm => "arm",
+            Self::Armv7 => "arm",
         }
     }
 
     pub fn go_archive(self) -> &'static str {
         match self {
             // Go calls its 32-bit ARM archive armv6l; it also runs on ARMv7
-            Self::Arm => "armv6l",
+            Self::Armv7 => "armv6l",
             other => other.go(),
         }
     }

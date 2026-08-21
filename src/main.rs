@@ -6,6 +6,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 mod config;
 mod init;
 mod operations;
+mod paths;
 mod platform;
 mod workflow;
 
@@ -39,19 +40,19 @@ enum Command {
 }
 
 struct ActiveHost {
-    root: std::path::PathBuf,
+    config_dir: std::path::PathBuf,
     config: config::Config,
     platform: platform::Platform,
 }
 
 impl ActiveHost {
     fn load() -> Result<Self> {
-        let root = init::config_root()?;
-        let config = config::Config::load(&root.join("cozydot.yaml"))
+        let config_dir = paths::config_dir()?;
+        let config = config::Config::load(&config_dir.join("cozydot.yaml"))
             .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
         let platform = platform::Platform::detect()?;
         config.validate_for_platform(&platform)?;
-        Ok(Self { root, config, platform })
+        Ok(Self { config_dir, config, platform })
     }
 }
 
@@ -64,18 +65,18 @@ fn main() -> Result<()> {
     match command {
         Command::Init { preset } => println!("Initialized cozydot in {}", init::init(preset)?.display()),
         Command::Check => {
-            let path = init::config_root()?.join("cozydot.yaml");
+            let path = paths::config_dir()?.join("cozydot.yaml");
             let context = "active configuration is missing or invalid; run 'cozydot init' first";
             config::Config::load(&path).with_context(|| context)?;
             println!("Checked {}", path.display());
         }
         Command::Apply => {
             let host = ActiveHost::load()?;
-            workflow::apply(&host.config, &host.platform, &host.root.join("dotfiles"))?;
+            workflow::apply(&host.config, &host.platform, &host.config_dir.join("dotfiles"))?;
         }
         Command::Dotfiles { replace } => {
             let host = ActiveHost::load()?;
-            workflow::dotfiles(&host.config, &host.platform, &host.root.join("dotfiles"), replace)?;
+            workflow::dotfiles(&host.config, &host.platform, &host.config_dir.join("dotfiles"), replace)?;
         }
         Command::Update => {
             let host = ActiveHost::load()?;

@@ -34,7 +34,7 @@ const APT_PREREQS: [&str; 8] =
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     let host = Host::new()?;
     match platform.identity {
-        PlatformIdentity::MacOS => macos_apply(&host, config, platform.architecture, dotfiles_root),
+        PlatformIdentity::Macos => macos_apply(&host, config, platform.architecture, dotfiles_root),
         PlatformIdentity::Linux { distro, family } => {
             linux_apply(&host, config, platform, distro, family, dotfiles_root)
         }
@@ -43,7 +43,7 @@ pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resu
 
 pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool) -> Result<()> {
     let platform_packages = match platform.identity {
-        PlatformIdentity::MacOS => &config.macos.dotfiles.packages,
+        PlatformIdentity::Macos => &config.macos.dotfiles.packages,
         PlatformIdentity::Linux { .. } => &config.linux.dotfiles.packages,
     };
     if let Some(dotfiles) = dotfiles_packages(config, platform_packages) {
@@ -56,7 +56,7 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     let host = Host::new()?;
     match platform.identity {
-        PlatformIdentity::MacOS => macos_update(&host, config, platform.architecture),
+        PlatformIdentity::Macos => macos_update(&host, config, platform.architecture),
         PlatformIdentity::Linux { .. } => linux_update(&host, config, platform),
     }
 }
@@ -76,7 +76,7 @@ fn linux_apply(
     let apt_architecture = match platform.architecture {
         Architecture::X86_64 => AptArchitecture::Amd64,
         Architecture::Aarch64 => AptArchitecture::Arm64,
-        Architecture::Arm => AptArchitecture::Armhf,
+        Architecture::Armv7 => AptArchitecture::Armhf,
     };
     if let Some(apt) = &config.linux.packages.apt
         && let Some(configured_repos) = &apt.repos
@@ -85,8 +85,8 @@ fn linux_apply(
             if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_architecture)) {
                 continue;
             }
-            let Some((key, source_url)) = select_distro_map(&repo.urls, distro, family) else { continue };
-            repos.push(add_repo(repo, platform, distro, key, source_url));
+            let Some((key, source_uri)) = select_distro_map(&repo.uris, distro, family) else { continue };
+            repos.push(add_repo(repo, platform, distro, key, source_uri));
             repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
             repo_packages_to_install.extend(repo.packages.iter().cloned());
         }
@@ -185,8 +185,7 @@ fn linux_apply(
 
 fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
     let dotfiles = dotfiles_packages(config, &config.macos.dotfiles.packages);
-    // TODO: refine & shorten variable name + simplify conditionals?
-    let homebrew_packages =
+    let needs_homebrew_packages =
         dotfiles.is_some() || !config.macos.homebrew.formulae.is_empty() || !config.macos.homebrew.casks.is_empty();
 
     if config.macos.system.validate_sudo_access == Some(true) {
@@ -199,7 +198,7 @@ fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: 
     }
     // install Homebrew and Stow before applying package-backed user configuration
     run("Apply", "Homebrew install", || homebrew::install(host))?;
-    if homebrew_packages {
+    if needs_homebrew_packages {
         let mut formulae = config.macos.homebrew.formulae.clone();
         if dotfiles.is_some() && !formulae.iter().any(|formula| formula == "stow") {
             formulae.push("stow".into());
@@ -322,7 +321,7 @@ fn update_tools_and_packages(host: &Host, config: &Config, arch: Architecture, m
     }
     if updates.tools.python == Some(true) {
         run("Update", "uv install", || uv::install(host))?;
-        run("Update", "Python version upgrade", || uv::upgrade_py_versions(host))?;
+        run("Update", "Python version upgrade", || uv::upgrade_py(host))?;
     }
     if updates.packages.cargo == Some(true) {
         run("Update", "Cargo crate update", || cargo::update_crates(host))?;
@@ -333,7 +332,7 @@ fn update_tools_and_packages(host: &Host, config: &Config, arch: Architecture, m
     Ok(())
 }
 
-fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_url: &str) -> AptRepo {
+fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_uri: &str) -> AptRepo {
     let suite = if repo.suite == "codename" {
         selected_repo_codename(key, platform, distro).to_owned()
     } else {
@@ -342,7 +341,7 @@ fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey,
     AptRepo::new(
         repo.name.clone(),
         repo.key_url.clone(),
-        source_url.to_owned(),
+        source_uri.to_owned(),
         platform.architecture,
         suite,
         repo.components.clone(),

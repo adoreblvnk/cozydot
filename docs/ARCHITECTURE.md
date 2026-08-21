@@ -1,4 +1,4 @@
-# Intern Onboarding
+# Architecture & Workflows
 
 Cozydot is a Rust CLI that provisions Debian-family Linux and Apple Silicon macOS from one typed YAML configuration. This guide describes the runtime architecture and command order.
 
@@ -11,7 +11,7 @@ Host-changing commands load the active host before entering a workflow:
 3. Detect and normalize the platform.
 4. Validate the configuration for that platform.
 5. Enter the Linux or macOS workflow.
-6. Construct and run each typed `Operation` in dependency order.
+6. Run each host-operation function in dependency order.
 7. Stop on the first failure.
 
 The implementation is divided by responsibility:
@@ -21,12 +21,12 @@ src/main.rs            CLI entry points and active-host loading
 src/init.rs            presets, bundled files, and managed hashes
 src/config.rs          typed YAML and validation
 src/platform.rs        platform detection and normalization
-src/workflow/mod.rs    Linux and macOS command order
-src/operations/mod.rs  typed operations and dispatch
+src/workflow.rs        Linux and macOS command order
+src/operations/mod.rs  operation modules
 src/operations/        live-state checks and host changes
 ```
 
-Workflows keep execution order visible in `src/workflow/mod.rs`. Executors inspect live state and perform the concrete host changes.
+Workflows keep execution order visible in `src/workflow.rs`. Operations inspect live state and perform concrete host changes.
 
 ## Init
 

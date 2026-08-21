@@ -81,7 +81,7 @@ linux:
         - name: vscode
           key_url: https://packages.microsoft.com/keys/microsoft.asc
           key_path: /etc/apt/keyrings/packages.microsoft.gpg
-          urls:
+          uris:
             default: https://packages.microsoft.com/repos/code
           suite: stable
           components:
@@ -91,7 +91,7 @@ linux:
         - name: wezterm
           key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
-          urls:
+          uris:
             default: https://apt.fury.io/wez/
           suite: "*"
           components:
@@ -109,7 +109,7 @@ linux:
           assets:
             x86_64: ^fastfetch-linux-amd64\.deb$
             aarch64: ^fastfetch-linux-aarch64\.deb$
-            arm: ^fastfetch-linux-armv7l.*\.deb$
+            armv7: ^fastfetch-linux-armv7l.*\.deb$
       - name: git-credential-manager
         format: deb
         source:

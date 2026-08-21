@@ -31,10 +31,10 @@ fn generate() -> io::Result<()> {
 
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("bundle.rs");
     let mut file = fs::File::create(output)?;
-    writeln!(file, "pub static RECORDS: &[Record] = &[")?;
+    writeln!(file, "pub static EMBEDDED_FILES: &[EmbeddedFile] = &[")?;
     for (path, (source, mode)) in records {
         let bytes = fs::read(source)?;
-        writeln!(file, "    Record {{ path: {path:?}, bytes: &{bytes:?}, mode: {mode:#o} }},")?;
+        writeln!(file, "    EmbeddedFile {{ path: {path:?}, bytes: &{bytes:?}, mode: {mode:#o} }},")?;
     }
     writeln!(file, "];")?;
     for (constant, bytes) in presets {

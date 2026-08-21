@@ -9,26 +9,27 @@ use std::{
 
 use super::host::Host;
 
-pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool) -> Result<()> {
-    let root = fs::canonicalize(root).with_context(|| format!("canonicalize dotfiles root {}", root.display()))?;
-    if !fs::symlink_metadata(&root)?.file_type().is_dir() {
-        bail!("dotfiles root is not a directory: {}", root.display());
+pub(crate) fn apply(host: &Host, stow_dir: &Path, packages: &[String], replace: bool) -> Result<()> {
+    let stow_dir =
+        fs::canonicalize(stow_dir).with_context(|| format!("canonicalize stow directory {}", stow_dir.display()))?;
+    if !fs::symlink_metadata(&stow_dir)?.file_type().is_dir() {
+        bail!("stow directory is not a directory: {}", stow_dir.display());
     }
 
-    let mut sources = Vec::with_capacity(packages.len());
+    let mut package_dirs = Vec::with_capacity(packages.len());
     for package in packages {
-        let source = root.join(package);
-        let metadata =
-            fs::symlink_metadata(&source).with_context(|| format!("dotfiles package {package:?} does not exist"))?;
+        let package_dir = stow_dir.join(package);
+        let metadata = fs::symlink_metadata(&package_dir)
+            .with_context(|| format!("dotfiles package {package:?} does not exist"))?;
         if !metadata.file_type().is_dir() {
             bail!("dotfiles package {package:?} is not a real directory");
         }
-        sources.push((package, source));
+        package_dirs.push((package, package_dir));
     }
 
     host.require_cli("GNU Stow", "stow").context("dotfiles require GNU Stow")?;
     let home = host.home();
-    let mut args = vec![OsStr::new("--dir"), root.as_os_str(), OsStr::new("--target"), home.as_os_str()];
+    let mut args = vec![OsStr::new("--dir"), stow_dir.as_os_str(), OsStr::new("--target"), home.as_os_str()];
     if !replace {
         let mut check_args = args.clone();
         check_args.extend([OsStr::new("--simulate"), OsStr::new("--")]);
@@ -38,8 +39,8 @@ pub(crate) fn apply(host: &Host, root: &Path, packages: &[String], replace: bool
 
     let mut conflicts = Vec::new();
     if replace {
-        for (package, source) in &sources {
-            collect_conflicts(source, home.to_path_buf(), package, &mut conflicts)?;
+        for (package, package_dir) in &package_dirs {
+            collect_conflicts(package_dir, home.to_path_buf(), package, &mut conflicts)?;
         }
         conflicts.sort_by(|left, right| left.1.cmp(&right.1));
         conflicts.dedup_by(|left, right| left.1 == right.1);
@@ -111,10 +112,7 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
     if conflicts.is_empty() {
         return Ok(());
     }
-    let state_home = match std::env::var_os("XDG_STATE_HOME") {
-        Some(path) => PathBuf::from(path),
-        None => host.home().join(".local/state"),
-    };
+    let state_home = crate::paths::state_home()?;
     let timestamp_context = "dotfiles backup timestamp is before the Unix epoch";
     let now = SystemTime::now();
     let elapsed = now.duration_since(UNIX_EPOCH).context(timestamp_context)?;
