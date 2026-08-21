@@ -92,19 +92,16 @@ impl Config {
         }
 
         if let Some(configured) = &self.linux.desktop
-            && !matches!(desktop, DesktopKind::Gnome | DesktopKind::Cinnamon)
+            && desktop != DesktopKind::Gnome
         {
             if configured.has_common_intent() {
                 bail!(
-                    "linux.desktop: theme, terminal, and idle settings require GNOME or Cinnamon; detected {:?}",
+                    "linux.desktop: theme, terminal, and idle settings require GNOME; detected {:?}",
                     desktop.as_str()
                 );
             }
             if configured.gnome.as_ref().is_some_and(Gnome::has_intent) {
-                bail!(
-                    "linux.desktop.gnome: requires GNOME or Cinnamon so GNOME-only settings can be applied or skipped; detected {:?}",
-                    desktop.as_str()
-                );
+                bail!("linux.desktop.gnome: requires GNOME; detected {:?}", desktop.as_str());
             }
         }
         Ok(())

@@ -11,20 +11,14 @@ pub(crate) mod fonts;
 pub(crate) mod gnome;
 pub(crate) mod macos;
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum DesktopEnvironment {
-    Gnome,
-    Cinnamon,
-}
-
 const GNOME_MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const GNOME_TERMINAL_SHORTCUT: &str =
     "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
 
-pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, color_scheme: Theme) -> Result<()> {
+pub(crate) fn set_color_scheme(host: &Host, color_scheme: Theme) -> Result<()> {
     gsettings_set(
         host,
-        &format!("{}.desktop.interface", prefix(environment)),
+        "org.gnome.desktop.interface",
         "color-scheme",
         match color_scheme {
             Theme::Light => "'prefer-light'",
@@ -33,23 +27,16 @@ pub(crate) fn set_color_scheme(host: &Host, environment: DesktopEnvironment, col
     )
 }
 
-pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executable: &str) -> Result<()> {
+pub(crate) fn set_terminal(host: &Host, executable: &str) -> Result<()> {
     if !host.executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
     }
-    if environment == DesktopEnvironment::Gnome {
-        set_xdg_terminal(host, executable)?;
-        // Ubuntu provides this media key; upstream GNOME needs a custom binding.
-        if !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success())
-        {
-            ensure_gnome_terminal_shortcut(host, "xdg-terminal-exec")?;
-        }
-        return Ok(());
+    set_xdg_terminal(host, executable)?;
+    // Ubuntu provides this media key; upstream GNOME needs a custom binding.
+    if !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {
+        ensure_gnome_terminal_shortcut(host, "xdg-terminal-exec")?;
     }
-
-    let schema = format!("{}.desktop.default-applications.terminal", prefix(environment));
-    gsettings_set(host, &schema, "exec", &format!("'{executable}'"))?;
-    gsettings_set(host, &schema, "exec-arg", "''")
+    Ok(())
 }
 
 fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
@@ -97,21 +84,13 @@ fn ensure_gnome_terminal_shortcut(host: &Host, executable: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn set_idle_delay(host: &Host, environment: DesktopEnvironment, seconds: u32) -> Result<()> {
-    gsettings_set(host, &format!("{}.desktop.session", prefix(environment)), "idle-delay", &format!("uint32 {seconds}"))
+pub(crate) fn set_idle_delay(host: &Host, seconds: u32) -> Result<()> {
+    gsettings_set(host, "org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))
 }
 
-pub(crate) fn set_idle_dim(host: &Host, environment: DesktopEnvironment, enabled: bool) -> Result<()> {
-    let prefix = prefix(environment);
+pub(crate) fn set_idle_dim(host: &Host, enabled: bool) -> Result<()> {
     let value = if enabled { "true" } else { "false" };
-    gsettings_set(host, &format!("{prefix}.settings-daemon.plugins.power"), "idle-dim", value)
-}
-
-fn prefix(environment: DesktopEnvironment) -> &'static str {
-    match environment {
-        DesktopEnvironment::Gnome => "org.gnome",
-        DesktopEnvironment::Cinnamon => "org.cinnamon",
-    }
+    gsettings_set(host, "org.gnome.settings-daemon.plugins.power", "idle-dim", value)
 }
 
 fn gsettings_set(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {

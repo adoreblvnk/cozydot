@@ -6,7 +6,7 @@ use crate::{
         select_distro_map, selected_repo_codename,
     },
     operations::{
-        desktop::{self, DesktopEnvironment, fonts, gnome, macos as macos_defaults},
+        desktop::{self, fonts, gnome, macos as macos_defaults},
         dotfiles,
         host::{Host, macos as macos_host, users},
         integrations::{docker, vscode},
@@ -396,30 +396,24 @@ fn add_desktop_prereqs(config: &Config, platform: &Platform, apt_prereqs: &mut B
 
 fn linux_desktop(host: &Host, config: &Config, platform: &Platform) -> Result<()> {
     let Some(desktop) = config.linux.desktop.as_ref().filter(|desktop| desktop.has_intent()) else { return Ok(()) };
-    let Some(environment) = (match platform.desktop {
-        DesktopKind::Gnome => Some(DesktopEnvironment::Gnome),
-        DesktopKind::Cinnamon => Some(DesktopEnvironment::Cinnamon),
-        DesktopKind::None => None,
-    }) else {
+    if platform.desktop != DesktopKind::Gnome {
         return Ok(());
-    };
+    }
     if let Some(theme) = desktop.theme {
-        run("Apply", "desktop setting set", || desktop::set_color_scheme(host, environment, theme))?;
+        run("Apply", "desktop setting set", || desktop::set_color_scheme(host, theme))?;
     }
     if let Some(executable) = &desktop.terminal {
-        run("Apply", "desktop setting set", || desktop::set_terminal(host, environment, executable))?;
+        run("Apply", "desktop setting set", || desktop::set_terminal(host, executable))?;
     }
     if let Some(idle) = &desktop.idle {
         if let Some(timeout) = idle.timeout {
-            run("Apply", "desktop setting set", || desktop::set_idle_delay(host, environment, timeout.seconds()))?;
+            run("Apply", "desktop setting set", || desktop::set_idle_delay(host, timeout.seconds()))?;
         }
         if let Some(enabled) = idle.dim {
-            run("Apply", "desktop setting set", || desktop::set_idle_dim(host, environment, enabled))?;
+            run("Apply", "desktop setting set", || desktop::set_idle_dim(host, enabled))?;
         }
     }
-    if environment == DesktopEnvironment::Gnome
-        && let Some(gnome) = &desktop.gnome
-    {
+    if let Some(gnome) = &desktop.gnome {
         if let Some(extensions) = gnome.extensions.as_ref().filter(|values| !values.is_empty()) {
             run_with_outcome("Apply", "GNOME extension apply", || gnome::apply_extensions(host, extensions))?;
         }
