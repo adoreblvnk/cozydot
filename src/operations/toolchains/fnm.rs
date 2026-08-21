@@ -1,6 +1,6 @@
 use crate::operations::{
     host::shell::append_shell,
-    host::{Host, TempPath, path_program, regular_executable_file},
+    host::{Host, TempPath, is_regular_executable, path_program},
     packages::homebrew,
 };
 use anyhow::{Context, Result, bail};
@@ -20,13 +20,13 @@ pub fn install(host: &Host) -> Result<()> {
 
     let install_dir = host.home().join(".local/share/fnm");
     let fnm_path = install_dir.join("fnm");
-    if !regular_executable_file(&fnm_path) {
+    if !is_regular_executable(&fnm_path) {
         let installer = TempPath::new("fnm-install")?;
         let path = installer.path().as_os_str();
         host.curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
         let install_dir = install_dir.as_os_str();
         host.run("fnm install", "bash", [path, "--install-dir".as_ref(), install_dir, "--skip-shell".as_ref()])?;
-        if !regular_executable_file(&fnm_path) {
+        if !is_regular_executable(&fnm_path) {
             bail!("fnm installer did not publish executable {}", fnm_path.display());
         }
     }
@@ -46,10 +46,10 @@ pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {
 
 pub(crate) fn find_executable(host: &Host) -> Result<Option<String>> {
     if cfg!(target_os = "macos") {
-        return homebrew::formula_executable(host, "fnm", "fnm").map(Some);
+        return homebrew::executable_path(host, "fnm", "fnm").map(Some);
     }
     let managed = host.home().join(".local/share/fnm/fnm");
-    if regular_executable_file(&managed) {
+    if is_regular_executable(&managed) {
         return path_program(&managed, "managed fnm executable path").map(Some);
     }
     Ok(None)

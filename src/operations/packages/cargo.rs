@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use super::super::host::{Host, executable_file, path_program};
+use super::super::host::{Host, is_executable, path_program};
 
 pub(crate) fn install_binstall(host: &Host) -> Result<()> {
     if cfg!(target_os = "macos") {
@@ -8,7 +8,7 @@ pub(crate) fn install_binstall(host: &Host) -> Result<()> {
     }
     let cargo_home = host.home().join(".cargo");
     let cargo_binstall = cargo_home.join("bin/cargo-binstall");
-    if executable_file(&cargo_binstall) {
+    if is_executable(&cargo_binstall) {
         return Ok(());
     }
     let cargo = cargo_home.join("bin/cargo");
@@ -32,7 +32,7 @@ pub(crate) fn install_crates(host: &Host, crates: &[String]) -> Result<()> {
         return Ok(());
     }
     let binstall = if cfg!(target_os = "macos") {
-        super::homebrew::formula_executable(host, "cargo-binstall", "cargo-binstall")?
+        super::homebrew::executable_path(host, "cargo-binstall", "cargo-binstall")?
     } else {
         path_program(&cargo_home.join("bin/cargo-binstall"), "cargo-binstall executable path")?
     };
@@ -44,7 +44,7 @@ pub(crate) fn install_crates(host: &Host, crates: &[String]) -> Result<()> {
 
 pub(crate) fn update_crates(host: &Host) -> Result<()> {
     let program = host.home().join(".cargo/bin/cargo-install-update");
-    if !executable_file(&program) {
+    if !is_executable(&program) {
         return Ok(());
     }
     let program = path_program(&program, "managed cargo-install-update executable path")?;

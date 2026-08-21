@@ -72,12 +72,12 @@ impl Host {
         &self.home
     }
 
-    pub fn executable_on_path(&self, name: &str) -> bool {
+    pub fn has_executable_on_path(&self, name: &str) -> bool {
         let Some(path) = std::env::var_os("PATH") else {
             return false;
         };
         for directory in std::env::split_paths(&path) {
-            if executable_file(&directory.join(name)) {
+            if is_executable(&directory.join(name)) {
                 return true;
             }
         }
@@ -112,11 +112,11 @@ impl TempPath {
     }
 }
 
-pub(crate) fn executable_file(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
-pub(crate) fn regular_executable_file(path: &Path) -> bool {
+pub(crate) fn is_regular_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return false;
     };
@@ -128,7 +128,7 @@ pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
 }
 
 pub(crate) fn require_regular_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
-    if !regular_executable_file(path) {
+    if !is_regular_executable(path) {
         bail!("{unavailable}");
     }
     path_program(path, description)

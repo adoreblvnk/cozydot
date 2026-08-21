@@ -28,7 +28,7 @@ pub(crate) fn set_color_scheme(host: &Host, color_scheme: Theme) -> Result<()> {
 }
 
 pub(crate) fn set_terminal(host: &Host, executable: &str) -> Result<()> {
-    if !host.executable_on_path(executable) {
+    if !host.has_executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
     }
     set_xdg_terminal(host, executable)?;

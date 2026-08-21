@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::operations::host::{Host, TempPath, regular_executable_file, shell::append_profile};
+use crate::operations::host::{Host, TempPath, is_regular_executable, shell::append_profile};
 use crate::platform::Architecture;
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
@@ -13,7 +13,7 @@ pub(crate) fn install_toolchain(host: &Host, selector: &str, architecture: Archi
     let program = "/usr/local/go/bin/go";
     let expected = format!("go version go{version} {target_os}/{}", architecture.go());
     // verify that Go is executable & go version output matches expected version & platform
-    let installed = regular_executable_file(program.as_ref());
+    let installed = is_regular_executable(program.as_ref());
     let output = if installed { host.output(program, ["version"]).ok() } else { None };
     let successful_output = output.as_ref().filter(|output| output.status.success());
     let stdout = successful_output.and_then(|output| std::str::from_utf8(&output.stdout).ok());
