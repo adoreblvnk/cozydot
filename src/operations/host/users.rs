@@ -3,13 +3,13 @@ use anyhow::{Result, bail};
 use super::{Host, stdout_line};
 
 pub(crate) fn ensure_in_sudo_group(host: &Host) -> Result<()> {
-    let username = effective_user(host)?;
+    let username = get_effective_username(host)?;
     host.run("administrative group membership", "sudo", ["usermod", "-aG", "sudo", "--", &username])?;
     Ok(())
 }
 
 pub(crate) fn ensure_in_group(host: &Host, label: &str, program: &str, group: &str) -> Result<()> {
-    let username = effective_user(host)?;
+    let username = get_effective_username(host)?;
     let groups = host.run(&format!("{label} group membership query"), "id", ["-nG", "--", &username])?;
     if stdout_line(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|current| current == group) {
         return Ok(());
@@ -20,7 +20,7 @@ pub(crate) fn ensure_in_group(host: &Host, label: &str, program: &str, group: &s
     Ok(())
 }
 
-fn effective_user(host: &Host) -> Result<String> {
+fn get_effective_username(host: &Host) -> Result<String> {
     // use effective UID from NSS instead of user-controlled env vars
     let uid = rustix::process::geteuid().as_raw();
     let output = host.run("effective user query", "getent", ["passwd", &uid.to_string()])?;

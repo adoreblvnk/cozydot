@@ -26,7 +26,7 @@ pub(crate) fn set_unattended_upgrades(host: &Host, enabled: bool) -> Result<()> 
         host.run("unattended-upgrades service enablement", "sudo", args)?;
     } else {
         write_atomic(host, Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        if systemd::enabled_or_active(host, "unattended-upgrades.service")? {
+        if systemd::is_enabled_or_active(host, "unattended-upgrades.service")? {
             let args = ["systemctl", "disable", "--now", "unattended-upgrades.service"];
             host.run("unattended-upgrades service disablement", "sudo", args)?;
         }

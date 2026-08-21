@@ -81,19 +81,7 @@ impl Init {
     }
 
     fn sync_dotfile_package(&mut self, package: &Path, records: &[&EmbeddedFile]) -> Result<()> {
-        if !self.dotfile_package_is_unmodified(package)? {
-            return Ok(());
-        }
-
-        for record in records {
-            let relative = PathBuf::from(record.path);
-            write_file(&self.root, record, &relative)?;
-            self.managed.insert(relative, hash_bytes(record.bytes));
-        }
-        Ok(())
-    }
-
-    fn dotfile_package_is_unmodified(&self, package: &Path) -> Result<bool> {
+        // only sync packages with no unmanaged or modified files
         let mut managed = Vec::new();
         for (relative, hash) in &self.managed {
             let Ok(suffix) = relative.strip_prefix(package) else {
@@ -104,31 +92,39 @@ impl Init {
             }
         }
         let dest = self.root.join(package);
-        match fs::symlink_metadata(&dest) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(managed.is_empty()),
+        let package_exists = match fs::symlink_metadata(&dest) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound && managed.is_empty() => false,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error.into()),
-            Ok(metadata) if !metadata.file_type().is_dir() => return Ok(false),
-            Ok(_) if managed.is_empty() => return Ok(false),
-            Ok(_) => {}
-        }
-
-        let mut files = BTreeSet::new();
-        if !collect_regular_files(&dest, &self.root, &mut files)? {
-            return Ok(false);
-        }
-        if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
-            return Ok(false);
-        }
-        for (relative, hash) in managed {
-            let path = self.root.join(relative);
-            let Ok(current) = hash_file(&path) else {
-                return Ok(false);
-            };
-            if &current != hash {
-                return Ok(false);
+            Ok(metadata) if !metadata.file_type().is_dir() => return Ok(()),
+            Ok(_) if managed.is_empty() => return Ok(()),
+            Ok(_) => true,
+        };
+        if package_exists {
+            let mut files = BTreeSet::new();
+            if !collect_regular_files(&dest, &self.root, &mut files)? {
+                return Ok(());
+            }
+            if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
+                return Ok(());
+            }
+            for (relative, hash) in managed {
+                let path = self.root.join(relative);
+                let Ok(current) = hash_file(&path) else {
+                    return Ok(());
+                };
+                if &current != hash {
+                    return Ok(());
+                }
             }
         }
-        Ok(true)
+
+        for record in records {
+            let relative = PathBuf::from(record.path);
+            write_file(&self.root, record, &relative)?;
+            self.managed.insert(relative, hash_bytes(record.bytes));
+        }
+        Ok(())
     }
 }
 

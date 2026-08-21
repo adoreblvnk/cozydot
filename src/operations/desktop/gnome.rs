@@ -25,7 +25,7 @@ pub(crate) fn apply_extensions(host: &Host, extensions: &[String]) -> Result<Out
     Ok(outcome)
 }
 
-pub(crate) fn install_dash_to_dock(host: &Host) -> Result<Outcome> {
+pub(crate) fn apply_dash_to_dock(host: &Host) -> Result<Outcome> {
     if install_or_enable_extension(host, DASH_TO_DOCK_UUID)? == Outcome::LoginRequired {
         return Ok(Outcome::LoginRequired);
     }
@@ -46,7 +46,7 @@ pub(crate) fn install_dash_to_dock(host: &Host) -> Result<Outcome> {
     Ok(Outcome::Completed)
 }
 
-pub(crate) fn install_rounded_window_corners(host: &Host) -> Result<Outcome> {
+pub(crate) fn apply_rounded_window_corners(host: &Host) -> Result<Outcome> {
     if install_or_enable_extension(host, ROUNDED_CORNERS_UUID)? == Outcome::LoginRequired {
         return Ok(Outcome::LoginRequired);
     }

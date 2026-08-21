@@ -9,7 +9,7 @@ pub(crate) fn append_profile(host: &Host, snippet: &str) -> Result<()> {
     append_once(&host.home().join(name), snippet)
 }
 
-pub(crate) fn append_shell(host: &Host, snippet: &str) -> Result<()> {
+pub(crate) fn append_shell_rc(host: &Host, snippet: &str) -> Result<()> {
     let name = if cfg!(target_os = "macos") { ".zshrc" } else { ".bashrc" };
     append_once(&host.home().join(name), snippet)
 }

@@ -18,7 +18,7 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
 
     remove_snaps(host)?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        if systemd::enabled_or_active(host, unit)? {
+        if systemd::is_enabled_or_active(host, unit)? {
             host.run("snapd service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }
