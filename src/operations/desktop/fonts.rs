@@ -3,7 +3,7 @@ use std::{ffi::OsStr, fs, path::Path};
 
 use super::super::host::{Host, TempPath};
 
-pub(crate) fn apply(host: &Host, families: &[String], force: bool) -> Result<()> {
+pub(crate) fn apply(host: &Host, families: &[String], reinstall: bool) -> Result<()> {
     let parent = host.home().join(if cfg!(target_os = "macos") { "Library/Fonts" } else { ".local/share/fonts" });
     fs::create_dir_all(&parent).context("create user font directory")?;
     if !fs::symlink_metadata(&parent)?.file_type().is_dir() {
@@ -20,7 +20,7 @@ pub(crate) fn apply(host: &Host, families: &[String], force: bool) -> Result<()>
                 return Err(error).context(format!("read Nerd Font destination metadata {}", destination.display()));
             }
         };
-        if force || !is_family_installed {
+        if reinstall || !is_family_installed {
             install(host, family, &destination)?;
             changed = true;
         }

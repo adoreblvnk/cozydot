@@ -2,8 +2,8 @@
 
 use crate::{
     config::{
-        AptArchitecture, BinaryFormat, BinarySource, Config, DistroMapKey, EnabledDisabled, Gnome, Repo,
-        select_distro_map, selected_repo_codename,
+        AptArchitecture, AptRepoConfig, BinaryFormat, BinarySource, Config, DistroMapKey, Enablement, Gnome,
+        select_distro_entry, select_repo_codename,
     },
     operations::{
         desktop::{self, fonts, gnome, macos as macos_defaults},
@@ -84,8 +84,8 @@ fn linux_apply(
             if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_architecture)) {
                 continue;
             }
-            let Some((key, source_uri)) = select_distro_map(&repo.uris, distro, family) else { continue };
-            repos.push(add_repo(repo, platform, distro, key, source_uri));
+            let Some((key, source_uri)) = select_distro_entry(&repo.uris, distro, family) else { continue };
+            repos.push(build_apt_repo(repo, platform, distro, key, source_uri));
             repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
             repo_packages_to_install.extend(repo.packages.iter().cloned());
         }
@@ -122,11 +122,11 @@ fn linux_apply(
     {
         if let Some(state) = ubuntu.unattended_upgrades {
             run("Apply", "unattended-upgrades set", || {
-                apt::set_unattended_upgrades(host, state == EnabledDisabled::Enabled)
+                apt::set_unattended_upgrades(host, state == Enablement::Enabled)
             })?;
         }
         if let Some(state) = ubuntu.snapd {
-            run("Apply", "snapd set", || snapd::set_enabled(host, state == EnabledDisabled::Enabled))?;
+            run("Apply", "snapd set", || snapd::set_enabled(host, state == Enablement::Enabled))?;
         }
         if ubuntu.restricted_extras {
             run("Apply", "APT package install", || apt::install(host, &["ubuntu-restricted-extras".into()]))?;
@@ -210,7 +210,7 @@ fn macos_apply(host: &Host, config: &Config, arch: Architecture, dotfiles_root: 
     if let Some(dotfiles) = dotfiles {
         run("Apply", "dotfiles apply", || dotfiles::apply(host, dotfiles_root, &dotfiles, false))?;
     }
-    vscode_extensions(host, config)?;
+    apply_vscode_extensions(host, config)?;
     macos_desktop(host, config)?;
     Ok(())
 }
@@ -327,9 +327,15 @@ fn update_tools_and_packages(host: &Host, config: &Config, arch: Architecture, m
     Ok(())
 }
 
-fn add_repo(repo: &Repo, platform: &Platform, distro: Distro, key: DistroMapKey, source_uri: &str) -> AptRepo {
+fn build_apt_repo(
+    repo: &AptRepoConfig,
+    platform: &Platform,
+    distro: Distro,
+    key: DistroMapKey,
+    source_uri: &str,
+) -> AptRepo {
     let suite = if repo.suite == "codename" {
-        selected_repo_codename(key, platform, distro).to_owned()
+        select_repo_codename(key, platform, distro).to_owned()
     } else {
         repo.suite.clone()
     };
@@ -369,10 +375,10 @@ fn linux_integrations(host: &Host, config: &Config) -> Result<()> {
             users::ensure_in_group(host, "VirtualBox", "VBoxManage", "vboxusers")
         })?;
     }
-    vscode_extensions(host, config)
+    apply_vscode_extensions(host, config)
 }
 
-fn vscode_extensions(host: &Host, config: &Config) -> Result<()> {
+fn apply_vscode_extensions(host: &Host, config: &Config) -> Result<()> {
     if !config.shared.integrations.vscode.extensions.is_empty() {
         run("Apply", "Visual Studio Code extension install", || {
             vscode::install_extensions(host, &config.shared.integrations.vscode.extensions)
@@ -413,12 +419,10 @@ fn linux_desktop(host: &Host, config: &Config, platform: &Platform) -> Result<()
             run_with_outcome("Apply", "GNOME extension apply", || gnome::apply_extensions(host, extensions))?;
         }
         if gnome.dash_to_dock == Some(true) {
-            run_with_outcome("Apply", "Dash to Dock install", || gnome::install_dash_to_dock(host))?;
+            run_with_outcome("Apply", "Dash to Dock install", || gnome::apply_dash_to_dock(host))?;
         }
         if gnome.rounded_window_corners == Some(true) {
-            run_with_outcome("Apply", "Rounded Window Corners install", || {
-                gnome::install_rounded_window_corners(host)
-            })?;
+            run_with_outcome("Apply", "Rounded Window Corners install", || gnome::apply_rounded_window_corners(host))?;
         }
     }
     Ok(())

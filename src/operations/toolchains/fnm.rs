@@ -1,5 +1,5 @@
 use crate::operations::{
-    host::shell::append_shell,
+    host::shell::append_shell_rc,
     host::{Host, TempPath, is_regular_executable, path_program},
     packages::homebrew,
 };
@@ -15,7 +15,7 @@ const FNM_ZSH_INIT: &str = r#"eval "$(fnm env --use-on-cd --shell zsh)""#;
 pub fn install(host: &Host) -> Result<()> {
     if cfg!(target_os = "macos") {
         homebrew::install_packages(host, &["fnm".to_owned()], &[])?;
-        return append_shell(host, FNM_ZSH_INIT);
+        return append_shell_rc(host, FNM_ZSH_INIT);
     }
 
     let install_dir = host.home().join(".local/share/fnm");
@@ -30,7 +30,7 @@ pub fn install(host: &Host) -> Result<()> {
             bail!("fnm installer did not publish executable {}", fnm_path.display());
         }
     }
-    append_shell(host, FNM_BASH_INIT)
+    append_shell_rc(host, FNM_BASH_INIT)
 }
 
 pub(crate) fn install_version(host: &Host, selector: &str) -> Result<()> {

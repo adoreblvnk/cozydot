@@ -199,17 +199,17 @@ pub struct PackageUpdates {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinuxConfig {
-    pub system: System,
-    pub packages: Packages,
+    pub system: LinuxSystem,
+    pub packages: LinuxPackages,
     pub dotfiles: Dotfiles,
-    pub integrations: Integrations,
-    pub desktop: Option<Desktop>,
+    pub integrations: LinuxIntegrations,
+    pub desktop: Option<LinuxDesktop>,
     pub updates: Option<LinuxUpdates>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct System {
+pub struct LinuxSystem {
     pub allowed_platforms: Option<PlatformAllowlist>,
     pub sudo_group: Option<bool>,
     pub ubuntu: Option<UbuntuSystem>,
@@ -224,7 +224,7 @@ pub struct PlatformAllowlist {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum EnabledDisabled {
+pub enum Enablement {
     Enabled,
     Disabled,
 }
@@ -232,21 +232,21 @@ pub enum EnabledDisabled {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UbuntuSystem {
-    pub unattended_upgrades: Option<EnabledDisabled>,
-    pub snapd: Option<EnabledDisabled>,
+    pub unattended_upgrades: Option<Enablement>,
+    pub snapd: Option<Enablement>,
     #[serde(default)]
     pub restricted_extras: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Packages {
+pub struct LinuxPackages {
     pub apt: Option<AptPackages>,
     pub flatpak: Option<Vec<String>>,
     pub binaries: Option<Vec<BinaryPackage>>,
 }
 
-impl Packages {
+impl LinuxPackages {
     pub fn validate(&self) -> Result<()> {
         if let Some(apt) = &self.apt {
             apt.validate()?;
@@ -268,7 +268,7 @@ impl Packages {
 #[serde(deny_unknown_fields)]
 pub struct AptPackages {
     pub install: Option<Vec<String>>,
-    pub repos: Option<Vec<Repo>>,
+    pub repos: Option<Vec<AptRepoConfig>>,
 }
 
 impl AptPackages {
@@ -321,7 +321,7 @@ impl DistroMapKey {
     }
 }
 
-pub fn select_distro_map<T>(
+pub fn select_distro_entry<T>(
     map: &BTreeMap<DistroMapKey, T>,
     distro: Distro,
     family: Family,
@@ -333,7 +333,7 @@ pub fn select_distro_map<T>(
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Repo {
+pub struct AptRepoConfig {
     pub name: String,
     pub key_url: String,
     pub key_path: String,
@@ -347,7 +347,7 @@ pub struct Repo {
     pub packages: Vec<String>,
 }
 
-impl Repo {
+impl AptRepoConfig {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("linux.packages.apt.repos[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
@@ -399,7 +399,7 @@ pub enum AptArchitecture {
     Arm64,
 }
 
-pub fn selected_repo_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
+pub fn select_repo_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
     if key == DistroMapKey::Default || key == DistroMapKey::from_distro(distro) {
         &platform.distro_codename
     } else {
@@ -471,7 +471,7 @@ impl ArchitectureMap {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Integrations {
+pub struct LinuxIntegrations {
     pub docker: Option<DockerIntegration>,
     pub virtualbox: Option<VirtualBoxIntegration>,
 }
@@ -511,14 +511,14 @@ pub enum Theme {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Desktop {
+pub struct LinuxDesktop {
     pub theme: Option<Theme>,
     pub terminal: Option<String>,
     pub idle: Option<Idle>,
     pub gnome: Option<Gnome>,
 }
 
-impl Desktop {
+impl LinuxDesktop {
     fn validate(&self) -> Result<()> {
         if let Some(terminal) = &self.terminal {
             validate_executable(terminal, "linux.desktop.terminal")?;
