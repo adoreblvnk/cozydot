@@ -35,7 +35,7 @@ pub(crate) fn install_py(host: &Host, selector: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn upgrade_py_versions(host: &Host) -> Result<()> {
+pub(crate) fn upgrade_py(host: &Host) -> Result<()> {
     let uv = require_regular_executable(
         &host.home().join(".local/bin/uv"),
         "managed tool executable path",

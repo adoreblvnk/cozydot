@@ -1,9 +1,7 @@
 use anyhow::{Result, bail};
 use std::{
-    env,
     fs::{self, File},
     io::Write,
-    path::PathBuf,
 };
 
 use super::host::{Host, stdout_line};
@@ -55,10 +53,7 @@ pub(crate) fn set_terminal(host: &Host, environment: DesktopEnvironment, executa
 }
 
 fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
-    let config_home = match env::var_os("XDG_CONFIG_HOME") {
-        Some(path) if !path.is_empty() => PathBuf::from(path),
-        _ => host.home().join(".config"),
-    };
+    let config_home = crate::paths::config_home()?;
     fs::create_dir_all(&config_home)?;
     let destination = config_home.join("xdg-terminals.list");
     let entry = format!("{executable}.desktop");

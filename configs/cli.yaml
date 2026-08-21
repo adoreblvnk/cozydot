@@ -80,7 +80,7 @@ linux:
         - name: github-cli
           key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
           key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-          urls:
+          uris:
             default: https://cli.github.com/packages
           suite: stable
           components:
@@ -96,7 +96,7 @@ linux:
           assets:
             x86_64: ^fastfetch-linux-amd64\.deb$
             aarch64: ^fastfetch-linux-aarch64\.deb$
-            arm: ^fastfetch-linux-armv7l.*\.deb$
+            armv7: ^fastfetch-linux-armv7l.*\.deb$
       - name: git-credential-manager
         format: deb
         source:

@@ -118,7 +118,7 @@ linux:
         - name: docker
           key_url: https://download.docker.com/linux/ubuntu/gpg
           key_path: /etc/apt/keyrings/docker.asc
-          urls:
+          uris:
             ubuntu: https://download.docker.com/linux/ubuntu
             debian: https://download.docker.com/linux/debian
           suite: codename
@@ -141,7 +141,7 @@ linux:
         - name: github-cli
           key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
           key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-          urls:
+          uris:
             default: https://cli.github.com/packages
           suite: stable
           components:
@@ -151,7 +151,7 @@ linux:
         - name: helium
           key_url: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
           key_path: /usr/share/keyrings/helium.gpg
-          urls:
+          uris:
             default: https://pkg.helium.computer/deb
           suite: stable
           components:
@@ -164,7 +164,7 @@ linux:
         - name: onlyoffice
           key_url: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
           key_path: /usr/share/keyrings/onlyoffice.gpg
-          urls:
+          uris:
             default: https://download.onlyoffice.com/repo/debian
           suite: squeeze
           components:
@@ -177,7 +177,7 @@ linux:
         - name: virtualbox
           key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
-          urls:
+          uris:
             default: https://download.virtualbox.org/virtualbox/debian
           suite: codename
           components:
@@ -189,7 +189,7 @@ linux:
         - name: vscode
           key_url: https://packages.microsoft.com/keys/microsoft.asc
           key_path: /etc/apt/keyrings/packages.microsoft.gpg
-          urls:
+          uris:
             default: https://packages.microsoft.com/repos/code
           suite: stable
           components:
@@ -199,7 +199,7 @@ linux:
         - name: wezterm
           key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
-          urls:
+          uris:
             default: https://apt.fury.io/wez/
           suite: "*"
           components:
@@ -235,7 +235,7 @@ linux:
           assets:
             x86_64: ^fastfetch-linux-amd64\.deb$
             aarch64: ^fastfetch-linux-aarch64\.deb$
-            arm: ^fastfetch-linux-armv7l.*\.deb$
+            armv7: ^fastfetch-linux-armv7l.*\.deb$
       - name: git-credential-manager
         format: deb
         source:

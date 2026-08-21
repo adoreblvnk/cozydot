@@ -3,7 +3,6 @@ use clap::ValueEnum;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
     fs::{self, File},
     io::{self, Write},
     os::unix::fs::PermissionsExt,
@@ -19,7 +18,7 @@ pub enum Preset {
 
 /// Create `cozydot.yaml` & `dotfiles` dir without overwriting user-managed changes.
 pub fn init(preset: Preset) -> Result<PathBuf> {
-    let root = config_root()?;
+    let root = crate::paths::config_dir()?;
     ensure_directory_path(&root, Path::new(""))?;
     let managed = read_manifest(&root.join(".managed-files"))?;
     let mut init = Init { root, managed };
@@ -35,14 +34,7 @@ pub fn init(preset: Preset) -> Result<PathBuf> {
     Ok(init.root)
 }
 
-pub fn config_root() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("XDG_CONFIG_HOME").filter(|path| !path.is_empty()) {
-        return Ok(PathBuf::from(path).join("cozydot"));
-    }
-    Ok(PathBuf::from(env::var_os("HOME").context("HOME is not set")?).join(".config/cozydot"))
-}
-
-pub struct Record {
+pub struct EmbeddedFile {
     pub path: &'static str,
     pub bytes: &'static [u8],
     pub mode: u32,
@@ -57,7 +49,7 @@ struct Init {
 
 impl Init {
     fn sync_cozydot_yaml(&mut self, preset: &'static [u8]) -> Result<()> {
-        let record = Record { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
+        let record = EmbeddedFile { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
         let relative = PathBuf::from(record.path);
         let dest = self.root.join(&relative);
         let new_hash = hash_bytes(record.bytes);
@@ -76,8 +68,8 @@ impl Init {
     }
 
     fn sync_bundled_dotfiles(&mut self) -> Result<()> {
-        let mut packages = BTreeMap::<PathBuf, Vec<&Record>>::new();
-        for record in RECORDS {
+        let mut packages = BTreeMap::<PathBuf, Vec<&EmbeddedFile>>::new();
+        for record in EMBEDDED_FILES {
             let relative = PathBuf::from(record.path);
             let package = relative.components().take(2).collect();
             packages.entry(package).or_default().push(record);
@@ -88,7 +80,7 @@ impl Init {
         Ok(())
     }
 
-    fn sync_dotfile_package(&mut self, package: &Path, records: &[&Record]) -> Result<()> {
+    fn sync_dotfile_package(&mut self, package: &Path, records: &[&EmbeddedFile]) -> Result<()> {
         if !self.dotfile_package_is_unmodified(package)? {
             return Ok(());
         }
@@ -121,7 +113,7 @@ impl Init {
         }
 
         let mut files = BTreeSet::new();
-        if !collect_real_files(&dest, &self.root, &mut files)? {
+        if !collect_regular_files(&dest, &self.root, &mut files)? {
             return Ok(false);
         }
         if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
@@ -140,7 +132,7 @@ impl Init {
     }
 }
 
-fn write_file(root: &Path, record: &Record, relative: &Path) -> Result<()> {
+fn write_file(root: &Path, record: &EmbeddedFile, relative: &Path) -> Result<()> {
     let parent = relative.parent().unwrap_or(Path::new(""));
     ensure_directory_path(root, parent)?;
     let dest = root.join(relative);
@@ -177,12 +169,12 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect_real_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
+fn collect_regular_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            if !collect_real_files(&entry.path(), root, files)? {
+            if !collect_regular_files(&entry.path(), root, files)? {
                 return Ok(false);
             }
         } else if file_type.is_file() {

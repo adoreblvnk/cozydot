@@ -7,7 +7,7 @@ const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
 
 pub struct AptRepo {
     key_url: String,
-    source_url: String,
+    source_uri: String,
     architecture: Architecture,
     suite: String,
     components: Vec<String>,
@@ -20,7 +20,7 @@ impl AptRepo {
     pub fn new(
         name: impl Into<String>,
         key_url: String,
-        source_url: String,
+        source_uri: String,
         architecture: Architecture,
         suite: String,
         components: Vec<String>,
@@ -28,13 +28,13 @@ impl AptRepo {
     ) -> Self {
         let name = name.into();
         let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Self { key_url, source_url, architecture, suite, components, key_path, source_list_path }
+        Self { key_url, source_uri, architecture, suite, components, key_path, source_list_path }
     }
 
     pub fn render_source(&self) -> String {
         let architecture = self.architecture.debian();
         let key_path = self.key_path.display();
-        let prefix = format!("deb [arch={architecture} signed-by={key_path}] {} ", self.source_url);
+        let prefix = format!("deb [arch={architecture} signed-by={key_path}] {} ", self.source_uri);
         format!("{prefix}{} {}\n", self.suite, self.components.join(" "))
     }
 }
@@ -88,7 +88,7 @@ pub(crate) mod debian_components {
     use std::{ffi::OsStr, path::Path};
 
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
-    const ONELINE_SOURCE: &str = "/etc/apt/sources.list";
+    const ONE_LINE_SOURCE: &str = "/etc/apt/sources.list";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
     // TODO: review this
@@ -102,7 +102,7 @@ pub(crate) mod debian_components {
         if !deb822 {
             host.run("Debian APT deb822 source absence check", "sudo", ["test", "!", "-e", DEB822_SOURCE])?;
         }
-        let source = if deb822 { DEB822_SOURCE } else { ONELINE_SOURCE };
+        let source = if deb822 { DEB822_SOURCE } else { ONE_LINE_SOURCE };
         if !deb822 {
             reject_symlink(host, source)?;
             if !probe_regular(host, source)? {
@@ -112,7 +112,7 @@ pub(crate) mod debian_components {
 
         let original = read(host, source)?;
         let text = std::str::from_utf8(&original).context("Debian APT source is not UTF-8")?;
-        let replacement = if deb822 { add_deb822_components(text) } else { add_oneline_components(text) };
+        let replacement = if deb822 { add_deb822_components(text) } else { add_one_line_components(text) };
         if replacement.as_bytes() == original {
             return Ok(());
         }
@@ -169,7 +169,7 @@ pub(crate) mod debian_components {
         replacement
     }
 
-    fn add_oneline_components(text: &str) -> String {
+    fn add_one_line_components(text: &str) -> String {
         let mut replacement = String::with_capacity(text.len());
         for line in text.split_inclusive('\n') {
             let body = line.strip_suffix('\n').unwrap_or(line);
