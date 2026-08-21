@@ -50,7 +50,6 @@ Cozydot supports these Linux architectures:
 
 - x86_64
 - aarch64
-- ARMv7 (32-bit)
 
 Cozydot supports macOS on these architectures:
 

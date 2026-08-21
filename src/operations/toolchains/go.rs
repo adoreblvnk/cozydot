@@ -20,7 +20,7 @@ pub(crate) fn install_toolchain(host: &Host, selector: &str, architecture: Archi
     let version_matches = stdout.is_some_and(|stdout| stdout.trim() == expected);
     if !version_matches {
         let archive = TempPath::new_with_suffix("go", ".tar.gz")?;
-        let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go_archive());
+        let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go());
         let url = format!("https://go.dev/dl/{filename}");
         let output = archive.path().as_os_str();
         host.curl("Go archive download", &url, ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), output])?;

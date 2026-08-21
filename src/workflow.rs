@@ -76,7 +76,6 @@ fn linux_apply(
     let apt_architecture = match platform.architecture {
         Architecture::X86_64 => AptArchitecture::Amd64,
         Architecture::Aarch64 => AptArchitecture::Arm64,
-        Architecture::Armv7 => AptArchitecture::Armhf,
     };
     if let Some(apt) = &config.linux.packages.apt
         && let Some(configured_repos) = &apt.repos

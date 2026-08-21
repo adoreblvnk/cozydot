@@ -11,9 +11,6 @@ SYSTEM="$(uname -s)"
 case "$SYSTEM:$MACHINE" in
   Linux:x86_64 | Linux:amd64) PLATFORM=linux; ARCH=amd64; TARGET=x86_64-unknown-linux-gnu; TAR=tar ;;
   Linux:aarch64 | Linux:arm64) PLATFORM=linux; ARCH=arm64; TARGET=aarch64-unknown-linux-gnu; TAR=tar ;;
-  Linux:armv7 | Linux:armv7l | Linux:armhf | Linux:arm32)
-    PLATFORM=linux; ARCH=armv7; TARGET=armv7-unknown-linux-gnueabihf; TAR=tar
-    ;;
   Darwin:arm64) PLATFORM=macos; ARCH=arm64; TARGET=aarch64-apple-darwin; TAR=gtar ;;
   *) printf 'unsupported platform: %s %s\n' "$SYSTEM" "$MACHINE" >&2; exit 1 ;;
 esac

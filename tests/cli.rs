@@ -260,7 +260,7 @@ fn validation_happens_before_platform_detection_or_mutation() {
     };
     for (linux, error) in [
         (repo("        path: /\n"), "linux.packages.apt.repos[0]: unknown field `path`"),
-        (repo("        arch: [arm32]\n"), "linux.packages.apt.repos[0].arch[0]: unknown variant `arm32`"),
+        (repo("        arch: [sparc]\n"), "linux.packages.apt.repos[0].arch[0]: unknown variant `sparc`"),
         (repo("        arch: []\n"), "arch: must not be empty"),
         (repo("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
         (

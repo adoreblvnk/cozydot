@@ -397,7 +397,6 @@ pub(crate) fn validate_repo_key_path(path: &Path) -> Result<()> {
 pub enum AptArchitecture {
     Amd64,
     Arm64,
-    Armhf,
 }
 
 pub fn selected_repo_codename(key: DistroMapKey, platform: &Platform, distro: Distro) -> &str {
@@ -452,12 +451,11 @@ impl BinarySource {
 pub struct ArchitectureMap {
     pub x86_64: Option<String>,
     pub aarch64: Option<String>,
-    pub armv7: Option<String>,
 }
 
 impl ArchitectureMap {
     fn validate(&self, path: &str, kind: &str) -> Result<()> {
-        if self.x86_64.is_none() && self.aarch64.is_none() && self.armv7.is_none() {
+        if self.x86_64.is_none() && self.aarch64.is_none() {
             bail!("{path}: must contain at least one canonical architecture {kind}");
         }
         Ok(())
@@ -467,7 +465,6 @@ impl ArchitectureMap {
         match architecture {
             Architecture::X86_64 => self.x86_64.as_deref(),
             Architecture::Aarch64 => self.aarch64.as_deref(),
-            Architecture::Armv7 => self.armv7.as_deref(),
         }
     }
 }

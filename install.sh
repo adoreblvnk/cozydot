@@ -8,7 +8,6 @@ BIN_DIR="$HOME/.local/bin"
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) PLATFORM=linux; ARCH=amd64 ;;
   Linux:aarch64 | Linux:arm64) PLATFORM=linux; ARCH=arm64 ;;
-  Linux:armv7 | Linux:armv7l | Linux:armhf) PLATFORM=linux; ARCH=armv7 ;;
   Darwin:arm64) PLATFORM=macos; ARCH=arm64 ;;
   *) printf 'cozydot: unsupported platform\n' >&2; exit 1 ;;
 esac
