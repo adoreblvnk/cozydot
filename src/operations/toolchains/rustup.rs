@@ -2,14 +2,14 @@ use anyhow::{Result, bail};
 use std::ffi::OsStr;
 
 use crate::operations::host::{
-    Host, TempPath, path_program, regular_executable_file, require_regular_executable, shell::append_profile,
+    Host, TempPath, is_regular_executable, path_program, require_regular_executable, shell::append_profile,
 };
 
 const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi"#;
 
 pub fn install(host: &Host, selector: &str) -> Result<()> {
     let rustup_path = host.home().join(".cargo/bin/rustup");
-    if !regular_executable_file(&rustup_path) {
+    if !is_regular_executable(&rustup_path) {
         let installer = TempPath::new("rustup")?;
         host.curl(
             "rustup installer download",
@@ -33,7 +33,7 @@ pub fn install(host: &Host, selector: &str) -> Result<()> {
                 OsStr::new(selector),
             ],
         )?;
-        if !regular_executable_file(&rustup_path) {
+        if !is_regular_executable(&rustup_path) {
             bail!("rustup installer did not publish the managed rustup executable");
         }
     } else {

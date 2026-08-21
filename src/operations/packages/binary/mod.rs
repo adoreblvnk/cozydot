@@ -32,7 +32,7 @@ pub(crate) fn install(host: &Host, package: &BinaryPackage, architecture: Archit
 
 fn is_installed(host: &Host, package: &BinaryPackage) -> bool {
     match package.format {
-        BinaryFormat::Deb => host.executable_on_path(&package.name),
+        BinaryFormat::Deb => host.has_executable_on_path(&package.name),
         BinaryFormat::AppImage => appimage_path(host, package).exists(),
     }
 }
