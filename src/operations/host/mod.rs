@@ -74,31 +74,19 @@ pub(crate) fn has_executable_on_path(name: &str) -> bool {
     false
 }
 
-pub(crate) struct TempPath(tempfile::TempPath);
+pub(crate) fn temp_path(stem: &str) -> Result<tempfile::TempPath> {
+    temp_path_with_suffix(stem, "")
+}
 
-impl TempPath {
-    pub fn new(stem: &str) -> Result<Self> {
-        Self::new_with_suffix(stem, "")
-    }
+pub(crate) fn temp_path_with_suffix(stem: &str, suffix: &str) -> Result<tempfile::TempPath> {
+    let file = tempfile::Builder::new().prefix(stem).suffix(suffix).tempfile().context("create temporary file")?;
+    Ok(file.into_temp_path())
+}
 
-    // TODO: in the future we can use tempfile directly instead of wrapping it?
-    pub fn new_with_suffix(stem: &str, suffix: &str) -> Result<Self> {
-        let file = tempfile::Builder::new().prefix(stem).suffix(suffix).tempfile().context("create temporary file")?;
-        Ok(Self(file.into_temp_path()))
-    }
-
-    pub fn new_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<Self> {
-        let file = tempfile::Builder::new()
-            .prefix(stem)
-            .suffix(suffix)
-            .tempfile_in(parent)
-            .context("create temporary file")?;
-        Ok(Self(file.into_temp_path()))
-    }
-
-    pub fn path(&self) -> &Path {
-        self.0.as_ref()
-    }
+pub(crate) fn temp_path_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<tempfile::TempPath> {
+    let file =
+        tempfile::Builder::new().prefix(stem).suffix(suffix).tempfile_in(parent).context("create temporary file")?;
+    Ok(file.into_temp_path())
 }
 
 pub(crate) fn is_executable(path: &Path) -> bool {

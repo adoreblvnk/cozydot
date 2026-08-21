@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::operations::host::{self, TempPath, is_regular_executable, shell::append_profile};
+use crate::operations::host::{self, is_regular_executable, shell::append_profile, temp_path_with_suffix};
 use crate::platform::Architecture;
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
@@ -19,14 +19,14 @@ pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> R
     let stdout = successful_output.and_then(|output| std::str::from_utf8(&output.stdout).ok());
     let version_matches = stdout.is_some_and(|stdout| stdout.trim() == expected);
     if !version_matches {
-        let archive = TempPath::new_with_suffix("go", ".tar.gz")?;
+        let archive = temp_path_with_suffix("go", ".tar.gz")?;
         let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go());
         let url = format!("https://go.dev/dl/{filename}");
-        let output = archive.path().as_os_str();
+        let output = archive.as_os_str();
         host::curl("Go archive download", &url, ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), output])?;
         // remove whole tree so files missing from new release can't survive replacement
         host::run("Go installation replacement", "sudo", ["rm", "-rf", "/usr/local/go"])?;
-        let archive = archive.path().to_str().context("Go archive path is not UTF-8")?;
+        let archive = archive.to_str().context("Go archive path is not UTF-8")?;
         host::run("Go archive extraction", "sudo", ["tar", "-xzf", archive, "-C", "/usr/local"])?;
     }
     append_profile(GO_PATH_INIT)

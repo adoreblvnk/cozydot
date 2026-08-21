@@ -1,4 +1,4 @@
-use crate::operations::host::{self, TempPath};
+use crate::operations::host::{self, temp_path_with_suffix};
 use crate::{
     config::{BinaryFormat, BinaryPackage, BinarySource},
     platform::Architecture,
@@ -24,7 +24,7 @@ pub(crate) fn install(package: &BinaryPackage, architecture: Architecture) -> Re
     }
     let Some(url) = resolve_url(package, architecture)? else { return Ok(()) };
     match package.format {
-        BinaryFormat::Deb => install_deb(download_deb(package, &url)?),
+        BinaryFormat::Deb => install_deb(package, &url),
         BinaryFormat::AppImage => {
             appimage::install_appimage("download binary package", &url, &appimage_path(&home, package))
         }
@@ -68,13 +68,9 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, architectu
     Ok(matches[0].browser_download_url.clone())
 }
 
-fn download_deb(package: &BinaryPackage, url: &str) -> Result<TempPath> {
-    let temp = TempPath::new_with_suffix(&package.name, ".deb")?;
-    host::curl("download binary package", url, ["--output".as_ref(), temp.path().as_os_str()])?;
-    Ok(temp)
-}
-
-fn install_deb(temp: TempPath) -> Result<()> {
+fn install_deb(package: &BinaryPackage, url: &str) -> Result<()> {
+    let temp = temp_path_with_suffix(&package.name, ".deb")?;
+    host::curl("download binary package", url, ["--output".as_ref(), temp.as_os_str()])?;
     host::run(
         "Deb package install",
         "sudo",
@@ -85,7 +81,7 @@ fn install_deb(temp: TempPath) -> Result<()> {
             "-y".as_ref(),
             "-qq".as_ref(),
             "--".as_ref(),
-            temp.path().as_os_str(),
+            temp.as_os_str(),
         ],
     )?;
     Ok(())

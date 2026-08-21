@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::Path};
 
-use super::super::host::{self, TempPath};
+use super::super::host::{self, temp_path_with_suffix};
 
 pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
     let parent = host::home()?.join(if cfg!(target_os = "macos") { "Library/Fonts" } else { ".local/share/fonts" });
@@ -32,12 +32,12 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
 }
 
 fn install(family: &str, destination: &Path) -> Result<()> {
-    let archive = TempPath::new_with_suffix("nerd-font", ".tar.xz")?;
+    let archive = temp_path_with_suffix("nerd-font", ".tar.xz")?;
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
-    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.path().as_os_str()];
+    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.as_os_str()];
     host::curl("Nerd Font archive download", &url, args)?;
     let path = destination.to_str().context("font path is not UTF-8")?;
-    let archive_path = archive.path().to_str().context("font archive path is not UTF-8")?;
+    let archive_path = archive.to_str().context("font archive path is not UTF-8")?;
     host::run("Nerd Font destination replacement", "rm", ["-rf", path])?;
     host::run("Nerd Font destination creation", "mkdir", ["-p", path])?;
     host::run("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;
