@@ -100,7 +100,7 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 ### Linux
 
 1. Derive base prerequisites and add Flatpak when its update is enabled.
-2. When an APT policy is configured, run APT update followed by the selected `upgrade` or `full-upgrade` command.
+2. Run APT update, then run the selected `upgrade` or `full-upgrade` command when an APT policy is configured.
 3. Ensure update prerequisites without upgrading installed packages.
 4. Update installed Flatpak applications and runtimes when enabled.
 5. Ensure Rust with the configured or stable toolchain, then update Rust toolchains when enabled.

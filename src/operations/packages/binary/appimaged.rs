@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
 pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
+    ensure_fuse(host)?;
     if !host.output("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
         // https://github.com/probonopd/go-appimage/blob/master/src/appimaged/README.md#initial-setup
         let _ = host.output("systemctl", ["--user", "stop", "appimaged.service"]);
@@ -33,7 +34,7 @@ pub(crate) fn install(host: &Host, architecture: Architecture) -> Result<()> {
         )?;
     }
 
-    ensure_fuse(host)
+    Ok(())
 }
 
 fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> {

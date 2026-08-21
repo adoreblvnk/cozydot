@@ -177,6 +177,7 @@ fn init_materializes_presets_and_preserves_user_edits() {
     for preset in ["cozydot", "cli", "vm"] {
         let temp = tempfile::tempdir().unwrap();
         cozydot().env("XDG_CONFIG_HOME", temp.path()).args(["init", "--preset", preset]).assert().success();
+        cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("check").assert().success();
         let root = temp.path().join("cozydot");
         assert_eq!(fs::read(root.join("cozydot.yaml")).unwrap(), fs::read(format!("configs/{preset}.yaml")).unwrap());
         assert!(root.join(".managed-files").is_file());
