@@ -234,7 +234,6 @@ linux:
           assets:
             x86_64: ^fastfetch-linux-amd64\.deb$
             aarch64: ^fastfetch-linux-aarch64\.deb$
-            armv7: ^fastfetch-linux-armv7l.*\.deb$
       - name: git-credential-manager
         format: deb
         source:

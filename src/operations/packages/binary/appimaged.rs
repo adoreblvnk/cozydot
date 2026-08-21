@@ -43,7 +43,6 @@ fn resolve_asset_url(host: &Host, architecture: Architecture) -> Result<String> 
     let suffix = match architecture {
         Architecture::X86_64 => "-x86_64.AppImage",
         Architecture::Aarch64 => "-aarch64.AppImage",
-        Architecture::Armv7 => "-armhf.AppImage",
     };
     for asset in release.assets {
         if asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix) {

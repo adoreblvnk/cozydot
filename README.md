@@ -29,9 +29,9 @@ machine dependent on a custom runtime, package store, or configuration layout.
 The installed software and configuration remain usable and can still be managed
 with their official documentation.
 
-Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`),
-`aarch64` (`arm64`), and 32-bit ARMv7 (`armv7`), plus macOS on Apple Silicon
-(`arm64`). Other architectures are rejected.
+Cozydot supports Debian, Ubuntu, Pop!_OS, and Linux Mint on `x86_64` (`amd64`)
+and `aarch64` (`arm64`), plus macOS on Apple Silicon (`aarch64-apple-darwin`).
+Other architectures are rejected.
 
 Supported Debian releases are Bookworm and Trixie. On pure Debian, every
 `apply` appends `contrib`, `non-free`, and `non-free-firmware` to the selected
@@ -46,7 +46,7 @@ On a supported host:
 curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh | bash
 ```
 
-The installer selects the `amd64`, `arm64`, or `armv7` release, verifies its
+The installer selects the `amd64` or `arm64` release, verifies its
 published SHA-256 file, requires the archive to contain exactly one regular
 `cozydot` entry, and atomically installs the binary in `~/.local/bin`.
 
@@ -131,8 +131,8 @@ Direct APT packages are ensured before third-party repositories. Cozydot publish
 every repository applicable to the detected distribution and optional APT-native
 `arch` list, runs `apt-get update` once, purges all installed repository conflicts,
 then ensures all repository packages without upgrading installed versions. An omitted `arch`
-supports every Cozydot Linux architecture; supported values are `amd64`, `arm64`,
-and `armhf`.
+supports every Cozydot Linux architecture; supported values are `amd64` and
+`arm64`.
 
 ## Safety model
 

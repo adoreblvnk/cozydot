@@ -150,7 +150,6 @@ impl DesktopKind {
 pub enum Architecture {
     X86_64,
     Aarch64,
-    Armv7,
 }
 
 impl Architecture {
@@ -158,8 +157,7 @@ impl Architecture {
         match value {
             "x86_64" | "amd64" => Ok(Self::X86_64),
             "aarch64" | "arm64" => Ok(Self::Aarch64),
-            "arm" | "arm32" | "armv7" | "armv7l" | "armhf" => Ok(Self::Armv7),
-            _ => bail!("unsupported architecture {value:?}; supported architectures: x86_64, aarch64, armv7"),
+            _ => bail!("unsupported architecture {value:?}; supported architectures: x86_64, aarch64"),
         }
     }
 
@@ -167,7 +165,6 @@ impl Architecture {
         match self {
             Self::X86_64 => "x86_64",
             Self::Aarch64 => "aarch64",
-            Self::Armv7 => "armv7",
         }
     }
 
@@ -175,7 +172,6 @@ impl Architecture {
         match self {
             Self::X86_64 => "amd64",
             Self::Aarch64 => "arm64",
-            Self::Armv7 => "armhf",
         }
     }
 
@@ -183,15 +179,6 @@ impl Architecture {
         match self {
             Self::X86_64 => "amd64",
             Self::Aarch64 => "arm64",
-            Self::Armv7 => "arm",
-        }
-    }
-
-    pub fn go_archive(self) -> &'static str {
-        match self {
-            // Go calls its 32-bit ARM archive armv6l; it also runs on ARMv7
-            Self::Armv7 => "armv6l",
-            other => other.go(),
         }
     }
 }
