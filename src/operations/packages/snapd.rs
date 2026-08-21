@@ -2,29 +2,29 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::operations::{
-    host::{Host, privileged_file::write_atomic, systemd},
+    host::{self, privileged_file::write_atomic, systemd},
     packages::apt,
 };
 
 const NO_SNAP_PIN: &str = "/etc/apt/preferences.d/nosnap.pref";
 
-pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
+pub(crate) fn set_enabled(enabled: bool) -> Result<()> {
     if enabled {
-        host.run("no-snap APT pin removal", "sudo", ["rm", "-f", NO_SNAP_PIN])?;
-        apt::install(host, &["snapd".into()])?;
-        host.run("snapd service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
+        host::run("no-snap APT pin removal", "sudo", ["rm", "-f", NO_SNAP_PIN])?;
+        apt::install(&["snapd".into()])?;
+        host::run("snapd service enablement", "sudo", ["systemctl", "enable", "--now", "snapd.socket"])?;
         return Ok(());
     }
 
-    remove_snaps(host)?;
+    remove_snaps()?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        if systemd::is_enabled_or_active(host, unit)? {
-            host.run("snapd service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
+        if systemd::is_enabled_or_active(unit)? {
+            host::run("snapd service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }
-    apt::purge(host, &["snapd".into()])?;
-    let home_snap = host.home().join("snap");
-    host.run(
+    apt::purge(&["snapd".into()])?;
+    let home_snap = host::home()?.join("snap");
+    host::run(
         "snap data removal",
         "sudo",
         [
@@ -38,12 +38,12 @@ pub(crate) fn set_enabled(host: &Host, enabled: bool) -> Result<()> {
         ],
     )?;
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
-    write_atomic(host, Path::new(NO_SNAP_PIN), pin, "no-snap APT pin write")?;
+    write_atomic(Path::new(NO_SNAP_PIN), pin, "no-snap APT pin write")?;
     Ok(())
 }
 
-fn remove_snaps(host: &Host) -> Result<()> {
-    let output = host.output("snap", ["list"])?;
+fn remove_snaps() -> Result<()> {
+    let output = host::output("snap", ["list"])?;
     if !output.status.success() {
         return Ok(());
     }
@@ -56,7 +56,7 @@ fn remove_snaps(host: &Host) -> Result<()> {
     // sort snaps so snapd, bare & core are last
     names.sort_by_key(|name| matches!(*name, "snapd" | "bare") || name.starts_with("core"));
     for name in names {
-        host.run("snap package removal", "sudo", ["snap", "remove", "--purge", name])?;
+        host::run("snap package removal", "sudo", ["snap", "remove", "--purge", name])?;
     }
     Ok(())
 }

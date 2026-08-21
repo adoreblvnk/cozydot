@@ -14,75 +14,64 @@ pub(crate) mod shell;
 pub(crate) mod systemd;
 pub(crate) mod users;
 
-pub(crate) struct Host {
-    home: PathBuf,
+pub(crate) fn output<I, S>(program: &str, args: I) -> Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
+    let mut command = Command::new(program);
+    command.args(&args);
+    command.output().with_context(|| format!("start command {}", display(program, &args)))
 }
 
-impl Host {
-    pub(crate) fn new() -> Result<Self> {
-        let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
-        Ok(Self { home })
+pub(crate) fn run<I, S>(label: &str, program: &str, args: I) -> Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = output(program, args)?;
+    if !output.status.success() {
+        bail!("{label}: {program} failed ({}): {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
     }
+    Ok(output)
+}
 
-    pub fn output<I, S>(&self, program: &str, args: I) -> Result<Output>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
-        let mut command = Command::new(program);
-        command.args(&args);
-        command.output().with_context(|| format!("start command {}", display(program, &args)))
+pub(crate) fn require_cli(label: &str, program: &str) -> Result<()> {
+    let version_check = run(&format!("{label} CLI version check"), program, ["--version"]);
+    version_check.with_context(|| format!("{label} integration requires an existing usable {program} CLI"))?;
+    Ok(())
+}
+
+pub(crate) fn curl<I, S>(label: &str, url: &str, args: I) -> Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let options = ["--location", "--fail", "--silent", "--show-error", "--retry", "3", "--retry-all-errors"];
+    let mut curl_args = options.map(OsString::from).to_vec();
+    for arg in args {
+        curl_args.push(arg.as_ref().to_os_string());
     }
+    // keep URL after `--` so a leading hyphen can't become a curl option
+    curl_args.extend([OsString::from("--"), OsString::from(url)]);
+    run(label, "curl", curl_args)
+}
 
-    pub fn run<I, S>(&self, label: &str, program: &str, args: I) -> Result<Output>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let output = self.output(program, args)?;
-        if !output.status.success() {
-            bail!("{label}: {program} failed ({}): {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
+pub(crate) fn home() -> Result<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")
+}
+
+pub(crate) fn has_executable_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for directory in std::env::split_paths(&path) {
+        if is_executable(&directory.join(name)) {
+            return true;
         }
-        Ok(output)
     }
-
-    pub fn require_cli(&self, label: &str, program: &str) -> Result<()> {
-        let version_check = self.run(&format!("{label} CLI version check"), program, ["--version"]);
-        version_check.with_context(|| format!("{label} integration requires an existing usable {program} CLI"))?;
-        Ok(())
-    }
-
-    pub fn curl<I, S>(&self, label: &str, url: &str, args: I) -> Result<Output>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let options = ["--location", "--fail", "--silent", "--show-error", "--retry", "3", "--retry-all-errors"];
-        let mut curl_args = options.map(OsString::from).to_vec();
-        for arg in args {
-            curl_args.push(arg.as_ref().to_os_string());
-        }
-        // keep URL after `--` so a leading hyphen can't become a curl option
-        curl_args.extend([OsString::from("--"), OsString::from(url)]);
-        self.run(label, "curl", curl_args)
-    }
-
-    pub fn home(&self) -> &Path {
-        &self.home
-    }
-
-    pub fn has_executable_on_path(&self, name: &str) -> bool {
-        let Some(path) = std::env::var_os("PATH") else {
-            return false;
-        };
-        for directory in std::env::split_paths(&path) {
-            if is_executable(&directory.join(name)) {
-                return true;
-            }
-        }
-        false
-    }
+    false
 }
 
 pub(crate) struct TempPath(tempfile::TempPath);
