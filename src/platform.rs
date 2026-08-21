@@ -125,7 +125,6 @@ pub enum PlatformIdentity {
 pub enum DesktopKind {
     None,
     Gnome,
-    Cinnamon,
 }
 
 impl DesktopKind {
@@ -135,9 +134,6 @@ impl DesktopKind {
             if token.contains("gnome") {
                 return Self::Gnome;
             }
-            if token.contains("cinnamon") {
-                return Self::Cinnamon;
-            }
         }
         Self::None
     }
@@ -146,7 +142,6 @@ impl DesktopKind {
         match self {
             Self::None => "none",
             Self::Gnome => "gnome",
-            Self::Cinnamon => "cinnamon",
         }
     }
 }

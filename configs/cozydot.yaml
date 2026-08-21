@@ -87,7 +87,6 @@ linux:
         - linuxmint
       desktops:
         - gnome
-        - cinnamon
     ubuntu:
       unattended_upgrades: disabled
       snapd: disabled

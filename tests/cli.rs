@@ -581,7 +581,7 @@ esac
 
 #[test]
 #[cfg(target_os = "linux")]
-fn terminal_configuration_handles_desktop_shortcut_capabilities() {
+fn terminal_configuration_handles_gnome_shortcut_capabilities() {
     const MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
     const CUSTOM_PATH: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
     let custom_schema = format!("{MEDIA_KEYS}.custom-keybinding:{CUSTOM_PATH}");
@@ -610,17 +610,6 @@ fn terminal_configuration_handles_desktop_shortcut_capabilities() {
         ]
     );
     assert_eq!(preference, "wezterm.desktop\n");
-    assert!(prerequisite);
-
-    let (calls, preference, prerequisite) = run_terminal_apply("cinnamon", false, "@as []");
-    assert_eq!(
-        calls,
-        [
-            "gsettings set org.cinnamon.desktop.default-applications.terminal exec 'wezterm'",
-            "gsettings set org.cinnamon.desktop.default-applications.terminal exec-arg ''",
-        ]
-    );
-    assert!(preference.is_empty());
     assert!(prerequisite);
 }
 
