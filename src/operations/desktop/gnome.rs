@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::operations::host::{Host, TempPath};
+use crate::operations::host::{self, TempPath};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {
@@ -15,18 +15,18 @@ const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
 const ROUNDED_CORNERS_SETTINGS: &str =
     "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings";
 
-pub(crate) fn apply_extensions(host: &Host, extensions: &[String]) -> Result<Outcome> {
+pub(crate) fn apply_extensions(extensions: &[String]) -> Result<Outcome> {
     let mut outcome = Outcome::Completed;
     for uuid in extensions {
-        if install_or_enable_extension(host, uuid)? == Outcome::LoginRequired {
+        if install_or_enable_extension(uuid)? == Outcome::LoginRequired {
             outcome = Outcome::LoginRequired;
         }
     }
     Ok(outcome)
 }
 
-pub(crate) fn apply_dash_to_dock(host: &Host) -> Result<Outcome> {
-    if install_or_enable_extension(host, DASH_TO_DOCK_UUID)? == Outcome::LoginRequired {
+pub(crate) fn apply_dash_to_dock() -> Result<Outcome> {
+    if install_or_enable_extension(DASH_TO_DOCK_UUID)? == Outcome::LoginRequired {
         return Ok(Outcome::LoginRequired);
     }
     for (key, value) in [
@@ -41,28 +41,28 @@ pub(crate) fn apply_dash_to_dock(host: &Host) -> Result<Outcome> {
         ("click-action", "'minimize-or-previews'"),
     ] {
         let path = format!("/org/gnome/shell/extensions/dash-to-dock/{key}");
-        host.run("dconf write", "dconf", ["write", &path, value])?;
+        host::run("dconf write", "dconf", ["write", &path, value])?;
     }
     Ok(Outcome::Completed)
 }
 
-pub(crate) fn apply_rounded_window_corners(host: &Host) -> Result<Outcome> {
-    if install_or_enable_extension(host, ROUNDED_CORNERS_UUID)? == Outcome::LoginRequired {
+pub(crate) fn apply_rounded_window_corners() -> Result<Outcome> {
+    if install_or_enable_extension(ROUNDED_CORNERS_UUID)? == Outcome::LoginRequired {
         return Ok(Outcome::LoginRequired);
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
-    host.run("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
+    host::run("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
     Ok(Outcome::Completed)
 }
 
-fn install_or_enable_extension(host: &Host, uuid: &str) -> Result<Outcome> {
+fn install_or_enable_extension(uuid: &str) -> Result<Outcome> {
     validate_uuid(uuid)?;
-    if !host.output("gnome-extensions", ["info", uuid])?.status.success() {
-        install_extension(host, uuid)?;
+    if !host::output("gnome-extensions", ["info", uuid])?.status.success() {
+        install_extension(uuid)?;
         // GNOME only finds newly installed extensions after next login
         return Ok(Outcome::LoginRequired);
     }
-    host.run("GNOME extension enable", "gnome-extensions", ["enable", uuid])?;
+    host::run("GNOME extension enable", "gnome-extensions", ["enable", uuid])?;
     Ok(Outcome::Completed)
 }
 
@@ -81,19 +81,23 @@ fn valid_uuid_part(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
 }
 
-fn install_extension(host: &Host, uuid: &str) -> Result<()> {
+fn install_extension(uuid: &str) -> Result<()> {
     // TODO: can we simplify this?
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={uuid}");
-    let metadata = host.curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
-    let shell = host.run("GNOME extension shell version", "gnome-shell", ["--version"])?;
+    let metadata = host::curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
+    let shell = host::run("GNOME extension shell version", "gnome-shell", ["--version"])?;
     let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
     let archive = TempPath::new_with_suffix("gnome-extension", ".zip")?;
     let name = uuid.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
-    host.curl("GNOME extension download", &url, ["--output", &archive.path().to_string_lossy()])?;
-    host.run("GNOME extension install", "gnome-extensions", ["install", "--force", &archive.path().to_string_lossy()])?;
+    host::curl("GNOME extension download", &url, ["--output", &archive.path().to_string_lossy()])?;
+    host::run(
+        "GNOME extension install",
+        "gnome-extensions",
+        ["install", "--force", &archive.path().to_string_lossy()],
+    )?;
     Ok(())
 }
 

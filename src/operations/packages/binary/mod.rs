@@ -1,4 +1,4 @@
-use crate::operations::host::{Host, TempPath};
+use crate::operations::host::{self, TempPath};
 use crate::{
     config::{BinaryFormat, BinaryPackage, BinarySource},
     platform::Architecture,
@@ -17,31 +17,32 @@ const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
 const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
 
-pub(crate) fn install(host: &Host, package: &BinaryPackage, architecture: Architecture) -> Result<()> {
-    if is_installed(host, package) {
+pub(crate) fn install(package: &BinaryPackage, architecture: Architecture) -> Result<()> {
+    let home = host::home()?;
+    if is_installed(&home, package) {
         return Ok(());
     }
-    let Some(url) = resolve_url(host, package, architecture)? else { return Ok(()) };
+    let Some(url) = resolve_url(package, architecture)? else { return Ok(()) };
     match package.format {
-        BinaryFormat::Deb => install_deb(host, download_deb(host, package, &url)?),
+        BinaryFormat::Deb => install_deb(download_deb(package, &url)?),
         BinaryFormat::AppImage => {
-            appimage::install_appimage(host, "download binary package", &url, &appimage_path(host, package))
+            appimage::install_appimage("download binary package", &url, &appimage_path(&home, package))
         }
     }
 }
 
-fn is_installed(host: &Host, package: &BinaryPackage) -> bool {
+fn is_installed(home: &std::path::Path, package: &BinaryPackage) -> bool {
     match package.format {
-        BinaryFormat::Deb => host.has_executable_on_path(&package.name),
-        BinaryFormat::AppImage => appimage_path(host, package).exists(),
+        BinaryFormat::Deb => host::has_executable_on_path(&package.name),
+        BinaryFormat::AppImage => appimage_path(home, package).exists(),
     }
 }
 
-fn appimage_path(host: &Host, package: &BinaryPackage) -> PathBuf {
-    host.home().join("Applications").join(format!("{}.AppImage", package.name))
+fn appimage_path(home: &std::path::Path, package: &BinaryPackage) -> PathBuf {
+    home.join("Applications").join(format!("{}.AppImage", package.name))
 }
 
-fn resolve_url(host: &Host, package: &BinaryPackage, architecture: Architecture) -> Result<Option<String>> {
+fn resolve_url(package: &BinaryPackage, architecture: Architecture) -> Result<Option<String>> {
     match &package.source {
         BinarySource::Url { urls } => Ok(urls.get(architecture).map(str::to_owned)),
         BinarySource::GitHub { repo, assets } => {
@@ -50,7 +51,7 @@ fn resolve_url(host: &Host, package: &BinaryPackage, architecture: Architecture)
             let accept = GITHUB_ACCEPT;
             let version = GITHUB_API_VERSION;
             let args = ["--proto", "=https", "--header", accept, "--header", version, "--header", USER_AGENT];
-            let output = host.curl("resolve binary package release", &endpoint, args)?;
+            let output = host::curl("resolve binary package release", &endpoint, args)?;
             select_asset_url(&output.stdout, asset_pattern, &package.name, architecture).map(Some)
         }
     }
@@ -67,14 +68,14 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, architectu
     Ok(matches[0].browser_download_url.clone())
 }
 
-fn download_deb(host: &Host, package: &BinaryPackage, url: &str) -> Result<TempPath> {
+fn download_deb(package: &BinaryPackage, url: &str) -> Result<TempPath> {
     let temp = TempPath::new_with_suffix(&package.name, ".deb")?;
-    host.curl("download binary package", url, ["--output".as_ref(), temp.path().as_os_str()])?;
+    host::curl("download binary package", url, ["--output".as_ref(), temp.path().as_os_str()])?;
     Ok(temp)
 }
 
-fn install_deb(host: &Host, temp: TempPath) -> Result<()> {
-    host.run(
+fn install_deb(temp: TempPath) -> Result<()> {
+    host::run(
         "Deb package install",
         "sudo",
         [

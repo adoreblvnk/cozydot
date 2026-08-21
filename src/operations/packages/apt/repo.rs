@@ -1,4 +1,4 @@
-use crate::operations::host::{Host, TempPath, privileged_file};
+use crate::operations::host::{self, TempPath, privileged_file};
 use crate::platform::Architecture;
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::PathBuf};
@@ -39,21 +39,21 @@ impl AptRepo {
     }
 }
 
-pub(crate) fn add(host: &Host, repo: &AptRepo) -> Result<()> {
+pub(crate) fn add(repo: &AptRepo) -> Result<()> {
     let preserve_armor = repo.key_path.extension() == Some(OsStr::new("asc"));
 
-    let key = processed_key(host, &repo.key_url, preserve_armor)?;
+    let key = processed_key(&repo.key_url, preserve_armor)?;
     let source = repo.render_source().into_bytes();
 
-    privileged_file::write_atomic(host, &repo.key_path, &key, "APT repo key write")?;
-    privileged_file::write_atomic(host, &repo.source_list_path, &source, "APT repo source write")?;
+    privileged_file::write_atomic(&repo.key_path, &key, "APT repo key write")?;
+    privileged_file::write_atomic(&repo.source_list_path, &source, "APT repo source write")?;
 
     Ok(())
 }
 
-fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
+fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
     let downloaded = TempPath::new("repo-key-download")?;
-    host.curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.path().to_string_lossy()])?;
+    host::curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.path().to_string_lossy()])?;
 
     let downloaded_bytes = fs::read(downloaded.path()).context("read downloaded repo key")?;
 
@@ -62,13 +62,13 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
     let key = binary_keyring.path().to_string_lossy();
     let input = downloaded.path().to_string_lossy();
     let args = ["--no-options", "--batch", "--yes", "--output", key.as_ref(), "--dearmor", input.as_ref()];
-    host.run("repo key conversion", "gpg", args)?;
+    host::run("repo key conversion", "gpg", args)?;
 
     // parsing proves download contains a public key; configured URL remains identity trust boundary
     let key = binary_keyring.path().to_string_lossy();
     let no_default = "--no-default-keyring";
     let args = ["--no-options", "--batch", no_default, "--keyring", key.as_ref(), "--with-colons", "--list-keys"];
-    let key_list = host.run("repo key validation", "gpg", args)?;
+    let key_list = host::run("repo key validation", "gpg", args)?;
     let mut lines = key_list.stdout.split(|byte| *byte == b'\n');
     let public_key = lines.any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()));
     if !public_key {
@@ -83,7 +83,7 @@ fn processed_key(host: &Host, url: &str, preserve_armor: bool) -> Result<Vec<u8>
 }
 
 pub(crate) mod debian_components {
-    use crate::operations::host::{Host, privileged_file};
+    use crate::operations::host::{self, privileged_file};
     use anyhow::{Context, Result, bail};
     use std::{ffi::OsStr, path::Path};
 
@@ -92,40 +92,40 @@ pub(crate) mod debian_components {
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
     // TODO: review this
-    pub(crate) fn add(host: &Host) -> Result<()> {
+    pub(crate) fn add() -> Result<()> {
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
-            host.run("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
+            host::run("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
         }
 
-        reject_symlink(host, DEB822_SOURCE)?;
-        let deb822 = probe_regular(host, DEB822_SOURCE)?;
+        reject_symlink(DEB822_SOURCE)?;
+        let deb822 = probe_regular(DEB822_SOURCE)?;
         if !deb822 {
-            host.run("Debian APT deb822 source absence check", "sudo", ["test", "!", "-e", DEB822_SOURCE])?;
+            host::run("Debian APT deb822 source absence check", "sudo", ["test", "!", "-e", DEB822_SOURCE])?;
         }
         let source = if deb822 { DEB822_SOURCE } else { ONE_LINE_SOURCE };
         if !deb822 {
-            reject_symlink(host, source)?;
-            if !probe_regular(host, source)? {
+            reject_symlink(source)?;
+            if !probe_regular(source)? {
                 bail!("Debian APT source file does not exist: {source}");
             }
         }
 
-        let original = read(host, source)?;
+        let original = read(source)?;
         let text = std::str::from_utf8(&original).context("Debian APT source is not UTF-8")?;
         let replacement = if deb822 { add_deb822_components(text) } else { add_one_line_components(text) };
         if replacement.as_bytes() == original {
             return Ok(());
         }
         // catch changes since first read before replacing file; this isn't a lock
-        if read(host, source)? != original {
+        if read(source)? != original {
             bail!("Debian APT source changed concurrently before write");
         }
-        privileged_file::write_atomic(host, Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
+        privileged_file::write_atomic(Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
         Ok(())
     }
 
-    fn reject_symlink(host: &Host, path: &str) -> Result<()> {
-        let output = host.output("sudo", ["test", "-L", path])?;
+    fn reject_symlink(path: &str) -> Result<()> {
+        let output = host::output("sudo", ["test", "-L", path])?;
         match output.status.code() {
             Some(0) => bail!("Debian APT source path is a symlink: {path}"),
             Some(1) => Ok(()),
@@ -133,8 +133,8 @@ pub(crate) mod debian_components {
         }
     }
 
-    fn probe_regular(host: &Host, path: &str) -> Result<bool> {
-        let output = host.output("sudo", ["test", "-f", path])?;
+    fn probe_regular(path: &str) -> Result<bool> {
+        let output = host::output("sudo", ["test", "-f", path])?;
         match output.status.code() {
             Some(0) => Ok(true),
             Some(1) => Ok(false),
@@ -142,8 +142,8 @@ pub(crate) mod debian_components {
         }
     }
 
-    fn read(host: &Host, path: &str) -> Result<Vec<u8>> {
-        Ok(host.run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new(path)])?.stdout)
+    fn read(path: &str) -> Result<Vec<u8>> {
+        Ok(host::run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new(path)])?.stdout)
     }
 
     fn add_deb822_components(text: &str) -> String {

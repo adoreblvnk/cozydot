@@ -7,9 +7,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::host::Host;
+use super::host;
 
-pub(crate) fn apply(host: &Host, stow_dir: &Path, packages: &[String], replace: bool) -> Result<()> {
+pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Result<()> {
     let stow_dir =
         fs::canonicalize(stow_dir).with_context(|| format!("canonicalize stow directory {}", stow_dir.display()))?;
     if !fs::symlink_metadata(&stow_dir)?.file_type().is_dir() {
@@ -27,24 +27,24 @@ pub(crate) fn apply(host: &Host, stow_dir: &Path, packages: &[String], replace: 
         package_dirs.push((package, package_dir));
     }
 
-    host.require_cli("GNU Stow", "stow").context("dotfiles require GNU Stow")?;
-    let home = host.home();
+    host::require_cli("GNU Stow", "stow").context("dotfiles require GNU Stow")?;
+    let home = host::home()?;
     let mut args = vec![OsStr::new("--dir"), stow_dir.as_os_str(), OsStr::new("--target"), home.as_os_str()];
     if !replace {
         let mut check_args = args.clone();
         check_args.extend([OsStr::new("--simulate"), OsStr::new("--")]);
         check_args.extend(packages.iter().map(OsStr::new));
-        host.run("stow package check", "stow", check_args)?;
+        host::run("stow package check", "stow", check_args)?;
     }
 
     let mut conflicts = Vec::new();
     if replace {
         for (package, package_dir) in &package_dirs {
-            collect_conflicts(package_dir, home.to_path_buf(), package, &mut conflicts)?;
+            collect_conflicts(package_dir, home.clone(), package, &mut conflicts)?;
         }
         conflicts.sort_by(|left, right| left.1.cmp(&right.1));
         conflicts.dedup_by(|left, right| left.1 == right.1);
-        backup_conflicts(host, &conflicts)?;
+        backup_conflicts(&home, &conflicts)?;
     }
 
     if packages.iter().any(|package| package == "gnupg") {
@@ -59,7 +59,7 @@ pub(crate) fn apply(host: &Host, stow_dir: &Path, packages: &[String], replace: 
     }
     args.push(OsStr::new("--"));
     args.extend(packages.iter().map(OsStr::new));
-    host.run("stow package install", "stow", args)?;
+    host::run("stow package install", "stow", args)?;
     Ok(())
 }
 
@@ -108,7 +108,7 @@ fn resolves_to(target: &Path, source: &Path) -> bool {
     target == source
 }
 
-fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> {
+fn backup_conflicts(home: &Path, conflicts: &[(String, PathBuf)]) -> Result<()> {
     if conflicts.is_empty() {
         return Ok(());
     }
@@ -120,7 +120,7 @@ fn backup_conflicts(host: &Host, conflicts: &[(String, PathBuf)]) -> Result<()> 
     let backup_root = state_home.join("cozydot/dotfile-backups").join(format!("{timestamp}-{}", std::process::id()));
     for (package, conflict) in conflicts {
         let context = || format!("dotfiles conflict escaped the home directory: {}", conflict.display());
-        let relative = conflict.strip_prefix(host.home()).with_context(context)?;
+        let relative = conflict.strip_prefix(home).with_context(context)?;
         let backup = backup_root.join(package).join(relative);
         let parent = backup.parent().context("dotfiles backup has no parent")?;
         fs::create_dir_all(parent).context("create dotfiles backup directory")?;

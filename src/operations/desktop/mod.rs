@@ -4,7 +4,7 @@ use std::{
     io::Write,
 };
 
-use super::host::{Host, stdout_line};
+use super::host::{self, stdout_line};
 use crate::config::Theme;
 
 pub(crate) mod fonts;
@@ -15,9 +15,8 @@ const GNOME_MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const GNOME_TERMINAL_SHORTCUT: &str =
     "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
 
-pub(crate) fn set_color_scheme(host: &Host, color_scheme: Theme) -> Result<()> {
+pub(crate) fn set_color_scheme(color_scheme: Theme) -> Result<()> {
     gsettings_set(
-        host,
         "org.gnome.desktop.interface",
         "color-scheme",
         match color_scheme {
@@ -27,19 +26,19 @@ pub(crate) fn set_color_scheme(host: &Host, color_scheme: Theme) -> Result<()> {
     )
 }
 
-pub(crate) fn set_terminal(host: &Host, executable: &str) -> Result<()> {
-    if !host.has_executable_on_path(executable) {
+pub(crate) fn set_terminal(executable: &str) -> Result<()> {
+    if !host::has_executable_on_path(executable) {
         bail!("desktop terminal executable {executable:?} is unavailable");
     }
-    set_xdg_terminal(host, executable)?;
+    set_xdg_terminal(executable)?;
     // Ubuntu provides this media key; upstream GNOME needs a custom binding.
-    if !host.output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {
-        ensure_gnome_terminal_shortcut(host, "xdg-terminal-exec")?;
+    if !host::output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {
+        ensure_gnome_terminal_shortcut("xdg-terminal-exec")?;
     }
     Ok(())
 }
 
-fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
+fn set_xdg_terminal(executable: &str) -> Result<()> {
     let config_home = crate::paths::config_home()?;
     fs::create_dir_all(&config_home)?;
     let destination = config_home.join("xdg-terminals.list");
@@ -50,15 +49,15 @@ fn set_xdg_terminal(host: &Host, executable: &str) -> Result<()> {
     temp.persist(destination).map_err(|error| error.error)?;
     File::open(config_home)?.sync_all()?;
 
-    let output = host.run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
+    let output = host::run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
     if stdout_line(&output.stdout, "xdg-terminal-exec --print-id")? != entry.as_str() {
         bail!("xdg-terminal-exec did not select {entry:?}");
     }
     Ok(())
 }
 
-fn ensure_gnome_terminal_shortcut(host: &Host, executable: &str) -> Result<()> {
-    let output = host.run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
+fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
+    let output = host::run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
     let keybindings = stdout_line(&output.stdout, "gsettings get custom-keybindings")?;
     let quoted_path = format!("'{GNOME_TERMINAL_SHORTCUT}'");
     let updated = if keybindings.contains(&quoted_path) {
@@ -75,25 +74,25 @@ fn ensure_gnome_terminal_shortcut(host: &Host, executable: &str) -> Result<()> {
 
     let schema = format!("{GNOME_MEDIA_KEYS}.custom-keybinding:{GNOME_TERMINAL_SHORTCUT}");
     // Complete the binding before publishing its path to GNOME.
-    gsettings_set(host, &schema, "name", "'Terminal'")?;
-    gsettings_set(host, &schema, "command", &format!("'{executable}'"))?;
-    gsettings_set(host, &schema, "binding", "'<Primary><Alt>T'")?;
+    gsettings_set(&schema, "name", "'Terminal'")?;
+    gsettings_set(&schema, "command", &format!("'{executable}'"))?;
+    gsettings_set(&schema, "binding", "'<Primary><Alt>T'")?;
     if let Some(updated) = updated {
-        gsettings_set(host, GNOME_MEDIA_KEYS, "custom-keybindings", &updated)?;
+        gsettings_set(GNOME_MEDIA_KEYS, "custom-keybindings", &updated)?;
     }
     Ok(())
 }
 
-pub(crate) fn set_idle_delay(host: &Host, seconds: u32) -> Result<()> {
-    gsettings_set(host, "org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))
+pub(crate) fn set_idle_delay(seconds: u32) -> Result<()> {
+    gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))
 }
 
-pub(crate) fn set_idle_dim(host: &Host, enabled: bool) -> Result<()> {
+pub(crate) fn set_idle_dim(enabled: bool) -> Result<()> {
     let value = if enabled { "true" } else { "false" };
-    gsettings_set(host, "org.gnome.settings-daemon.plugins.power", "idle-dim", value)
+    gsettings_set("org.gnome.settings-daemon.plugins.power", "idle-dim", value)
 }
 
-fn gsettings_set(host: &Host, schema: &str, key: &str, value: &str) -> Result<()> {
-    host.run("gsettings set", "gsettings", ["set", schema, key, value])?;
+fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> {
+    host::run("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }
