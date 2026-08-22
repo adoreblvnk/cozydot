@@ -97,15 +97,6 @@ impl Distro {
             }
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ubuntu => "ubuntu",
-            Self::LinuxMint => "linuxmint",
-            Self::Pop => "pop",
-            Self::Debian => "debian",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

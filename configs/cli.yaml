@@ -48,13 +48,8 @@ shared:
     fonts: true
 linux:
   system:
-    sudo_group: true
-    allowed_platforms:
-      distros:
-        - ubuntu
-        - debian
-        - pop
-        - linuxmint
+    debian:
+      sudo_group: true
     ubuntu:
       unattended_upgrades: disabled
       snapd: disabled
@@ -133,40 +128,10 @@ macos:
       - trash
       - vim
     casks:
-      - bitwarden
-      - discord
-      - docker
-      - drawio
-      - gimp
       - git-credential-manager
-      - helium-browser
-      - obs
-      - obsidian
-      - onlyoffice
-      - qbittorrent
-      - shotcut
-      - telegram
-      - virtualbox
-      - visual-studio-code
-      - vlc
-      - wezterm
-      - zen
   dotfiles:
     packages:
       - zsh
-  desktop:
-    appearance: dark
-    dock:
-      autohide: true
-      show_recent_applications: false
-    finder:
-      show_filename_extensions: true
-      show_hidden_files: true
-    keyboard:
-      key_repeat: 2 # macOS default: 6
-      initial_key_repeat: 15 # macOS default: 25
-    trackpad:
-      tap_to_click: true
   updates:
     homebrew:
       formulae: true

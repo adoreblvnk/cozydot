@@ -21,18 +21,18 @@ shared:
     packages:
       - bat
       - bin
-      - bottom
       - fastfetch
       - git
       - gnupg
       - starship
       - vscode
       - wezterm
-      - yazi
   integrations:
     vscode:
       extensions:
         - catppuccin.catppuccin-vsc
+  desktop:
+    theme: dark
   updates:
     tools:
       rust: true
@@ -45,13 +45,8 @@ shared:
     fonts: true
 linux:
   system:
-    sudo_group: true
-    allowed_platforms:
-      distros:
-        - ubuntu
-        - debian
-      desktops:
-        - gnome
+    debian:
+      sudo_group: true
     ubuntu:
       unattended_upgrades: disabled
       snapd: disabled
@@ -122,7 +117,6 @@ linux:
       - bash
   integrations: {}
   desktop:
-    theme: dark
     terminal: wezterm
     idle:
       timeout: 15m
@@ -160,28 +154,13 @@ macos:
       - vim
     casks:
       - bitwarden
-      - discord
-      - docker
-      - drawio
-      - gimp
       - git-credential-manager
-      - helium-browser
-      - obs
-      - obsidian
-      - onlyoffice
-      - qbittorrent
-      - shotcut
-      - telegram
-      - virtualbox
       - visual-studio-code
-      - vlc
       - wezterm
-      - zen
   dotfiles:
     packages:
       - zsh
   desktop:
-    appearance: dark
     dock:
       autohide: true
       show_recent_applications: false

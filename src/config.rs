@@ -71,38 +71,17 @@ impl Config {
 
     /// Validate config intent that depends on the detected `platform`.
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
-        let PlatformIdentity::Linux { distro, .. } = platform.identity else { return Ok(()) };
-        let desktop = platform.desktop;
+        let PlatformIdentity::Linux { .. } = platform.identity else { return Ok(()) };
 
-        if let Some(allowed_platforms) = self.linux.system.allowed_platforms.as_ref() {
-            let distros = allowed_platforms.distros.as_ref();
-            if distros.is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&distro)) {
-                bail!(
-                    "linux.system.allowed_platforms.distros: detected distribution {:?} is not allowed",
-                    distro.as_str()
-                );
-            }
-            let desktops = allowed_platforms.desktops.as_ref();
-            if desktops.is_some_and(|allowed| !allowed.is_empty() && !allowed.contains(&desktop)) {
-                bail!(
-                    "linux.system.allowed_platforms.desktops: detected desktop {:?} is not allowed",
-                    desktop.as_str()
-                );
-            }
-        }
-
-        if let Some(configured) = &self.linux.desktop
-            && desktop != DesktopKind::Gnome
+        let theme = self.shared.desktop.as_ref().and_then(|desktop| desktop.theme);
+        let linux_desktop = self.linux.desktop.as_ref();
+        if platform.desktop != DesktopKind::Gnome
+            && (theme.is_some() || linux_desktop.is_some_and(LinuxDesktop::has_intent))
         {
-            if configured.has_common_intent() {
-                bail!(
-                    "linux.desktop: theme, terminal, and idle settings require GNOME; detected {:?}",
-                    desktop.as_str()
-                );
-            }
-            if configured.gnome.as_ref().is_some_and(Gnome::has_intent) {
-                bail!("linux.desktop.gnome: requires GNOME; detected {:?}", desktop.as_str());
-            }
+            bail!(
+                "shared.desktop.theme and linux.desktop settings require GNOME; detected {:?}",
+                platform.desktop.as_str()
+            );
         }
         Ok(())
     }
@@ -116,6 +95,7 @@ pub struct SharedConfig {
     pub fonts: Fonts,
     pub dotfiles: Dotfiles,
     pub integrations: SharedIntegrations,
+    pub desktop: Option<SharedDesktop>,
     pub updates: SharedUpdates,
 }
 
@@ -174,6 +154,12 @@ pub struct VsCodeIntegration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SharedDesktop {
+    pub theme: Option<Theme>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SharedUpdates {
     pub tools: ToolUpdates,
     pub packages: PackageUpdates,
@@ -210,16 +196,14 @@ pub struct LinuxConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinuxSystem {
-    pub allowed_platforms: Option<PlatformAllowlist>,
-    pub sudo_group: Option<bool>,
+    pub debian: Option<DebianSystem>,
     pub ubuntu: Option<UbuntuSystem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlatformAllowlist {
-    pub distros: Option<Vec<Distro>>,
-    pub desktops: Option<Vec<DesktopKind>>,
+pub struct DebianSystem {
+    pub sudo_group: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -512,7 +496,6 @@ pub enum Theme {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinuxDesktop {
-    pub theme: Option<Theme>,
     pub terminal: Option<String>,
     pub idle: Option<Idle>,
     pub gnome: Option<Gnome>,
@@ -526,14 +509,10 @@ impl LinuxDesktop {
         Ok(())
     }
 
-    pub fn has_common_intent(&self) -> bool {
-        self.theme.is_some()
-            || self.terminal.is_some()
-            || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
-    }
-
     pub fn has_intent(&self) -> bool {
-        self.has_common_intent() || self.gnome.as_ref().is_some_and(Gnome::has_intent)
+        self.terminal.is_some()
+            || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
+            || self.gnome.as_ref().is_some_and(Gnome::has_intent)
     }
 }
 
@@ -605,7 +584,7 @@ pub struct MacosConfig {
     pub system: MacSystem,
     pub homebrew: Homebrew,
     pub dotfiles: Dotfiles,
-    pub desktop: MacDesktop,
+    pub desktop: Option<MacDesktop>,
     pub updates: MacUpdates,
 }
 
@@ -632,7 +611,6 @@ pub struct Homebrew {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacDesktop {
-    pub appearance: Option<Theme>,
     pub dock: Option<MacDock>,
     pub finder: Option<MacFinder>,
     pub keyboard: Option<MacKeyboard>,
@@ -647,7 +625,7 @@ impl MacDesktop {
         let keyboard = self.keyboard.as_ref();
         let keyboard = keyboard.is_some_and(|k| k.key_repeat.is_some() || k.initial_key_repeat.is_some());
         let trackpad = self.trackpad.as_ref().is_some_and(|trackpad| trackpad.tap_to_click.is_some());
-        self.appearance.is_some() || dock || finder || keyboard || trackpad
+        dock || finder || keyboard || trackpad
     }
 }
 
