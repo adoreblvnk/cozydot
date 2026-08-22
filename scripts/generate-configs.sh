@@ -16,11 +16,12 @@ trap 'rm -rf -- "$temporary"' EXIT
 generate_cli() {
   yq '
     del(
-      .linux.system.allowed_platforms.desktops,
+      .shared.desktop,
       .linux.system.ubuntu.restricted_extras,
       .linux.packages.flatpak,
       .linux.desktop,
-      .linux.updates.flatpak
+      .linux.updates.flatpak,
+      .macos.desktop
     ) |
     .linux.integrations = {} |
     .linux.packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
@@ -30,16 +31,13 @@ generate_cli() {
     .linux.packages.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .shared.dotfiles.packages -= ["opencode", "vscode", "wezterm"]
+    .shared.dotfiles.packages -= ["opencode", "vscode", "wezterm"] |
+    .macos.homebrew.casks = ["git-credential-manager"]
   ' "$base"
 }
 
 generate_vm() {
   yq '
-    .linux.system.allowed_platforms = {
-      "distros": ["ubuntu", "debian"],
-      "desktops": ["gnome"]
-    } |
     del(
       .linux.integrations.docker,
       .linux.integrations.virtualbox
@@ -52,9 +50,15 @@ generate_vm() {
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
     .shared.tools.node = "latest" |
-    .shared.dotfiles.packages -= ["opencode"] |
+    .shared.dotfiles.packages -= ["bottom", "opencode", "yazi"] |
     .shared.integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
-    .linux.updates.apt = "full-upgrade"
+    .linux.updates.apt = "full-upgrade" |
+    .macos.homebrew.casks = [
+      "bitwarden",
+      "git-credential-manager",
+      "visual-studio-code",
+      "wezterm"
+    ]
   ' "$base"
 }
 

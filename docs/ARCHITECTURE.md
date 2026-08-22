@@ -63,7 +63,7 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 14. Install configured Nerd Font families.
 15. Apply shared and Linux dotfile packages.
 16. Apply Docker, VirtualBox, and Visual Studio Code integrations.
-17. Set configured Linux desktop settings.
+17. Set the shared theme and configured Linux desktop settings.
 
 ### macOS
 
@@ -77,7 +77,7 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 8. Install configured user Nerd Font families.
 9. Apply shared and macOS dotfile packages.
 10. Install configured Visual Studio Code extensions.
-11. Write configured macOS defaults.
+11. Set the shared theme and write configured macOS defaults.
 
 ## Dotfiles
 

@@ -340,7 +340,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
-    write_config(&root, "{}", "system:\n  sudo_group: true\n");
+    write_config(&root, "{}", "system:\n  debian:\n    sudo_group: true\n");
     write_linux_host_fakes(&fake_bin);
     write_executable(
         &fake_bin.join("sudo"),
@@ -524,6 +524,42 @@ case "$1" in
   *) exit 0 ;;
 esac
 "#,
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn shared_theme_configures_the_gnome_color_scheme() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = config_dir(&temp);
+    let fake_bin = temp.path().join("bin");
+    let state = temp.path().join("state");
+    let log = temp.path().join("apply.log");
+    fs::create_dir_all(state.join("files")).unwrap();
+    fs::create_dir_all(state.join("packages")).unwrap();
+    fs::write(state.join("files/debian.sources"), "Components: main\n").unwrap();
+    write_config(&root, "desktop:\n  theme: dark\n", "{}");
+    write_apt_fakes(&fake_bin);
+    write_executable(
+        &fake_bin.join("gsettings"),
+        "#!/bin/sh\nprintf 'gsettings %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n",
+    );
+
+    cozydot()
+        .env("XDG_CONFIG_HOME", temp.path().join("config"))
+        .env("XDG_CURRENT_DESKTOP", "gnome")
+        .env("COZYDOT_TEST_LOG", &log)
+        .env("COZYDOT_TEST_STATE", &state)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .arg("apply")
+        .assert()
+        .success();
+
+    assert!(
+        fs::read_to_string(log)
+            .unwrap()
+            .lines()
+            .any(|line| line == "gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'")
     );
 }
 

@@ -65,6 +65,9 @@ shared:
         - wayou.vscode-todo-highlight
         - yzhang.markdown-all-in-one
 
+  desktop:
+    theme: dark
+
   updates:
     tools:
       rust: true
@@ -78,15 +81,8 @@ shared:
 
 linux:
   system:
-    sudo_group: true
-    allowed_platforms:
-      distros:
-        - ubuntu
-        - debian
-        - pop
-        - linuxmint
-      desktops:
-        - gnome
+    debian:
+      sudo_group: true
     ubuntu:
       unattended_upgrades: disabled
       snapd: disabled
@@ -273,7 +269,6 @@ linux:
       group: true
 
   desktop:
-    theme: dark
     terminal: wezterm
     idle:
       timeout: 15m
@@ -337,7 +332,6 @@ macos:
       - zsh
 
   desktop:
-    appearance: dark
     dock:
       autohide: true
       show_recent_applications: false

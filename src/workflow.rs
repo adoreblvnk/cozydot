@@ -3,7 +3,7 @@
 use crate::{
     config::{
         AptArchitecture, AptRepoConfig, BinaryFormat, BinarySource, Config, DistroMapKey, Enablement, Fonts, Gnome,
-        LinuxDesktop, LinuxIntegrations, MacDesktop, SharedConfig, SharedPackages, Tools, select_distro_entry,
+        LinuxDesktop, LinuxIntegrations, MacDesktop, SharedConfig, SharedPackages, Theme, Tools, select_distro_entry,
         select_repo_codename,
     },
     operations::{
@@ -21,7 +21,7 @@ use crate::{
         },
         toolchains::{fnm, go, rustup, uv},
     },
-    platform::{Architecture, DesktopKind, Distro, Platform, PlatformIdentity},
+    platform::{Architecture, Distro, Platform, PlatformIdentity},
 };
 use anyhow::{Context, Result};
 use std::{
@@ -62,6 +62,7 @@ pub fn update(config: &Config, platform: &Platform) -> Result<()> {
 
 fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     let PlatformIdentity::Linux { distro, .. } = platform.identity else { unreachable!() };
+    let theme = config.shared.desktop.as_ref().and_then(|desktop| desktop.theme);
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     let mut repos = Vec::new();
     let mut repo_packages_to_purge = Vec::new();
@@ -101,11 +102,11 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             }
         }
     }
-    add_desktop_prereqs(config.linux.desktop.as_ref(), platform.desktop, &mut apt_prereqs);
+    add_desktop_prereqs(theme, config.linux.desktop.as_ref(), &mut apt_prereqs);
 
     // establish distro services and package prerequisites before third-party repositories
     if distro == Distro::Debian {
-        if config.linux.system.sudo_group == Some(true) {
+        if config.linux.system.debian.as_ref().is_some_and(|debian| debian.sudo_group == Some(true)) {
             run("Apply", "sudo group membership", users::ensure_in_sudo_group)?;
         }
         run("Apply", "Debian APT component add", repo::debian_components::add)?;
@@ -170,11 +171,12 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     linux_integrations(&config.linux.integrations)?;
     apply_vscode_extensions(&config.shared.integrations.vscode.extensions)?;
-    linux_desktop(config.linux.desktop.as_ref(), platform.desktop)?;
+    linux_desktop(theme, config.linux.desktop.as_ref())?;
     Ok(())
 }
 
 fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
+    let theme = config.shared.desktop.as_ref().and_then(|desktop| desktop.theme);
     let dotfiles = dotfiles_packages(&config.shared.dotfiles.packages, &config.macos.dotfiles.packages);
     let mut formulae = config.macos.homebrew.formulae.clone();
     if !formulae.iter().any(|formula| formula == "stow") {
@@ -199,7 +201,7 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
         run("Apply", "dotfiles apply", || dotfiles::apply(dotfiles_root, &dotfiles, false))?;
     }
     apply_vscode_extensions(&config.shared.integrations.vscode.extensions)?;
-    macos_desktop(&config.macos.desktop)?;
+    macos_desktop(theme, config.macos.desktop.as_ref())?;
     Ok(())
 }
 
@@ -363,26 +365,21 @@ fn apply_vscode_extensions(extensions: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn add_desktop_prereqs(
-    desktop: Option<&LinuxDesktop>,
-    desktop_kind: DesktopKind,
-    apt_prereqs: &mut BTreeSet<&'static str>,
-) {
-    let Some(desktop) = desktop.filter(|desktop| desktop.has_intent()) else { return };
+fn add_desktop_prereqs(theme: Option<Theme>, desktop: Option<&LinuxDesktop>, apt_prereqs: &mut BTreeSet<&'static str>) {
+    if theme.is_none() && !desktop.is_some_and(LinuxDesktop::has_intent) {
+        return;
+    }
     apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
-    if desktop_kind == DesktopKind::Gnome && desktop.gnome.as_ref().is_some_and(Gnome::has_intent) {
+    if desktop.and_then(|desktop| desktop.gnome.as_ref()).is_some_and(Gnome::has_intent) {
         apt_prereqs.insert("gnome-shell");
     }
 }
 
-fn linux_desktop(desktop: Option<&LinuxDesktop>, desktop_kind: DesktopKind) -> Result<()> {
-    let Some(desktop) = desktop.filter(|desktop| desktop.has_intent()) else { return Ok(()) };
-    if desktop_kind != DesktopKind::Gnome {
-        return Ok(());
-    }
-    if let Some(theme) = desktop.theme {
+fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result<()> {
+    if let Some(theme) = theme {
         run("Apply", "desktop setting set", || desktop::set_color_scheme(theme))?;
     }
+    let Some(desktop) = desktop.filter(|desktop| desktop.has_intent()) else { return Ok(()) };
     if let Some(executable) = &desktop.terminal {
         run("Apply", "desktop setting set", || desktop::set_terminal(executable))?;
     }
@@ -408,9 +405,9 @@ fn linux_desktop(desktop: Option<&LinuxDesktop>, desktop_kind: DesktopKind) -> R
     Ok(())
 }
 
-fn macos_desktop(desktop: &MacDesktop) -> Result<()> {
-    if desktop.has_intent() {
-        run("Apply", "macOS defaults write", || macos_defaults::write_defaults(desktop))?;
+fn macos_desktop(theme: Option<Theme>, desktop: Option<&MacDesktop>) -> Result<()> {
+    if theme.is_some() || desktop.is_some_and(MacDesktop::has_intent) {
+        run("Apply", "macOS defaults write", || macos_defaults::write_defaults(theme, desktop))?;
     }
     Ok(())
 }
