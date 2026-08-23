@@ -29,26 +29,14 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let load = || -> Result<Self> {
             let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-            let config = Self::deserialize_str(&text)?;
+            let config: Self = yaml_serde::from_str(&text).context("config")?;
             config.validate()?;
             Ok(config)
         };
         load().with_context(|| format!("validate {}", path.display()))
     }
 
-    fn deserialize_str(text: &str) -> Result<Self> {
-        yaml_serde::from_str(text).context("config")
-    }
-
     fn validate(&self) -> Result<()> {
-        self.linux.packages.validate()?;
-        self.shared.fonts.validate()?;
-        self.shared.dotfiles.validate("shared.dotfiles")?;
-        self.linux.dotfiles.validate("linux.dotfiles")?;
-        self.macos.dotfiles.validate("macos.dotfiles")?;
-        if let Some(desktop) = &self.linux.desktop {
-            desktop.validate()?;
-        }
         if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
             && self.shared.tools.rust.is_none()
         {
@@ -66,6 +54,14 @@ impl Config {
                 bail!("shared.tools.go: expected `latest` or an exact version such as `1.24.6`");
             }
         }
+        self.shared.fonts.validate()?;
+        self.shared.dotfiles.validate("shared.dotfiles")?;
+        self.linux.packages.validate()?;
+        self.linux.dotfiles.validate("linux.dotfiles")?;
+        if let Some(desktop) = &self.linux.desktop {
+            desktop.validate()?;
+        }
+        self.macos.dotfiles.validate("macos.dotfiles")?;
         Ok(())
     }
 
@@ -103,9 +99,9 @@ pub struct SharedConfig {
 #[serde(deny_unknown_fields)]
 pub struct Tools {
     pub rust: Option<String>,
-    pub go: Option<String>,
     pub node: Option<String>,
     pub python: Option<String>,
+    pub go: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -698,4 +694,47 @@ fn validate_executable(value: &str, path: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn platform(distro: Distro, family: Family, distro_codename: &str, base_codename: &str) -> Platform {
+        Platform {
+            identity: PlatformIdentity::Linux { distro, family },
+            distro_codename: distro_codename.to_owned(),
+            base_codename: base_codename.to_owned(),
+            desktop: DesktopKind::None,
+            architecture: Architecture::X86_64,
+        }
+    }
+
+    fn family_repo_codename(platform: &Platform) -> &str {
+        let uris = BTreeMap::from([(DistroMapKey::Ubuntu, ()), (DistroMapKey::Debian, ())]);
+        let (key, _) = select_distro_entry(&uris, platform.identity).unwrap();
+        select_repo_codename(key, platform)
+    }
+
+    #[test]
+    fn ubuntu_family_repo_uses_base_codename_for_derivatives() {
+        let pop = platform(Distro::Pop, Family::Ubuntu, "cosmic", "noble");
+        let mint = platform(Distro::LinuxMint, Family::Ubuntu, "wilma", "noble");
+        assert_eq!(family_repo_codename(&pop), "noble");
+        assert_eq!(family_repo_codename(&mint), "noble");
+    }
+
+    #[test]
+    fn debian_family_repo_uses_base_codename_for_linux_mint() {
+        let mint = platform(Distro::LinuxMint, Family::Debian, "faye", "bookworm");
+        assert_eq!(family_repo_codename(&mint), "bookworm");
+    }
+
+    #[test]
+    fn family_repo_keeps_base_distro_codename() {
+        let ubuntu = platform(Distro::Ubuntu, Family::Ubuntu, "noble", "noble");
+        let debian = platform(Distro::Debian, Family::Debian, "bookworm", "bookworm");
+        assert_eq!(family_repo_codename(&ubuntu), "noble");
+        assert_eq!(family_repo_codename(&debian), "bookworm");
+    }
 }

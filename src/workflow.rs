@@ -56,7 +56,7 @@ pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     host::home()?;
     match platform.identity {
         PlatformIdentity::Macos => macos_update(config, platform.architecture),
-        PlatformIdentity::Linux { .. } => linux_update(config, platform),
+        PlatformIdentity::Linux { .. } => linux_update(config, platform.architecture),
     }
 }
 
@@ -235,7 +235,7 @@ fn apply_packages(packages: &SharedPackages) -> Result<()> {
     Ok(())
 }
 
-fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
+fn linux_update(config: &Config, architecture: Architecture) -> Result<()> {
     let updates = config.linux.updates.as_ref();
     let flatpak = updates.and_then(|updates| updates.flatpak) == Some(true);
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
@@ -254,7 +254,7 @@ fn linux_update(config: &Config, platform: &Platform) -> Result<()> {
     if flatpak {
         run("Update", "Flatpak update", flatpak::update)?;
     }
-    update_tools_and_packages(&config.shared, platform.architecture, false)?;
+    update_tools_and_packages(&config.shared, architecture, false)?;
     if config.shared.updates.fonts == Some(true)
         && let Some(families) = nerd_fonts(&config.shared.fonts)
     {
