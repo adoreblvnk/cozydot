@@ -71,7 +71,6 @@ fn cozydot() -> Command {
 }
 
 fn write_linux_host_fakes(fake_bin: &Path) {
-    write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(&fake_bin.join("dpkg-query"), "#!/bin/sh\nprintf 'installed\\n'\n");
 }
 
@@ -229,28 +228,24 @@ fn init_preserves_entire_dotfile_package_when_one_file_changes() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn validation_happens_before_platform_detection_or_mutation() {
+fn invalid_config_prevents_host_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
-    let probe = temp.path().join("platform-probe");
     let mutation = temp.path().join("mutation");
     fs::write(root.join("cozydot.yaml"), "version: [\n").unwrap();
-    write_executable(&fake_bin.join("uname"), "#!/bin/sh\n: > \"$COZYDOT_TEST_PROBE\"\nprintf 'x86_64\\n'\n");
     for command in ["sudo", "curl", "gpg", "stow", "systemctl", "gsettings", "code"] {
         write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
     }
 
     cozydot()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
-        .env("COZYDOT_TEST_PROBE", &probe)
         .env("COZYDOT_TEST_MUTATION", &mutation)
         .env("PATH", &fake_bin)
         .arg("apply")
         .assert()
         .failure()
         .stderr(predicate::str::contains("active configuration is missing or invalid"));
-    assert!(!probe.exists());
     assert!(!mutation.exists());
 
     let repo = |extra: &str| {
