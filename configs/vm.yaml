@@ -20,7 +20,6 @@ shared:
   dotfiles:
     packages:
       - bat
-      - bin
       - fastfetch
       - git
       - gnupg

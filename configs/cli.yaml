@@ -26,7 +26,6 @@ shared:
   dotfiles:
     packages:
       - bat
-      - bin
       - bottom
       - fastfetch
       - git

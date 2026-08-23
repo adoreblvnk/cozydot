@@ -67,11 +67,11 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 
 ### macOS
 
-1. Derive required tool installations and whether dotfiles require Stow.
+1. Derive required tool installations and Homebrew packages.
 2. Validate sudo access when configured.
 3. Install Command Line Tools for Xcode when configured.
 4. Install Homebrew.
-5. Install configured formulae and casks, adding `stow` when dotfiles are configured.
+5. Install configured formulae and casks with `stow` as a baseline prerequisite.
 6. Install Rust with the configured toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
 7. Install configured Cargo crates and npm packages.
 8. Install configured user Nerd Font families.
