@@ -71,7 +71,7 @@ for preset in cli vm; do
   committed="$root/configs/$preset.yaml"
   if [[ "$mode" == "--check" ]]; then
     if ! cmp -s -- "$generated" "$committed"; then
-      printf 'configs/%s.yaml is stale; run scripts/generate-configs.sh\n' "$preset" >&2
+      printf 'error: configs/%s.yaml is stale; run scripts/generate-configs.sh\n' "$preset" >&2
       status=1
     fi
   else

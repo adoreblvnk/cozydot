@@ -78,7 +78,8 @@ fn write_linux_host_fakes(fake_bin: &Path) {
 fn cli_contracts() {
     for args in [Vec::<&str>::new(), vec!["--help"]] {
         cozydot().args(args).assert().success().stdout(
-            predicate::str::contains("init")
+            predicate::str::contains("Declarative Linux and macOS post-install, update, and dotfile manager")
+                .and(predicate::str::contains("init"))
                 .and(predicate::str::contains("apply"))
                 .and(predicate::str::contains("check"))
                 .and(predicate::str::contains("dotfiles"))
@@ -89,12 +90,9 @@ fn cli_contracts() {
 
     let temp = tempfile::tempdir().unwrap();
     for command in ["apply", "check", "dotfiles", "update"] {
-        cozydot()
-            .env("XDG_CONFIG_HOME", temp.path())
-            .arg(command)
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("active configuration is missing or invalid"));
+        cozydot().env("XDG_CONFIG_HOME", temp.path()).arg(command).assert().failure().stderr(
+            predicate::str::contains("active config not found at").and(predicate::str::contains("run `cozydot init`")),
+        );
     }
     cozydot()
         .env("XDG_CONFIG_HOME", temp.path())
@@ -131,7 +129,7 @@ fn installer_rejects_unsupported_platform_before_download() {
         .env("COZYDOT_TEST_DOWNLOAD", &download)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("cozydot: unsupported platform"));
+        .stderr(predicate::str::contains("error: unsupported platform Darwin:x86_64"));
     assert!(!download.exists());
 }
 
@@ -167,7 +165,7 @@ esac
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .assert()
         .failure()
-        .stderr(predicate::str::contains("cozydot: checksum verification failed"));
+        .stderr(predicate::str::contains("error: checksum verification failed"));
     assert_eq!(fs::read_to_string(install_dir.join("cozydot")).unwrap(), "existing\n");
 }
 
@@ -175,9 +173,21 @@ esac
 fn init_materializes_presets_and_preserves_user_edits() {
     for preset in ["cozydot", "cli", "vm"] {
         let temp = tempfile::tempdir().unwrap();
-        cozydot().env("XDG_CONFIG_HOME", temp.path()).args(["init", "--preset", preset]).assert().success();
-        cozydot().env("XDG_CONFIG_HOME", temp.path()).arg("check").assert().success();
         let root = temp.path().join("cozydot");
+        cozydot()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .args(["init", "--preset", preset])
+            .assert()
+            .success()
+            .stdout(format!("Initialized Cozydot at {}\n", root.display()))
+            .stderr("");
+        cozydot()
+            .env("XDG_CONFIG_HOME", temp.path())
+            .arg("check")
+            .assert()
+            .success()
+            .stdout(format!("Validated {}\n", root.join("cozydot.yaml").display()))
+            .stderr("");
         assert_eq!(fs::read(root.join("cozydot.yaml")).unwrap(), fs::read(format!("configs/{preset}.yaml")).unwrap());
         assert!(root.join(".managed-files").is_file());
         assert!(root.join("dotfiles/bash/.bashrc").is_file());
@@ -245,7 +255,7 @@ fn invalid_config_prevents_host_mutation() {
         .arg("apply")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("active configuration is missing or invalid"));
+        .stderr(predicate::str::contains("error: parse").and(predicate::str::contains("cozydot.yaml")));
     assert!(!mutation.exists());
 
     let repo = |extra: &str| {
@@ -311,8 +321,9 @@ printf '%s\n' "$*" >> "$COZYDOT_TEST_APT_LOG"
             .env("PATH", &fake_bin);
         command
     };
-    command().arg("apply").assert().success().stdout("Apply: APT update\nApply: APT package install\n");
-    command().arg("update").assert().success().stdout("Update: APT update\nUpdate: APT package install\n");
+    let baseline = "    Updating APT package metadata\n  Installing APT prerequisites\n";
+    command().arg("apply").assert().success().stdout("").stderr(baseline);
+    command().arg("update").assert().success().stdout("").stderr(baseline);
     assert_eq!(
         fs::read_to_string(apt_log).unwrap(),
         concat!(
@@ -349,7 +360,8 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
         .arg("apply")
         .assert()
         .success()
-        .stdout("Apply: APT update\nApply: APT package install\n");
+        .stdout("")
+        .stderr("    Updating APT package metadata\n  Installing APT prerequisites\n");
     assert!(!mutation.exists());
 }
 
@@ -409,7 +421,7 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
     assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
     assert!(!state.exists());
 
-    command().args(["dotfiles", "--replace"]).assert().success().stdout("Apply: dotfiles apply\n");
+    command().args(["dotfiles", "--replace"]).assert().success().stdout("").stderr("    Applying dotfiles\n");
     assert_eq!(fs::canonicalize(home.join(".bashrc")).unwrap(), fs::canonicalize(source).unwrap());
     let backups = state.join("cozydot/dotfile-backups");
     let backup = fs::read_dir(backups).unwrap().next().unwrap().unwrap().path().join("bash/.bashrc");
@@ -783,7 +795,8 @@ fn inapplicable_repos_have_no_side_effects() {
             .arg("apply")
             .assert()
             .success()
-            .stdout("Apply: APT update\nApply: APT package install\n");
+            .stdout("")
+            .stderr("    Updating APT package metadata\n  Installing APT prerequisites\n");
         assert!(!mutation.exists());
     }
 }

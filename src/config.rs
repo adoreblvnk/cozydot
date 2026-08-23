@@ -27,13 +27,10 @@ pub struct Config {
 impl Config {
     /// Load & validate config at `path`.
     pub fn load(path: &Path) -> Result<Self> {
-        let load = || -> Result<Self> {
-            let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-            let config: Self = yaml_serde::from_str(&text).context("config")?;
-            config.validate()?;
-            Ok(config)
-        };
-        load().with_context(|| format!("validate {}", path.display()))
+        let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        let config: Self = yaml_serde::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+        config.validate().with_context(|| format!("validate {}", path.display()))?;
+        Ok(config)
     }
 
     fn validate(&self) -> Result<()> {

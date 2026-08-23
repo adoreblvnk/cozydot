@@ -1,7 +1,11 @@
 //! Provision Linux & macOS from one config.
 
-use anyhow::{Context, Result};
+use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 mod config;
 mod init;
@@ -11,7 +15,7 @@ mod platform;
 mod workflow;
 
 #[derive(Debug, Parser)]
-#[command(name = "cozydot", version, about = "Provision Linux and macOS from one active configuration")]
+#[command(name = "cozydot", version, about = "Declarative Linux and macOS post-install, update, and dotfile manager")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -19,28 +23,28 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Safely initialize or synchronize config & bundled dotfiles.
+    /// Initialize or synchronize config & bundled dotfiles.
     Init {
-        /// Choose config preset.
+        /// Select a config preset.
         #[arg(long, value_enum, default_value = "cozydot")]
         preset: init::Preset,
     },
-    /// Check active config.
+    /// Validate active config.
     Check,
     /// Apply active config to this host.
     Apply,
     /// Apply configured dotfiles.
     Dotfiles {
-        /// Back up conflicts before replacing with Cozydot links.
+        /// Back up conflicts before replacing them with Cozydot links.
         #[arg(short = 'r', long)]
         replace: bool,
     },
-    /// Run enabled updates.
+    /// Update configured software.
     Update,
 }
 
 struct ActiveHost {
-    config_dir: std::path::PathBuf,
+    config_dir: PathBuf,
     config: config::Config,
     platform: platform::Platform,
 }
@@ -48,40 +52,61 @@ struct ActiveHost {
 impl ActiveHost {
     fn load() -> Result<Self> {
         let config_dir = paths::config_dir()?;
-        let config = config::Config::load(&config_dir.join("cozydot.yaml"))
-            .with_context(|| "active configuration is missing or invalid; run 'cozydot init' first")?;
+        let config = load_active_config(&config_dir.join("cozydot.yaml"))?;
         let platform = platform::Platform::detect()?;
         config.validate_for_platform(&platform)?;
         Ok(Self { config_dir, config, platform })
     }
 }
 
-fn main() -> Result<()> {
-    let Some(command) = Cli::parse().command else {
-        Cli::command().print_help()?;
-        println!();
-        return Ok(());
-    };
-    match command {
-        Command::Init { preset } => println!("Initialized cozydot in {}", init::init(preset)?.display()),
-        Command::Check => {
-            let path = paths::config_dir()?.join("cozydot.yaml");
-            let context = "active configuration is missing or invalid; run 'cozydot init' first";
-            config::Config::load(&path).with_context(|| context)?;
-            println!("Checked {}", path.display());
+fn load_active_config(path: &Path) -> Result<config::Config> {
+    match config::Config::load(path) {
+        Err(error)
+            if error.chain().any(|cause| {
+                cause.downcast_ref::<io::Error>().is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
+            }) =>
+        {
+            Err(anyhow!("active config not found at {}; run `cozydot init`", path.display()))
         }
-        Command::Apply => {
-            let host = ActiveHost::load()?;
-            workflow::apply(&host.config, &host.platform, &host.config_dir.join("dotfiles"))?;
-        }
-        Command::Dotfiles { replace } => {
-            let host = ActiveHost::load()?;
-            workflow::dotfiles(&host.config, &host.platform, &host.config_dir.join("dotfiles"), replace)?;
-        }
-        Command::Update => {
-            let host = ActiveHost::load()?;
-            workflow::update(&host.config, &host.platform)?;
-        }
+        result => result,
     }
-    Ok(())
+}
+
+fn main() {
+    let result = (|| -> Result<()> {
+        let Some(command) = Cli::parse().command else {
+            Cli::command().print_help()?;
+            println!();
+            return Ok(());
+        };
+        match command {
+            Command::Init { preset } => println!("Initialized Cozydot at {}", init::init(preset)?.display()),
+            Command::Check => {
+                let path = paths::config_dir()?.join("cozydot.yaml");
+                load_active_config(&path)?;
+                println!("Validated {}", path.display());
+            }
+            Command::Apply => {
+                let host = ActiveHost::load()?;
+                workflow::apply(&host.config, &host.platform, &host.config_dir.join("dotfiles"))?;
+            }
+            Command::Dotfiles { replace } => {
+                let host = ActiveHost::load()?;
+                workflow::dotfiles(&host.config, &host.platform, &host.config_dir.join("dotfiles"), replace)?;
+            }
+            Command::Update => {
+                let host = ActiveHost::load()?;
+                workflow::update(&host.config, &host.platform)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        eprintln!("error: {error}");
+        for cause in error.chain().skip(1) {
+            let cause = cause.to_string().replace('\n', "\n  ");
+            eprintln!("\nCaused by:\n  {cause}");
+        }
+        std::process::exit(1);
+    }
 }
