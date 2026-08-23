@@ -44,7 +44,6 @@ jobs:
             COZYDOT_RELEASE_BASE_URL="file:///does/not/exist" "$binary" init
           test -f "$root/config/cozydot/cozydot.yaml"
           test -f "$root/config/cozydot/dotfiles/bash/.bashrc"
-          test -x "$root/config/cozydot/dotfiles/bin/.local/bin/round"
           test ! -e "$root/cache"
           "$binary" --version
       - run: bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc

@@ -32,7 +32,6 @@ shared:
   dotfiles:
     packages:
       - bat
-      - bin
       - bottom
       - fastfetch
       - git
@@ -173,7 +172,8 @@ linux:
           key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
           uris:
-            default: https://download.virtualbox.org/virtualbox/debian
+            ubuntu: https://download.virtualbox.org/virtualbox/debian
+            debian: https://download.virtualbox.org/virtualbox/debian
           suite: codename
           components:
             - contrib

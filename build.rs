@@ -54,6 +54,10 @@ fn walk(source: &Path, destination: &Path, records: &mut BTreeMap<String, (PathB
     for entry in entries {
         let file_name = entry.file_name();
         let name = validate_name(&file_name, &entry.path())?;
+        // keep the local-only bin package out of embedded releases
+        if destination == Path::new("dotfiles") && name == "bin" {
+            continue;
+        }
         let child_destination = destination.join(name);
         let kind = entry.file_type()?;
         if kind.is_dir() {
