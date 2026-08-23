@@ -34,7 +34,7 @@ pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> R
 
 pub(crate) fn update_toolchain(selector: &str, architecture: Architecture) -> Result<()> {
     if selector != "latest" {
-        eprintln!("warning: Go update skipped because shared.tools.go is pinned to an exact version");
+        eprintln!("warning: skipping Go update because shared.tools.go is pinned to an exact version");
         return Ok(());
     }
     install_toolchain(selector, architecture)

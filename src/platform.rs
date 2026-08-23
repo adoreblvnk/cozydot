@@ -77,7 +77,7 @@ impl Distro {
             "linuxmint" => Ok(Self::LinuxMint),
             "pop" => Ok(Self::Pop),
             "debian" => Ok(Self::Debian),
-            _ => bail!("unsupported distro: {value}"),
+            _ => bail!("unsupported distro {value:?}; supported distros: Debian, Ubuntu, Pop!_OS, Linux Mint"),
         }
     }
 

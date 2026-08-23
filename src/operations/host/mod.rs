@@ -32,7 +32,12 @@ where
 {
     let output = output(program, args)?;
     if !output.status.success() {
-        bail!("{label}: {program} failed ({}): {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        if stderr.is_empty() {
+            bail!("{label}: {program} failed ({})", output.status);
+        }
+        bail!("{label}: {program} failed ({})\n--- stderr\n{stderr}", output.status);
     }
     Ok(output)
 }

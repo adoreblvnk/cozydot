@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_ID="$(cargo pkgid --manifest-path "$ROOT/Cargo.toml")"
 VERSION="${PACKAGE_ID##*[#@]}"
-[[ -n $VERSION && $VERSION != "$PACKAGE_ID" ]] || { printf 'unable to resolve Cargo package version\n' >&2; exit 1; }
+[[ -n $VERSION && $VERSION != "$PACKAGE_ID" ]] || { printf 'error: unable to resolve Cargo package version\n' >&2; exit 1; }
 OUTPUT="${1:-$ROOT/target}"
 MACHINE="${COZYDOT_ARCH:-$(uname -m)}"
 SYSTEM="$(uname -s)"
@@ -12,9 +12,9 @@ case "$SYSTEM:$MACHINE" in
   Linux:x86_64 | Linux:amd64) PLATFORM=linux; ARCH=amd64; TARGET=x86_64-unknown-linux-gnu; TAR=tar ;;
   Linux:aarch64 | Linux:arm64) PLATFORM=linux; ARCH=arm64; TARGET=aarch64-unknown-linux-gnu; TAR=tar ;;
   Darwin:arm64) PLATFORM=macos; ARCH=arm64; TARGET=aarch64-apple-darwin; TAR=gtar ;;
-  *) printf 'unsupported platform: %s %s\n' "$SYSTEM" "$MACHINE" >&2; exit 1 ;;
+  *) printf 'error: unsupported platform: %s %s\n' "$SYSTEM" "$MACHINE" >&2; exit 1 ;;
 esac
-command -v "$TAR" >/dev/null 2>&1 || { printf 'required GNU tar command is unavailable: %s\n' "$TAR" >&2; exit 1; }
+command -v "$TAR" >/dev/null 2>&1 || { printf 'error: required GNU tar command is unavailable: %s\n' "$TAR" >&2; exit 1; }
 ASSET="cozydot-$VERSION-$PLATFORM-$ARCH.tar.gz"
 mkdir -p "$ROOT/target"
 STAGE="$(mktemp -d "$ROOT/target/.package.XXXXXX")"
