@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, ensure};
 use std::ffi::OsStr;
 
 use crate::operations::host::{
@@ -33,9 +33,7 @@ pub fn install(selector: &str) -> Result<()> {
                 OsStr::new(selector),
             ],
         )?;
-        if !is_regular_executable(&rustup_path) {
-            bail!("rustup installer did not publish the managed rustup executable");
-        }
+        ensure!(is_regular_executable(&rustup_path), "rustup installer did not publish the managed rustup executable");
     } else {
         let rustup = path_program(&rustup_path, "managed tool executable path")?;
         host::run("rustup toolchain install", &rustup, ["toolchain", "install", "--no-update", "--", selector])?;

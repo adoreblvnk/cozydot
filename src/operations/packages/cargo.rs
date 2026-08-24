@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use regex::Regex;
 
 use super::super::host::{self, is_executable, path_program};
 
@@ -54,11 +55,7 @@ pub(crate) fn update_crates() -> Result<()> {
 
 fn installed_crates(output: &[u8]) -> Result<Vec<String>> {
     let output = std::str::from_utf8(output).context("cargo install --list returned non-UTF-8 output")?;
-    let installed = output.lines().filter_map(|line| {
-        let (name, version) = line.split_once(" v")?;
-        let valid_name = !name.is_empty() && !name.contains(char::is_whitespace);
-        let valid_version = version.starts_with(|character: char| character.is_ascii_digit());
-        (valid_name && valid_version).then(|| name.to_owned())
-    });
+    let pattern = Regex::new(r"^(\S+) v[0-9].*$")?;
+    let installed = output.lines().filter_map(|line| pattern.captures(line).map(|captures| captures[1].to_owned()));
     Ok(installed.collect())
 }

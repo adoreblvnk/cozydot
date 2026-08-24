@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use std::{
     fs::{self, File},
     io::Write,
@@ -27,9 +27,7 @@ pub(crate) fn set_color_scheme(color_scheme: Theme) -> Result<()> {
 }
 
 pub(crate) fn set_terminal(executable: &str) -> Result<()> {
-    if !host::has_executable_on_path(executable) {
-        bail!("desktop terminal executable {executable:?} is unavailable");
-    }
+    ensure!(host::has_executable_on_path(executable), "desktop terminal executable {executable:?} is unavailable");
     set_xdg_terminal(executable)?;
     // Ubuntu provides this media key; upstream GNOME needs a custom binding.
     if !host::output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {

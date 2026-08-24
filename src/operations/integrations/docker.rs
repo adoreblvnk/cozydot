@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value};
 use std::path::Path;
 
@@ -30,9 +30,7 @@ fn read_config() -> Result<Map<String, Value>> {
     }
     let mode_hex = stdout_line(&stat_output.stdout, "sudo stat")?;
     let mode = u32::from_str_radix(mode_hex, 16).context("sudo stat returned malformed mode output")?;
-    if mode & 0o170000 != 0o100000 {
-        bail!("Docker daemon config destination is not a regular file");
-    }
+    ensure!(mode & 0o170000 == 0o100000, "Docker daemon config destination is not a regular file");
     let output = host::run("Docker daemon config read", "sudo", ["cat", DAEMON_CONFIG])?;
     serde_json::from_slice(&output.stdout).context("Docker daemon config must be a JSON object")
 }

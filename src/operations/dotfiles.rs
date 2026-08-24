@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use std::{
     ffi::OsStr,
     fs,
@@ -21,9 +21,7 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
         let package_dir = stow_dir.join(package);
         let metadata = fs::symlink_metadata(&package_dir)
             .with_context(|| format!("dotfiles package {package:?} does not exist"))?;
-        if !metadata.file_type().is_dir() {
-            bail!("dotfiles package {package:?} is not a real directory");
-        }
+        ensure!(metadata.file_type().is_dir(), "dotfiles package {package:?} is not a real directory");
         package_dirs.push((package, package_dir));
     }
 

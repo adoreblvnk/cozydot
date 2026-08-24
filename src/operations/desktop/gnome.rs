@@ -1,4 +1,5 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -68,17 +69,9 @@ fn install_or_enable_extension(uuid: &str) -> Result<Outcome> {
 
 fn validate_uuid(value: &str) -> Result<()> {
     // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
-    let Some((left, right)) = value.split_once('@') else {
-        bail!("invalid GNOME extension UUID {value:?}");
-    };
-    if !valid_uuid_part(left) || !valid_uuid_part(right) {
-        bail!("invalid GNOME extension UUID {value:?}");
-    }
+    let valid = Regex::new(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$")?.is_match(value);
+    ensure!(valid, "invalid GNOME extension UUID {value:?}");
     Ok(())
-}
-
-fn valid_uuid_part(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
 }
 
 fn install_extension(uuid: &str) -> Result<()> {
@@ -97,16 +90,10 @@ fn install_extension(uuid: &str) -> Result<()> {
 }
 
 fn shell_version(input: &str) -> Result<&str> {
+    let pattern = Regex::new(r"^[0-9]+(\.[0-9]+)*$")?;
     for token in input.split_whitespace() {
         let candidate = token.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
-        let mut is_version = !candidate.is_empty();
-        for component in candidate.split('.') {
-            if component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit()) {
-                is_version = false;
-                break;
-            }
-        }
-        if is_version {
+        if pattern.is_match(candidate) {
             return Ok(candidate);
         }
     }

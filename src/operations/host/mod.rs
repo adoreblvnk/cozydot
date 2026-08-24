@@ -6,7 +6,7 @@ use std::{
     process::{Command, Output},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 
 pub(crate) mod macos;
 pub(crate) mod privileged_file;
@@ -99,9 +99,7 @@ pub(crate) fn path_program(path: &Path, description: &str) -> Result<String> {
 }
 
 pub(crate) fn require_regular_executable(path: &Path, description: &str, unavailable: &str) -> Result<String> {
-    if !is_regular_executable(path) {
-        bail!("{unavailable}");
-    }
+    ensure!(is_regular_executable(path), "{unavailable}");
     path_program(path, description)
 }
 
@@ -109,9 +107,7 @@ pub(crate) fn require_regular_executable(path: &Path, description: &str, unavail
 pub(crate) fn stdout_line<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str> {
     let output = std::str::from_utf8(bytes).with_context(|| format!("{command} returned non-UTF-8 output"))?;
     let record = output.strip_suffix('\n').unwrap_or(output);
-    if record.is_empty() || record.contains('\n') {
-        bail!("{command} returned malformed record output");
-    }
+    ensure!(!record.is_empty() && !record.contains('\n'), "{command} returned malformed record output");
     Ok(record)
 }
 
