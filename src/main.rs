@@ -2,10 +2,7 @@
 
 use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::{io, path::PathBuf};
 
 use crate::style::ERROR;
 
@@ -55,23 +52,18 @@ struct ActiveHost {
 impl ActiveHost {
     fn load() -> Result<Self> {
         let config_dir = paths::config_dir()?;
-        let config = load_active_config(&config_dir.join("cozydot.yaml"))?;
+        let path = config_dir.join("cozydot.yaml");
+        let config = match config::Config::load(&path) {
+            Err(error)
+                if error.downcast_ref::<io::Error>().is_some_and(|error| error.kind() == io::ErrorKind::NotFound) =>
+            {
+                Err(anyhow!("active config not found at {}; run `cozydot init`", path.display()))
+            }
+            result => result,
+        }?;
         let platform = platform::Platform::detect()?;
         config.validate_for_platform(&platform)?;
         Ok(Self { config_dir, config, platform })
-    }
-}
-
-fn load_active_config(path: &Path) -> Result<config::Config> {
-    match config::Config::load(path) {
-        Err(error)
-            if error.chain().any(|cause| {
-                cause.downcast_ref::<io::Error>().is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
-            }) =>
-        {
-            Err(anyhow!("active config not found at {}; run `cozydot init`", path.display()))
-        }
-        result => result,
     }
 }
 
@@ -85,9 +77,8 @@ fn main() {
         match command {
             Command::Init { preset } => println!("Initialized Cozydot at {}", init::init(preset)?.display()),
             Command::Check => {
-                let path = paths::config_dir()?.join("cozydot.yaml");
-                load_active_config(&path)?;
-                println!("Validated {}", path.display());
+                let host = ActiveHost::load()?;
+                println!("Validated {}", host.config_dir.join("cozydot.yaml").display());
             }
             Command::Apply => {
                 let host = ActiveHost::load()?;

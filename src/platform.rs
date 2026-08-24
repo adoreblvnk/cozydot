@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use etc_os_release::OsRelease;
 use serde::Deserialize;
 
@@ -15,9 +15,7 @@ impl Platform {
     pub fn detect() -> Result<Self> {
         let uname = rustix::system::uname();
         let arch = uname.machine().to_str().context("uname machine architecture is not UTF-8")?;
-        if arch.is_empty() {
-            bail!("uname returned an empty machine architecture");
-        }
+        ensure!(!arch.is_empty(), "uname returned an empty machine architecture");
         if cfg!(target_os = "macos") {
             let arch = match arch {
                 "aarch64" | "arm64" => Arch::Aarch64,
@@ -45,7 +43,7 @@ impl Platform {
             Family::Debian => os.get_value("DEBIAN_CODENAME"),
         };
         let base_codename = base_codename.unwrap_or(&distro_codename).to_owned();
-        if distro == Distro::Debian && !matches!(distro_codename.as_str(), "bookworm" | "trixie") {
+        if distro == Distro::Debian && !["bookworm", "trixie"].contains(&distro_codename.as_str()) {
             bail!("unsupported Debian release {distro_codename:?}; supported releases are bookworm and trixie");
         }
         if distro_codename.chars().any(char::is_control) || base_codename.chars().any(char::is_control) {
@@ -120,13 +118,7 @@ pub enum DesktopKind {
 
 impl DesktopKind {
     fn from_environment(value: &str) -> Self {
-        for token in value.split(':') {
-            let token = token.to_ascii_lowercase();
-            if token.contains("gnome") {
-                return Self::Gnome;
-            }
-        }
-        Self::None
+        if value.to_ascii_lowercase().contains("gnome") { Self::Gnome } else { Self::None }
     }
 
     pub fn as_str(self) -> &'static str {

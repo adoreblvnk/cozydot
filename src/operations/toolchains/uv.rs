@@ -1,7 +1,7 @@
 use crate::operations::host::{
     self, is_regular_executable, require_regular_executable, shell::append_profile, temp_path,
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, ensure};
 
 const UV_INIT: &str = r#"if [ -f "$HOME/.local/bin/env" ]; then
   . "$HOME/.local/bin/env"
@@ -14,9 +14,7 @@ pub fn install() -> Result<()> {
         let path = installer.as_os_str();
         host::curl("uv installer download", "https://astral.sh/uv/install.sh", ["--output".as_ref(), path])?;
         host::run("uv install", "env", ["UV_NO_MODIFY_PATH=1".as_ref(), "sh".as_ref(), path])?;
-        if !is_regular_executable(&uv_path) {
-            bail!("uv installer did not publish executable {}", uv_path.display());
-        }
+        ensure!(is_regular_executable(&uv_path), "uv installer did not publish executable {}", uv_path.display());
     }
     append_profile(UV_INIT)
 }

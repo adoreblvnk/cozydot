@@ -1,6 +1,6 @@
 use crate::operations::host::{self, privileged_file, temp_path};
 use crate::platform::Arch;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 use std::{ffi::OsStr, fs, path::PathBuf};
 
 const SOURCES_DIR: &str = "/etc/apt/sources.list.d";
@@ -69,16 +69,14 @@ fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
     let key_list = host::run("repo key validation", "gpg", args)?;
     let mut lines = key_list.stdout.split(|byte| *byte == b'\n');
     let public_key = lines.any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()));
-    if !public_key {
-        bail!("repo key validation found no public key");
-    }
+    ensure!(public_key, "repo key validation found no public key");
 
     if preserve_armor { Ok(downloaded_bytes) } else { fs::read(&binary_keyring).context("read dearmored repo key") }
 }
 
 pub(crate) mod debian_components {
     use crate::operations::host::{self, privileged_file};
-    use anyhow::{Context, Result, bail};
+    use anyhow::{Context, Result, bail, ensure};
     use std::{ffi::OsStr, path::Path};
 
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
@@ -98,9 +96,7 @@ pub(crate) mod debian_components {
         let source = if deb822 { DEB822_SOURCE } else { ONE_LINE_SOURCE };
         if !deb822 {
             reject_symlink(source)?;
-            if !probe_regular(source)? {
-                bail!("Debian APT source file does not exist: {source}");
-            }
+            ensure!(probe_regular(source)?, "Debian APT source file does not exist: {source}");
         }
 
         let original = read(source)?;
@@ -110,9 +106,7 @@ pub(crate) mod debian_components {
             return Ok(());
         }
         // catch changes since first read before replacing file; this isn't a lock
-        if read(source)? != original {
-            bail!("Debian APT source changed concurrently before write");
-        }
+        ensure!(read(source)? == original, "Debian APT source changed concurrently before write");
         privileged_file::write_atomic(Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
         Ok(())
     }

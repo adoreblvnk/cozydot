@@ -1,7 +1,8 @@
 //! Define & validate Cozydot config.
 
 use crate::platform::{Arch, DesktopKind, Distro, Family, Platform, PlatformIdentity};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
+use regex::Regex;
 use serde::{Deserialize, Deserializer, de};
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -35,22 +36,28 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        // packages
         self.packages.linux.validate()?;
+
+        // tools
+        if let Some(go) = self.tools.go.as_deref() {
+            let valid = Regex::new(r"^(latest|[0-9]+\.[0-9]+\.[0-9]+)$")?.is_match(go);
+            ensure!(valid, "tools.go: expected `latest` or an exact version such as `1.24.6`");
+        }
         if !self.tools.cargo.is_empty() && self.tools.rust.is_none() {
             bail!("tools.cargo: requires tools.rust");
         }
         if !self.tools.npm.is_empty() && self.tools.node.is_none() {
             bail!("tools.npm: requires tools.node");
         }
-        if let Some(go) = self.tools.go.as_deref() {
-            let exact = go.split('.').count() == 3
-                && go.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
-            if go != "latest" && !exact {
-                bail!("tools.go: expected `latest` or an exact version such as `1.24.6`");
-            }
-        }
+
+        // fonts
         self.fonts.validate()?;
+
+        // dotfiles
         self.dotfiles.validate()?;
+
+        // desktop
         if let Some(linux) = self.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref()) {
             linux.validate()?;
         }
@@ -237,12 +244,8 @@ impl AptRepoConfig {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("packages.linux.apt.repos[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        if self.uris.is_empty() {
-            bail!("{path}.uris: must be a non-empty mapping");
-        }
-        if self.key_url.chars().any(char::is_control) {
-            bail!("{path}.key_url: must contain no control characters");
-        }
+        ensure!(!self.uris.is_empty(), "{path}.uris: must be a non-empty mapping");
+        ensure!(!self.key_url.chars().any(char::is_control), "{path}.key_url: must contain no control characters");
         // limit privileged writes to direct children of APT keyring directories
         let key_path = Path::new(&self.key_path);
         let parent = key_path.parent().context("APT repo key path has no parent")?;
@@ -250,14 +253,10 @@ impl AptRepoConfig {
             bail!("APT repo key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
         }
         let name = key_path.file_name().and_then(|name| name.to_str()).context("APT repo key path has no filename")?;
-        if !matches!(key_path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
-            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-        {
+        if !Regex::new(r"^[A-Za-z0-9._-]+\.(asc|gpg)$")?.is_match(name) {
             bail!("APT repo key path must name a safe .asc or .gpg file");
         }
-        if self.suite.is_empty() {
-            bail!("{path}.suite: must not be empty");
-        }
+        ensure!(!self.suite.is_empty(), "{path}.suite: must not be empty");
         if self.components.is_empty() || self.components.iter().any(String::is_empty) {
             bail!("{path}.components: must contain only non-empty values");
         }
@@ -487,14 +486,10 @@ pub struct LinuxDesktop {
 impl LinuxDesktop {
     fn validate(&self) -> Result<()> {
         if let Some(terminal) = self.gnome.as_ref().and_then(|gnome| gnome.terminal.as_ref()) {
-            let valid = terminal.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-                && terminal
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'));
+            let valid = Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")?.is_match(terminal);
             if !valid {
-                bail!(
-                    "desktop.linux.gnome.terminal: invalid executable basename {terminal:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'"
-                );
+                let path = "desktop.linux.gnome.terminal";
+                bail!("{path}: {terminal:?} must start alphanumeric and contain only alphanumerics or `._+-`");
             }
         }
         Ok(())
@@ -680,13 +675,9 @@ fn validate_definition_names(values: &[String], path: &str) -> Result<()> {
 }
 
 fn validate_definition_name(value: &str, path: &str) -> Result<()> {
-    let valid = value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-        && value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
-        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    let valid = Regex::new(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")?.is_match(value);
     if !valid {
-        bail!(
-            "{path}: invalid value {value:?}; must start and end with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', or '-'"
-        );
+        bail!("{path}: {value:?} must start/end alphanumeric and contain only alphanumerics or `._-`");
     }
     Ok(())
 }

@@ -3,7 +3,7 @@ use crate::operations::{
     host::{self, is_regular_executable, path_program, temp_path},
     packages::homebrew,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 
 const FNM_BASH_INIT: &str = r#"FNM_PATH="$HOME/.local/share/fnm"
 if [ -d "$FNM_PATH" ]; then
@@ -26,9 +26,7 @@ pub fn install() -> Result<()> {
         host::curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
         let install_dir = install_dir.as_os_str();
         host::run("fnm install", "bash", [path, "--install-dir".as_ref(), install_dir, "--skip-shell".as_ref()])?;
-        if !is_regular_executable(&fnm_path) {
-            bail!("fnm installer did not publish executable {}", fnm_path.display());
-        }
+        ensure!(is_regular_executable(&fnm_path), "fnm installer did not publish executable {}", fnm_path.display());
     }
     append_shell_rc(FNM_BASH_INIT)
 }
