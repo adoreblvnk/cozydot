@@ -1,11 +1,11 @@
 use super::github::Release;
 use crate::operations::{host, packages::apt};
-use crate::platform::Architecture;
+use crate::platform::Arch;
 use anyhow::{Context, Result, bail};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
-pub(crate) fn install(architecture: Architecture) -> Result<()> {
+pub(crate) fn install(arch: Arch) -> Result<()> {
     ensure_fuse()?;
     if !host::output("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
         // https://github.com/probonopd/go-appimage/blob/master/src/appimaged/README.md#initial-setup
@@ -25,7 +25,7 @@ pub(crate) fn install(architecture: Architecture) -> Result<()> {
 
         let applications = home.join("Applications");
         let destination = applications.join("appimaged.AppImage");
-        let url = resolve_asset_url(architecture)?;
+        let url = resolve_asset_url(arch)?;
         super::appimage::install_appimage("download appimaged", &url, &destination)?;
         host::run(
             "launch appimaged",
@@ -37,19 +37,19 @@ pub(crate) fn install(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-fn resolve_asset_url(architecture: Architecture) -> Result<String> {
+fn resolve_asset_url(arch: Arch) -> Result<String> {
     let output = host::curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
     let release: Release = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
-    let suffix = match architecture {
-        Architecture::X86_64 => "-x86_64.AppImage",
-        Architecture::Aarch64 => "-aarch64.AppImage",
+    let suffix = match arch {
+        Arch::X86_64 => "-x86_64.AppImage",
+        Arch::Aarch64 => "-aarch64.AppImage",
     };
     for asset in release.assets {
         if asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix) {
             return Ok(asset.browser_download_url);
         }
     }
-    bail!("appimaged release has no asset for {}", architecture.as_str())
+    bail!("appimaged release has no asset for {}", arch.as_str())
 }
 
 fn ensure_fuse() -> Result<()> {

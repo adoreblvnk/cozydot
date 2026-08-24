@@ -1,6 +1,6 @@
 //! Define & validate Cozydot config.
 
-use crate::platform::{Architecture, DesktopKind, Distro, Family, Platform, PlatformIdentity};
+use crate::platform::{Arch, DesktopKind, Distro, Family, Platform, PlatformIdentity};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Deserializer, de};
 use std::{
@@ -10,7 +10,7 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum ConfigVersion {
+pub enum Version {
     #[serde(rename = "1.0.0")]
     V1_0_0,
 }
@@ -18,7 +18,7 @@ pub enum ConfigVersion {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    pub version: ConfigVersion,
+    pub version: Version,
     pub system: System,
     pub packages: Packages,
     pub tools: Tools,
@@ -39,10 +39,10 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.tools.cargo.as_ref().is_some_and(|values| !values.is_empty()) && self.tools.rust.is_none() {
+        if !self.tools.cargo.is_empty() && self.tools.rust.is_none() {
             bail!("tools.cargo: requires tools.rust");
         }
-        if self.tools.npm.as_ref().is_some_and(|values| !values.is_empty()) && self.tools.node.is_none() {
+        if !self.tools.npm.is_empty() && self.tools.node.is_none() {
             bail!("tools.npm: requires tools.node");
         }
         if let Some(go) = self.tools.go.as_deref() {
@@ -84,114 +84,14 @@ impl Config {
 pub struct System {
     pub debian: Option<DebianSystem>,
     pub ubuntu: Option<UbuntuSystem>,
-    pub macos: MacSystem,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Packages {
-    pub linux: LinuxPackages,
-    pub macos: MacPackages,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Tools {
-    pub rust: Option<String>,
-    pub node: Option<String>,
-    pub python: Option<String>,
-    pub go: Option<String>,
-    pub cargo: Option<Vec<String>>,
-    pub npm: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Fonts {
-    pub nerd: Option<Vec<String>>,
-}
-
-impl Fonts {
-    fn validate(&self) -> Result<()> {
-        let Some(families) = self.nerd.as_deref() else { return Ok(()) };
-        validate_definition_names(families, "fonts.nerd")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Dotfiles {
-    pub replace: Option<bool>,
-    pub packages: DotfilePackages,
-}
-
-impl Dotfiles {
-    fn validate(&self) -> Result<()> {
-        validate_definition_names(&self.packages.all, "dotfiles.packages.all")?;
-        validate_definition_names(&self.packages.linux, "dotfiles.packages.linux")?;
-        validate_definition_names(&self.packages.macos, "dotfiles.packages.macos")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DotfilePackages {
-    pub all: Vec<String>,
-    pub linux: Vec<String>,
-    pub macos: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Integrations {
-    pub vscode: VsCodeIntegration,
-    pub linux: LinuxIntegrations,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VsCodeIntegration {
-    pub extensions: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Desktop {
-    pub theme: Option<Theme>,
-    pub linux: Option<LinuxDesktop>,
-    pub macos: Option<MacDesktop>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Updates {
-    pub packages: PackageUpdates,
-    pub tools: ToolUpdates,
-    pub fonts: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolUpdates {
-    pub rust: Option<bool>,
-    pub node: Option<bool>,
-    pub python: Option<bool>,
-    pub go: Option<bool>,
-    pub cargo: Option<bool>,
-    pub npm: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PackageUpdates {
-    pub linux: LinuxUpdates,
-    pub macos: MacUpdates,
+    pub macos: MacosSystem,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DebianSystem {
-    pub sudo_group: Option<bool>,
+    #[serde(default)]
+    pub sudo_group: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -212,10 +112,34 @@ pub struct UbuntuSystem {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct MacosSystem {
+    #[serde(default)]
+    pub validate_sudo_access: bool,
+    pub xcode: Xcode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Xcode {
+    #[serde(default)]
+    pub command_line_tools: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Packages {
+    pub linux: LinuxPackages,
+    pub macos: MacosPackages,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinuxPackages {
     pub apt: Option<AptPackages>,
-    pub flatpak: Option<Vec<String>>,
-    pub binaries: Option<Vec<BinaryPackage>>,
+    #[serde(default)]
+    pub flatpak: Vec<String>,
+    #[serde(default)]
+    pub binaries: Vec<BinaryPackage>,
 }
 
 impl LinuxPackages {
@@ -223,13 +147,11 @@ impl LinuxPackages {
         if let Some(apt) = &self.apt {
             apt.validate()?;
         }
-        if let Some(binaries) = &self.binaries {
-            let mut names = HashSet::new();
-            for (index, binary) in binaries.iter().enumerate() {
-                binary.validate(index)?;
-                if !names.insert(binary.name.as_str()) {
-                    bail!("packages.linux.binaries[{index}].name: duplicate binary name {:?}", binary.name);
-                }
+        let mut names = HashSet::new();
+        for (index, binary) in self.binaries.iter().enumerate() {
+            binary.validate(index)?;
+            if !names.insert(binary.name.as_str()) {
+                bail!("packages.linux.binaries[{index}].name: duplicate binary name {:?}", binary.name);
             }
         }
         Ok(())
@@ -239,26 +161,26 @@ impl LinuxPackages {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AptPackages {
-    pub install: Option<Vec<String>>,
-    pub repos: Option<Vec<AptRepoConfig>>,
+    #[serde(default)]
+    pub install: Vec<String>,
+    #[serde(default)]
+    pub repos: Vec<AptRepoConfig>,
 }
 
 impl AptPackages {
     fn validate(&self) -> Result<()> {
-        if let Some(repos) = &self.repos {
-            let mut names = HashSet::new();
-            let mut key_paths = HashSet::new();
-            for (index, repo) in repos.iter().enumerate() {
-                repo.validate(index)?;
-                if !names.insert(repo.name.as_str()) {
-                    bail!("packages.linux.apt.repos[{index}].name: duplicate repo name {:?}", repo.name);
-                }
-                if !key_paths.insert(repo.key_path.as_str()) {
-                    bail!(
-                        "packages.linux.apt.repos[{index}].key_path: destination {:?} collides with an earlier repo",
-                        repo.key_path
-                    );
-                }
+        let mut names = HashSet::new();
+        let mut key_paths = HashSet::new();
+        for (index, repo) in self.repos.iter().enumerate() {
+            repo.validate(index)?;
+            if !names.insert(repo.name.as_str()) {
+                bail!("packages.linux.apt.repos[{index}].name: duplicate repo name {:?}", repo.name);
+            }
+            if !key_paths.insert(repo.key_path.as_str()) {
+                bail!(
+                    "packages.linux.apt.repos[{index}].key_path: destination {:?} collides with an earlier repo",
+                    repo.key_path
+                );
             }
         }
         Ok(())
@@ -267,7 +189,7 @@ impl AptPackages {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum DistroMapKey {
+pub enum DistroKey {
     Default,
     Ubuntu,
     LinuxMint,
@@ -275,7 +197,7 @@ pub enum DistroMapKey {
     Debian,
 }
 
-impl DistroMapKey {
+impl DistroKey {
     fn from_distro(distro: Distro) -> Self {
         match distro {
             Distro::Ubuntu => Self::Ubuntu,
@@ -293,14 +215,11 @@ impl DistroMapKey {
     }
 }
 
-pub fn select_distro_entry<T>(
-    map: &BTreeMap<DistroMapKey, T>,
-    identity: PlatformIdentity,
-) -> Option<(DistroMapKey, &T)> {
+pub fn select_distro_entry<T>(map: &BTreeMap<DistroKey, T>, identity: PlatformIdentity) -> Option<(DistroKey, &T)> {
     let PlatformIdentity::Linux { distro, family } = identity else { return None };
-    let exact_key = DistroMapKey::from_distro(distro);
-    let family_key = DistroMapKey::from_family(family);
-    [exact_key, family_key, DistroMapKey::Default].into_iter().find_map(|key| map.get(&key).map(|value| (key, value)))
+    let exact_key = DistroKey::from_distro(distro);
+    let family_key = DistroKey::from_family(family);
+    [exact_key, family_key, DistroKey::Default].into_iter().find_map(|key| map.get(&key).map(|value| (key, value)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -309,10 +228,10 @@ pub struct AptRepoConfig {
     pub name: String,
     pub key_url: String,
     pub key_path: String,
-    pub uris: BTreeMap<DistroMapKey, String>,
+    pub uris: BTreeMap<DistroKey, String>,
     pub suite: String,
     pub components: Vec<String>,
-    pub arch: Option<Vec<AptArchitecture>>,
+    pub arch: Option<Vec<AptArch>>,
     #[serde(default)]
     pub conflicts: Vec<String>,
     #[serde(default)]
@@ -366,17 +285,17 @@ pub(crate) fn validate_repo_key_path(path: &Path) -> Result<()> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum AptArchitecture {
+pub enum AptArch {
     Amd64,
     Arm64,
 }
 
-pub fn select_repo_codename(key: DistroMapKey, platform: &Platform) -> &str {
+pub fn select_repo_codename(key: DistroKey, platform: &Platform) -> &str {
     let exact = match platform.identity {
-        PlatformIdentity::Linux { distro, .. } => key == DistroMapKey::from_distro(distro),
+        PlatformIdentity::Linux { distro, .. } => key == DistroKey::from_distro(distro),
         PlatformIdentity::Macos => false,
     };
-    if key == DistroMapKey::Default || exact { &platform.distro_codename } else { &platform.base_codename }
+    if key == DistroKey::Default || exact { &platform.distro_codename } else { &platform.base_codename }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -405,8 +324,8 @@ impl BinaryPackage {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
-    GitHub { repo: String, assets: ArchitectureMap },
-    Url { urls: ArchitectureMap },
+    GitHub { repo: String, assets: ArchMap },
+    Url { urls: ArchMap },
 }
 
 impl BinarySource {
@@ -420,12 +339,12 @@ impl BinarySource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ArchitectureMap {
+pub struct ArchMap {
     pub x86_64: Option<String>,
     pub aarch64: Option<String>,
 }
 
-impl ArchitectureMap {
+impl ArchMap {
     fn validate(&self, path: &str, kind: &str) -> Result<()> {
         if self.x86_64.is_none() && self.aarch64.is_none() {
             bail!("{path}: must contain at least one canonical architecture {kind}");
@@ -433,25 +352,102 @@ impl ArchitectureMap {
         Ok(())
     }
 
-    pub fn get(&self, architecture: Architecture) -> Option<&str> {
-        match architecture {
-            Architecture::X86_64 => self.x86_64.as_deref(),
-            Architecture::Aarch64 => self.aarch64.as_deref(),
+    pub fn get(&self, arch: Arch) -> Option<&str> {
+        match arch {
+            Arch::X86_64 => self.x86_64.as_deref(),
+            Arch::Aarch64 => self.aarch64.as_deref(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LinuxIntegrations {
-    pub docker: Option<DockerIntegration>,
-    pub virtualbox: Option<VirtualBoxIntegration>,
+pub struct MacosPackages {
+    pub homebrew: Homebrew,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DockerIntegration {
-    pub group: Option<bool>,
+pub struct Homebrew {
+    pub formulae: Vec<String>,
+    pub casks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tools {
+    pub rust: Option<String>,
+    pub node: Option<String>,
+    pub python: Option<String>,
+    pub go: Option<String>,
+    #[serde(default)]
+    pub cargo: Vec<String>,
+    #[serde(default)]
+    pub npm: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Fonts {
+    #[serde(default)]
+    pub nerd: Vec<String>,
+}
+
+impl Fonts {
+    fn validate(&self) -> Result<()> {
+        validate_definition_names(&self.nerd, "fonts.nerd")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dotfiles {
+    #[serde(default)]
+    pub replace: bool,
+    pub packages: DotfilePackages,
+}
+
+impl Dotfiles {
+    fn validate(&self) -> Result<()> {
+        validate_definition_names(&self.packages.all, "dotfiles.packages.all")?;
+        validate_definition_names(&self.packages.linux, "dotfiles.packages.linux")?;
+        validate_definition_names(&self.packages.macos, "dotfiles.packages.macos")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DotfilePackages {
+    pub all: Vec<String>,
+    pub linux: Vec<String>,
+    pub macos: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Integrations {
+    pub vscode: VsCode,
+    pub linux: LinuxIntegrations,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VsCode {
+    pub extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxIntegrations {
+    pub docker: Option<Docker>,
+    pub virtualbox: Option<VirtualBox>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Docker {
+    #[serde(default)]
+    pub group: bool,
     pub logging: Option<DockerLogging>,
 }
 
@@ -470,8 +466,17 @@ pub struct DockerLogging {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VirtualBoxIntegration {
-    pub group: Option<bool>,
+pub struct VirtualBox {
+    #[serde(default)]
+    pub group: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Desktop {
+    pub theme: Option<Theme>,
+    pub linux: Option<LinuxDesktop>,
+    pub macos: Option<MacosDesktop>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -490,7 +495,15 @@ pub struct LinuxDesktop {
 impl LinuxDesktop {
     fn validate(&self) -> Result<()> {
         if let Some(terminal) = self.gnome.as_ref().and_then(|gnome| gnome.terminal.as_ref()) {
-            validate_executable(terminal, "desktop.linux.gnome.terminal")?;
+            let valid = terminal.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                && terminal
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'));
+            if !valid {
+                bail!(
+                    "desktop.linux.gnome.terminal: invalid executable basename {terminal:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'"
+                );
+            }
         }
         Ok(())
     }
@@ -503,20 +516,20 @@ impl LinuxDesktop {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Idle {
-    pub timeout: Option<DesktopIdleDuration>,
+    pub timeout: Option<IdleDuration>,
     pub dim: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DesktopIdleDuration(u32);
+pub struct IdleDuration(u32);
 
-impl DesktopIdleDuration {
+impl IdleDuration {
     pub fn seconds(self) -> u32 {
         self.0
     }
 }
 
-impl<'de> Deserialize<'de> for DesktopIdleDuration {
+impl<'de> Deserialize<'de> for IdleDuration {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -537,71 +550,34 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
 pub struct Gnome {
     pub terminal: Option<String>,
     pub idle: Option<Idle>,
-    pub extensions: Option<Vec<String>>,
-    pub dash_to_dock: Option<bool>,
-    pub rounded_window_corners: Option<bool>,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub dash_to_dock: bool,
+    #[serde(default)]
+    pub rounded_window_corners: bool,
 }
 
 impl Gnome {
     pub(crate) fn has_intent(&self) -> bool {
         self.terminal.is_some()
             || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
-            || self.extensions.as_ref().is_some_and(|extensions| !extensions.is_empty())
-            || self.dash_to_dock == Some(true)
-            || self.rounded_window_corners == Some(true)
+            || !self.extensions.is_empty()
+            || self.dash_to_dock
+            || self.rounded_window_corners
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LinuxUpdates {
-    pub apt: Option<AptUpgradeCommand>,
-    pub flatpak: Option<bool>,
+pub struct MacosDesktop {
+    pub dock: Option<Dock>,
+    pub finder: Option<Finder>,
+    pub keyboard: Option<Keyboard>,
+    pub trackpad: Option<Trackpad>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AptUpgradeCommand {
-    Upgrade,
-    FullUpgrade,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacPackages {
-    pub homebrew: Homebrew,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacSystem {
-    pub validate_sudo_access: Option<bool>,
-    pub xcode: MacXcode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacXcode {
-    pub command_line_tools: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Homebrew {
-    pub formulae: Vec<String>,
-    pub casks: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MacDesktop {
-    pub dock: Option<MacDock>,
-    pub finder: Option<MacFinder>,
-    pub keyboard: Option<MacKeyboard>,
-    pub trackpad: Option<MacTrackpad>,
-}
-
-impl MacDesktop {
+impl MacosDesktop {
     pub(crate) fn has_intent(&self) -> bool {
         let dock = self.dock.as_ref().is_some_and(|d| d.autohide.is_some() || d.show_recent_applications.is_some());
         let finder = self.finder.as_ref();
@@ -615,42 +591,92 @@ impl MacDesktop {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacDock {
+pub struct Dock {
     pub autohide: Option<bool>,
     pub show_recent_applications: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacFinder {
+pub struct Finder {
     pub show_filename_extensions: Option<bool>,
     pub show_hidden_files: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacKeyboard {
+pub struct Keyboard {
     pub key_repeat: Option<i32>,
     pub initial_key_repeat: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacTrackpad {
+pub struct Trackpad {
     pub tap_to_click: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacUpdates {
-    pub homebrew: MacHomebrewUpdates,
+pub struct Updates {
+    pub packages: PackageUpdates,
+    pub tools: ToolUpdates,
+    #[serde(default)]
+    pub fonts: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacHomebrewUpdates {
-    pub formulae: Option<bool>,
-    pub casks: Option<bool>,
+pub struct PackageUpdates {
+    pub linux: LinuxUpdates,
+    pub macos: MacosUpdates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinuxUpdates {
+    pub apt: Option<AptUpgrade>,
+    #[serde(default)]
+    pub flatpak: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AptUpgrade {
+    Upgrade,
+    FullUpgrade,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacosUpdates {
+    pub homebrew: HomebrewUpdates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomebrewUpdates {
+    #[serde(default)]
+    pub formulae: bool,
+    #[serde(default)]
+    pub casks: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolUpdates {
+    #[serde(default)]
+    pub rust: bool,
+    #[serde(default)]
+    pub node: bool,
+    #[serde(default)]
+    pub python: bool,
+    #[serde(default)]
+    pub go: bool,
+    #[serde(default)]
+    pub cargo: bool,
+    #[serde(default)]
+    pub npm: bool,
 }
 
 fn validate_definition_names(values: &[String], path: &str) -> Result<()> {
@@ -668,17 +694,6 @@ fn validate_definition_name(value: &str, path: &str) -> Result<()> {
     if !valid {
         bail!(
             "{path}: invalid value {value:?}; must start and end with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', or '-'"
-        );
-    }
-    Ok(())
-}
-
-fn validate_executable(value: &str, path: &str) -> Result<()> {
-    let valid = value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'));
-    if !valid {
-        bail!(
-            "{path}: invalid executable basename {value:?}; must start with an ASCII alphanumeric and contain only ASCII alphanumerics, '.', '_', '+', or '-'"
         );
     }
     Ok(())

@@ -8,7 +8,7 @@ pub struct Platform {
     pub distro_codename: String,
     pub base_codename: String,
     pub desktop: DesktopKind,
-    pub architecture: Architecture,
+    pub arch: Arch,
 }
 
 impl Platform {
@@ -19,8 +19,8 @@ impl Platform {
             bail!("uname returned an empty machine architecture");
         }
         if cfg!(target_os = "macos") {
-            let architecture = match arch {
-                "aarch64" | "arm64" => Architecture::Aarch64,
+            let arch = match arch {
+                "aarch64" | "arm64" => Arch::Aarch64,
                 _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
             };
             return Ok(Self {
@@ -28,7 +28,7 @@ impl Platform {
                 distro_codename: String::new(),
                 base_codename: String::new(),
                 desktop: DesktopKind::None,
-                architecture,
+                arch,
             });
         }
         let os = OsRelease::open().context("read os-release")?;
@@ -56,7 +56,7 @@ impl Platform {
             distro_codename,
             base_codename,
             desktop: DesktopKind::from_environment(desktop),
-            architecture: Architecture::normalize(arch)?,
+            arch: Arch::normalize(arch)?,
         })
     }
 }
@@ -138,12 +138,12 @@ impl DesktopKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Architecture {
+pub enum Arch {
     X86_64,
     Aarch64,
 }
 
-impl Architecture {
+impl Arch {
     pub fn normalize(value: &str) -> Result<Self> {
         match value {
             "x86_64" | "amd64" => Ok(Self::X86_64),

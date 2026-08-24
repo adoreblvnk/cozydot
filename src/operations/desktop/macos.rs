@@ -1,10 +1,10 @@
 use crate::{
-    config::{MacDesktop, Theme},
+    config::{MacosDesktop, Theme},
     operations::host,
 };
 use anyhow::Result;
 
-pub(crate) fn write_defaults(theme: Option<Theme>, desktop: Option<&MacDesktop>) -> Result<()> {
+pub(crate) fn write_defaults(theme: Option<Theme>, desktop: Option<&MacosDesktop>) -> Result<()> {
     let mut restart_dock = false;
     let mut restart_finder = false;
     if let Some(theme) = theme {

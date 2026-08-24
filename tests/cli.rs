@@ -1,40 +1,43 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
-fn config(shared: &str, linux: &str) -> String {
+fn config(extra: &str) -> String {
     let mut value = json!({
         "version": "1.0.0",
-        "shared": {
-            "tools": {},
-            "packages": {},
-            "fonts": {},
-            "dotfiles": {"packages": []},
-            "integrations": {"vscode": {"extensions": []}},
-            "updates": {"tools": {}, "packages": {}, "fonts": null}
+        "system": {
+            "debian": null,
+            "ubuntu": null,
+            "macos": {"xcode": {}}
         },
-        "linux": {
-            "system": {},
-            "packages": {},
-            "dotfiles": {"packages": []},
-            "integrations": {},
-            "desktop": null,
-            "updates": null
+        "packages": {
+            "linux": {},
+            "macos": {"homebrew": {"formulae": [], "casks": []}}
         },
-        "macos": {
-            "system": {"xcode": {}},
-            "homebrew": {"formulae": [], "casks": []},
-            "dotfiles": {"packages": []},
-            "desktop": {},
-            "updates": {"homebrew": {}}
+        "tools": {},
+        "fonts": {},
+        "dotfiles": {"packages": {"all": [], "linux": [], "macos": []}},
+        "integrations": {"vscode": {"extensions": []}, "linux": {}},
+        "desktop": null,
+        "updates": {
+            "packages": {"linux": {}, "macos": {"homebrew": {}}},
+            "tools": {}
         }
     });
-    let shared: Map<String, Value> = yaml_serde::from_str(shared).unwrap();
-    let linux: Map<String, Value> = yaml_serde::from_str(linux).unwrap();
-    value["shared"].as_object_mut().unwrap().extend(shared);
-    value["linux"].as_object_mut().unwrap().extend(linux);
+    let extra: Value = yaml_serde::from_str(extra).unwrap();
+    fn merge(value: &mut Value, extra: Value) {
+        match (value, extra) {
+            (Value::Object(value), Value::Object(extra)) => {
+                for (key, extra) in extra {
+                    merge(value.entry(key).or_insert(Value::Null), extra);
+                }
+            }
+            (value, extra) => *value = extra,
+        }
+    }
+    merge(&mut value, extra);
     serde_json::to_string(&value).unwrap()
 }
 
@@ -44,8 +47,8 @@ fn config_dir(temp: &tempfile::TempDir) -> std::path::PathBuf {
     root
 }
 
-fn write_config(root: &Path, shared: &str, linux: &str) {
-    fs::write(root.join("cozydot.yaml"), config(shared, linux)).unwrap();
+fn write_config(root: &Path, extra: &str) {
+    fs::write(root.join("cozydot.yaml"), config(extra)).unwrap();
 }
 
 fn write_executable(path: &Path, body: &str) {
@@ -260,24 +263,24 @@ fn invalid_config_prevents_host_mutation() {
 
     let repo = |extra: &str| {
         format!(
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {{default: https://example.com/repo}}\n        suite: stable\n        components: [main]\n{extra}"
+            "packages:\n  linux:\n    apt:\n      repos:\n        - name: vendor\n          key_url: https://example.com/key\n          key_path: /etc/apt/keyrings/vendor.gpg\n          uris: {{default: https://example.com/repo}}\n          suite: stable\n          components: [main]\n{extra}"
         )
     };
-    for (linux, error) in [
-        (repo("        path: /\n"), "linux.packages.apt.repos[0]: unknown field `path`"),
-        (repo("        arch: [sparc]\n"), "linux.packages.apt.repos[0].arch[0]: unknown variant `sparc`"),
-        (repo("        arch: []\n"), "arch: must not be empty"),
+    for (extra, error) in [
+        (repo("          path: /\n"), "packages.linux.apt.repos[0]: unknown field `path`"),
+        (repo("          arch: [sparc]\n"), "packages.linux.apt.repos[0].arch[0]: unknown variant `sparc`"),
+        (repo("          arch: []\n"), "arch: must not be empty"),
         (repo("").replace("/etc/apt/keyrings/vendor.gpg", "/tmp/vendor.gpg"), "direct child"),
         (
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {default: source}\n        components: [main]\n".to_owned(),
+            "packages:\n  linux:\n    apt:\n      repos:\n        - name: vendor\n          key_url: key\n          key_path: /etc/apt/keyrings/vendor.gpg\n          uris: {default: source}\n          components: [main]\n".to_owned(),
             "missing field `suite`",
         ),
         (
-            "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {default: source}\n        suite: stable\n".to_owned(),
+            "packages:\n  linux:\n    apt:\n      repos:\n        - name: vendor\n          key_url: key\n          key_path: /etc/apt/keyrings/vendor.gpg\n          uris: {default: source}\n          suite: stable\n".to_owned(),
             "missing field `components`",
         ),
     ] {
-        write_config(&root, "{}", &linux);
+        write_config(&root, &extra);
         cozydot()
             .env("XDG_CONFIG_HOME", temp.path().join("config"))
             .arg("check")
@@ -295,7 +298,7 @@ fn empty_apply_and_update_establish_the_linux_baseline() {
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
     let apt_log = temp.path().join("apt.log");
-    write_config(&root, "{}", "{}");
+    write_config(&root, "{}");
     write_linux_host_fakes(&fake_bin);
     for command in ["curl", "gpg", "stow", "flatpak", "rustup"] {
         write_executable(&fake_bin.join(command), "#!/bin/sh\n: > \"$COZYDOT_TEST_MUTATION\"\nexit 99\n");
@@ -346,7 +349,7 @@ fn sudo_group_membership_is_not_applied_on_a_non_debian_host() {
     let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
     let mutation = temp.path().join("mutation");
-    write_config(&root, "{}", "system:\n  debian:\n    sudo_group: true\n");
+    write_config(&root, "system:\n  debian:\n    sudo_group: true\n");
     write_linux_host_fakes(&fake_bin);
     write_executable(
         &fake_bin.join("sudo"),
@@ -378,7 +381,7 @@ fn dotfiles_refuse_conflicts_and_replace_only_when_explicit() {
     fs::create_dir_all(&home).unwrap();
     fs::write(&source, "managed\n").unwrap();
     fs::write(home.join(".bashrc"), "existing\n").unwrap();
-    write_config(&root, "dotfiles:\n  packages: [bash, missing]\n", "{}");
+    write_config(&root, "dotfiles:\n  packages:\n    all: [bash, missing]\n");
     write_executable(&fake_bin.join("uname"), "#!/bin/sh\nprintf 'x86_64\\n'\n");
     write_executable(
         &fake_bin.join("stow"),
@@ -416,7 +419,7 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
     assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
     assert!(!state.exists());
 
-    write_config(&root, "dotfiles:\n  packages: [bash]\n", "{}");
+    write_config(&root, "dotfiles:\n  packages:\n    all: [bash]\n");
     command().arg("dotfiles").assert().failure().stderr(predicate::str::contains("stow package check"));
     assert_eq!(fs::read_to_string(home.join(".bashrc")).unwrap(), "existing\n");
     assert!(!state.exists());
@@ -430,26 +433,26 @@ ln -s "$dir/$package/.bashrc" "$target/.bashrc"
 
 fn repo_config() -> String {
     config(
-        "{}",
         r#"packages:
-  apt:
-    install: [direct-package]
-    repos:
-      - name: armored
-        key_url: https://example.com/armored
-        key_path: /etc/apt/keyrings/armored.asc
-        uris: {default: https://example.com/armored}
-        suite: stable
-        components: [main]
-        conflicts: [old-package, absent-conflict]
-        packages: [vendor-one]
-      - name: binary
-        key_url: https://example.com/binary
-        key_path: /usr/share/keyrings/binary.gpg
-        uris: {default: https://example.com/binary}
-        suite: vendor-suite
-        components: [vendor-component]
-        packages: [vendor-two]
+  linux:
+    apt:
+      install: [direct-package]
+      repos:
+        - name: armored
+          key_url: https://example.com/armored
+          key_path: /etc/apt/keyrings/armored.asc
+          uris: {default: https://example.com/armored}
+          suite: stable
+          components: [main]
+          conflicts: [old-package, absent-conflict]
+          packages: [vendor-one]
+        - name: binary
+          key_url: https://example.com/binary
+          key_path: /usr/share/keyrings/binary.gpg
+          uris: {default: https://example.com/binary}
+          suite: vendor-suite
+          components: [vendor-component]
+          packages: [vendor-two]
 "#,
     )
 }
@@ -536,7 +539,7 @@ esac
 
 #[test]
 #[cfg(target_os = "linux")]
-fn shared_theme_configures_the_gnome_color_scheme() {
+fn theme_configures_the_gnome_color_scheme() {
     let temp = tempfile::tempdir().unwrap();
     let root = config_dir(&temp);
     let fake_bin = temp.path().join("bin");
@@ -545,7 +548,7 @@ fn shared_theme_configures_the_gnome_color_scheme() {
     fs::create_dir_all(state.join("files")).unwrap();
     fs::create_dir_all(state.join("packages")).unwrap();
     fs::write(state.join("files/debian.sources"), "Components: main\n").unwrap();
-    write_config(&root, "desktop:\n  theme: dark\n", "{}");
+    write_config(&root, "desktop:\n  theme: dark\n");
     write_apt_fakes(&fake_bin);
     write_executable(
         &fake_bin.join("gsettings"),
@@ -579,7 +582,7 @@ fn run_terminal_apply(desktop: &str, terminal_key: bool, custom_keybindings: &st
     fs::create_dir_all(state.join("files")).unwrap();
     fs::create_dir_all(state.join("packages")).unwrap();
     fs::write(state.join("files/debian.sources"), "Components: main\n").unwrap();
-    write_config(&root, "{}", "desktop:\n  terminal: wezterm\n");
+    write_config(&root, "desktop:\n  linux:\n    gnome:\n      terminal: wezterm\n");
     write_apt_fakes(&fake_bin);
     write_executable(&fake_bin.join("wezterm"), "#!/bin/sh\nexit 0\n");
     write_executable(
@@ -693,8 +696,7 @@ fn repo_key_validation_precedes_repo_file_write() {
     }
     write_config(
         &root,
-        "{}",
-        "packages:\n  apt:\n    repos:\n      - name: vendor\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/vendor.gpg\n        uris: {default: https://example.com/repo}\n        suite: stable\n        components: [main]\n",
+        "packages:\n  linux:\n    apt:\n      repos:\n        - name: vendor\n          key_url: https://example.com/key\n          key_path: /etc/apt/keyrings/vendor.gpg\n          uris: {default: https://example.com/repo}\n          suite: stable\n          components: [main]\n",
     );
     write_apt_fakes(&fake_bin);
 
@@ -765,8 +767,8 @@ fn apply_writes_repo_files_and_installs_packages_in_order() {
 fn inapplicable_repos_have_no_side_effects() {
     let inapplicable_distro = if os_release_value("ID") == "linuxmint" { "pop" } else { "linuxmint" };
     for applicability in [
-        "          default: https://example.com/repo\n        arch: [arm64]".to_owned(),
-        format!("          {inapplicable_distro}: https://example.com/repo"),
+        "            default: https://example.com/repo\n          arch: [arm64]".to_owned(),
+        format!("            {inapplicable_distro}: https://example.com/repo"),
     ] {
         let temp = tempfile::tempdir().unwrap();
         let root = config_dir(&temp);
@@ -774,9 +776,8 @@ fn inapplicable_repos_have_no_side_effects() {
         let mutation = temp.path().join("mutation");
         write_config(
             &root,
-            "{}",
             &format!(
-                "packages:\n  apt:\n    repos:\n      - name: skipped\n        key_url: https://example.com/key\n        key_path: /etc/apt/keyrings/skipped.gpg\n        uris:\n{applicability}\n        suite: stable\n        components: [main]\n        conflicts: [old]\n        packages: [new]\n"
+                "packages:\n  linux:\n    apt:\n      repos:\n        - name: skipped\n          key_url: https://example.com/key\n          key_path: /etc/apt/keyrings/skipped.gpg\n          uris:\n{applicability}\n          suite: stable\n          components: [main]\n          conflicts: [old]\n          packages: [new]\n"
             ),
         );
         write_linux_host_fakes(&fake_bin);
@@ -827,7 +828,7 @@ fn update_runs_only_the_selected_apt_upgrade_command() {
         let root = config_dir(&temp);
         let fake_bin = temp.path().join("bin");
         let log = temp.path().join("update.log");
-        write_config(&root, "{}", &format!("updates:\n  apt: {policy}\n"));
+        write_config(&root, &format!("updates:\n  packages:\n    linux:\n      apt: {policy}\n"));
         write_linux_host_fakes(&fake_bin);
         write_executable(&fake_bin.join("sudo"), "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$COZYDOT_TEST_LOG\"\n");
 

@@ -1,14 +1,14 @@
 use crate::operations::host::{self, privileged_file, temp_path, temp_path_with_suffix};
-use crate::platform::Architecture;
+use crate::platform::Arch;
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::PathBuf};
 
-const SOURCES_DIRECTORY: &str = "/etc/apt/sources.list.d";
+const SOURCES_DIR: &str = "/etc/apt/sources.list.d";
 
 pub struct AptRepo {
     key_url: String,
     source_uri: String,
-    architecture: Architecture,
+    arch: Arch,
     suite: String,
     components: Vec<String>,
     key_path: PathBuf,
@@ -16,25 +16,24 @@ pub struct AptRepo {
 }
 
 impl AptRepo {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
         key_url: String,
         source_uri: String,
-        architecture: Architecture,
+        arch: Arch,
         suite: String,
         components: Vec<String>,
         key_path: PathBuf,
     ) -> Self {
         let name = name.into();
-        let source_list_path = PathBuf::from(format!("{SOURCES_DIRECTORY}/{name}.list"));
-        Self { key_url, source_uri, architecture, suite, components, key_path, source_list_path }
+        let source_list_path = PathBuf::from(format!("{SOURCES_DIR}/{name}.list"));
+        Self { key_url, source_uri, arch, suite, components, key_path, source_list_path }
     }
 
     pub fn render_source(&self) -> String {
-        let architecture = self.architecture.debian();
+        let arch = self.arch.debian();
         let key_path = self.key_path.display();
-        let prefix = format!("deb [arch={architecture} signed-by={key_path}] {} ", self.source_uri);
+        let prefix = format!("deb [arch={arch} signed-by={key_path}] {} ", self.source_uri);
         format!("{prefix}{} {}\n", self.suite, self.components.join(" "))
     }
 }
@@ -87,7 +86,6 @@ pub(crate) mod debian_components {
     const ONE_LINE_SOURCE: &str = "/etc/apt/sources.list";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
-    // TODO: review this
     pub(crate) fn add() -> Result<()> {
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
             host::run("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;

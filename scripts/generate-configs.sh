@@ -16,44 +16,38 @@ trap 'rm -rf -- "$temporary"' EXIT
 generate_cli() {
   yq '
     del(
-      .shared.desktop,
-      .linux.system.ubuntu.restricted_extras,
-      .linux.packages.flatpak,
-      .linux.desktop,
-      .linux.updates.flatpak,
-      .macos.desktop
+      .system.ubuntu.restricted_extras,
+      .packages.linux.flatpak,
+      .desktop,
+      .updates.packages.linux.flatpak
     ) |
-    .linux.integrations = {} |
-    .linux.packages.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
-    .linux.packages.apt.repos |= map(select(.name == "github-cli")) |
-    .shared.packages.npm = ["opencode-ai"] |
-    .shared.integrations.vscode.extensions = [] |
-    .linux.packages.binaries |= map(select(
+    .integrations.linux = {} |
+    .packages.linux.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
+    .packages.linux.apt.repos |= map(select(.name == "github-cli")) |
+    .tools.npm = ["opencode-ai"] |
+    .integrations.vscode.extensions = [] |
+    .packages.linux.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .shared.dotfiles.packages -= ["opencode", "vscode", "wezterm"] |
-    .macos.homebrew.casks = ["git-credential-manager"]
+    .dotfiles.packages.all -= ["opencode", "vscode", "wezterm"] |
+    .packages.macos.homebrew.casks = ["git-credential-manager"]
   ' "$base"
 }
 
 generate_vm() {
   yq '
-    del(
-      .linux.integrations.docker,
-      .linux.integrations.virtualbox
-    ) |
-    .linux.packages.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
-    .linux.packages.flatpak = ["com.bitwarden.desktop"] |
-    .shared.packages.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
-    .shared.packages.npm = ["opencode-ai"] |
-    .linux.packages.binaries |= map(select(
+    .integrations.linux = {} |
+    .packages.linux.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
+    .packages.linux.flatpak = ["com.bitwarden.desktop"] |
+    .tools.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
+    .tools.npm = ["opencode-ai"] |
+    .packages.linux.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .shared.tools.node = "latest" |
-    .shared.dotfiles.packages -= ["bottom", "opencode", "yazi"] |
-    .shared.integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
-    .linux.updates.apt = "full-upgrade" |
-    .macos.homebrew.casks = [
+    .tools.node = "latest" |
+    .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
+    .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
+    .packages.macos.homebrew.casks = [
       "bitwarden",
       "git-credential-manager",
       "visual-studio-code",

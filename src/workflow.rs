@@ -2,9 +2,8 @@
 
 use crate::{
     config::{
-        AptArchitecture, AptRepoConfig, BinaryFormat, BinarySource, Config, DistroMapKey, Dotfiles, Enablement, Fonts,
-        Gnome, LinuxDesktop, LinuxIntegrations, MacDesktop, Theme, ToolUpdates, Tools, select_distro_entry,
-        select_repo_codename,
+        AptArch, BinaryFormat, BinarySource, Config, Dotfiles, Enablement, Fonts, Gnome, LinuxDesktop,
+        LinuxIntegrations, MacosDesktop, Theme, ToolUpdates, Tools, select_distro_entry, select_repo_codename,
     },
     operations::{
         desktop::{self, fonts, gnome, macos as macos_defaults},
@@ -21,7 +20,7 @@ use crate::{
         },
         toolchains::{fnm, go, rustup, uv},
     },
-    platform::{Architecture, Distro, Platform, PlatformIdentity},
+    platform::{Arch, Distro, Platform, PlatformIdentity},
     style::STATUS,
 };
 use anyhow::{Context, Result};
@@ -36,7 +35,7 @@ const APT_PREREQS: [&str; 8] =
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     host::home()?;
     match platform.identity {
-        PlatformIdentity::Macos => macos_apply(config, platform.architecture, dotfiles_root),
+        PlatformIdentity::Macos => macos_apply(config, platform.arch, dotfiles_root),
         PlatformIdentity::Linux { .. } => linux_apply(config, platform, dotfiles_root),
     }
 }
@@ -46,11 +45,9 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
         PlatformIdentity::Macos => &config.dotfiles.packages.macos,
         PlatformIdentity::Linux { .. } => &config.dotfiles.packages.linux,
     };
-    if let Some(packages) = configured_dotfiles(&config.dotfiles, platform_packages) {
+    if let Some(packages) = dotfile_packages(&config.dotfiles, platform_packages) {
         host::home()?;
-        run("Applying", "dotfiles", || {
-            dotfiles::apply(root, &packages, replace || config.dotfiles.replace.unwrap_or(false))
-        })?;
+        run("Applying", "dotfiles", || dotfiles::apply(root, &packages, replace || config.dotfiles.replace))?;
     }
     Ok(())
 }
@@ -58,8 +55,8 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     host::home()?;
     match platform.identity {
-        PlatformIdentity::Macos => macos_update(config, platform.architecture),
-        PlatformIdentity::Linux { .. } => linux_update(config, platform.architecture),
+        PlatformIdentity::Macos => macos_update(config, platform.arch),
+        PlatformIdentity::Linux { .. } => linux_update(config, platform.arch),
     }
 }
 
@@ -69,35 +66,47 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref());
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     let mut repos = Vec::new();
-    let mut repo_packages_to_purge = Vec::new();
-    let mut repo_packages_to_install = Vec::new();
-    let apt_architecture = match platform.architecture {
-        Architecture::X86_64 => AptArchitecture::Amd64,
-        Architecture::Aarch64 => AptArchitecture::Arm64,
+    let mut repo_conflicts = Vec::new();
+    let mut repo_packages = Vec::new();
+    let apt_arch = match platform.arch {
+        Arch::X86_64 => AptArch::Amd64,
+        Arch::Aarch64 => AptArch::Arm64,
     };
-    if let Some(apt) = &config.packages.linux.apt
-        && let Some(configured_repos) = &apt.repos
-    {
-        for repo in configured_repos {
-            if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_architecture)) {
+    if let Some(apt) = &config.packages.linux.apt {
+        for repo in &apt.repos {
+            if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_arch)) {
                 continue;
             }
             let Some((key, source_uri)) = select_distro_entry(&repo.uris, platform.identity) else { continue };
-            repos.push((repo.name.as_str(), build_apt_repo(repo, platform, key, source_uri)));
-            repo_packages_to_purge.extend(repo.conflicts.iter().cloned());
-            repo_packages_to_install.extend(repo.packages.iter().cloned());
+            let suite = if repo.suite == "codename" {
+                select_repo_codename(key, platform).to_owned()
+            } else {
+                repo.suite.clone()
+            };
+            let apt_repo = AptRepo::new(
+                repo.name.clone(),
+                repo.key_url.clone(),
+                source_uri.to_owned(),
+                platform.arch,
+                suite,
+                repo.components.clone(),
+                PathBuf::from(&repo.key_path),
+            );
+            repos.push((repo.name.as_str(), apt_repo));
+            repo_conflicts.extend(repo.conflicts.iter().cloned());
+            repo_packages.extend(repo.packages.iter().cloned());
         }
     }
-    let flatpak_refs = config.packages.linux.flatpak.as_deref().filter(|values| !values.is_empty());
+    let flatpak_refs = (!config.packages.linux.flatpak.is_empty()).then_some(config.packages.linux.flatpak.as_slice());
     if flatpak_refs.is_some() {
         apt_prereqs.insert("flatpak");
     }
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
-    for binary in config.packages.linux.binaries.as_deref().unwrap_or_default() {
+    for binary in &config.packages.linux.binaries {
         let supported = match &binary.source {
-            BinarySource::GitHub { assets, .. } => assets.get(platform.architecture).is_some(),
-            BinarySource::Url { urls } => urls.get(platform.architecture).is_some(),
+            BinarySource::GitHub { assets, .. } => assets.get(platform.arch).is_some(),
+            BinarySource::Url { urls } => urls.get(platform.arch).is_some(),
         };
         if supported {
             match binary.format {
@@ -106,11 +115,16 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             }
         }
     }
-    add_desktop_prereqs(theme, desktop_config, &mut apt_prereqs);
+    if theme.is_some() || desktop_config.is_some_and(LinuxDesktop::has_intent) {
+        apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
+        if desktop_config.and_then(|desktop| desktop.gnome.as_ref()).is_some_and(Gnome::has_intent) {
+            apt_prereqs.insert("gnome-shell");
+        }
+    }
 
     // establish distro services and package prerequisites before third-party repositories
     if distro == Distro::Debian {
-        if config.system.debian.as_ref().is_some_and(|debian| debian.sudo_group == Some(true)) {
+        if config.system.debian.as_ref().is_some_and(|debian| debian.sudo_group) {
             run("Configuring", "sudo group membership", users::ensure_in_sudo_group)?;
         }
         run("Enabling", "Debian APT components", repo::debian_components::add)?;
@@ -133,10 +147,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         apt::install(&apt_prereqs.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>())
     })?;
     if let Some(apt) = &config.packages.linux.apt
-        && let Some(packages) = &apt.install
-        && !packages.is_empty()
+        && !apt.install.is_empty()
     {
-        run("Installing", "configured APT packages", || apt::install(packages))?;
+        run("Installing", "configured APT packages", || apt::install(&apt.install))?;
     }
     // add repositories before changing packages supplied by them
     if !repos.is_empty() {
@@ -146,11 +159,11 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         }
         run("Updating", "APT package metadata", apt::update)?;
     }
-    if !repo_packages_to_purge.is_empty() {
-        run("Removing", "conflicting APT packages", || apt::purge(&repo_packages_to_purge))?;
+    if !repo_conflicts.is_empty() {
+        run("Removing", "conflicting APT packages", || apt::purge(&repo_conflicts))?;
     }
-    if !repo_packages_to_install.is_empty() {
-        run("Installing", "APT repository packages", || apt::install(&repo_packages_to_install))?;
+    if !repo_packages.is_empty() {
+        run("Installing", "APT repository packages", || apt::install(&repo_packages))?;
     }
     if let Some(refs) = flatpak_refs {
         run("Adding", "Flathub remote", flatpak::add_flathub_remote)?;
@@ -158,23 +171,21 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     for package in deb_binaries {
         let subject = format!("{} binary package", package.name);
-        run("Installing", &subject, || binary::install(package, platform.architecture))?;
+        run("Installing", &subject, || binary::install(package, platform.arch))?;
     }
     if !appimages.is_empty() {
-        run("Installing", "appimaged", || appimaged::install(platform.architecture))?;
+        run("Installing", "appimaged", || appimaged::install(platform.arch))?;
         for package in appimages {
             let subject = format!("{} binary package", package.name);
-            run("Installing", &subject, || binary::install(package, platform.architecture))?;
+            run("Installing", &subject, || binary::install(package, platform.arch))?;
         }
     }
-    apply_tools(&config.tools, platform.architecture)?;
+    apply_tools(&config.tools, platform.arch)?;
     if let Some(families) = nerd_fonts(&config.fonts) {
         run("Installing", "Nerd Fonts", || fonts::apply(families, false))?;
     }
-    if let Some(packages) = configured_dotfiles(&config.dotfiles, &config.dotfiles.packages.linux) {
-        run("Applying", "dotfiles", || {
-            dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace.unwrap_or(false))
-        })?;
+    if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.linux) {
+        run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
     }
     linux_integrations(&config.integrations.linux)?;
     apply_vscode_extensions(&config.integrations.vscode.extensions)?;
@@ -182,21 +193,21 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     Ok(())
 }
 
-fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Result<()> {
+fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> {
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
-    let dotfiles = configured_dotfiles(&config.dotfiles, &config.dotfiles.packages.macos);
+    let dotfiles = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos);
     let homebrew = &config.packages.macos.homebrew;
     let mut formulae = homebrew.formulae.clone();
     if !formulae.iter().any(|formula| formula == "stow") {
         formulae.push("stow".into());
     }
 
-    if config.system.macos.validate_sudo_access == Some(true) {
+    if config.system.macos.validate_sudo_access {
         run("Validating", "macOS sudo access", macos_host::validate_sudo_access)?;
     }
-    if config.system.macos.xcode.command_line_tools == Some(true) {
-        run("Installing", "Command Line Tools for Xcode", macos_host::install_command_line_tools_for_xcode)?;
+    if config.system.macos.xcode.command_line_tools {
+        run("Installing", "Command Line Tools for Xcode", macos_host::install_command_line_tools)?;
     }
     // install Homebrew and Stow before applying package-backed user configuration
     run("Installing", "Homebrew", homebrew::install)?;
@@ -206,16 +217,16 @@ fn macos_apply(config: &Config, arch: Architecture, dotfiles_root: &Path) -> Res
         run("Installing", "Nerd Fonts", || fonts::apply(families, false))?;
     }
     if let Some(packages) = dotfiles {
-        run("Applying", "dotfiles", || {
-            dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace.unwrap_or(false))
-        })?;
+        run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
     }
     apply_vscode_extensions(&config.integrations.vscode.extensions)?;
-    macos_desktop(theme, desktop_config)?;
+    if theme.is_some() || desktop_config.is_some_and(MacosDesktop::has_intent) {
+        run("Writing", "macOS defaults", || macos_defaults::write_defaults(theme, desktop_config))?;
+    }
     Ok(())
 }
 
-fn apply_tools(tools: &Tools, arch: Architecture) -> Result<()> {
+fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
     if let Some(selector) = tools.rust.as_deref() {
         run("Installing", "Rust toolchain", || rustup::install(selector))?;
         run("Installing", "cargo-binstall", cargo::install_binstall)?;
@@ -232,18 +243,18 @@ fn apply_tools(tools: &Tools, arch: Architecture) -> Result<()> {
     if let Some(selector) = tools.go.as_deref() {
         run("Installing", "Go toolchain", || go::install_toolchain(selector, arch))?;
     }
-    if let Some(crates) = tools.cargo.as_ref().filter(|values| !values.is_empty()) {
-        run("Installing", "Cargo crates", || cargo::install_crates(crates))?;
+    if !tools.cargo.is_empty() {
+        run("Installing", "Cargo crates", || cargo::install_crates(&tools.cargo))?;
     }
-    if let Some(npm_packages) = tools.npm.as_ref().filter(|values| !values.is_empty()) {
-        run("Installing", "npm packages", || npm::install(npm_packages))?;
+    if !tools.npm.is_empty() {
+        run("Installing", "npm packages", || npm::install(&tools.npm))?;
     }
     Ok(())
 }
 
-fn linux_update(config: &Config, architecture: Architecture) -> Result<()> {
+fn linux_update(config: &Config, arch: Arch) -> Result<()> {
     let updates = &config.updates.packages.linux;
-    let flatpak = updates.flatpak == Some(true);
+    let flatpak = updates.flatpak;
     let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
     if flatpak {
         apt_prereqs.insert("flatpak");
@@ -260,8 +271,8 @@ fn linux_update(config: &Config, architecture: Architecture) -> Result<()> {
     if flatpak {
         run("Updating", "Flatpak apps", flatpak::update)?;
     }
-    update_tools_and_packages(&config.tools, &config.updates.tools, architecture, false)?;
-    if config.updates.fonts == Some(true)
+    update_tools(&config.tools, &config.updates.tools, arch)?;
+    if config.updates.fonts
         && let Some(families) = nerd_fonts(&config.fonts)
     {
         run("Updating", "Nerd Fonts", || fonts::apply(families, true))?;
@@ -269,17 +280,20 @@ fn linux_update(config: &Config, architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-fn macos_update(config: &Config, arch: Architecture) -> Result<()> {
+fn macos_update(config: &Config, arch: Arch) -> Result<()> {
     let homebrew = &config.updates.packages.macos.homebrew;
-    let homebrew_formulae = homebrew.formulae == Some(true);
-    let homebrew_casks = homebrew.casks == Some(true);
+    let formulae = homebrew.formulae;
+    let casks = homebrew.casks;
 
     run("Installing", "Homebrew", homebrew::install)?;
-    if homebrew_formulae || homebrew_casks {
-        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(homebrew_formulae, homebrew_casks))?;
+    if formulae || casks {
+        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(formulae, casks))?;
     }
-    update_tools_and_packages(&config.tools, &config.updates.tools, arch, true)?;
-    if config.updates.fonts == Some(true)
+    if config.updates.tools.npm && !config.updates.tools.node {
+        run("Installing", "fnm", fnm::install)?;
+    }
+    update_tools(&config.tools, &config.updates.tools, arch)?;
+    if config.updates.fonts
         && let Some(families) = nerd_fonts(&config.fonts)
     {
         run("Updating", "Nerd Fonts", || fonts::apply(families, true))?;
@@ -287,60 +301,45 @@ fn macos_update(config: &Config, arch: Architecture) -> Result<()> {
     Ok(())
 }
 
-fn update_tools_and_packages(tools: &Tools, updates: &ToolUpdates, arch: Architecture, macos: bool) -> Result<()> {
-    if updates.rust == Some(true) {
+fn update_tools(tools: &Tools, updates: &ToolUpdates, arch: Arch) -> Result<()> {
+    if updates.rust {
         run("Installing", "Rust toolchain", || rustup::install(tools.rust.as_deref().unwrap_or("stable")))?;
         run("Updating", "Rust toolchains", rustup::update_toolchains)?;
     }
-    // macOS resolves npm via Homebrew fnm, so npm-only updates must ensure its formula first
-    if updates.node == Some(true) || (macos && updates.npm == Some(true)) {
+    if updates.node {
         run("Installing", "fnm", fnm::install)?;
     }
-    if updates.node == Some(true) {
+    if updates.node {
         run("Installing", "Node.js", || fnm::install_version(tools.node.as_deref().unwrap_or("latest")))?;
     }
-    if updates.python == Some(true) {
+    if updates.python {
         run("Installing", "uv", uv::install)?;
         run("Upgrading", "Python", uv::upgrade_py)?;
     }
-    if updates.go == Some(true) {
+    if updates.go {
         run("Updating", "Go toolchain", || go::update_toolchain(tools.go.as_deref().unwrap_or("latest"), arch))?;
     }
-    if updates.cargo == Some(true) {
+    if updates.cargo {
         run("Updating", "Cargo crates", cargo::update_crates)?;
     }
-    if updates.npm == Some(true) {
+    if updates.npm {
         run("Updating", "npm packages", npm::update)?;
     }
     Ok(())
 }
 
-fn build_apt_repo(repo: &AptRepoConfig, platform: &Platform, key: DistroMapKey, source_uri: &str) -> AptRepo {
-    let suite =
-        if repo.suite == "codename" { select_repo_codename(key, platform).to_owned() } else { repo.suite.clone() };
-    AptRepo::new(
-        repo.name.clone(),
-        repo.key_url.clone(),
-        source_uri.to_owned(),
-        platform.architecture,
-        suite,
-        repo.components.clone(),
-        PathBuf::from(&repo.key_path),
-    )
-}
-
 fn nerd_fonts(fonts: &Fonts) -> Option<&[String]> {
-    fonts.nerd.as_deref().filter(|families| !families.is_empty())
+    (!fonts.nerd.is_empty()).then_some(fonts.nerd.as_slice())
 }
 
-fn configured_dotfiles(dotfiles: &Dotfiles, platform_packages: &[String]) -> Option<Vec<String>> {
+fn dotfile_packages(dotfiles: &Dotfiles, platform_packages: &[String]) -> Option<Vec<String>> {
     let packages = dotfiles.packages.all.iter().chain(platform_packages).cloned().collect::<Vec<_>>();
     (!packages.is_empty()).then_some(packages)
 }
 
 fn linux_integrations(integrations: &LinuxIntegrations) -> Result<()> {
     if let Some(docker) = &integrations.docker {
-        if docker.group == Some(true) {
+        if docker.group {
             run("Configuring", "Docker group membership", || users::ensure_in_group("Docker", "docker", "docker"))?;
         }
         if let Some(logging) = &docker.logging {
@@ -349,7 +348,7 @@ fn linux_integrations(integrations: &LinuxIntegrations) -> Result<()> {
             })?;
         }
     }
-    if integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.group == Some(true)) {
+    if integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.group) {
         run("Configuring", "VirtualBox group membership", || {
             users::ensure_in_group("VirtualBox", "VBoxManage", "vboxusers")
         })?;
@@ -362,16 +361,6 @@ fn apply_vscode_extensions(extensions: &[String]) -> Result<()> {
         run("Installing", "Visual Studio Code extensions", || vscode::install_extensions(extensions))?;
     }
     Ok(())
-}
-
-fn add_desktop_prereqs(theme: Option<Theme>, desktop: Option<&LinuxDesktop>, apt_prereqs: &mut BTreeSet<&'static str>) {
-    if theme.is_none() && !desktop.is_some_and(LinuxDesktop::has_intent) {
-        return;
-    }
-    apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
-    if desktop.and_then(|desktop| desktop.gnome.as_ref()).is_some_and(Gnome::has_intent) {
-        apt_prereqs.insert("gnome-shell");
-    }
 }
 
 fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result<()> {
@@ -392,21 +381,14 @@ fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result
             run("Setting", "idle dimming", || desktop::set_idle_dim(enabled))?;
         }
     }
-    if let Some(extensions) = gnome.extensions.as_ref().filter(|values| !values.is_empty()) {
-        run_with_outcome("Applying", "GNOME extensions", || gnome::apply_extensions(extensions))?;
+    if !gnome.extensions.is_empty() {
+        run_with_outcome("Applying", "GNOME extensions", || gnome::apply_extensions(&gnome.extensions))?;
     }
-    if gnome.dash_to_dock == Some(true) {
+    if gnome.dash_to_dock {
         run_with_outcome("Installing", "Dash to Dock", gnome::apply_dash_to_dock)?;
     }
-    if gnome.rounded_window_corners == Some(true) {
+    if gnome.rounded_window_corners {
         run_with_outcome("Installing", "Rounded Window Corners", gnome::apply_rounded_window_corners)?;
-    }
-    Ok(())
-}
-
-fn macos_desktop(theme: Option<Theme>, desktop: Option<&MacDesktop>) -> Result<()> {
-    if theme.is_some() || desktop.is_some_and(MacDesktop::has_intent) {
-        run("Writing", "macOS defaults", || macos_defaults::write_defaults(theme, desktop))?;
     }
     Ok(())
 }

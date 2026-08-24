@@ -82,7 +82,6 @@ fn valid_uuid_part(value: &str) -> bool {
 }
 
 fn install_extension(uuid: &str) -> Result<()> {
-    // TODO: can we simplify this?
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={uuid}");
     let metadata = host::curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host::run("GNOME extension shell version", "gnome-shell", ["--version"])?;
@@ -98,7 +97,6 @@ fn install_extension(uuid: &str) -> Result<()> {
 }
 
 fn shell_version(input: &str) -> Result<&str> {
-    // TODO: can we simplify this?
     for token in input.split_whitespace() {
         let candidate = token.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
         let mut is_version = !candidate.is_empty();
