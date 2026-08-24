@@ -3,7 +3,7 @@
 use crate::{
     config::{
         AptArch, BinaryFormat, Config, Dotfiles, Enablement, Fonts, Gnome, LinuxDesktop, LinuxIntegrations,
-        MacosDesktop, Theme, ToolUpdates, Tools, select_distro_entry, select_repo_codename,
+        MacosDesktop, Theme, ToolUpdates, Tools, select_distro_uri, select_repo_codename,
     },
     operations::{
         desktop::{self, fonts, gnome, macos as macos_defaults},
@@ -24,10 +24,7 @@ use crate::{
     style::STATUS,
 };
 use anyhow::{Context, Result};
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 const APT_PREREQS: [&str; 8] =
     ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xdg-terminal-exec", "xz-utils"];
@@ -64,7 +61,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     let PlatformIdentity::Linux { distro, .. } = platform.identity else { unreachable!() };
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref());
-    let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
+    let mut apt_prereqs = APT_PREREQS.into_iter().map(str::to_owned).collect::<Vec<_>>();
     let mut repos = Vec::new();
     let mut repo_conflicts = Vec::new();
     let mut repo_packages = Vec::new();
@@ -77,7 +74,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_arch)) {
                 continue;
             }
-            let Some((key, source_uri)) = select_distro_entry(&repo.uris, platform.identity) else { continue };
+            let Some((key, source_uri)) = select_distro_uri(&repo.uris, platform.identity) else { continue };
             let suite = if repo.suite == "codename" {
                 select_repo_codename(key, platform).to_owned()
             } else {
@@ -99,7 +96,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     let flatpak_refs = (!config.packages.linux.flatpak.is_empty()).then_some(config.packages.linux.flatpak.as_slice());
     if flatpak_refs.is_some() {
-        apt_prereqs.insert("flatpak");
+        apt_prereqs.push("flatpak".into());
     }
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
@@ -111,9 +108,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         }
     }
     if theme.is_some() || desktop_config.is_some_and(LinuxDesktop::has_intent) {
-        apt_prereqs.extend(["dconf-cli", "libglib2.0-bin"]);
+        apt_prereqs.extend(["dconf-cli".into(), "libglib2.0-bin".into()]);
         if desktop_config.and_then(|desktop| desktop.gnome.as_ref()).is_some_and(Gnome::has_intent) {
-            apt_prereqs.insert("gnome-shell");
+            apt_prereqs.push("gnome-shell".into());
         }
     }
 
@@ -138,9 +135,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         }
     }
     run("Updating", "APT package metadata", apt::update)?;
-    run("Installing", "APT prerequisites", || {
-        apt::install(&apt_prereqs.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>())
-    })?;
+    run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
     if let Some(apt) = &config.packages.linux.apt
         && !apt.install.is_empty()
     {
@@ -182,8 +177,8 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.linux) {
         run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
     }
-    linux_integrations(&config.integrations.linux)?;
     apply_vscode_extensions(&config.integrations.vscode.extensions)?;
+    linux_integrations(&config.integrations.linux)?;
     linux_desktop(theme, desktop_config)?;
     Ok(())
 }
@@ -250,9 +245,9 @@ fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
 fn linux_update(config: &Config, arch: Arch) -> Result<()> {
     let updates = &config.updates.packages.linux;
     let flatpak = updates.flatpak;
-    let mut apt_prereqs = BTreeSet::from(APT_PREREQS);
+    let mut apt_prereqs = APT_PREREQS.into_iter().map(str::to_owned).collect::<Vec<_>>();
     if flatpak {
-        apt_prereqs.insert("flatpak");
+        apt_prereqs.push("flatpak".into());
     }
 
     // refresh package metadata before upgrades and prerequisite reconciliation
@@ -260,9 +255,7 @@ fn linux_update(config: &Config, arch: Arch) -> Result<()> {
     if let Some(policy) = updates.apt {
         run("Upgrading", "APT packages", || apt::upgrade(policy))?;
     }
-    run("Installing", "APT prerequisites", || {
-        apt::install(&apt_prereqs.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>())
-    })?;
+    run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
     if flatpak {
         run("Updating", "Flatpak apps", flatpak::update)?;
     }

@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::operations::host::{self, temp_path_with_suffix};
+use crate::operations::host::{self, temp_path};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {
@@ -88,7 +88,7 @@ fn install_extension(uuid: &str) -> Result<()> {
     let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
-    let archive = temp_path_with_suffix("gnome-extension", ".zip")?;
+    let archive = temp_path("gnome-extension", ".zip")?;
     let name = uuid.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
     host::curl("GNOME extension download", &url, ["--output", &archive.to_string_lossy()])?;

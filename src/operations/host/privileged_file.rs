@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use super::*;
 
 pub(crate) fn write_atomic(destination: &Path, contents: &[u8], label: &str) -> Result<()> {
-    let local = temp_path("privileged-write")?;
+    let local = temp_path("privileged-write", "")?;
     let context = "open local atomic-write staging file";
     let mut file = fs::OpenOptions::new().write(true).truncate(true).open(&local).context(context)?;
     file.write_all(contents).context("write local atomic-write staging file")?;

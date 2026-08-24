@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fs::{self, File},
     io::{self, Write},
     os::unix::fs::PermissionsExt,
@@ -101,10 +101,11 @@ impl Init {
             Ok(_) => true,
         };
         if package_exists {
-            let mut files = BTreeSet::new();
+            let mut files = Vec::new();
             if !collect_regular_files(&dest, &self.root, &mut files)? {
                 return Ok(());
             }
+            files.sort();
             if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
                 return Ok(());
             }
@@ -165,7 +166,7 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect_regular_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>) -> Result<bool> {
+fn collect_regular_files(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) -> Result<bool> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -174,7 +175,7 @@ fn collect_regular_files(dir: &Path, root: &Path, files: &mut BTreeSet<PathBuf>)
                 return Ok(false);
             }
         } else if file_type.is_file() {
-            files.insert(entry.path().strip_prefix(root)?.to_path_buf());
+            files.push(entry.path().strip_prefix(root)?.to_path_buf());
         } else {
             return Ok(false);
         }
@@ -192,8 +193,13 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
     for line in text.lines() {
         let (hash, relative) = line.split_once('\t').context("malformed managed-files record")?;
         let relative = PathBuf::from(relative);
-        validate_hash(hash)?;
-        validate_relative(&relative)?;
+        ensure!(hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()), "invalid SHA-256 record");
+        if relative.as_os_str().is_empty()
+            || relative.components().any(|component| !matches!(component, Component::Normal(_)))
+            || relative.to_string_lossy().contains(['\t', '\n'])
+        {
+            bail!("unsafe managed path: {}", relative.display());
+        }
         if result.insert(relative, hash.into()).is_some() {
             bail!("duplicate managed-files record");
         }
@@ -222,19 +228,6 @@ fn sync_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn validate_hash(hash: &str) -> Result<()> {
-    ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()), "invalid SHA-256 record");
-    Ok(())
-}
-fn validate_relative(path: &Path) -> Result<()> {
-    if path.as_os_str().is_empty()
-        || path.components().any(|c| !matches!(c, Component::Normal(_)))
-        || path.to_string_lossy().contains(['\t', '\n'])
-    {
-        bail!("unsafe managed path: {}", path.display());
-    }
-    Ok(())
-}
 fn hash_bytes(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
