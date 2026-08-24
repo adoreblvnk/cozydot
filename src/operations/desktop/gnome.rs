@@ -57,7 +57,9 @@ pub(crate) fn apply_rounded_window_corners() -> Result<Outcome> {
 }
 
 fn install_or_enable_extension(uuid: &str) -> Result<Outcome> {
-    validate_uuid(uuid)?;
+    // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
+    let valid = Regex::new(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$")?.is_match(uuid);
+    ensure!(valid, "invalid GNOME extension UUID {uuid:?}");
     if !host::output("gnome-extensions", ["info", uuid])?.status.success() {
         install_extension(uuid)?;
         // GNOME only finds newly installed extensions after next login
@@ -65,13 +67,6 @@ fn install_or_enable_extension(uuid: &str) -> Result<Outcome> {
     }
     host::run("GNOME extension enable", "gnome-extensions", ["enable", uuid])?;
     Ok(Outcome::Completed)
-}
-
-fn validate_uuid(value: &str) -> Result<()> {
-    // UUIDs enter request URLs & archive names, so accept only GNOME's path-safe form
-    let valid = Regex::new(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$")?.is_match(value);
-    ensure!(valid, "invalid GNOME extension UUID {value:?}");
-    Ok(())
 }
 
 fn install_extension(uuid: &str) -> Result<()> {
@@ -82,6 +77,7 @@ fn install_extension(uuid: &str) -> Result<()> {
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
     let archive = temp_path("gnome-extension", ".zip")?;
+    // extension archive names omit @ although metadata UUIDs retain it
     let name = uuid.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
     host::curl("GNOME extension download", &url, ["--output", &archive.to_string_lossy()])?;
@@ -113,6 +109,7 @@ fn select_extension_version(input: &str, shell_version: &str) -> Result<u64> {
 
     let response: Response = serde_json::from_str(input).context("parse GNOME extension JSON")?;
     let mut candidate = shell_version;
+    // metadata may key compatibility by the full shell version or a shorter parent
     loop {
         if let Some(extension) = response.shell_version_map.get(candidate) {
             return Ok(extension.version);

@@ -74,6 +74,7 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, arch: Arch
     let release: Release = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
+    // reject ambiguous matches instead of depending on GitHub asset order
     if matches.len() != 1 {
         let arch = arch.as_str();
         bail!("binary package {:?} ({}) asset pattern matched {} assets", package, arch, matches.len());

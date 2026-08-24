@@ -25,6 +25,7 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
             changed = true;
         }
     }
+    // macOS discovers user fonts directly while Linux requires a fontconfig refresh
     if changed && !cfg!(target_os = "macos") {
         host::run("Nerd Font cache refresh", "fc-cache", [OsStr::new("--force"), parent.as_os_str()])?;
     }
@@ -38,6 +39,7 @@ fn install(family: &str, destination: &Path) -> Result<()> {
     host::curl("Nerd Font archive download", &url, args)?;
     let path = destination.to_str().context("font path is not UTF-8")?;
     let archive_path = archive.to_str().context("font archive path is not UTF-8")?;
+    // replace the whole family so files removed upstream cannot survive reinstall
     host::run("Nerd Font destination replacement", "rm", ["-rf", path])?;
     host::run("Nerd Font destination creation", "mkdir", ["-p", path])?;
     host::run("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;

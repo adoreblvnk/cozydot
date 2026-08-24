@@ -52,7 +52,7 @@ impl Config {
         }
 
         // fonts
-        self.fonts.validate()?;
+        validate_definition_names(&self.fonts.nerd, "fonts.nerd")?;
 
         // dotfiles
         self.dotfiles.validate()?;
@@ -70,9 +70,8 @@ impl Config {
 
         let theme = self.desktop.as_ref().and_then(|desktop| desktop.theme);
         let linux_desktop = self.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref());
-        if platform.desktop != DesktopKind::Gnome
-            && (theme.is_some() || linux_desktop.is_some_and(LinuxDesktop::has_intent))
-        {
+        let has_gnome_intent = theme.is_some() || linux_desktop.is_some_and(LinuxDesktop::has_intent);
+        if platform.desktop != DesktopKind::Gnome && has_gnome_intent {
             bail!(
                 "desktop.theme and desktop.linux.gnome settings require GNOME; detected {:?}",
                 platform.desktop.as_str()
@@ -219,9 +218,13 @@ pub fn select_distro_uri(uris: &BTreeMap<DistroKey, String>, identity: PlatformI
     let PlatformIdentity::Linux { distro, family } = identity else { return None };
     let exact_key = DistroKey::from_distro(distro);
     let family_key = DistroKey::from_family(family);
-    [exact_key, family_key, DistroKey::Default]
-        .into_iter()
-        .find_map(|key| uris.get(&key).map(|uri| (key, uri.as_str())))
+    // prefer the exact distro, then its base family, then the default URI
+    for key in [exact_key, family_key, DistroKey::Default] {
+        if let Some(uri) = uris.get(&key) {
+            return Some((key, uri.as_str()));
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -263,11 +266,11 @@ impl AptRepoConfig {
         if self.arch.as_ref().is_some_and(Vec::is_empty) {
             bail!("{path}.arch: must not be empty when present");
         }
-        let has_control = |value: &str| value.chars().any(char::is_control);
-        if self.uris.values().any(|value| has_control(value))
-            || has_control(&self.suite)
-            || self.components.iter().any(|value| has_control(value))
-        {
+        let contains_control = |value: &str| value.chars().any(char::is_control);
+        let has_control = self.uris.values().any(|value| contains_control(value))
+            || contains_control(&self.suite)
+            || self.components.iter().any(|value| contains_control(value));
+        if has_control {
             bail!("{path}: source values must fit on one line and contain no control characters");
         }
         Ok(())
@@ -286,6 +289,7 @@ pub fn select_repo_codename(key: DistroKey, platform: &Platform) -> &str {
         PlatformIdentity::Linux { distro, .. } => key == DistroKey::from_distro(distro),
         PlatformIdentity::Macos => false,
     };
+    // exact/default mappings track the host codename; family mappings track the base codename
     if key == DistroKey::Default || exact { &platform.distro_codename } else { &platform.base_codename }
 }
 
@@ -382,12 +386,6 @@ pub struct Tools {
 pub struct Fonts {
     #[serde(default)]
     pub nerd: Vec<String>,
-}
-
-impl Fonts {
-    fn validate(&self) -> Result<()> {
-        validate_definition_names(&self.nerd, "fonts.nerd")
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -523,6 +521,7 @@ impl<'de> Deserialize<'de> for IdleDuration {
     {
         let value = String::deserialize(deserializer)?;
         let duration = humantime::parse_duration(&value).map_err(de::Error::custom)?;
+        // GNOME stores idle-delay as uint32 seconds
         if duration.subsec_nanos() != 0 {
             return Err(de::Error::custom("duration must resolve to a whole number of seconds"));
         }

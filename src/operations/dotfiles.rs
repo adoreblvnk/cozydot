@@ -29,6 +29,7 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
     let home = host::home()?;
     let mut args = vec![OsStr::new("--dir"), stow_dir.as_os_str(), OsStr::new("--target"), home.as_os_str()];
     if !replace {
+        // simulate first so conflicts fail before Stow mutates the home directory
         let mut check_args = args.clone();
         check_args.extend([OsStr::new("--simulate"), OsStr::new("--")]);
         check_args.extend(packages.iter().map(OsStr::new));
@@ -40,6 +41,7 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
         for (package, package_dir) in &package_dirs {
             collect_conflicts(package_dir, home.clone(), package, &mut conflicts)?;
         }
+        // back up each target once when multiple Stow packages claim it
         conflicts.sort_by(|left, right| left.1.cmp(&right.1));
         conflicts.dedup_by(|left, right| left.1 == right.1);
         backup_conflicts(&home, &conflicts)?;
