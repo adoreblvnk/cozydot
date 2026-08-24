@@ -1,6 +1,5 @@
 //! Provision Linux & macOS from one config.
 
-use anstyle::{AnsiColor, Effects, Style};
 use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
 use std::{
@@ -8,14 +7,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::style::ERROR;
+
 mod config;
 mod init;
 mod operations;
 mod paths;
 mod platform;
+mod style;
 mod workflow;
-
-const ERROR: Style = AnsiColor::BrightRed.on_default().effects(Effects::BOLD);
 
 #[derive(Debug, Parser)]
 #[command(name = "cozydot", version, about = "Declarative Linux and macOS post-install, update, and dotfile manager")]

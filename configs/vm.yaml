@@ -1,56 +1,17 @@
-# Cross-platform Cozydot configuration.
 version: 1.0.0
-shared:
-  tools:
-    rust: stable
-    node: latest
-    python: "3.13"
-    go: latest
-  packages:
-    cargo:
-      - bat
-      - fd-find
-      - starship
-      - tealdeer
-    npm:
-      - opencode-ai
-  fonts:
-    nerd:
-      - GeistMono
-  dotfiles:
-    packages:
-      - bat
-      - fastfetch
-      - git
-      - gnupg
-      - starship
-      - vscode
-      - wezterm
-  integrations:
-    vscode:
-      extensions:
-        - catppuccin.catppuccin-vsc
-  desktop:
-    theme: dark
-  updates:
-    tools:
-      rust: true
-      go: true
-      node: true
-      python: true
-    packages:
-      cargo: true
-      npm: true
-    fonts: true
-linux:
-  system:
-    debian:
-      sudo_group: true
-    ubuntu:
-      unattended_upgrades: disabled
-      snapd: disabled
-      restricted_extras: true
-  packages:
+system:
+  debian:
+    sudo_group: true
+  ubuntu:
+    unattended_upgrades: disabled
+    snapd: disabled
+    restricted_extras: true
+  macos:
+    validate_sudo_access: true
+    xcode:
+      command_line_tools: true
+packages:
+  linux:
     apt:
       install:
         - bash-completion
@@ -111,55 +72,78 @@ linux:
           assets:
             x86_64: ^gcm-linux-x64-.*\.deb$
             aarch64: ^gcm-linux-arm64-.*\.deb$
-  dotfiles:
-    packages:
+  macos:
+    homebrew:
+      formulae:
+        - cmake
+        - ffmpeg
+        - fastfetch
+        - figlet
+        - fzf
+        - gh
+        - git
+        - imagemagick
+        - lolcat
+        - openjdk
+        - pandoc
+        - pass
+        - pinentry-mac
+        - trash
+        - vim
+      casks:
+        - bitwarden
+        - git-credential-manager
+        - visual-studio-code
+        - wezterm
+tools:
+  rust: stable
+  node: latest
+  python: "3.13"
+  go: latest
+  cargo:
+    - bat
+    - fd-find
+    - starship
+    - tealdeer
+  npm:
+    - opencode-ai
+fonts:
+  nerd:
+    - GeistMono
+dotfiles:
+  replace: true
+  packages:
+    all:
+      - bat
+      - fastfetch
+      - git
+      - gnupg
+      - starship
+      - vscode
+      - wezterm
+    linux:
       - bash
-  integrations: {}
-  desktop:
-    terminal: wezterm
-    idle:
-      timeout: 15m
-      dim: false
+    macos:
+      - zsh
+integrations:
+  vscode:
+    extensions:
+      - catppuccin.catppuccin-vsc
+  linux: {}
+desktop:
+  theme: dark
+  linux:
     gnome:
+      terminal: wezterm
+      idle:
+        timeout: 15m
+        dim: false
       extensions:
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
       dash_to_dock: true
       rounded_window_corners: true
-  updates:
-    apt: full-upgrade
-    flatpak: true
-macos:
-  system:
-    validate_sudo_access: true
-    xcode:
-      command_line_tools: true
-  homebrew:
-    formulae:
-      - cmake
-      - ffmpeg
-      - fastfetch
-      - figlet
-      - fzf
-      - gh
-      - git
-      - imagemagick
-      - lolcat
-      - openjdk
-      - pandoc
-      - pass
-      - pinentry-mac
-      - trash
-      - vim
-    casks:
-      - bitwarden
-      - git-credential-manager
-      - visual-studio-code
-      - wezterm
-  dotfiles:
-    packages:
-      - zsh
-  desktop:
+  macos:
     dock:
       autohide: true
       show_recent_applications: false
@@ -171,7 +155,20 @@ macos:
       initial_key_repeat: 15 # macOS default: 25
     trackpad:
       tap_to_click: true
-  updates:
-    homebrew:
-      formulae: true
-      casks: true
+updates:
+  packages:
+    linux:
+      apt: full-upgrade
+      flatpak: true
+    macos:
+      homebrew:
+        formulae: true
+        casks: true
+  tools:
+    rust: true
+    node: true
+    python: true
+    go: true
+    cargo: true
+    npm: true
+  fonts: true

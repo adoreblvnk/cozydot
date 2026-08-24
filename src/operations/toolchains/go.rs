@@ -1,12 +1,11 @@
-use anstyle::{AnsiColor, Effects, Style};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::operations::host::{self, is_regular_executable, shell::append_profile, temp_path_with_suffix};
 use crate::platform::Architecture;
+use crate::style::WARNING;
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
-const WARNING: Style = AnsiColor::Yellow.on_default().effects(Effects::BOLD);
 
 pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> Result<()> {
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
@@ -37,7 +36,7 @@ pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> R
 pub(crate) fn update_toolchain(selector: &str, architecture: Architecture) -> Result<()> {
     if selector != "latest" {
         anstream::eprintln!(
-            "{WARNING}warning:{WARNING:#} skipping Go update because shared.tools.go is pinned to an exact version"
+            "{WARNING}warning:{WARNING:#} skipping Go update because tools.go is pinned to an exact version"
         );
         return Ok(());
     }

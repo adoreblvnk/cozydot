@@ -1,93 +1,17 @@
-# Cross-platform Cozydot configuration.
 version: 1.0.0
-
-shared:
-  tools:
-    rust: stable
-    node: lts
-    python: "3.13"
-    go: latest
-
-  packages:
-    cargo:
-      - bat
-      - bottom
-      - du-dust
-      - eza
-      - fd-find
-      - presenterm
-      - starship
-      - tealdeer
-      - yazi-fm
-      - zoxide
-    npm:
-      - "@playwright/cli"
-      - opencode-ai
-      - skills
-
-  fonts:
-    nerd:
-      - GeistMono
-
-  dotfiles:
-    packages:
-      - bat
-      - bottom
-      - fastfetch
-      - git
-      - gnupg
-      - opencode
-      - starship
-      - vscode
-      - wezterm
-      - yazi
-
-  integrations:
-    vscode:
-      extensions:
-        - catppuccin.catppuccin-vsc
-        - charliermarsh.ruff
-        - christian-kohler.path-intellisense
-        - eamodio.gitlens
-        - ecmel.vscode-html-css
-        - foxundermoon.shell-format
-        - golang.go
-        - llvm-vs-code-extensions.vscode-clangd
-        - ms-python.debugpy
-        - ms-python.python
-        - ms-python.vscode-pylance
-        - prettier.prettier-vscode
-        - redhat.vscode-yaml
-        - rust-lang.rust-analyzer
-        - streetsidesoftware.code-spell-checker
-        - timonwong.shellcheck
-        - wayou.vscode-todo-highlight
-        - yzhang.markdown-all-in-one
-
-  desktop:
-    theme: dark
-
-  updates:
-    tools:
-      rust: true
-      go: true
-      node: true
-      python: true
-    packages:
-      cargo: true
-      npm: true
-    fonts: true
-
-linux:
-  system:
-    debian:
-      sudo_group: true
-    ubuntu:
-      unattended_upgrades: disabled
-      snapd: disabled
-      restricted_extras: true
-
-  packages:
+system:
+  debian:
+    sudo_group: true
+  ubuntu:
+    unattended_upgrades: disabled
+    snapd: disabled
+    restricted_extras: true
+  macos:
+    validate_sudo_access: true
+    xcode:
+      command_line_tools: true
+packages:
+  linux:
     apt:
       install:
         - bash-completion
@@ -201,7 +125,6 @@ linux:
             - "*"
           packages:
             - wezterm-nightly
-
     flatpak:
       - com.bitwarden.desktop
       - com.discordapp.Discord
@@ -212,7 +135,6 @@ linux:
       - org.qbittorrent.qBittorrent
       - org.shotcut.Shotcut
       - org.telegram.desktop
-
     binaries:
       - name: drawio
         format: deb
@@ -254,12 +176,106 @@ linux:
           assets:
             x86_64: ^zen-x86_6[0-9]\.AppImage$
             aarch64: ^zen-aarch6[0-9]\.AppImage$
-
-  dotfiles:
-    packages:
+  macos:
+    homebrew:
+      formulae:
+        - cmake
+        - ffmpeg
+        - fastfetch
+        - figlet
+        - fzf
+        - gh
+        - git
+        - imagemagick
+        - lolcat
+        - openjdk
+        - pandoc
+        - pass
+        - pinentry-mac
+        - trash
+        - vim
+      casks:
+        - bitwarden
+        - discord
+        - docker
+        - drawio
+        - gimp
+        - git-credential-manager
+        - helium-browser
+        - obs
+        - obsidian
+        - onlyoffice
+        - qbittorrent
+        - shotcut
+        - telegram
+        - virtualbox
+        - visual-studio-code
+        - vlc
+        - wezterm
+        - zen
+tools:
+  rust: stable
+  node: lts
+  python: "3.13"
+  go: latest
+  cargo:
+    - bat
+    - bottom
+    - du-dust
+    - eza
+    - fd-find
+    - presenterm
+    - starship
+    - tealdeer
+    - yazi-fm
+    - zoxide
+  npm:
+    - "@playwright/cli"
+    - opencode-ai
+    - skills
+fonts:
+  nerd:
+    - GeistMono
+dotfiles:
+  replace: true
+  packages:
+    all:
+      - bat
+      - bottom
+      - fastfetch
+      - git
+      - gnupg
+      - opencode
+      - starship
+      - vscode
+      - wezterm
+      - yazi
+    linux:
       - bash
-
-  integrations:
+    macos:
+      - zsh
+integrations:
+  vscode:
+    extensions:
+      - catppuccin.catppuccin-vsc
+      - charliermarsh.ruff
+      - christian-kohler.path-intellisense
+      - eamodio.gitlens
+      - ecmel.vscode-html-css
+      - foxundermoon.shell-format
+      - golang.go
+      - llvm-vs-code-extensions.vscode-clangd
+      - ms-python.debugpy
+      - ms-python.python
+      - ms-python.vscode-pylance
+      - prettier.prettier-vscode
+      - redhat.vscode-yaml
+      - rust-lang.rust-analyzer
+      - streetsidesoftware.code-spell-checker
+      - timonwong.shellcheck
+      - wayou.vscode-todo-highlight
+      - yzhang.markdown-all-in-one
+  linux:
     docker:
       group: true
       logging:
@@ -267,71 +283,20 @@ linux:
         max_size: 10m
     virtualbox:
       group: true
-
-  desktop:
-    terminal: wezterm
-    idle:
-      timeout: 15m
-      dim: false
+desktop:
+  theme: dark
+  linux:
     gnome:
+      terminal: wezterm
+      idle:
+        timeout: 15m
+        dim: false
       extensions:
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
       dash_to_dock: true
       rounded_window_corners: true
-
-  updates:
-    apt: full-upgrade
-    flatpak: true
-
-macos:
-  system:
-    validate_sudo_access: true
-    xcode:
-      command_line_tools: true
-
-  homebrew:
-    formulae:
-      - cmake
-      - ffmpeg
-      - fastfetch
-      - figlet
-      - fzf
-      - gh
-      - git
-      - imagemagick
-      - lolcat
-      - openjdk
-      - pandoc
-      - pass
-      - pinentry-mac
-      - trash
-      - vim
-    casks:
-      - bitwarden
-      - discord
-      - docker
-      - drawio
-      - gimp
-      - git-credential-manager
-      - helium-browser
-      - obs
-      - obsidian
-      - onlyoffice
-      - qbittorrent
-      - shotcut
-      - telegram
-      - virtualbox
-      - visual-studio-code
-      - vlc
-      - wezterm
-      - zen
-
-  dotfiles:
-    packages:
-      - zsh
-
-  desktop:
+  macos:
     dock:
       autohide: true
       show_recent_applications: false
@@ -343,8 +308,20 @@ macos:
       initial_key_repeat: 15 # macOS default: 25
     trackpad:
       tap_to_click: true
-
-  updates:
-    homebrew:
-      formulae: true
-      casks: true
+updates:
+  packages:
+    linux:
+      apt: full-upgrade
+      flatpak: true
+    macos:
+      homebrew:
+        formulae: true
+        casks: true
+  tools:
+    rust: true
+    node: true
+    python: true
+    go: true
+    cargo: true
+    npm: true
+  fonts: true

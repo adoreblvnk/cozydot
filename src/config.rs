@@ -19,9 +19,14 @@ pub enum ConfigVersion {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: ConfigVersion,
-    pub shared: SharedConfig,
-    pub linux: LinuxConfig,
-    pub macos: MacosConfig,
+    pub system: System,
+    pub packages: Packages,
+    pub tools: Tools,
+    pub fonts: Fonts,
+    pub dotfiles: Dotfiles,
+    pub integrations: Integrations,
+    pub desktop: Option<Desktop>,
+    pub updates: Updates,
 }
 
 impl Config {
@@ -34,31 +39,25 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.shared.packages.cargo.as_ref().is_some_and(|values| !values.is_empty())
-            && self.shared.tools.rust.is_none()
-        {
-            bail!("shared.packages.cargo: requires shared.tools.rust");
+        if self.tools.cargo.as_ref().is_some_and(|values| !values.is_empty()) && self.tools.rust.is_none() {
+            bail!("tools.cargo: requires tools.rust");
         }
-        if self.shared.packages.npm.as_ref().is_some_and(|values| !values.is_empty())
-            && self.shared.tools.node.is_none()
-        {
-            bail!("shared.packages.npm: requires shared.tools.node");
+        if self.tools.npm.as_ref().is_some_and(|values| !values.is_empty()) && self.tools.node.is_none() {
+            bail!("tools.npm: requires tools.node");
         }
-        if let Some(go) = self.shared.tools.go.as_deref() {
+        if let Some(go) = self.tools.go.as_deref() {
             let exact = go.split('.').count() == 3
                 && go.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
             if go != "latest" && !exact {
-                bail!("shared.tools.go: expected `latest` or an exact version such as `1.24.6`");
+                bail!("tools.go: expected `latest` or an exact version such as `1.24.6`");
             }
         }
-        self.shared.fonts.validate()?;
-        self.shared.dotfiles.validate("shared.dotfiles")?;
-        self.linux.packages.validate()?;
-        self.linux.dotfiles.validate("linux.dotfiles")?;
-        if let Some(desktop) = &self.linux.desktop {
-            desktop.validate()?;
+        self.fonts.validate()?;
+        self.dotfiles.validate()?;
+        self.packages.linux.validate()?;
+        if let Some(linux) = self.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref()) {
+            linux.validate()?;
         }
-        self.macos.dotfiles.validate("macos.dotfiles")?;
         Ok(())
     }
 
@@ -66,13 +65,13 @@ impl Config {
     pub fn validate_for_platform(&self, platform: &Platform) -> Result<()> {
         let PlatformIdentity::Linux { .. } = platform.identity else { return Ok(()) };
 
-        let theme = self.shared.desktop.as_ref().and_then(|desktop| desktop.theme);
-        let linux_desktop = self.linux.desktop.as_ref();
+        let theme = self.desktop.as_ref().and_then(|desktop| desktop.theme);
+        let linux_desktop = self.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref());
         if platform.desktop != DesktopKind::Gnome
             && (theme.is_some() || linux_desktop.is_some_and(LinuxDesktop::has_intent))
         {
             bail!(
-                "shared.desktop.theme and linux.desktop settings require GNOME; detected {:?}",
+                "desktop.theme and desktop.linux.gnome settings require GNOME; detected {:?}",
                 platform.desktop.as_str()
             );
         }
@@ -82,14 +81,17 @@ impl Config {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SharedConfig {
-    pub tools: Tools,
-    pub packages: SharedPackages,
-    pub fonts: Fonts,
-    pub dotfiles: Dotfiles,
-    pub integrations: SharedIntegrations,
-    pub desktop: Option<SharedDesktop>,
-    pub updates: SharedUpdates,
+pub struct System {
+    pub debian: Option<DebianSystem>,
+    pub ubuntu: Option<UbuntuSystem>,
+    pub macos: MacSystem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Packages {
+    pub linux: LinuxPackages,
+    pub macos: MacPackages,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -99,11 +101,6 @@ pub struct Tools {
     pub node: Option<String>,
     pub python: Option<String>,
     pub go: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SharedPackages {
     pub cargo: Option<Vec<String>>,
     pub npm: Option<Vec<String>>,
 }
@@ -117,26 +114,38 @@ pub struct Fonts {
 impl Fonts {
     fn validate(&self) -> Result<()> {
         let Some(families) = self.nerd.as_deref() else { return Ok(()) };
-        validate_definition_names(families, "shared.fonts.nerd")
+        validate_definition_names(families, "fonts.nerd")
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dotfiles {
-    pub packages: Vec<String>,
+    pub replace: Option<bool>,
+    pub packages: DotfilePackages,
 }
 
 impl Dotfiles {
-    fn validate(&self, path: &str) -> Result<()> {
-        validate_definition_names(&self.packages, &format!("{path}.packages"))
+    fn validate(&self) -> Result<()> {
+        validate_definition_names(&self.packages.all, "dotfiles.packages.all")?;
+        validate_definition_names(&self.packages.linux, "dotfiles.packages.linux")?;
+        validate_definition_names(&self.packages.macos, "dotfiles.packages.macos")
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SharedIntegrations {
+pub struct DotfilePackages {
+    pub all: Vec<String>,
+    pub linux: Vec<String>,
+    pub macos: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Integrations {
     pub vscode: VsCodeIntegration,
+    pub linux: LinuxIntegrations,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -147,15 +156,17 @@ pub struct VsCodeIntegration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SharedDesktop {
+pub struct Desktop {
     pub theme: Option<Theme>,
+    pub linux: Option<LinuxDesktop>,
+    pub macos: Option<MacDesktop>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SharedUpdates {
-    pub tools: ToolUpdates,
+pub struct Updates {
     pub packages: PackageUpdates,
+    pub tools: ToolUpdates,
     pub fonts: Option<bool>,
 }
 
@@ -163,34 +174,18 @@ pub struct SharedUpdates {
 #[serde(deny_unknown_fields)]
 pub struct ToolUpdates {
     pub rust: Option<bool>,
-    pub go: Option<bool>,
     pub node: Option<bool>,
     pub python: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PackageUpdates {
+    pub go: Option<bool>,
     pub cargo: Option<bool>,
     pub npm: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LinuxConfig {
-    pub system: LinuxSystem,
-    pub packages: LinuxPackages,
-    pub dotfiles: Dotfiles,
-    pub integrations: LinuxIntegrations,
-    pub desktop: Option<LinuxDesktop>,
-    pub updates: Option<LinuxUpdates>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LinuxSystem {
-    pub debian: Option<DebianSystem>,
-    pub ubuntu: Option<UbuntuSystem>,
+pub struct PackageUpdates {
+    pub linux: LinuxUpdates,
+    pub macos: MacUpdates,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -233,7 +228,7 @@ impl LinuxPackages {
             for (index, binary) in binaries.iter().enumerate() {
                 binary.validate(index)?;
                 if !names.insert(binary.name.as_str()) {
-                    bail!("linux.packages.binaries[{index}].name: duplicate binary name {:?}", binary.name);
+                    bail!("packages.linux.binaries[{index}].name: duplicate binary name {:?}", binary.name);
                 }
             }
         }
@@ -256,11 +251,11 @@ impl AptPackages {
             for (index, repo) in repos.iter().enumerate() {
                 repo.validate(index)?;
                 if !names.insert(repo.name.as_str()) {
-                    bail!("linux.packages.apt.repos[{index}].name: duplicate repo name {:?}", repo.name);
+                    bail!("packages.linux.apt.repos[{index}].name: duplicate repo name {:?}", repo.name);
                 }
                 if !key_paths.insert(repo.key_path.as_str()) {
                     bail!(
-                        "linux.packages.apt.repos[{index}].key_path: destination {:?} collides with an earlier repo",
+                        "packages.linux.apt.repos[{index}].key_path: destination {:?} collides with an earlier repo",
                         repo.key_path
                     );
                 }
@@ -326,7 +321,7 @@ pub struct AptRepoConfig {
 
 impl AptRepoConfig {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("linux.packages.apt.repos[{index}]");
+        let path = format!("packages.linux.apt.repos[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         if self.uris.is_empty() {
             bail!("{path}.uris: must be a non-empty mapping");
@@ -401,7 +396,7 @@ pub struct BinaryPackage {
 
 impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
-        let path = format!("linux.packages.binaries[{index}]");
+        let path = format!("packages.linux.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
         self.source.validate(&format!("{path}.source"))
     }
@@ -489,23 +484,19 @@ pub enum Theme {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinuxDesktop {
-    pub terminal: Option<String>,
-    pub idle: Option<Idle>,
     pub gnome: Option<Gnome>,
 }
 
 impl LinuxDesktop {
     fn validate(&self) -> Result<()> {
-        if let Some(terminal) = &self.terminal {
-            validate_executable(terminal, "linux.desktop.terminal")?;
+        if let Some(terminal) = self.gnome.as_ref().and_then(|gnome| gnome.terminal.as_ref()) {
+            validate_executable(terminal, "desktop.linux.gnome.terminal")?;
         }
         Ok(())
     }
 
     pub fn has_intent(&self) -> bool {
-        self.terminal.is_some()
-            || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
-            || self.gnome.as_ref().is_some_and(Gnome::has_intent)
+        self.gnome.as_ref().is_some_and(Gnome::has_intent)
     }
 }
 
@@ -544,6 +535,8 @@ impl<'de> Deserialize<'de> for DesktopIdleDuration {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Gnome {
+    pub terminal: Option<String>,
+    pub idle: Option<Idle>,
     pub extensions: Option<Vec<String>>,
     pub dash_to_dock: Option<bool>,
     pub rounded_window_corners: Option<bool>,
@@ -551,7 +544,9 @@ pub struct Gnome {
 
 impl Gnome {
     pub(crate) fn has_intent(&self) -> bool {
-        self.extensions.as_ref().is_some_and(|extensions| !extensions.is_empty())
+        self.terminal.is_some()
+            || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
+            || self.extensions.as_ref().is_some_and(|extensions| !extensions.is_empty())
             || self.dash_to_dock == Some(true)
             || self.rounded_window_corners == Some(true)
     }
@@ -573,12 +568,8 @@ pub enum AptUpgradeCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacosConfig {
-    pub system: MacSystem,
+pub struct MacPackages {
     pub homebrew: Homebrew,
-    pub dotfiles: Dotfiles,
-    pub desktop: Option<MacDesktop>,
-    pub updates: MacUpdates,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
