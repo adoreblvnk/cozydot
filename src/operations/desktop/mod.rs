@@ -46,7 +46,7 @@ fn set_xdg_terminal(executable: &str) -> Result<()> {
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".xdg-terminals.", &config_home)?;
     writeln!(temp, "{entry}")?;
     temp.as_file_mut().sync_all()?;
-    temp.persist(destination).map_err(|error| error.error)?;
+    temp.persist(destination)?;
     File::open(config_home)?.sync_all()?;
 
     let output = host::run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;

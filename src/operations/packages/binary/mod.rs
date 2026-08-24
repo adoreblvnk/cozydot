@@ -17,12 +17,26 @@ const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
 const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
 
-pub(crate) fn install(package: &BinaryPackage, arch: Arch) -> Result<()> {
+pub(crate) enum SelectedSource<'a> {
+    GitHub { repo: &'a str, asset_pattern: &'a str },
+    Url(&'a str),
+}
+
+pub(crate) fn select_source(package: &BinaryPackage, arch: Arch) -> Option<SelectedSource<'_>> {
+    match &package.source {
+        BinarySource::GitHub { repo, assets } => {
+            assets.get(arch).map(|asset_pattern| SelectedSource::GitHub { repo, asset_pattern })
+        }
+        BinarySource::Url { urls } => urls.get(arch).map(SelectedSource::Url),
+    }
+}
+
+pub(crate) fn install(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) -> Result<()> {
     let home = host::home()?;
     if is_installed(&home, package) {
         return Ok(());
     }
-    let Some(url) = resolve_url(package, arch)? else { return Ok(()) };
+    let url = resolve_url(package, arch, source)?;
     match package.format {
         BinaryFormat::Deb => install_deb(package, &url),
         BinaryFormat::AppImage => {
@@ -42,17 +56,16 @@ fn appimage_path(home: &std::path::Path, package: &BinaryPackage) -> PathBuf {
     home.join("Applications").join(format!("{}.AppImage", package.name))
 }
 
-fn resolve_url(package: &BinaryPackage, arch: Arch) -> Result<Option<String>> {
-    match &package.source {
-        BinarySource::Url { urls } => Ok(urls.get(arch).map(str::to_owned)),
-        BinarySource::GitHub { repo, assets } => {
-            let Some(asset_pattern) = assets.get(arch) else { return Ok(None) };
+fn resolve_url(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) -> Result<String> {
+    match source {
+        SelectedSource::Url(url) => Ok(url.to_owned()),
+        SelectedSource::GitHub { repo, asset_pattern } => {
             let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
             let accept = GITHUB_ACCEPT;
             let version = GITHUB_API_VERSION;
             let args = ["--proto", "=https", "--header", accept, "--header", version, "--header", USER_AGENT];
             let output = host::curl("resolve binary package release", &endpoint, args)?;
-            select_asset_url(&output.stdout, asset_pattern, &package.name, arch).map(Some)
+            select_asset_url(&output.stdout, asset_pattern, &package.name, arch)
         }
     }
 }

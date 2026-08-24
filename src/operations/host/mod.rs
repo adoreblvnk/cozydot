@@ -88,12 +88,6 @@ pub(crate) fn temp_path_with_suffix(stem: &str, suffix: &str) -> Result<tempfile
     Ok(file.into_temp_path())
 }
 
-pub(crate) fn temp_path_in_with_suffix(parent: &Path, stem: &str, suffix: &str) -> Result<tempfile::TempPath> {
-    let file =
-        tempfile::Builder::new().prefix(stem).suffix(suffix).tempfile_in(parent).context("create temporary file")?;
-    Ok(file.into_temp_path())
-}
-
 pub(crate) fn is_executable(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
