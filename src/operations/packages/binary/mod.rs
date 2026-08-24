@@ -48,7 +48,7 @@ pub(crate) fn install(package: &BinaryPackage, arch: Arch, source: SelectedSourc
 fn is_installed(home: &std::path::Path, package: &BinaryPackage) -> bool {
     match package.format {
         BinaryFormat::Deb => host::has_executable_on_path(&package.name),
-        BinaryFormat::AppImage => appimage_path(home, package).exists(),
+        BinaryFormat::AppImage => host::is_regular_executable(&appimage_path(home, package)),
     }
 }
 
