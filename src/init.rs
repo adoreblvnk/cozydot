@@ -1,13 +1,24 @@
 use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
+use rust_embed::Embed;
 use sha2::{Digest, Sha256};
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     fs::{self, File},
     io::{self, Write},
     os::unix::fs::PermissionsExt,
     path::{Component, Path, PathBuf},
 };
+
+#[derive(Embed)]
+#[folder = "dotfiles/"]
+#[prefix = "dotfiles/"]
+struct Dotfiles;
+
+const COZYDOT_PRESET: &[u8] = include_bytes!("../configs/cozydot.yaml");
+const CLI_PRESET: &[u8] = include_bytes!("../configs/cli.yaml");
+const VM_PRESET: &[u8] = include_bytes!("../configs/vm.yaml");
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum Preset {
@@ -34,13 +45,11 @@ pub fn init(preset: Preset) -> Result<PathBuf> {
     Ok(init.root)
 }
 
-pub struct EmbeddedFile {
-    pub path: &'static str,
-    pub bytes: &'static [u8],
-    pub mode: u32,
+struct EmbeddedFile {
+    path: Cow<'static, str>,
+    bytes: Cow<'static, [u8]>,
+    mode: u32,
 }
-
-include!(concat!(env!("OUT_DIR"), "/bundle.rs"));
 
 struct Init {
     root: PathBuf,
@@ -49,10 +58,9 @@ struct Init {
 
 impl Init {
     fn sync_config(&mut self, preset: &'static [u8]) -> Result<()> {
-        let record = EmbeddedFile { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
-        let relative = PathBuf::from(record.path);
+        let record = EmbeddedFile { path: Cow::Borrowed("cozydot.yaml"), bytes: Cow::Borrowed(preset), mode: 0o644 };
+        let relative = PathBuf::from(record.path.as_ref());
         let dest = self.root.join(&relative);
-        let new_hash = hash_bytes(record.bytes);
         let old_hash = self.managed.get(&relative);
         // overwrite only when the current file still matches Cozydot's last recorded hash
         let write = match fs::symlink_metadata(&dest) {
@@ -63,16 +71,18 @@ impl Init {
         };
         if write {
             write_file(&self.root, &record, &relative)?;
-            self.managed.insert(relative, new_hash);
+            self.managed.insert(relative, hash_bytes(record.bytes.as_ref()));
         }
         Ok(())
     }
 
     fn sync_dotfiles(&mut self) -> Result<()> {
-        let mut packages = BTreeMap::<PathBuf, Vec<&EmbeddedFile>>::new();
-        for record in EMBEDDED_FILES {
-            let relative = PathBuf::from(record.path);
-            let package = relative.components().take(2).collect();
+        let mut packages = BTreeMap::<PathBuf, Vec<EmbeddedFile>>::new();
+        for path in Dotfiles::iter() {
+            let bytes = Dotfiles::get(path.as_ref()).with_context(|| format!("missing embedded file {path}"))?.data;
+            let mode = if bytes.starts_with(b"#!") { 0o755 } else { 0o644 };
+            let record = EmbeddedFile { path, bytes, mode };
+            let package = Path::new(record.path.as_ref()).components().take(2).collect();
             packages.entry(package).or_default().push(record);
         }
         for (package, records) in packages {
@@ -81,7 +91,7 @@ impl Init {
         Ok(())
     }
 
-    fn sync_dotfile_package(&mut self, package: &Path, records: &[&EmbeddedFile]) -> Result<()> {
+    fn sync_dotfile_package(&mut self, package: &Path, records: &[EmbeddedFile]) -> Result<()> {
         // only sync packages with no unmanaged or modified files
         let mut managed = Vec::new();
         for (relative, hash) in &self.managed {
@@ -112,8 +122,7 @@ impl Init {
                 return Ok(());
             }
             for (relative, hash) in managed {
-                let path = self.root.join(relative);
-                let Ok(current) = hash_file(&path) else {
+                let Ok(current) = hash_file(&self.root.join(relative)) else {
                     return Ok(());
                 };
                 if &current != hash {
@@ -123,22 +132,21 @@ impl Init {
         }
 
         for record in records {
-            let relative = PathBuf::from(record.path);
+            let relative = PathBuf::from(record.path.as_ref());
             write_file(&self.root, record, &relative)?;
-            self.managed.insert(relative, hash_bytes(record.bytes));
+            self.managed.insert(relative, hash_bytes(record.bytes.as_ref()));
         }
         Ok(())
     }
 }
 
 fn write_file(root: &Path, record: &EmbeddedFile, relative: &Path) -> Result<()> {
-    let parent = relative.parent().unwrap_or(Path::new(""));
-    ensure_directory_path(root, parent)?;
+    ensure_directory_path(root, relative.parent().unwrap_or(Path::new("")))?;
     let dest = root.join(relative);
     let dest_parent = required_parent(&dest)?;
     // write & sync beside the destination before publishing it with rename
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".cozydot.", dest_parent)?;
-    temp.write_all(record.bytes)?;
+    temp.write_all(record.bytes.as_ref())?;
     temp.as_file_mut().sync_all()?;
     temp.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
     temp.persist(&dest)?;

@@ -163,8 +163,7 @@ pub(crate) mod debian_components {
             let body = line.strip_suffix('\n').unwrap_or(line);
             // insert components before inline comments while preserving the original newline
             let comment = body.find('#').unwrap_or(body.len());
-            let active = body[..comment].trim();
-            let fields = active.split_ascii_whitespace().collect::<Vec<_>>();
+            let fields = body[..comment].trim().split_ascii_whitespace().collect::<Vec<_>>();
             if fields.first() != Some(&"deb") {
                 replacement.push_str(line);
                 continue;

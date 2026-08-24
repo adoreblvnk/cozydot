@@ -21,8 +21,7 @@ pub(crate) fn install_toolchain(selector: &str, arch: Arch) -> Result<()> {
     let version_matches = stdout.is_some_and(|stdout| stdout.trim() == expected);
     if !version_matches {
         let archive = temp_path("go", ".tar.gz")?;
-        let filename = format!("go{version}.{target_os}-{}.tar.gz", arch.go());
-        let url = format!("https://go.dev/dl/{filename}");
+        let url = format!("https://go.dev/dl/go{version}.{target_os}-{}.tar.gz", arch.go());
         let output = archive.as_os_str();
         host::curl("Go archive download", &url, ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), output])?;
         // remove whole tree so files missing from new release can't survive replacement

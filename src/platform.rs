@@ -30,8 +30,7 @@ impl Platform {
             });
         }
         let os = OsRelease::open().context("read os-release")?;
-        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-        Self::from_os_release(&os, &desktop, arch)
+        Self::from_os_release(&os, &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(), arch)
     }
 
     fn from_os_release(os: &OsRelease, desktop: &str, arch: &str) -> Result<Self> {

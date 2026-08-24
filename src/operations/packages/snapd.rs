@@ -23,7 +23,6 @@ pub(crate) fn set_enabled(enabled: bool) -> Result<()> {
         }
     }
     apt::purge(&["snapd".into()])?;
-    let home_snap = host::home()?.join("snap");
     host::run(
         "snap data removal",
         "sudo",
@@ -31,7 +30,7 @@ pub(crate) fn set_enabled(enabled: bool) -> Result<()> {
             "rm".as_ref(),
             "-rf".as_ref(),
             "--".as_ref(),
-            home_snap.as_os_str(),
+            host::home()?.join("snap").as_os_str(),
             "/snap".as_ref(),
             "/var/snap".as_ref(),
             "/var/lib/snapd".as_ref(),

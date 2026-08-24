@@ -39,12 +39,11 @@ pub(crate) fn set_terminal(executable: &str) -> Result<()> {
 fn set_xdg_terminal(executable: &str) -> Result<()> {
     let config_home = crate::paths::config_home()?;
     fs::create_dir_all(&config_home)?;
-    let destination = config_home.join("xdg-terminals.list");
     let entry = format!("{executable}.desktop");
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".xdg-terminals.", &config_home)?;
     writeln!(temp, "{entry}")?;
     temp.as_file_mut().sync_all()?;
-    temp.persist(destination)?;
+    temp.persist(config_home.join("xdg-terminals.list"))?;
     File::open(config_home)?.sync_all()?;
 
     let output = host::run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;

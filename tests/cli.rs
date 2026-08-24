@@ -186,6 +186,7 @@ fn init_materializes_presets_and_preserves_user_edits() {
             .stderr("");
         cozydot()
             .env("XDG_CONFIG_HOME", temp.path())
+            .env("XDG_CURRENT_DESKTOP", "gnome")
             .arg("check")
             .assert()
             .success()

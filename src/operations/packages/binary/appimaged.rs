@@ -25,8 +25,7 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
             ["-c".as_ref(), r#"rm -f -- "$1"/appimage*"#.as_ref(), "sh".as_ref(), cache.as_os_str()],
         )?;
 
-        let applications = home.join("Applications");
-        let destination = applications.join("appimaged.AppImage");
+        let destination = home.join("Applications/appimaged.AppImage");
         super::appimage::install_appimage("download appimaged", &resolve_asset_url(arch)?, &destination)?;
         host::run(
             "launch appimaged",
