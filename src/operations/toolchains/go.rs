@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::operations::host::{self, is_regular_executable, shell::append_profile, temp_path_with_suffix};
+use crate::operations::host::{self, is_regular_executable, shell::append_profile, temp_path};
 use crate::platform::Arch;
 use crate::style::WARNING;
 
@@ -20,7 +20,7 @@ pub(crate) fn install_toolchain(selector: &str, arch: Arch) -> Result<()> {
     let stdout = successful_output.and_then(|output| std::str::from_utf8(&output.stdout).ok());
     let version_matches = stdout.is_some_and(|stdout| stdout.trim() == expected);
     if !version_matches {
-        let archive = temp_path_with_suffix("go", ".tar.gz")?;
+        let archive = temp_path("go", ".tar.gz")?;
         let filename = format!("go{version}.{target_os}-{}.tar.gz", arch.go());
         let url = format!("https://go.dev/dl/{filename}");
         let output = archive.as_os_str();

@@ -1,4 +1,4 @@
-use crate::operations::host::{self, temp_path_with_suffix};
+use crate::operations::host::{self, temp_path};
 use crate::{
     config::{BinaryFormat, BinaryPackage, BinarySource},
     platform::Arch,
@@ -82,7 +82,7 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, arch: Arch
 }
 
 fn install_deb(package: &BinaryPackage, url: &str) -> Result<()> {
-    let temp = temp_path_with_suffix(&package.name, ".deb")?;
+    let temp = temp_path(&package.name, ".deb")?;
     host::curl("download binary package", url, ["--output".as_ref(), temp.as_os_str()])?;
     host::run(
         "Deb package install",

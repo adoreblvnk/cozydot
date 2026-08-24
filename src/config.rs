@@ -3,11 +3,7 @@
 use crate::platform::{Arch, DesktopKind, Distro, Family, Platform, PlatformIdentity};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Deserializer, de};
-use std::{
-    collections::{BTreeMap, HashSet},
-    fs,
-    path::Path,
-};
+use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Version {
@@ -39,6 +35,7 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        self.packages.linux.validate()?;
         if !self.tools.cargo.is_empty() && self.tools.rust.is_none() {
             bail!("tools.cargo: requires tools.rust");
         }
@@ -54,7 +51,6 @@ impl Config {
         }
         self.fonts.validate()?;
         self.dotfiles.validate()?;
-        self.packages.linux.validate()?;
         if let Some(linux) = self.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref()) {
             linux.validate()?;
         }
@@ -147,10 +143,9 @@ impl LinuxPackages {
         if let Some(apt) = &self.apt {
             apt.validate()?;
         }
-        let mut names = HashSet::new();
         for (index, binary) in self.binaries.iter().enumerate() {
             binary.validate(index)?;
-            if !names.insert(binary.name.as_str()) {
+            if self.binaries[..index].iter().any(|earlier| earlier.name == binary.name) {
                 bail!("packages.linux.binaries[{index}].name: duplicate binary name {:?}", binary.name);
             }
         }
@@ -169,14 +164,12 @@ pub struct AptPackages {
 
 impl AptPackages {
     fn validate(&self) -> Result<()> {
-        let mut names = HashSet::new();
-        let mut key_paths = HashSet::new();
         for (index, repo) in self.repos.iter().enumerate() {
             repo.validate(index)?;
-            if !names.insert(repo.name.as_str()) {
+            if self.repos[..index].iter().any(|earlier| earlier.name == repo.name) {
                 bail!("packages.linux.apt.repos[{index}].name: duplicate repo name {:?}", repo.name);
             }
-            if !key_paths.insert(repo.key_path.as_str()) {
+            if self.repos[..index].iter().any(|earlier| earlier.key_path == repo.key_path) {
                 bail!(
                     "packages.linux.apt.repos[{index}].key_path: destination {:?} collides with an earlier repo",
                     repo.key_path
@@ -215,11 +208,13 @@ impl DistroKey {
     }
 }
 
-pub fn select_distro_entry<T>(map: &BTreeMap<DistroKey, T>, identity: PlatformIdentity) -> Option<(DistroKey, &T)> {
+pub fn select_distro_uri(uris: &BTreeMap<DistroKey, String>, identity: PlatformIdentity) -> Option<(DistroKey, &str)> {
     let PlatformIdentity::Linux { distro, family } = identity else { return None };
     let exact_key = DistroKey::from_distro(distro);
     let family_key = DistroKey::from_family(family);
-    [exact_key, family_key, DistroKey::Default].into_iter().find_map(|key| map.get(&key).map(|value| (key, value)))
+    [exact_key, family_key, DistroKey::Default]
+        .into_iter()
+        .find_map(|key| uris.get(&key).map(|uri| (key, uri.as_str())))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -248,7 +243,18 @@ impl AptRepoConfig {
         if self.key_url.chars().any(char::is_control) {
             bail!("{path}.key_url: must contain no control characters");
         }
-        validate_repo_key_path(Path::new(&self.key_path))?;
+        // limit privileged writes to direct children of APT keyring directories
+        let key_path = Path::new(&self.key_path);
+        let parent = key_path.parent().context("APT repo key path has no parent")?;
+        if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
+            bail!("APT repo key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
+        }
+        let name = key_path.file_name().and_then(|name| name.to_str()).context("APT repo key path has no filename")?;
+        if !matches!(key_path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
+            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        {
+            bail!("APT repo key path must name a safe .asc or .gpg file");
+        }
         if self.suite.is_empty() {
             bail!("{path}.suite: must not be empty");
         }
@@ -267,20 +273,6 @@ impl AptRepoConfig {
         }
         Ok(())
     }
-}
-
-pub(crate) fn validate_repo_key_path(path: &Path) -> Result<()> {
-    let parent = path.parent().context("APT repo key path has no parent")?;
-    if parent != Path::new("/etc/apt/keyrings") && parent != Path::new("/usr/share/keyrings") {
-        bail!("APT repo key path must be a direct child of /etc/apt/keyrings or /usr/share/keyrings");
-    }
-    let name = path.file_name().and_then(|name| name.to_str()).context("APT repo key path has no filename")?;
-    if !matches!(path.extension().and_then(|extension| extension.to_str()), Some("asc" | "gpg"))
-        || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-    {
-        bail!("APT repo key path must name a safe .asc or .gpg file");
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

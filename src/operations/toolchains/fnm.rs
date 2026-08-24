@@ -21,7 +21,7 @@ pub fn install() -> Result<()> {
     let install_dir = host::home()?.join(".local/share/fnm");
     let fnm_path = install_dir.join("fnm");
     if !is_regular_executable(&fnm_path) {
-        let installer = temp_path("fnm-install")?;
+        let installer = temp_path("fnm-install", "")?;
         let path = installer.as_os_str();
         host::curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
         let install_dir = install_dir.as_os_str();

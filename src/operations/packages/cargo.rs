@@ -24,7 +24,7 @@ pub(crate) fn install_crates(crates: &[String]) -> Result<()> {
     let installed = installed_crates(&output.stdout)?;
     let mut missing = Vec::new();
     for name in crates {
-        if !installed.contains(name.as_str()) {
+        if !installed.contains(name) {
             missing.push(name.as_str());
         }
     }
@@ -52,7 +52,7 @@ pub(crate) fn update_crates() -> Result<()> {
     Ok(())
 }
 
-fn installed_crates(output: &[u8]) -> Result<std::collections::BTreeSet<String>> {
+fn installed_crates(output: &[u8]) -> Result<Vec<String>> {
     let output = std::str::from_utf8(output).context("cargo install --list returned non-UTF-8 output")?;
     let installed = output.lines().filter_map(|line| {
         let (name, version) = line.split_once(" v")?;

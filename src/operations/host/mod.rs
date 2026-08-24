@@ -19,10 +19,9 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
     let mut command = Command::new(program);
-    command.args(&args);
-    command.output().with_context(|| format!("start command {}", display(program, &args)))
+    command.args(args);
+    command.output().with_context(|| format!("start command {}", display(&command)))
 }
 
 pub(crate) fn run<I, S>(label: &str, program: &str, args: I) -> Result<Output>
@@ -79,11 +78,7 @@ pub(crate) fn has_executable_on_path(name: &str) -> bool {
     false
 }
 
-pub(crate) fn temp_path(stem: &str) -> Result<tempfile::TempPath> {
-    temp_path_with_suffix(stem, "")
-}
-
-pub(crate) fn temp_path_with_suffix(stem: &str, suffix: &str) -> Result<tempfile::TempPath> {
+pub(crate) fn temp_path(stem: &str, suffix: &str) -> Result<tempfile::TempPath> {
     let file = tempfile::Builder::new().prefix(stem).suffix(suffix).tempfile().context("create temporary file")?;
     Ok(file.into_temp_path())
 }
@@ -120,10 +115,9 @@ pub(crate) fn stdout_line<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str>
     Ok(record)
 }
 
-fn display(program: &str, args: &[OsString]) -> String {
-    let mut parts = Vec::with_capacity(args.len() + 1);
-    parts.push(OsStr::new(program).to_string_lossy());
-    for arg in args {
+fn display(command: &Command) -> String {
+    let mut parts = vec![command.get_program().to_string_lossy()];
+    for arg in command.get_args() {
         parts.push(arg.to_string_lossy());
     }
     parts.join(" ")

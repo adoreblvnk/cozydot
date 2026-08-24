@@ -10,7 +10,7 @@ const CARGO_INIT: &str = r#"if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/e
 pub fn install(selector: &str) -> Result<()> {
     let rustup_path = host::home()?.join(".cargo/bin/rustup");
     if !is_regular_executable(&rustup_path) {
-        let installer = temp_path("rustup")?;
+        let installer = temp_path("rustup", "")?;
         host::curl(
             "rustup installer download",
             "https://sh.rustup.rs",

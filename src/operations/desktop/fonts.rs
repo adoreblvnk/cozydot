@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::Path};
 
-use super::super::host::{self, temp_path_with_suffix};
+use super::super::host::{self, temp_path};
 
 pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
     let parent = host::home()?.join(if cfg!(target_os = "macos") { "Library/Fonts" } else { ".local/share/fonts" });
@@ -32,7 +32,7 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
 }
 
 fn install(family: &str, destination: &Path) -> Result<()> {
-    let archive = temp_path_with_suffix("nerd-font", ".tar.xz")?;
+    let archive = temp_path("nerd-font", ".tar.xz")?;
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
     let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.as_os_str()];
     host::curl("Nerd Font archive download", &url, args)?;

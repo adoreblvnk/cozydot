@@ -9,7 +9,7 @@ pub(crate) fn install() -> Result<()> {
     if find_executable()?.is_some() {
         return Ok(());
     }
-    let script = temp_path("homebrew-install")?;
+    let script = temp_path("homebrew-install", "")?;
     let url = "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh";
     let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), script.as_os_str()];
     host::curl("Homebrew installer download", url, args)?;

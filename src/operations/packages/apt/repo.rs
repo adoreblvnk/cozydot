@@ -1,4 +1,4 @@
-use crate::operations::host::{self, privileged_file, temp_path, temp_path_with_suffix};
+use crate::operations::host::{self, privileged_file, temp_path};
 use crate::platform::Arch;
 use anyhow::{Context, Result, bail};
 use std::{ffi::OsStr, fs, path::PathBuf};
@@ -17,7 +17,7 @@ pub struct AptRepo {
 
 impl AptRepo {
     pub fn new(
-        name: impl Into<String>,
+        name: String,
         key_url: String,
         source_uri: String,
         arch: Arch,
@@ -25,7 +25,6 @@ impl AptRepo {
         components: Vec<String>,
         key_path: PathBuf,
     ) -> Self {
-        let name = name.into();
         let source_list_path = PathBuf::from(format!("{SOURCES_DIR}/{name}.list"));
         Self { key_url, source_uri, arch, suite, components, key_path, source_list_path }
     }
@@ -51,12 +50,12 @@ pub(crate) fn add(repo: &AptRepo) -> Result<()> {
 }
 
 fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
-    let downloaded = temp_path("repo-key-download")?;
+    let downloaded = temp_path("repo-key-download", "")?;
     host::curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.to_string_lossy()])?;
 
     let downloaded_bytes = fs::read(&downloaded).context("read downloaded repo key")?;
 
-    let binary_keyring = temp_path_with_suffix("repo-key-binary", ".gpg")?;
+    let binary_keyring = temp_path("repo-key-binary", ".gpg")?;
 
     let key = binary_keyring.to_string_lossy();
     let input = downloaded.to_string_lossy();
