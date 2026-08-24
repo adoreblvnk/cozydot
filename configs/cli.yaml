@@ -1,58 +1,16 @@
-# Cross-platform Cozydot configuration.
 version: 1.0.0
-shared:
-  tools:
-    rust: stable
-    node: lts
-    python: "3.13"
-    go: latest
-  packages:
-    cargo:
-      - bat
-      - bottom
-      - du-dust
-      - eza
-      - fd-find
-      - presenterm
-      - starship
-      - tealdeer
-      - yazi-fm
-      - zoxide
-    npm:
-      - opencode-ai
-  fonts:
-    nerd:
-      - GeistMono
-  dotfiles:
-    packages:
-      - bat
-      - bottom
-      - fastfetch
-      - git
-      - gnupg
-      - starship
-      - yazi
-  integrations:
-    vscode:
-      extensions: []
-  updates:
-    tools:
-      rust: true
-      go: true
-      node: true
-      python: true
-    packages:
-      cargo: true
-      npm: true
-    fonts: true
-linux:
-  system:
-    debian:
-      sudo_group: true
-    ubuntu:
-      unattended_upgrades: disabled
-      snapd: disabled
-  packages:
+system:
+  debian:
+    sudo_group: true
+  ubuntu:
+    unattended_upgrades: disabled
+    snapd: disabled
+  macos:
+    validate_sudo_access: true
+    xcode:
+      command_line_tools: true
+packages:
+  linux:
     apt:
       install:
         - bash-completion
@@ -98,40 +56,79 @@ linux:
           assets:
             x86_64: ^gcm-linux-x64-.*\.deb$
             aarch64: ^gcm-linux-arm64-.*\.deb$
-  dotfiles:
-    packages:
-      - bash
-  integrations: {}
-  updates:
-    apt: full-upgrade
-macos:
-  system:
-    validate_sudo_access: true
-    xcode:
-      command_line_tools: true
-  homebrew:
-    formulae:
-      - cmake
-      - ffmpeg
-      - fastfetch
-      - figlet
-      - fzf
-      - gh
-      - git
-      - imagemagick
-      - lolcat
-      - openjdk
-      - pandoc
-      - pass
-      - pinentry-mac
-      - trash
-      - vim
-    casks:
-      - git-credential-manager
-  dotfiles:
-    packages:
-      - zsh
-  updates:
+  macos:
     homebrew:
-      formulae: true
-      casks: true
+      formulae:
+        - cmake
+        - ffmpeg
+        - fastfetch
+        - figlet
+        - fzf
+        - gh
+        - git
+        - imagemagick
+        - lolcat
+        - openjdk
+        - pandoc
+        - pass
+        - pinentry-mac
+        - trash
+        - vim
+      casks:
+        - git-credential-manager
+tools:
+  rust: stable
+  node: lts
+  python: "3.13"
+  go: latest
+  cargo:
+    - bat
+    - bottom
+    - du-dust
+    - eza
+    - fd-find
+    - presenterm
+    - starship
+    - tealdeer
+    - yazi-fm
+    - zoxide
+  npm:
+    - opencode-ai
+fonts:
+  nerd:
+    - GeistMono
+dotfiles:
+  replace: true
+  packages:
+    all:
+      - bat
+      - bottom
+      - fastfetch
+      - git
+      - gnupg
+      - starship
+      - yazi
+    linux:
+      - bash
+    macos:
+      - zsh
+integrations:
+  vscode:
+    extensions: []
+  linux: {}
+updates:
+  packages:
+    linux:
+      apt: full-upgrade
+    macos:
+      homebrew:
+        formulae: true
+        casks: true
+  tools:
+    rust: true
+    node: true
+    python: true
+    go: true
+    cargo: true
+    npm: true
+  fonts: true
