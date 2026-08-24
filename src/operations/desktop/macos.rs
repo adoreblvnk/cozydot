@@ -44,9 +44,7 @@ pub(crate) fn write_defaults(theme: Option<Theme>, desktop: Option<&MacosDesktop
                 write_int("NSGlobalDomain", "InitialKeyRepeat", value)?;
             }
         }
-        if let Some(trackpad) = &desktop.trackpad
-            && let Some(value) = trackpad.tap_to_click
-        {
+        if let Some(value) = desktop.trackpad.as_ref().and_then(|trackpad| trackpad.tap_to_click) {
             write_bool("com.apple.AppleMultitouchTrackpad", "Clicking", value)?;
         }
     }

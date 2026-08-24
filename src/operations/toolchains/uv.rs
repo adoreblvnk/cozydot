@@ -13,6 +13,7 @@ pub fn install() -> Result<()> {
         let installer = temp_path("uv-install", "")?;
         let path = installer.as_os_str();
         host::curl("uv installer download", "https://astral.sh/uv/install.sh", ["--output".as_ref(), path])?;
+        // disable installer PATH edits because Cozydot sources the upstream env snippet itself
         host::run("uv install", "env", ["UV_NO_MODIFY_PATH=1".as_ref(), "sh".as_ref(), path])?;
         ensure!(is_regular_executable(&uv_path), "uv installer did not publish executable {}", uv_path.display());
     }

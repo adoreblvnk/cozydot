@@ -60,6 +60,7 @@ pub(crate) fn write_atomic(destination: &Path, contents: &[u8], label: &str) -> 
         Ok(())
     })();
     if result.is_err() {
+        // preserve the original failure; stale staging cleanup is best effort
         let _ = output("sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg]);
     }
     result

@@ -22,6 +22,7 @@ pub fn install(selector: &str) -> Result<()> {
                 installer.as_os_str(),
             ],
         )?;
+        // disable installer PATH edits because Cozydot appends its own profile snippet
         host::run(
             "rustup install",
             "sh",

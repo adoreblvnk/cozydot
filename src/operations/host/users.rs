@@ -14,6 +14,7 @@ pub(crate) fn ensure_in_group(label: &str, program: &str, group: &str) -> Result
     if stdout_line(&groups.stdout, "id -nG")?.split_ascii_whitespace().any(|current| current == group) {
         return Ok(());
     }
+    // verify the product exists before creating its integration group
     require_cli(label, program)?;
     run(&format!("{label} group creation"), "sudo", ["groupadd", "-f", group])?;
     run(&format!("{label} group membership"), "sudo", ["usermod", "-aG", group, "--", username.as_str()])?;

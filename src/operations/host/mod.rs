@@ -83,10 +83,12 @@ pub(crate) fn temp_path(stem: &str, suffix: &str) -> Result<tempfile::TempPath> 
     Ok(file.into_temp_path())
 }
 
+// PATH executables may be symlinks
 pub(crate) fn is_executable(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
+// managed installers must publish a real executable rather than a symlink
 pub(crate) fn is_regular_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return false;

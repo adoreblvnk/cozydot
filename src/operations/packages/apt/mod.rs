@@ -36,6 +36,7 @@ pub(crate) fn set_unattended_upgrades(enabled: bool) -> Result<()> {
 }
 
 pub fn install(packages: &[String]) -> Result<()> {
+    // + explicitly selects installation when apt-get resolves mixed package actions
     let packages = packages.iter().map(|package| format!("{package}+"));
     change_packages("APT package install", &["install", "--no-upgrade"], packages)
 }
@@ -78,6 +79,7 @@ fn change_packages(label: &str, command: &[&str], packages: impl IntoIterator<It
 fn is_installed(package: &str) -> Result<bool> {
     let output = host::output("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
     if !output.status.success() {
+        // dpkg-query exit 1 means no matching package; other failures remain errors
         if output.status.code() == Some(1) {
             return Ok(false);
         }

@@ -28,6 +28,7 @@ fn append_once(path: &Path, snippet: &str) -> Result<()> {
     }
     let context = || format!("open shell profile {}", path.display());
     let mut file = OpenOptions::new().create(true).append(true).open(path).with_context(context)?;
+    // preserve the existing last line before appending the managed snippet
     if !current.is_empty() && !current.ends_with('\n') {
         writeln!(file)?;
     }

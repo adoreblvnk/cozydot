@@ -38,6 +38,7 @@ impl Platform {
         let distro = Distro::from_os_release(os.id())?;
         let family = distro.family(os.get_value("ID_LIKE"))?;
         let distro_codename = os.version_codename().unwrap_or_default().to_owned();
+        // derivatives use their base distro codename for family repositories
         let base_codename = match family {
             Family::Ubuntu => os.get_value("UBUNTU_CODENAME"),
             Family::Debian => os.get_value("DEBIAN_CODENAME"),
@@ -87,6 +88,7 @@ impl Distro {
                 let id_like = id_like.unwrap_or_default();
                 let ubuntu = id_like.split_ascii_whitespace().any(|family| family == "ubuntu");
                 let debian = id_like.split_ascii_whitespace().any(|family| family == "debian");
+                // regular Mint lists Ubuntu & Debian; LMDE lists Debian only
                 match (ubuntu, debian) {
                     (true, _) => Ok(Family::Ubuntu),
                     (false, true) => Ok(Family::Debian),
@@ -118,6 +120,7 @@ pub enum DesktopKind {
 
 impl DesktopKind {
     fn from_environment(value: &str) -> Self {
+        // XDG_CURRENT_DESKTOP may be vendor-prefixed or contain multiple desktop names
         if value.to_ascii_lowercase().contains("gnome") { Self::Gnome } else { Self::None }
     }
 

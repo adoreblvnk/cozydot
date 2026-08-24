@@ -38,15 +38,14 @@ impl AptRepo {
 }
 
 pub(crate) fn add(repo: &AptRepo) -> Result<()> {
+    // .asc destinations retain armor while .gpg destinations receive binary keyrings
     let preserve_armor = repo.key_path.extension() == Some(OsStr::new("asc"));
 
     let key = processed_key(&repo.key_url, preserve_armor)?;
     let source = repo.render_source().into_bytes();
 
     privileged_file::write_atomic(&repo.key_path, &key, "APT repo key write")?;
-    privileged_file::write_atomic(&repo.source_list_path, &source, "APT repo source write")?;
-
-    Ok(())
+    privileged_file::write_atomic(&repo.source_list_path, &source, "APT repo source write")
 }
 
 fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
@@ -88,7 +87,9 @@ pub(crate) mod debian_components {
             host::run("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
         }
 
+        // edit only Debian's canonical source path and leave third-party source files untouched
         reject_symlink(DEB822_SOURCE)?;
+        // prefer deb822 when present; otherwise update the legacy one-line source
         let deb822 = probe_regular(DEB822_SOURCE)?;
         if !deb822 {
             host::run("Debian APT deb822 source absence check", "sudo", ["test", "!", "-e", DEB822_SOURCE])?;
@@ -160,6 +161,7 @@ pub(crate) mod debian_components {
         let mut replacement = String::with_capacity(text.len());
         for line in text.split_inclusive('\n') {
             let body = line.strip_suffix('\n').unwrap_or(line);
+            // insert components before inline comments while preserving the original newline
             let comment = body.find('#').unwrap_or(body.len());
             let active = body[..comment].trim();
             let fields = active.split_ascii_whitespace().collect::<Vec<_>>();
@@ -167,6 +169,7 @@ pub(crate) mod debian_components {
                 replacement.push_str(line);
                 continue;
             }
+            // repository options may precede the URI, so locate it instead of assuming a fixed field
             let uri = fields.iter().position(|field| field.starts_with("http://") || field.starts_with("https://"));
             let Some(uri) = uri else {
                 replacement.push_str(line);

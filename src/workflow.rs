@@ -2,8 +2,8 @@
 
 use crate::{
     config::{
-        AptArch, BinaryFormat, Config, Dotfiles, Enablement, Fonts, Gnome, LinuxDesktop, LinuxIntegrations,
-        MacosDesktop, Theme, ToolUpdates, Tools, select_distro_uri, select_repo_codename,
+        AptArch, BinaryFormat, Config, Dotfiles, Enablement, Gnome, LinuxDesktop, LinuxIntegrations, MacosDesktop,
+        Theme, ToolUpdates, Tools, select_distro_uri, select_repo_codename,
     },
     operations::{
         desktop::{self, fonts, gnome, macos as macos_defaults},
@@ -70,6 +70,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         Arch::Aarch64 => AptArch::Arm64,
     };
     if let Some(apt) = &config.packages.linux.apt {
+        // skip repos that do not publish for this host arch or distro family
         for repo in &apt.repos {
             if repo.arch.as_ref().is_some_and(|values| !values.contains(&apt_arch)) {
                 continue;
@@ -121,9 +122,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         }
         run("Enabling", "Debian APT components", repo::debian_components::add)?;
     }
-    if distro == Distro::Ubuntu
-        && let Some(ubuntu) = &config.system.ubuntu
-    {
+    if let (Distro::Ubuntu, Some(ubuntu)) = (distro, &config.system.ubuntu) {
         if let Some(state) = ubuntu.unattended_upgrades {
             run("Configuring", "unattended-upgrades", || apt::set_unattended_upgrades(state == Enablement::Enabled))?;
         }
@@ -136,9 +135,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     run("Updating", "APT package metadata", apt::update)?;
     run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
-    if let Some(apt) = &config.packages.linux.apt
-        && !apt.install.is_empty()
-    {
+    if let Some(apt) = config.packages.linux.apt.as_ref().filter(|apt| !apt.install.is_empty()) {
         run("Installing", "configured APT packages", || apt::install(&apt.install))?;
     }
     // add repositories before changing packages supplied by them
@@ -163,6 +160,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         let subject = format!("{} binary package", package.name);
         run("Installing", &subject, || binary::install(package, platform.arch, source))?;
     }
+    // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
         run("Installing", "appimaged", || appimaged::install(platform.arch))?;
         for (package, source) in appimages {
@@ -171,8 +169,8 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         }
     }
     apply_tools(&config.tools, platform.arch)?;
-    if let Some(families) = nerd_fonts(&config.fonts) {
-        run("Installing", "Nerd Fonts", || fonts::apply(families, false))?;
+    if !config.fonts.nerd.is_empty() {
+        run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
     if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.linux) {
         run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
@@ -189,6 +187,7 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
     let dotfiles = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos);
     let homebrew = &config.packages.macos.homebrew;
     let mut formulae = homebrew.formulae.clone();
+    // dotfiles require Stow even when it is absent from configured formulae
     if !formulae.iter().any(|formula| formula == "stow") {
         formulae.push("stow".into());
     }
@@ -203,8 +202,8 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
     run("Installing", "Homebrew", homebrew::install)?;
     run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &homebrew.casks))?;
     apply_tools(&config.tools, arch)?;
-    if let Some(families) = nerd_fonts(&config.fonts) {
-        run("Installing", "Nerd Fonts", || fonts::apply(families, false))?;
+    if !config.fonts.nerd.is_empty() {
+        run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
     if let Some(packages) = dotfiles {
         run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
@@ -260,10 +259,8 @@ fn linux_update(config: &Config, arch: Arch) -> Result<()> {
         run("Updating", "Flatpak apps", flatpak::update)?;
     }
     update_tools(&config.tools, &config.updates.tools, arch)?;
-    if config.updates.fonts
-        && let Some(families) = nerd_fonts(&config.fonts)
-    {
-        run("Updating", "Nerd Fonts", || fonts::apply(families, true))?;
+    if config.updates.fonts && !config.fonts.nerd.is_empty() {
+        run("Updating", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, true))?;
     }
     Ok(())
 }
@@ -277,19 +274,19 @@ fn macos_update(config: &Config, arch: Arch) -> Result<()> {
     if formulae || casks {
         run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(formulae, casks))?;
     }
+    // npm-only updates still need fnm to enter the managed default Node environment
     if config.updates.tools.npm && !config.updates.tools.node {
         run("Installing", "fnm", fnm::install)?;
     }
     update_tools(&config.tools, &config.updates.tools, arch)?;
-    if config.updates.fonts
-        && let Some(families) = nerd_fonts(&config.fonts)
-    {
-        run("Updating", "Nerd Fonts", || fonts::apply(families, true))?;
+    if config.updates.fonts && !config.fonts.nerd.is_empty() {
+        run("Updating", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, true))?;
     }
     Ok(())
 }
 
 fn update_tools(tools: &Tools, updates: &ToolUpdates, arch: Arch) -> Result<()> {
+    // moving updates use conventional selectors when the config has no installation pin
     if updates.rust {
         run("Installing", "Rust toolchain", || rustup::install(tools.rust.as_deref().unwrap_or("stable")))?;
         run("Updating", "Rust toolchains", rustup::update_toolchains)?;
@@ -314,12 +311,10 @@ fn update_tools(tools: &Tools, updates: &ToolUpdates, arch: Arch) -> Result<()> 
     Ok(())
 }
 
-fn nerd_fonts(fonts: &Fonts) -> Option<&[String]> {
-    (!fonts.nerd.is_empty()).then_some(fonts.nerd.as_slice())
-}
-
 fn dotfile_packages(dotfiles: &Dotfiles, platform_packages: &[String]) -> Option<Vec<String>> {
-    let packages = dotfiles.packages.all.iter().chain(platform_packages).cloned().collect::<Vec<_>>();
+    // preserve config order by appending platform packages after shared packages
+    let mut packages = dotfiles.packages.all.clone();
+    packages.extend_from_slice(platform_packages);
     (!packages.is_empty()).then_some(packages)
 }
 

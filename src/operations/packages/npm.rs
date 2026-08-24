@@ -6,7 +6,7 @@ pub(crate) fn install(packages: &[String]) -> Result<()> {
     let fnm = fnm::find_executable()?.context("npm install: managed fnm is unavailable after install")?;
     let mut missing = Vec::new();
     for package in packages {
-        // get package name without the trailing version / tag
+        // split at the final @ so scoped names remain intact while versions/tags are ignored
         let name = package.rsplit_once('@').map_or(package.as_str(), |(name, _)| name);
         let name = if name.is_empty() { package } else { name };
         let args = ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name];

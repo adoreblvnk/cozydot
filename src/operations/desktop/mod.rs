@@ -29,7 +29,7 @@ pub(crate) fn set_color_scheme(color_scheme: Theme) -> Result<()> {
 pub(crate) fn set_terminal(executable: &str) -> Result<()> {
     ensure!(host::has_executable_on_path(executable), "desktop terminal executable {executable:?} is unavailable");
     set_xdg_terminal(executable)?;
-    // Ubuntu provides this media key; upstream GNOME needs a custom binding.
+    // Ubuntu provides this media key; upstream GNOME needs a custom binding
     if !host::output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {
         ensure_gnome_terminal_shortcut("xdg-terminal-exec")?;
     }
@@ -58,20 +58,19 @@ fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
     let output = host::run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
     let keybindings = stdout_line(&output.stdout, "gsettings get custom-keybindings")?;
     let quoted_path = format!("'{GNOME_TERMINAL_SHORTCUT}'");
+    // gsettings renders an empty string array as [] or @as []
     let updated = if keybindings.contains(&quoted_path) {
         None
     } else if matches!(keybindings, "[]" | "@as []") {
         Some(format!("[{quoted_path}]"))
-    } else if keybindings.starts_with('[')
-        && let Some(existing) = keybindings.strip_suffix(']')
-    {
-        Some(format!("{existing}, {quoted_path}]"))
+    } else if let Some(existing) = keybindings.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
+        Some(format!("[{existing}, {quoted_path}]"))
     } else {
         bail!("gsettings get custom-keybindings returned malformed output");
     };
 
     let schema = format!("{GNOME_MEDIA_KEYS}.custom-keybinding:{GNOME_TERMINAL_SHORTCUT}");
-    // Complete the binding before publishing its path to GNOME.
+    // complete the binding before publishing its path to GNOME
     gsettings_set(&schema, "name", "'Terminal'")?;
     gsettings_set(&schema, "command", &format!("'{executable}'"))?;
     gsettings_set(&schema, "binding", "'<Primary><Alt>T'")?;
@@ -86,8 +85,7 @@ pub(crate) fn set_idle_delay(seconds: u32) -> Result<()> {
 }
 
 pub(crate) fn set_idle_dim(enabled: bool) -> Result<()> {
-    let value = if enabled { "true" } else { "false" };
-    gsettings_set("org.gnome.settings-daemon.plugins.power", "idle-dim", value)
+    gsettings_set("org.gnome.settings-daemon.plugins.power", "idle-dim", if enabled { "true" } else { "false" })
 }
 
 fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> {

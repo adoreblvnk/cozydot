@@ -54,6 +54,7 @@ impl Init {
         let dest = self.root.join(&relative);
         let new_hash = hash_bytes(record.bytes);
         let old_hash = self.managed.get(&relative);
+        // overwrite only when the current file still matches Cozydot's last recorded hash
         let write = match fs::symlink_metadata(&dest) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => true,
             Err(error) => return Err(error.into()),
@@ -105,6 +106,7 @@ impl Init {
             if !collect_regular_files(&dest, &self.root, &mut files)? {
                 return Ok(());
             }
+            // match manifest order because filesystem traversal order is unspecified
             files.sort();
             if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
                 return Ok(());
@@ -134,13 +136,13 @@ fn write_file(root: &Path, record: &EmbeddedFile, relative: &Path) -> Result<()>
     ensure_directory_path(root, parent)?;
     let dest = root.join(relative);
     let dest_parent = required_parent(&dest)?;
+    // write & sync beside the destination before publishing it with rename
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".cozydot.", dest_parent)?;
     temp.write_all(record.bytes)?;
     temp.as_file_mut().sync_all()?;
     temp.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
     temp.persist(&dest)?;
-    sync_dir(dest_parent)?;
-    Ok(())
+    sync_dir(dest_parent)
 }
 
 /// Create missing dirs under `root` & fail if `root` or a child dir is a symlink.
@@ -194,6 +196,7 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
         let (hash, relative) = line.split_once('\t').context("malformed managed-files record")?;
         let relative = PathBuf::from(relative);
         ensure!(hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()), "invalid SHA-256 record");
+        // reject paths that could escape root or corrupt tab-separated records
         if relative.as_os_str().is_empty()
             || relative.components().any(|component| !matches!(component, Component::Normal(_)))
             || relative.to_string_lossy().contains(['\t', '\n'])
@@ -215,8 +218,7 @@ fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()
     }
     temp.as_file_mut().sync_all()?;
     temp.persist(path)?;
-    sync_dir(parent)?;
-    Ok(())
+    sync_dir(parent)
 }
 
 fn required_parent(path: &Path) -> Result<&Path> {

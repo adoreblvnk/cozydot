@@ -9,6 +9,7 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
     ensure_fuse()?;
     if !host::output("systemctl", ["--user", "--quiet", "is-active", "appimaged.service"])?.status.success() {
         // https://github.com/probonopd/go-appimage/blob/master/src/appimaged/README.md#initial-setup
+        // cleanup is idempotent; an absent service or package is already the desired state
         let _ = host::output("systemctl", ["--user", "stop", "appimaged.service"]);
         let _ = host::output("sudo", ["apt-get", "-y", "purge", "appimagelauncher"]);
 
@@ -17,6 +18,7 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
         host::run("remove conflicting appimaged service", "rm", ["-f".as_ref(), service.as_os_str()])?;
         host::run("reload user services", "systemctl", ["--user", "daemon-reload"])?;
         let cache = home.join(".local/share/applications");
+        // pass the cache path as $1 so the shell never parses user-controlled path contents
         host::run(
             "clear AppImage cache",
             "sh",
@@ -25,8 +27,7 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
 
         let applications = home.join("Applications");
         let destination = applications.join("appimaged.AppImage");
-        let url = resolve_asset_url(arch)?;
-        super::appimage::install_appimage("download appimaged", &url, &destination)?;
+        super::appimage::install_appimage("download appimaged", &resolve_asset_url(arch)?, &destination)?;
         host::run(
             "launch appimaged",
             destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?,
@@ -53,6 +54,7 @@ fn resolve_asset_url(arch: Arch) -> Result<String> {
 }
 
 fn ensure_fuse() -> Result<()> {
+    // newer releases use libfuse2t64 while older releases retain libfuse2
     let output = host::output("apt-cache", ["show", "libfuse2t64"])?;
     let package = if output.status.success() { "libfuse2t64" } else { "libfuse2" };
     apt::install(&[package.into()])

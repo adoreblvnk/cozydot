@@ -15,6 +15,7 @@ pub(crate) fn state_home() -> Result<PathBuf> {
 }
 
 fn xdg_home(variable: &str, default: &str) -> Result<PathBuf> {
+    // empty XDG values fall back to HOME while non-empty values must be absolute
     if let Some(path) = env::var_os(variable).filter(|path| !path.is_empty()) {
         let path = PathBuf::from(path);
         ensure!(path.is_absolute(), "{variable} must be an absolute path");

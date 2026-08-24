@@ -62,6 +62,7 @@ impl ActiveHost {
             result => result,
         }?;
         let platform = platform::Platform::detect()?;
+        // check uses this path too, so host-dependent config errors fail before mutation
         config.validate_for_platform(&platform)?;
         Ok(Self { config_dir, config, platform })
     }
@@ -98,6 +99,7 @@ fn main() {
     if let Err(error) = result {
         anstream::eprintln!("{ERROR}error:{ERROR:#} {error}");
         for cause in error.chain().skip(1) {
+            // indent multiline causes so command stderr remains under its cause heading
             let cause = cause.to_string().replace('\n', "\n  ");
             eprintln!("\nCaused by:\n  {cause}");
         }

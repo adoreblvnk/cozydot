@@ -55,6 +55,7 @@ pub(crate) fn update_crates() -> Result<()> {
 
 fn installed_crates(output: &[u8]) -> Result<Vec<String>> {
     let output = std::str::from_utf8(output).context("cargo install --list returned non-UTF-8 output")?;
+    // top-level records start with `<crate> v<version>`; indented binary lines must not match
     let pattern = Regex::new(r"^(\S+) v[0-9].*$")?;
     let installed = output.lines().filter_map(|line| pattern.captures(line).map(|captures| captures[1].to_owned()));
     Ok(installed.collect())

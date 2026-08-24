@@ -4,6 +4,7 @@ use crate::operations::host;
 
 pub(crate) fn install_extensions(extensions: &[String]) -> Result<()> {
     let program = if cfg!(target_os = "macos") {
+        // GUI installs may expose code only inside the application bundle
         if host::output("code", ["--version"]).is_ok_and(|output| output.status.success()) {
             "code"
         } else {
