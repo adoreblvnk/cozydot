@@ -23,6 +23,7 @@ use crate::{
     },
     platform::{Architecture, Distro, Platform, PlatformIdentity},
 };
+use anstyle::{AnsiColor, Effects, Style};
 use anyhow::{Context, Result};
 use std::{
     collections::BTreeSet,
@@ -31,6 +32,7 @@ use std::{
 
 const APT_PREREQS: [&str; 8] =
     ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xdg-terminal-exec", "xz-utils"];
+const STATUS: Style = AnsiColor::BrightGreen.on_default().effects(Effects::BOLD);
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     host::home()?;
@@ -410,12 +412,12 @@ fn macos_desktop(theme: Option<Theme>, desktop: Option<&MacDesktop>) -> Result<(
 }
 
 fn run(status: &str, subject: &str, operation: impl FnOnce() -> Result<()>) -> Result<()> {
-    eprintln!("{status:>12} {subject}");
+    anstream::eprintln!("{STATUS}{status:>12}{STATUS:#} {subject}");
     operation().with_context(|| format!("{} {subject}", status.to_lowercase()))
 }
 
 fn run_with_outcome(status: &str, subject: &str, operation: impl FnOnce() -> Result<gnome::Outcome>) -> Result<()> {
-    eprintln!("{status:>12} {subject}");
+    anstream::eprintln!("{STATUS}{status:>12}{STATUS:#} {subject}");
     let action = status.to_lowercase();
     if operation().with_context(|| format!("{action} {subject}"))? == gnome::Outcome::LoginRequired {
         eprintln!("note: log out and back in to finish {action} {subject}");

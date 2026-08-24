@@ -1,5 +1,6 @@
 //! Provision Linux & macOS from one config.
 
+use anstyle::{AnsiColor, Effects, Style};
 use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
 use std::{
@@ -13,6 +14,8 @@ mod operations;
 mod paths;
 mod platform;
 mod workflow;
+
+const ERROR: Style = AnsiColor::BrightRed.on_default().effects(Effects::BOLD);
 
 #[derive(Debug, Parser)]
 #[command(name = "cozydot", version, about = "Declarative Linux and macOS post-install, update, and dotfile manager")]
@@ -102,7 +105,7 @@ fn main() {
         Ok(())
     })();
     if let Err(error) = result {
-        eprintln!("error: {error}");
+        anstream::eprintln!("{ERROR}error:{ERROR:#} {error}");
         for cause in error.chain().skip(1) {
             let cause = cause.to_string().replace('\n', "\n  ");
             eprintln!("\nCaused by:\n  {cause}");
