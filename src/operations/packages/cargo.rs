@@ -8,8 +8,7 @@ pub(crate) fn install_binstall() -> Result<()> {
         return super::homebrew::install_packages(&["cargo-binstall".to_owned()], &[]);
     }
     let cargo_home = host::home()?.join(".cargo");
-    let cargo_binstall = cargo_home.join("bin/cargo-binstall");
-    if is_executable(&cargo_binstall) {
+    if is_executable(&cargo_home.join("bin/cargo-binstall")) {
         return Ok(());
     }
     let cargo = cargo_home.join("bin/cargo");

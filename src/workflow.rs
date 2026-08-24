@@ -141,8 +141,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     // add repositories before changing packages supplied by them
     if !repos.is_empty() {
         for (name, apt_repo) in repos {
-            let subject = format!("{name} APT repository");
-            run("Adding", &subject, || repo::add(&apt_repo))?;
+            run("Adding", &format!("{name} APT repository"), || repo::add(&apt_repo))?;
         }
         run("Updating", "APT package metadata", apt::update)?;
     }
@@ -184,7 +183,6 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> {
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
-    let dotfiles = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos);
     let homebrew = &config.packages.macos.homebrew;
     let mut formulae = homebrew.formulae.clone();
     // dotfiles require Stow even when it is absent from configured formulae
@@ -205,7 +203,7 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
     if !config.fonts.nerd.is_empty() {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
-    if let Some(packages) = dotfiles {
+    if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos) {
         run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
     }
     apply_vscode_extensions(&config.integrations.vscode.extensions)?;

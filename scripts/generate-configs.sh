@@ -1,17 +1,22 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-base="$root/configs/cozydot.yaml"
-mode="${1:-write}"
+# ----- GLOBAL VARIABLES -----
 
-if (( $# > 1 )) || [[ "$mode" != "write" && "$mode" != "--check" ]]; then
-  printf 'usage: %s [--check]\n' "${0##*/}" >&2
-  exit 2
-fi
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+readonly ROOT
+readonly BASE="$ROOT/configs/cozydot.yaml"
+CHECK=false
 
-temporary="$(mktemp -d)"
-trap 'rm -rf -- "$temporary"' EXIT
+# ----- PRINT FUNCTIONS -----
+
+status() { printf '%s\n' "$1" >&2; }
+warning() { printf 'warning: %s\n' "$1" >&2; }
+error() { printf 'error: %s\n' "$1" >&2; exit 1; }
+
+# ----- HELPERS -----
+
+cleanup() { [ -z "$TEMP" ] || rm -rf "$TEMP"; }
 
 generate_cli() {
   yq '
@@ -31,7 +36,7 @@ generate_cli() {
     )) |
     .dotfiles.packages.all -= ["opencode", "vscode", "wezterm"] |
     .packages.macos.homebrew.casks = ["git-credential-manager"]
-  ' "$base"
+  ' "$BASE"
 }
 
 generate_vm() {
@@ -53,23 +58,34 @@ generate_vm() {
       "visual-studio-code",
       "wezterm"
     ]
-  ' "$base"
+  ' "$BASE"
 }
 
-generate_cli >"$temporary/cli.yaml"
-generate_vm >"$temporary/vm.yaml"
+# ----- MAIN -----
 
-status=0
-for preset in cli vm; do
-  generated="$temporary/$preset.yaml"
-  committed="$root/configs/$preset.yaml"
-  if [[ "$mode" == "--check" ]]; then
-    if ! cmp -s -- "$generated" "$committed"; then
-      printf 'error: configs/%s.yaml is stale; run scripts/generate-configs.sh\n' "$preset" >&2
-      status=1
+main() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --check) CHECK=true; shift ;;
+      *) error "unexpected argument: $1" ;;
+    esac
+  done
+
+  TEMP=$(mktemp -d)
+  trap cleanup 0 # remove temp dir on exit
+  generate_cli >"$TEMP/cli.yaml"
+  generate_vm >"$TEMP/vm.yaml"
+
+  for PRESET in cli vm; do
+    GENERATED="$TEMP/$PRESET.yaml"
+    COMMITTED="$ROOT/configs/$PRESET.yaml"
+    if [ "$CHECK" = false ]; then
+      # copy preset with 0644 permissions
+      install -m 0644 "$GENERATED" "$COMMITTED"
+    elif ! cmp -s "$GENERATED" "$COMMITTED"; then
+      error "configs/$PRESET.yaml is stale; run scripts/generate-configs.sh"
     fi
-  else
-    install -m 0644 "$generated" "$committed"
-  fi
-done
-exit "$status"
+  done
+}
+
+main "$@"

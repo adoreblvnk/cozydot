@@ -216,10 +216,8 @@ impl DistroKey {
 
 pub fn select_distro_uri(uris: &BTreeMap<DistroKey, String>, identity: PlatformIdentity) -> Option<(DistroKey, &str)> {
     let PlatformIdentity::Linux { distro, family } = identity else { return None };
-    let exact_key = DistroKey::from_distro(distro);
-    let family_key = DistroKey::from_family(family);
     // prefer the exact distro, then its base family, then the default URI
-    for key in [exact_key, family_key, DistroKey::Default] {
+    for key in [DistroKey::from_distro(distro), DistroKey::from_family(family), DistroKey::Default] {
         if let Some(uri) = uris.get(&key) {
             return Some((key, uri.as_str()));
         }
@@ -667,8 +665,7 @@ pub struct ToolUpdates {
 
 fn validate_definition_names(values: &[String], path: &str) -> Result<()> {
     for (index, value) in values.iter().enumerate() {
-        let item_path = format!("{path}[{index}]");
-        validate_definition_name(value, &item_path)?;
+        validate_definition_name(value, &format!("{path}[{index}]"))?;
     }
     Ok(())
 }
