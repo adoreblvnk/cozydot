@@ -19,7 +19,7 @@ main() {
 
   # extract version from Cargo's package ID
   PKGID=$(cargo pkgid -m "$ROOT/Cargo.toml")
-  VERSION=${PKGID##*@}
+  VERSION=${PKGID##*[#@]}
   [ "$VERSION" != "$PKGID" ] || error "unable to resolve Cargo package version"
 
   # map uname values to Rust targets & GNU tar commands
