@@ -90,8 +90,8 @@ presets.
 
 The active `cozydot.yaml` created by `init` is user configuration, not a
 generated repository file. Edit that active file and run `cozydot check` to
-validate it without detecting the platform or making changes. `apply` and
-`update` load the same active file.
+validate it against the current platform without making changes. `apply`,
+`dotfiles`, and `update` load the same active file.
 
 ## Apply, dotfiles, and update behavior
 
@@ -134,12 +134,19 @@ then ensures all repository packages without upgrading installed versions. An om
 supports every Cozydot Linux architecture; supported values are `amd64` and
 `arm64`.
 
+## Roadmap
+
+- Update managed Deb and AppImage binaries from their configured release sources.
+- Complete first-run Xcode Command Line Tools installation before continuing a
+  macOS apply.
+- Add a dedicated command for listing bundled presets.
+
 ## Safety model
 
-- `apply`, `dotfiles`, and `update` validate the complete active configuration
-  against the detected platform before starting side effects. Explicit Linux
-  and macOS workflows then execute host operations sequentially in dependency
-  order and stop on the first failure.
+- `check`, `apply`, `dotfiles`, and `update` validate the complete active
+  configuration against the detected platform. Explicit Linux and macOS
+  workflows then execute host operations sequentially in dependency order and
+  stop on the first failure.
 - YAML selects only the documented schema. It cannot provide arbitrary
   commands, shell fragments, managers, lock paths, plugins, or interpolation;
   execution uses a fixed set of host-operation functions.
