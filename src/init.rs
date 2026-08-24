@@ -137,7 +137,7 @@ fn write_file(root: &Path, record: &EmbeddedFile, relative: &Path) -> Result<()>
     temp.write_all(record.bytes)?;
     temp.as_file_mut().sync_all()?;
     temp.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
-    temp.persist(&dest).map_err(|e| e.error)?;
+    temp.persist(&dest)?;
     sync_dir(dest_parent)?;
     Ok(())
 }
@@ -208,7 +208,7 @@ fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()
         writeln!(temp, "{}\t{}", hash, relative.display())?;
     }
     temp.as_file_mut().sync_all()?;
-    temp.persist(path).map_err(|e| e.error)?;
+    temp.persist(path)?;
     sync_dir(parent)?;
     Ok(())
 }

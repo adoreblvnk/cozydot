@@ -11,9 +11,6 @@ pub fn add_flathub_remote() -> Result<()> {
 }
 
 pub fn install(refs: &[String]) -> Result<()> {
-    if refs.is_empty() {
-        return Ok(());
-    }
     let mut args = vec!["--user", "install", "--noninteractive", "-y", "flathub", "--"];
     args.extend(refs.iter().map(String::as_str));
     host::run("Flatpak application install", "flatpak", args)?;

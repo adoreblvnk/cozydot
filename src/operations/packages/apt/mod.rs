@@ -36,17 +36,11 @@ pub(crate) fn set_unattended_upgrades(enabled: bool) -> Result<()> {
 }
 
 pub fn install(packages: &[String]) -> Result<()> {
-    if packages.is_empty() {
-        return Ok(());
-    }
     let packages = packages.iter().map(|package| format!("{package}+"));
     change_packages("APT package install", &["install", "--no-upgrade"], packages)
 }
 
 pub fn purge(packages: &[String]) -> Result<()> {
-    if packages.is_empty() {
-        return Ok(());
-    }
     let mut installed = Vec::new();
     for package in packages {
         if is_installed(package)? {
