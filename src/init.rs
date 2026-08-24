@@ -27,8 +27,8 @@ pub fn init(preset: Preset) -> Result<PathBuf> {
         Preset::Cli => CLI_PRESET,
         Preset::Vm => VM_PRESET,
     };
-    init.sync_cozydot_yaml(preset)?;
-    init.sync_bundled_dotfiles()?;
+    init.sync_config(preset)?;
+    init.sync_dotfiles()?;
     // write ownership last so retries preserve files synced by partial runs
     write_manifest(&init.root.join(".managed-files"), &init.managed)?;
     Ok(init.root)
@@ -48,7 +48,7 @@ struct Init {
 }
 
 impl Init {
-    fn sync_cozydot_yaml(&mut self, preset: &'static [u8]) -> Result<()> {
+    fn sync_config(&mut self, preset: &'static [u8]) -> Result<()> {
         let record = EmbeddedFile { path: "cozydot.yaml", bytes: preset, mode: 0o644 };
         let relative = PathBuf::from(record.path);
         let dest = self.root.join(&relative);
@@ -67,7 +67,7 @@ impl Init {
         Ok(())
     }
 
-    fn sync_bundled_dotfiles(&mut self) -> Result<()> {
+    fn sync_dotfiles(&mut self) -> Result<()> {
         let mut packages = BTreeMap::<PathBuf, Vec<&EmbeddedFile>>::new();
         for record in EMBEDDED_FILES {
             let relative = PathBuf::from(record.path);
@@ -201,7 +201,6 @@ fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
     Ok(result)
 }
 
-// TODO: do we really need this where we're going?
 fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
     let parent = required_parent(path)?;
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".managed-files.", parent)?;

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::config::AptUpgradeCommand;
+use crate::config::AptUpgrade;
 use crate::operations::host::{self, privileged_file::write_atomic, systemd};
 
 pub(crate) mod repo;
@@ -49,7 +49,7 @@ pub fn purge(packages: &[String]) -> Result<()> {
     }
     let mut installed = Vec::new();
     for package in packages {
-        if is_package_installed(package)? {
+        if is_installed(package)? {
             installed.push(package.clone());
         }
     }
@@ -59,13 +59,13 @@ pub fn purge(packages: &[String]) -> Result<()> {
     change_packages("APT package purge", &["purge"], installed)
 }
 
-pub fn upgrade(command: AptUpgradeCommand) -> Result<()> {
+pub fn upgrade(command: AptUpgrade) -> Result<()> {
     let (label, apt_command) = match command {
-        AptUpgradeCommand::Upgrade => ("APT upgrade", "upgrade"),
-        AptUpgradeCommand::FullUpgrade => ("APT full-upgrade", "full-upgrade"),
+        AptUpgrade::Upgrade => ("APT upgrade", "upgrade"),
+        AptUpgrade::FullUpgrade => ("APT full-upgrade", "full-upgrade"),
     };
     host::run(label, "sudo", ["DEBIAN_FRONTEND=noninteractive", "apt-get", apt_command, "-y", "-qq"])?;
-    if command == AptUpgradeCommand::FullUpgrade {
+    if command == AptUpgrade::FullUpgrade {
         let args = ["DEBIAN_FRONTEND=noninteractive", "apt-get", "autoremove", "--purge", "-y", "-qq"];
         host::run("APT purge autoremove", "sudo", args)?;
     }
@@ -81,7 +81,7 @@ fn change_packages(label: &str, command: &[&str], packages: impl IntoIterator<It
     Ok(())
 }
 
-fn is_package_installed(package: &str) -> Result<bool> {
+fn is_installed(package: &str) -> Result<bool> {
     let output = host::output("dpkg-query", ["-W", "-f=${db:Status-Status}\\n", "--", package])?;
     if !output.status.success() {
         if output.status.code() == Some(1) {

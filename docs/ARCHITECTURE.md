@@ -47,7 +47,7 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 
 ### Linux
 
-1. Derive applicable repos, aggregate repo package changes, APT requirements, tool installations, binary mappings, and desktop prerequisites.
+1. Derive applicable repos, aggregate repo package changes, APT requirements, binary mappings, tool installations, and desktop prerequisites.
 2. On Debian, ensure configured `sudo` group membership and add official APT components.
 3. On Ubuntu, set unattended upgrades and snapd state, then install restricted extras when configured.
 4. Run APT update.
@@ -56,14 +56,14 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 7. Add each applicable APT repo, then run one APT update.
 8. Purge aggregate repo conflicts and install aggregate repo packages.
 9. Add the Flathub remote and install configured Flatpak applications.
-10. Install Rust with the configured toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
-11. Install configured Cargo crates and npm packages.
-12. Install applicable Deb binaries.
-13. Install appimaged, then applicable AppImages.
+10. Install applicable Deb binaries.
+11. Install appimaged, then applicable AppImages.
+12. Install Rust, fnm and Node.js, uv and Python, and Go in that order when required.
+13. Install configured Cargo crates and npm packages.
 14. Install configured Nerd Font families.
-15. Apply shared and Linux dotfile packages.
+15. Apply `dotfiles.packages.all` and `dotfiles.packages.linux`.
 16. Apply Docker, VirtualBox, and Visual Studio Code integrations.
-17. Set the shared theme and configured Linux desktop settings.
+17. Set `desktop.theme` and configured Linux desktop settings.
 
 ### macOS
 
@@ -72,18 +72,18 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 3. Install Command Line Tools for Xcode when configured.
 4. Install Homebrew.
 5. Install configured formulae and casks with `stow` as a baseline prerequisite.
-6. Install Rust with the configured toolchain, cargo-binstall, cargo-update, fnm, the configured Node.js version, uv, the configured Python version, and the Go toolchain in that order when required.
+6. Install Rust, fnm and Node.js, uv and Python, and Go in that order when required.
 7. Install configured Cargo crates and npm packages.
 8. Install configured user Nerd Font families.
-9. Apply shared and macOS dotfile packages.
+9. Apply `dotfiles.packages.all` and `dotfiles.packages.macos`.
 10. Install configured Visual Studio Code extensions.
-11. Set the shared theme and write configured macOS defaults.
+11. Set `desktop.theme` and write configured macOS defaults.
 
 ## Dotfiles
 
-`cozydot dotfiles` applies shared packages plus packages for the detected platform. Linux selects `linux.dotfiles.packages`; macOS selects `macos.dotfiles.packages`.
+`cozydot dotfiles` applies `dotfiles.packages.all` plus packages for the detected platform. Linux selects `dotfiles.packages.linux`; macOS selects `dotfiles.packages.macos`.
 
-1. Combine shared and platform dotfile packages in declaration order.
+1. Combine `dotfiles.packages.all` and platform dotfile packages in declaration order.
 2. Stop without an operation when no packages are configured.
 3. Verify the dotfiles root and every selected package directory.
 4. Verify GNU Stow is available.
@@ -104,9 +104,9 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 3. Ensure update prerequisites without upgrading installed packages.
 4. Update installed Flatpak applications and runtimes when enabled.
 5. Ensure Rust with the configured or stable toolchain, then update Rust toolchains when enabled.
-6. Update the Go toolchain when enabled.
-7. Install fnm and update the Node.js version when enabled.
-8. Install uv and upgrade the Python versions when enabled.
+6. Install fnm and update the Node.js version when enabled.
+7. Install uv and upgrade the Python versions when enabled.
+8. Update the Go toolchain when enabled.
 9. Update installed Cargo crates when enabled.
 10. Update global npm packages when enabled.
 11. Update configured Nerd Font families when enabled.
@@ -116,9 +116,9 @@ Workflows keep execution order visible in `src/workflow.rs`. Operations inspect 
 1. Install Homebrew.
 2. Run Homebrew update and upgrade the selected formulae and casks when enabled.
 3. Ensure Rust with the configured or stable toolchain, then update Rust toolchains when enabled.
-4. Update the Go toolchain when enabled.
-5. Install fnm for a Node.js version or npm update, then update the Node.js version when enabled.
-6. Install uv and upgrade the Python versions when enabled.
+4. Install fnm for a Node.js version or npm update, then update the Node.js version when enabled.
+5. Install uv and upgrade the Python versions when enabled.
+6. Update the Go toolchain when enabled.
 7. Update installed Cargo crates when enabled.
 8. Update global npm packages when enabled.
 9. Update configured user Nerd Font families when enabled.

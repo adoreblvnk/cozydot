@@ -2,17 +2,17 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::operations::host::{self, is_regular_executable, shell::append_profile, temp_path_with_suffix};
-use crate::platform::Architecture;
+use crate::platform::Arch;
 use crate::style::WARNING;
 
 const GO_PATH_INIT: &str = r#"export PATH="/usr/local/go/bin:$PATH""#;
 
-pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> Result<()> {
+pub(crate) fn install_toolchain(selector: &str, arch: Arch) -> Result<()> {
     let target_os = if cfg!(target_os = "macos") { "darwin" } else { "linux" };
     let latest = if selector == "latest" { Some(latest_version()?) } else { None };
     let version = latest.as_deref().unwrap_or(selector);
     let program = "/usr/local/go/bin/go";
-    let expected = format!("go version go{version} {target_os}/{}", architecture.go());
+    let expected = format!("go version go{version} {target_os}/{}", arch.go());
     // verify that Go is executable & go version output matches expected version & platform
     let installed = is_regular_executable(program.as_ref());
     let output = if installed { host::output(program, ["version"]).ok() } else { None };
@@ -21,7 +21,7 @@ pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> R
     let version_matches = stdout.is_some_and(|stdout| stdout.trim() == expected);
     if !version_matches {
         let archive = temp_path_with_suffix("go", ".tar.gz")?;
-        let filename = format!("go{version}.{target_os}-{}.tar.gz", architecture.go());
+        let filename = format!("go{version}.{target_os}-{}.tar.gz", arch.go());
         let url = format!("https://go.dev/dl/{filename}");
         let output = archive.as_os_str();
         host::curl("Go archive download", &url, ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), output])?;
@@ -33,14 +33,14 @@ pub(crate) fn install_toolchain(selector: &str, architecture: Architecture) -> R
     append_profile(GO_PATH_INIT)
 }
 
-pub(crate) fn update_toolchain(selector: &str, architecture: Architecture) -> Result<()> {
+pub(crate) fn update_toolchain(selector: &str, arch: Arch) -> Result<()> {
     if selector != "latest" {
         anstream::eprintln!(
             "{WARNING}warning:{WARNING:#} skipping Go update because tools.go is pinned to an exact version"
         );
         return Ok(());
     }
-    install_toolchain(selector, architecture)
+    install_toolchain(selector, arch)
 }
 
 fn latest_version() -> Result<String> {
