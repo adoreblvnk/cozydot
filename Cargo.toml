@@ -12,6 +12,8 @@ unsafe_code = "forbid"
 
 [dependencies]
 anyhow = "1"
+anstream = "1"
+anstyle = "1"
 clap = { version = "4.6", features = ["derive"] }
 humantime = "2"
 hex = "0.4"
