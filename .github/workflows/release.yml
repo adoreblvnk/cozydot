@@ -1,0 +1,57 @@
+name: Release
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PKGID=$(cargo pkgid -m Cargo.toml)
+          TAG="v${PKGID##*[#@]}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+  package:
+    needs: check
+    if: needs.check.outputs.tag
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'macOS'
+        run: brew install gnu-tar
+      - run: scripts/package-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.os }}
+          path: target/cozydot-*.tar.gz*
+  publish:
+    needs: [check, package]
+    if: needs.check.outputs.tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
+          path: target
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.check.outputs.tag }}" \
+            target/cozydot-*.tar.gz* \
+            --title "${{ needs.check.outputs.tag }}" \
+            --generate-notes
