@@ -50,17 +50,14 @@ The installer selects the `amd64` or `arm64` release, verifies its
 published SHA-256 file, requires the archive to contain exactly one regular
 `cozydot` entry, and atomically installs the binary in `~/.local/bin`.
 
-This environment variable overrides the release source:
-
-| Variable | Purpose |
-| --- | --- |
-| `COZYDOT_RELEASE_BASE_URL` | Release or mirror base URL; defaults to the GitHub releases page |
-
-Pass overrides to the shell running the installer, for example:
+You can override the release base URL using the `COZYDOT_RELEASE_BASE_URL` environment variable, or pass flags directly to `install.sh` using `bash -s`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh \
-  | COZYDOT_RELEASE_BASE_URL=https://mirror.example/cozydot bash
+# Install a specific version
+curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh | bash -s -- -v 1.0.0
+
+# Install from a mirror
+curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh | COZYDOT_RELEASE_BASE_URL=https://mirror.example/cozydot bash
 ```
 
 ## First run

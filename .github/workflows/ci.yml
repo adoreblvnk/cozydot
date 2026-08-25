@@ -23,18 +23,18 @@ jobs:
       - run: cargo test --locked --all-targets --all-features
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
       - name: Build deterministic release
+        id: build
         run: |
-          VERSION=$(cargo pkgid -m Cargo.toml | sed 's/.*[#@]//')
           archive="$(scripts/package-release.sh)"
-          test "$archive" = "$PWD/target/cozydot-v$VERSION-x86_64-unknown-linux-gnu.tar.gz"
-          (cd target && sha256sum -c cozydot-v$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256)
+          (cd target && sha256sum -c "${archive##*/}.sha256")
           test "$(tar -tzf "$archive")" = cozydot
+          echo "VERSION=$(cargo pkgid -m Cargo.toml | sed 's/.*[#@]//')" >> "$GITHUB_OUTPUT"
       - name: Smoke-test installed release
         run: |
-          VERSION=$(cargo pkgid -m Cargo.toml | sed 's/.*[#@]//')
           root="$(mktemp -d)"
+          VERSION="${{ steps.build.outputs.VERSION }}"
           mkdir -p "$root/mirror/download/v$VERSION" "$root/elsewhere"
-          cp target/cozydot-v$VERSION-x86_64-unknown-linux-gnu.tar.gz* "$root/mirror/download/v$VERSION/"
+          cp "target/cozydot-v$VERSION-x86_64-unknown-linux-gnu.tar.gz"* "$root/mirror/download/v$VERSION/"
           HOME="$root/home" XDG_CACHE_HOME="$root/cache" \
             COZYDOT_RELEASE_BASE_URL="file://$root/mirror" bash install.sh -v "$VERSION"
           binary="$root/home/.local/bin/cozydot"
@@ -55,18 +55,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: brew install gnu-tar
       - name: Build deterministic release
+        id: build
         run: |
-          VERSION=$(cargo pkgid -m Cargo.toml | sed 's/.*[#@]//')
           archive="$(scripts/package-release.sh)"
-          test "$archive" = "$PWD/target/cozydot-v$VERSION-aarch64-apple-darwin.tar.gz"
-          (cd target && shasum -a 256 -c cozydot-v$VERSION-aarch64-apple-darwin.tar.gz.sha256)
+          (cd target && shasum -a 256 -c "${archive##*/}.sha256")
           test "$(gtar -tzf "$archive")" = cozydot
+          echo "VERSION=$(cargo pkgid -m Cargo.toml | sed 's/.*[#@]//')" >> "$GITHUB_OUTPUT"
       - name: Smoke-test installed release
         run: |
-          VERSION=$(cargo pkgid -m Cargo.toml | sed 's/.*[#@]//')
           root="$(mktemp -d)"
+          VERSION="${{ steps.build.outputs.VERSION }}"
           mkdir -p "$root/mirror/download/v$VERSION"
-          cp target/cozydot-v$VERSION-aarch64-apple-darwin.tar.gz* "$root/mirror/download/v$VERSION/"
+          cp "target/cozydot-v$VERSION-aarch64-apple-darwin.tar.gz"* "$root/mirror/download/v$VERSION/"
           HOME="$root/home" COZYDOT_RELEASE_BASE_URL="file://$root/mirror" \
             /bin/bash install.sh -v "$VERSION"
           "$root/home/.local/bin/cozydot" --version | grep "$VERSION"
