@@ -72,7 +72,10 @@ fn dotfiles_refuse_conflicts_without_replace_flag() {
     // --version satisfies the CLI check, --simulate reports a conflict, installs succeed
     env.mock("stow", "#!/bin/sh\ncase \"$*\" in *--simulate*) exit 2 ;; esac\nexit 0\n");
 
-    env.write_config(&MINIMAL_CONFIG.replace("linux: []", "linux:\n      - bash"));
+    // bash applies on both platforms so the suite covers macOS runners too
+    env.write_config(
+        &MINIMAL_CONFIG.replace("linux: []\n    macos: []", "linux:\n      - bash\n    macos:\n      - bash"),
+    );
     fs::create_dir_all(env.root().join("cozydot/dotfiles/bash")).unwrap();
     fs::write(env.root().join("cozydot/dotfiles/bash/.bashrc"), "cozydot bashrc\n").unwrap();
     fs::write(env.home().join(".bashrc"), "user bashrc\n").unwrap();
