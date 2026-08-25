@@ -13,12 +13,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-      - name: Show active toolchain
-        run: rustup show active-toolchain
-      - name: Install yq
-        uses: dcarbone/install-yq-action@v1
-        with:
-          version: v4.49.2
       - name: Check generated configurations
         run: scripts/generate-configs.sh --check
       - name: Check formatting
