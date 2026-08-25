@@ -8,8 +8,8 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Version {
-    #[serde(rename = "1.0.0")]
-    V1_0_0,
+    #[serde(rename = "1")]
+    V1,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

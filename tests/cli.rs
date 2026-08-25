@@ -6,7 +6,7 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 fn config(extra: &str) -> String {
     let mut value = json!({
-        "version": "1.0.0",
+        "version": "1",
         "system": {
             "debian": null,
             "ubuntu": null,
@@ -128,11 +128,13 @@ fn installer_rejects_unsupported_platform_before_download() {
 
     Command::new("bash")
         .arg("install.sh")
+        .arg("-v")
+        .arg("1")
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .env("COZYDOT_TEST_DOWNLOAD", &download)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("error: unsupported platform Darwin:x86_64"));
+        .stderr(predicate::str::contains("error: unsupported platform: Darwin x86_64"));
     assert!(!download.exists());
 }
 
@@ -152,6 +154,7 @@ fn installer_checksum_failure_preserves_existing_binary() {
         &fake_bin.join("curl"),
         r#"#!/bin/sh
 while [ "$#" -gt 0 ]; do
+  [ "$1" != "-w" ] || { printf 'https://example/v1\n'; exit 0; }
   [ "$1" != "-o" ] || { shift; output=$1; }
   shift
 done
@@ -164,6 +167,8 @@ esac
 
     Command::new("bash")
         .arg("install.sh")
+        .arg("-v")
+        .arg("1")
         .env("HOME", &home)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .assert()
