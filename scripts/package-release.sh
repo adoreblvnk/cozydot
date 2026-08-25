@@ -31,7 +31,7 @@ main() {
   esac
   command -v "$TAR" >/dev/null 2>&1 || error "required GNU tar command is unavailable: $TAR"
 
-  ARCHIVE="cozydot-$VERSION-$TARGET.tar.gz"
+  ARCHIVE="cozydot-v$VERSION-$TARGET.tar.gz"
   mkdir -p "$ROOT/target"
 
   cargo build -r --target "$TARGET" --target-dir "$ROOT/target" -m "$ROOT/Cargo.toml" --locked

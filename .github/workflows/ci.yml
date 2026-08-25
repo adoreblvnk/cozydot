@@ -11,7 +11,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
       - run: rustup show active-toolchain
       - name: Install yq
         run: |
@@ -25,16 +25,16 @@ jobs:
       - name: Build deterministic release
         run: |
           archive="$(scripts/package-release.sh)"
-          test "$archive" = "$PWD/target/cozydot-1.0.0-x86_64-unknown-linux-gnu.tar.gz"
-          (cd target && sha256sum -c cozydot-1.0.0-x86_64-unknown-linux-gnu.tar.gz.sha256)
+          test "$archive" = "$PWD/target/cozydot-v1.0.0-x86_64-unknown-linux-gnu.tar.gz"
+          (cd target && sha256sum -c cozydot-v1.0.0-x86_64-unknown-linux-gnu.tar.gz.sha256)
           test "$(tar -tzf "$archive")" = cozydot
       - name: Smoke-test installed release
         run: |
           root="$(mktemp -d)"
           mkdir -p "$root/mirror/download/v1.0.0" "$root/elsewhere"
-          cp target/cozydot-1.0.0-x86_64-unknown-linux-gnu.tar.gz* "$root/mirror/download/v1.0.0/"
+          cp target/cozydot-v1.0.0-x86_64-unknown-linux-gnu.tar.gz* "$root/mirror/download/v1.0.0/"
           HOME="$root/home" XDG_CACHE_HOME="$root/cache" \
-            COZYDOT_RELEASE_BASE_URL="file://$root/mirror" bash install.sh
+            COZYDOT_RELEASE_BASE_URL="file://$root/mirror" bash install.sh -v 1.0.0
           binary="$root/home/.local/bin/cozydot"
           test ! -e "$root/config"
           test ! -e "$root/cache"
@@ -48,21 +48,21 @@ jobs:
           "$binary" --version
       - run: bash -n install.sh scripts/generate-configs.sh scripts/package-release.sh dotfiles/bash/.bashrc
   macos:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
       - run: brew install gnu-tar
       - name: Build deterministic release
         run: |
           archive="$(scripts/package-release.sh)"
-          test "$archive" = "$PWD/target/cozydot-1.0.0-aarch64-apple-darwin.tar.gz"
-          (cd target && shasum -a 256 -c cozydot-1.0.0-aarch64-apple-darwin.tar.gz.sha256)
+          test "$archive" = "$PWD/target/cozydot-v1.0.0-aarch64-apple-darwin.tar.gz"
+          (cd target && shasum -a 256 -c cozydot-v1.0.0-aarch64-apple-darwin.tar.gz.sha256)
           test "$(gtar -tzf "$archive")" = cozydot
       - name: Smoke-test installed release
         run: |
           root="$(mktemp -d)"
           mkdir -p "$root/mirror/download/v1.0.0"
-          cp target/cozydot-1.0.0-aarch64-apple-darwin.tar.gz* "$root/mirror/download/v1.0.0/"
+          cp target/cozydot-v1.0.0-aarch64-apple-darwin.tar.gz* "$root/mirror/download/v1.0.0/"
           HOME="$root/home" COZYDOT_RELEASE_BASE_URL="file://$root/mirror" \
-            /bin/bash install.sh
+            /bin/bash install.sh -v 1.0.0
           "$root/home/.local/bin/cozydot" --version | grep '1.0.0'
