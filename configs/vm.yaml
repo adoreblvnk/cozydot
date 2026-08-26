@@ -19,17 +19,16 @@ packages:
         - cmake
         - default-jdk
         - ffmpeg
-        - figlet
         - fzf
         - git
         - imagemagick
-        - lolcat
+        - jq
         - openssh-server
         - pandoc
         - pass
         - pinentry-tty
+        - shfmt
         - trash-cli
-        - ttf-mscorefonts-installer
         - vim
         - vlc
       repos:
@@ -78,16 +77,16 @@ packages:
         - cmake
         - ffmpeg
         - fastfetch
-        - figlet
         - fzf
         - gh
         - git
         - imagemagick
-        - lolcat
+        - jq
         - openjdk
         - pandoc
         - pass
         - pinentry-mac
+        - shfmt
         - trash
         - vim
       casks:
@@ -126,6 +125,17 @@ dotfiles:
     macos:
       - zsh
 integrations:
+  skills:
+    - anthropics/skills@pdf
+    - astral-sh/claude-code-plugins@uv
+    - jeffallan/claude-skills@prompt-engineer
+    - mattpocock/skills@writing-for-agents
+    - microsoft/playwright-cli@playwright-cli
+    - multica-ai/andrej-karpathy-skills@karpathy-guidelines
+    - pbakaus/impeccable@impeccable
+    - slidevjs/slidev@slidev
+    - vercel-labs/agent-skills@web-design-guidelines
+    - vercel-labs/skills@find-skills
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc

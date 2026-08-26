@@ -77,6 +77,10 @@ writes the active configuration and bundled dotfiles under
 `${XDG_CONFIG_HOME:-$HOME/.config}/cozydot` without a checkout or network
 request.
 
+> The Microsoft core fonts (`ttf-mscorefonts-installer`) are not provisioned
+> because their EULA must be accepted interactively. Install manually:
+> `sudo apt-get install -y ttf-mscorefonts-installer`
+
 ## Configuration sources
 
 `configs/cozydot.yaml` is the manually maintained base preset.
