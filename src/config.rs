@@ -414,6 +414,9 @@ pub struct DotfilePackages {
 #[serde(deny_unknown_fields)]
 pub struct Integrations {
     pub vscode: VsCode,
+    /// `skills` CLI sources such as `owner/repo@skill`
+    #[serde(default)]
+    pub skills: Vec<String>,
     pub linux: LinuxIntegrations,
 }
 
