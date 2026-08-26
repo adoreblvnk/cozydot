@@ -1,4 +1,3 @@
--- Nerd Font icon priority order: fa, md, oct, pl
 local wezterm = require 'wezterm'
 local act = wezterm.action
 local config = wezterm.config_builder()
@@ -98,6 +97,7 @@ config.tab_max_width = 32
 config.colors = { tab_bar = { background = colors.base } }
 
 -- Event Handlers
+-- Nerd Font icon priority order: fa, md, oct, pl
 wezterm.on('update-status', function(window, pane)
   local mode_text = "NORMAL"
   local mode_bg = colors.green
