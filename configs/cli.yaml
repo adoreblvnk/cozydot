@@ -13,6 +13,7 @@ packages:
   linux:
     apt:
       install:
+        - 7zip
         - bash-completion
         - build-essential
         - cmake
@@ -25,7 +26,6 @@ packages:
         - pass
         - pinentry-tty
         - shfmt
-        - trash-cli
         - vim
       repos:
         - name: github-cli
@@ -70,9 +70,10 @@ packages:
         - pandoc
         - pass
         - pinentry-mac
+        - sevenzip
         - shfmt
-        - trash
         - vim
+        - yq
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
@@ -89,9 +90,11 @@ tools:
     - eza
     - fd-find
     - presenterm
+    - resvg
     - ripgrep
     - starship
     - tealdeer
+    - tokei
     - yazi-fm
     - zoxide
   npm:

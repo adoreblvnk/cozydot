@@ -36,6 +36,7 @@ alias c=clear
 alias pip="python -m pip"
 
 if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
+if ! command -v trash &>/dev/null && command -v gio &>/dev/null; then alias trash="gio trash"; fi
 
 # eza aliases
 if command -v eza &>/dev/null; then

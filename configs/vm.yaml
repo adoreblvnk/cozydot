@@ -14,6 +14,7 @@ packages:
   linux:
     apt:
       install:
+        - 7zip
         - bash-completion
         - build-essential
         - cmake
@@ -28,7 +29,6 @@ packages:
         - pass
         - pinentry-tty
         - shfmt
-        - trash-cli
         - vim
         - vlc
       repos:
@@ -86,9 +86,10 @@ packages:
         - pandoc
         - pass
         - pinentry-mac
+        - sevenzip
         - shfmt
-        - trash
         - vim
+        - yq
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
