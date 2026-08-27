@@ -4,8 +4,7 @@ use std::{env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use assert_cmd::Command;
 
-pub const MINIMAL_CONFIG: &str = "\
-version: 1
+pub const MINIMAL_CONFIG: &str = r#"version: 1
 system:
   macos:
     xcode: {}
@@ -33,7 +32,7 @@ updates:
       homebrew: {}
   tools: {}
   fonts: false
-";
+"#;
 
 pub struct TestEnv {
     temp: tempfile::TempDir,

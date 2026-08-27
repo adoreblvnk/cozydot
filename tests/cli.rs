@@ -70,12 +70,25 @@ fn dotfiles_refuse_conflicts_without_replace_flag() {
     let env = TestEnv::new();
 
     // --version satisfies the CLI check, --simulate reports a conflict, installs succeed
-    env.mock("stow", "#!/bin/sh\ncase \"$*\" in *--simulate*) exit 2 ;; esac\nexit 0\n");
+    env.mock(
+        "stow",
+        r#"#!/bin/sh
+case "$*" in
+  *--simulate*) exit 2 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
 
     // bash applies on both platforms so the suite covers macOS runners too
-    env.write_config(
-        &MINIMAL_CONFIG.replace("linux: []\n    macos: []", "linux:\n      - bash\n    macos:\n      - bash"),
-    );
+    env.write_config(&MINIMAL_CONFIG.replace(
+        r#"    linux: []
+    macos: []"#,
+        r#"    linux:
+      - bash
+    macos:
+      - bash"#,
+    ));
     fs::create_dir_all(env.root().join("cozydot/dotfiles/bash")).unwrap();
     fs::write(env.root().join("cozydot/dotfiles/bash/.bashrc"), "cozydot bashrc\n").unwrap();
     fs::write(env.home().join(".bashrc"), "user bashrc\n").unwrap();
@@ -99,9 +112,17 @@ fn apply_aborts_prior_to_mutation_on_invalid_config() {
 
     // record any mutation attempt so the test can prove nothing ran
     let mutations = env.root().join("mutations");
-    env.mock("sudo", &format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\n", mutations.display()));
+    env.mock(
+        "sudo",
+        &format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> {}
+"#,
+            mutations.display()
+        ),
+    );
 
-    env.write_config(&format!("{MINIMAL_CONFIG}\nbogus_field: true\n"));
+    env.write_config(&format!("{MINIMAL_CONFIG}bogus_field: true\n"));
 
     env.cozydot().arg("apply").assert().failure().stderr(predicate::str::contains("bogus_field"));
 
@@ -116,9 +137,22 @@ fn apply_respects_platform_target_boundaries() {
 
     let brew_calls = env.root().join("brew-called");
     env.mock("sudo", "#!/bin/sh\nexit 0\n");
-    env.mock("brew", &format!("#!/bin/sh\ntouch {}\nexit 1\n", brew_calls.display()));
+    env.mock(
+        "brew",
+        &format!(
+            r#"#!/bin/sh
+touch {}
+exit 1
+"#,
+            brew_calls.display()
+        ),
+    );
 
-    let config = MINIMAL_CONFIG.replace("formulae: []", "formulae:\n        - should-never-be-installed-on-linux");
+    let config = MINIMAL_CONFIG.replace(
+        "formulae: []",
+        r#"formulae:
+        - should-never-be-installed-on-linux"#,
+    );
     env.write_config(&config);
 
     env.cozydot().arg("apply").assert().success();
@@ -133,20 +167,66 @@ fn apply_enforces_strict_dependency_ordering() {
     let env = TestEnv::new();
     let log = env.root().join("calls.log");
 
-    env.mock("sudo", &format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\n", log.display()));
+    env.mock(
+        "sudo",
+        &format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> {}
+"#,
+            log.display()
+        ),
+    );
     env.mock(
         "curl",
-        "#!/bin/sh\nnext=0\nfor arg do\n  if [ \"$next\" = 1 ]; then printf test-key > \"$arg\"; exit 0; fi\n  [ \"$arg\" = --output ] && next=1\ndone\nexit 1\n",
+        r#"#!/bin/sh
+next=0
+for arg do
+  if [ "$next" = 1 ]; then
+    printf test-key > "$arg"
+    exit 0
+  fi
+  [ "$arg" = --output ] && next=1
+done
+exit 1
+"#,
     );
     // dearmor writes a fake keyring; list-keys must report a public key or validation fails
     env.mock(
         "gpg",
-        "#!/bin/sh\nnext=0\nfor arg do\n  if [ \"$next\" = 1 ]; then printf test-key > \"$arg\"; fi\n  [ \"$arg\" = --output ] && next=1\ndone\ncase \"$*\" in *--list-keys*) printf 'pub:test\\n' ;; esac\nexit 0\n",
+        r#"#!/bin/sh
+next=0
+for arg do
+  if [ "$next" = 1 ]; then
+    printf test-key > "$arg"
+    next=0
+  fi
+  [ "$arg" = --output ] && next=1
+done
+case "$*" in
+  *--list-keys*) printf 'pub:test\n' ;;
+esac
+exit 0
+"#,
     );
 
     let config = MINIMAL_CONFIG.replace(
         "packages:\n  linux: {}",
-        "packages:\n  linux:\n    apt:\n      install:\n        - hello\n      repos:\n        - name: example\n          key_url: https://example.com/key.gpg\n          key_path: /etc/apt/keyrings/example.gpg\n          uris:\n            default: https://example.com/apt\n          suite: stable\n          components:\n            - main\n          packages:\n            - example-package",
+        r#"packages:
+  linux:
+    apt:
+      install:
+        - hello
+      repos:
+        - name: example
+          key_url: https://example.com/key.gpg
+          key_path: /etc/apt/keyrings/example.gpg
+          uris:
+            default: https://example.com/apt
+          suite: stable
+          components:
+            - main
+          packages:
+            - example-package"#,
     );
     env.write_config(&config);
 
@@ -190,8 +270,25 @@ fn installer_rejects_unsupported_platforms_before_download() {
     let env = TestEnv::new();
 
     let downloads = env.root().join("downloaded");
-    env.mock("uname", "#!/bin/sh\ncase \"$1\" in -s) echo FreeBSD ;; -m) echo amd64 ;; esac\n");
-    env.mock("curl", &format!("#!/bin/sh\ntouch {}\nexit 0\n", downloads.display()));
+    env.mock(
+        "uname",
+        r#"#!/bin/sh
+case "$1" in
+  -s) echo FreeBSD ;;
+  -m) echo amd64 ;;
+esac
+"#,
+    );
+    env.mock(
+        "curl",
+        &format!(
+            r#"#!/bin/sh
+touch {}
+exit 0
+"#,
+            downloads.display()
+        ),
+    );
 
     let output = StdCommand::new("bash")
         .arg(env!("CARGO_MANIFEST_DIR").to_owned() + "/install.sh")
@@ -216,11 +313,29 @@ fn installer_checksum_failure_preserves_existing_binary() {
     fs::create_dir_all(installed.parent().unwrap()).unwrap();
     fs::write(&installed, "existing binary\n").unwrap();
 
-    env.mock("uname", "#!/bin/sh\ncase \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n");
+    env.mock(
+        "uname",
+        r#"#!/bin/sh
+case "$1" in
+  -s) echo Linux ;;
+  -m) echo x86_64 ;;
+esac
+"#,
+    );
     // serve fake archive & checksum bytes to whichever -o destination the installer picks
     env.mock(
         "curl",
-        "#!/bin/sh\nnext=0\nfor arg do\n  if [ \"$next\" = 1 ]; then printf fake-archive > \"$arg\"; exit 0; fi\n  [ \"$arg\" = -o ] && next=1\ndone\nexit 1\n",
+        r#"#!/bin/sh
+next=0
+for arg do
+  if [ "$next" = 1 ]; then
+    printf fake-archive > "$arg"
+    exit 0
+  fi
+  [ "$arg" = -o ] && next=1
+done
+exit 1
+"#,
     );
     env.mock("sha256sum", "#!/bin/sh\nexit 1\n");
 
