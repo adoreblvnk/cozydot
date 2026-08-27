@@ -108,6 +108,23 @@ On Linux, `cozydot update` always ensures the base prerequisite packages before 
 
 Direct APT packages are ensured before third-party repositories. Cozydot publishes every repository applicable to the detected distribution and optional APT-native `arch` list, runs `apt-get update` once, purges all installed repository conflicts, then ensures all repository packages without upgrading installed versions. An omitted `arch` supports every Cozydot Linux architecture; supported values are `amd64` and `arm64`.
 
+### Local environment secrets
+
+Cozydot agents (such as Exa-Search or Context7) resolve their API keys via your local bash profile environment variables. You must create an `.env` file to store these locally:
+
+```bash
+mkdir -p ~/.config/cozydot
+touch ~/.config/cozydot/.env
+```
+
+Add your secrets to this file:
+
+```env
+# ~/.config/cozydot/.env
+EXA_API_KEY=your_exa_key_here
+CONTEXT7_API_KEY=your_context7_key_here
+```
+
 ### Safety model
 
 - `check`, `apply`, `dotfiles`, and `update` validate the complete active configuration against the detected platform. Explicit Linux and macOS workflows then execute host operations sequentially in dependency order and stop on the first failure.
