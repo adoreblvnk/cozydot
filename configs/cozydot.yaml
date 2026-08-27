@@ -200,14 +200,16 @@ packages:
       casks:
         - bitwarden
         - discord
-        - docker
         - drawio
         - git-credential-manager
         - helium-browser
         - obs
         - obsidian
+        - orbstack
         - qbittorrent
+        - qlmarkdown
         - shotcut
+        - syntax-highlight
         - telegram
         - visual-studio-code
         - wezterm
@@ -236,7 +238,6 @@ tools:
     - "@slidev/cli"
     - lighthouse
     - opencode-ai
-    - repomix
     - skills
 fonts:
   nerd:
