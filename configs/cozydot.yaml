@@ -236,7 +236,6 @@ tools:
     - "@slidev/cli"
     - lighthouse
     - opencode-ai
-    - repomix
     - skills
 fonts:
   nerd:
