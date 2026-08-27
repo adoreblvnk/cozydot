@@ -30,6 +30,7 @@ packages:
         - shfmt
         - trash-cli
         - vim
+        - vlc
       repos:
         - name: docker
           key_url: https://download.docker.com/linux/ubuntu/gpg
@@ -77,6 +78,19 @@ packages:
             - arm64
           packages:
             - helium-bin
+        - name: onlyoffice
+          key_url: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
+          key_path: /usr/share/keyrings/onlyoffice.gpg
+          uris:
+            default: https://download.onlyoffice.com/repo/debian
+          suite: squeeze
+          components:
+            - main
+          arch:
+            - amd64
+            - arm64
+          packages:
+            - onlyoffice-desktopeditors
         - name: virtualbox
           key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
