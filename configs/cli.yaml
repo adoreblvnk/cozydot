@@ -59,8 +59,8 @@ packages:
     homebrew:
       formulae:
         - cmake
-        - ffmpeg
         - fastfetch
+        - ffmpeg
         - fzf
         - gh
         - git
@@ -73,6 +73,8 @@ packages:
         - shfmt
         - trash
         - vim
+        - zsh-autosuggestions
+        - zsh-syntax-highlighting
       casks:
         - git-credential-manager
 tools:
@@ -87,6 +89,7 @@ tools:
     - eza
     - fd-find
     - presenterm
+    - ripgrep
     - starship
     - tealdeer
     - yazi-fm

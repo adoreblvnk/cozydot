@@ -30,7 +30,6 @@ packages:
         - shfmt
         - trash-cli
         - vim
-        - vlc
       repos:
         - name: docker
           key_url: https://download.docker.com/linux/ubuntu/gpg
@@ -78,19 +77,6 @@ packages:
             - arm64
           packages:
             - helium-bin
-        - name: onlyoffice
-          key_url: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-          key_path: /usr/share/keyrings/onlyoffice.gpg
-          uris:
-            default: https://download.onlyoffice.com/repo/debian
-          suite: squeeze
-          components:
-            - main
-          arch:
-            - amd64
-            - arm64
-          packages:
-            - onlyoffice-desktopeditors
         - name: virtualbox
           key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
@@ -179,8 +165,8 @@ packages:
     homebrew:
       formulae:
         - cmake
-        - ffmpeg
         - fastfetch
+        - ffmpeg
         - fzf
         - gh
         - git
@@ -193,6 +179,8 @@ packages:
         - shfmt
         - trash
         - vim
+        - zsh-autosuggestions
+        - zsh-syntax-highlighting
       casks:
         - bitwarden
         - discord
@@ -202,12 +190,10 @@ packages:
         - helium-browser
         - obs
         - obsidian
-        - onlyoffice
         - qbittorrent
         - shotcut
         - telegram
         - visual-studio-code
-        - vlc
         - wezterm
         - zen
 tools:
@@ -222,6 +208,7 @@ tools:
     - eza
     - fd-find
     - presenterm
+    - ripgrep
     - starship
     - tealdeer
     - yazi-fm
@@ -244,12 +231,13 @@ dotfiles:
       - gnupg
       - opencode
       - starship
-      - vscode
       - wezterm
       - yazi
     linux:
       - bash
+      - vscode-linux
     macos:
+      - vscode-macos
       - zsh
 integrations:
   skills:
@@ -269,7 +257,6 @@ integrations:
       - charliermarsh.ruff
       - christian-kohler.path-intellisense
       - eamodio.gitlens
-      - ecmel.vscode-html-css
       - esbenp.prettier-vscode
       - golang.go
       - llvm-vs-code-extensions.vscode-clangd

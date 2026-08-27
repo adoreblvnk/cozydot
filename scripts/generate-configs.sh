@@ -54,7 +54,9 @@ generate_cli() {
     .packages.linux.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .dotfiles.packages.all -= ["opencode", "vscode", "wezterm"] |
+    .dotfiles.packages.all -= ["opencode", "wezterm"] |
+    .dotfiles.packages.linux -= ["vscode-linux"] |
+    .dotfiles.packages.macos -= ["vscode-macos"] |
     .packages.macos.homebrew.casks = ["git-credential-manager"]
   ' "$BASE"
 }
@@ -71,6 +73,7 @@ generate_vm() {
     )) |
     .tools.node = "latest" |
     .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
+    .dotfiles.packages.macos -= ["vscode-macos"] |
     .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
     .packages.macos.homebrew.casks = [
       "bitwarden",
