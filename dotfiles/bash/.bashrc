@@ -64,41 +64,44 @@ alias c=clear
 alias pip="python -m pip"
 
 if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
+if ! command -v trash &>/dev/null && command -v gio &>/dev/null; then alias trash="gio trash"; fi
 
 # eza aliases
 if command -v eza &>/dev/null; then
   alias ls="eza --group-directories-first --icons=auto"
   alias la="eza --group-directories-first --icons=auto -a"
-  alias ll="eza --group-directories-first --icons=auto -al"
+  alias ll="eza --group-directories-first --icons=auto --git -al"
   alias tree="eza --group-directories-first --icons=auto -T"
 fi
 
-# Functions
+# Integrations
+# tells wezterm the current cwd (for tabs) & command status
+# uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
+# source: https://github.com/wezterm/wezterm/blob/main/assets/shell-integration/wezterm.sh
+if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
+
+if command -v bat &>/dev/null; then export MANPAGER="bat -plman"; fi
+
+# Set up fzf key bindings and fuzzy completion
+if command -v fzf &>/dev/null; then eval "$(fzf --bash)"; fi
+
 if command -v yazi &>/dev/null; then
   # https://yazi-rs.github.io/docs/quick-start#shell-wrapper
   function y() {
-    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-    yazi "$@" --cwd-file="$tmp"
-    IFS= read -r -d '' cwd < "$tmp"
-    [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
-    rm -f -- "$tmp"
+  	local tmp cwd; tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+  	command yazi "$@" --cwd-file="$tmp"
+  	IFS= read -r -d '' cwd < "$tmp"
+  	[ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd" || builtin true
+  	command rm -f -- "$tmp"
   }
 fi
-
-# Prompt
-if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
-
-# Shell Integrations
-# tells wezterm the current cwd (for tabs) & command status
-# uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
-if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
 
 # https://github.com/ajeetdsouza/zoxide?tab=readme-ov-file#installation
 if command -v zoxide &>/dev/null; then eval "$(zoxide init bash)"; fi
 
+# Prompt
+if command -v starship >/dev/null; then eval "$(starship init bash)"; fi
+
 # Startup
 # display system info
 if command -v fastfetch &>/dev/null; then fastfetch; fi
-
-export NVM_DIR="$HOME/.nvm"
-source "$NVM_DIR/nvm.sh"

@@ -13,20 +13,19 @@ packages:
   linux:
     apt:
       install:
+        - 7zip
         - bash-completion
         - build-essential
         - cmake
         - default-jdk
-        - figlet
         - fzf
         - git
-        - lolcat
+        - jq
         - openssh-server
         - pandoc
         - pass
         - pinentry-tty
-        - trash-cli
-        - ttf-mscorefonts-installer
+        - shfmt
         - vim
       repos:
         - name: github-cli
@@ -60,20 +59,23 @@ packages:
     homebrew:
       formulae:
         - cmake
-        - ffmpeg
         - fastfetch
-        - figlet
+        - ffmpeg
         - fzf
         - gh
         - git
         - imagemagick
-        - lolcat
+        - jq
         - openjdk
         - pandoc
         - pass
         - pinentry-mac
-        - trash
+        - sevenzip
+        - shfmt
         - vim
+        - yq
+        - zsh-autosuggestions
+        - zsh-syntax-highlighting
       casks:
         - git-credential-manager
 tools:
@@ -88,8 +90,11 @@ tools:
     - eza
     - fd-find
     - presenterm
+    - resvg
+    - ripgrep
     - starship
     - tealdeer
+    - tokei
     - yazi-fm
     - zoxide
   npm:
@@ -113,6 +118,21 @@ dotfiles:
     macos:
       - zsh
 integrations:
+  skills:
+    - addyosmani/web-quality-skills@accessibility
+    - addyosmani/web-quality-skills@web-quality-audit
+    - anthropics/skills@pdf
+    - astral-sh/claude-code-plugins@uv
+    - exa-labs/agent-skills@exa-search
+    - jeffallan/claude-skills@prompt-engineer
+    - mattpocock/skills@writing-for-agents
+    - microsoft/playwright-cli@playwright-cli
+    - multica-ai/andrej-karpathy-skills@karpathy-guidelines
+    - pbakaus/impeccable@impeccable
+    - slidevjs/slidev@slidev
+    - vercel-labs/agent-skills@web-design-guidelines
+    - vercel-labs/skills@find-skills
+    - yamadashy/repomix@repomix-explorer
   vscode:
     extensions: []
   linux: {}

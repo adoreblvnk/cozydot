@@ -14,22 +14,21 @@ packages:
   linux:
     apt:
       install:
+        - 7zip
         - bash-completion
         - build-essential
         - cmake
         - default-jdk
         - ffmpeg
-        - figlet
         - fzf
         - git
         - imagemagick
-        - lolcat
+        - jq
         - openssh-server
         - pandoc
         - pass
         - pinentry-tty
-        - trash-cli
-        - ttf-mscorefonts-installer
+        - shfmt
         - vim
         - vlc
       repos:
@@ -47,6 +46,7 @@ packages:
             - docker-compose
             - docker-compose-v2
             - docker-doc
+            - docker-buildx
             - podman-docker
             - containerd
             - runc
@@ -180,37 +180,36 @@ packages:
     homebrew:
       formulae:
         - cmake
-        - ffmpeg
         - fastfetch
-        - figlet
+        - ffmpeg
         - fzf
         - gh
         - git
         - imagemagick
-        - lolcat
+        - jq
         - openjdk
         - pandoc
         - pass
         - pinentry-mac
-        - trash
+        - sevenzip
+        - shfmt
         - vim
+        - yq
+        - zsh-autosuggestions
+        - zsh-syntax-highlighting
       casks:
         - bitwarden
         - discord
         - docker
         - drawio
-        - gimp
         - git-credential-manager
         - helium-browser
         - obs
         - obsidian
-        - onlyoffice
         - qbittorrent
         - shotcut
         - telegram
-        - virtualbox
         - visual-studio-code
-        - vlc
         - wezterm
         - zen
 tools:
@@ -225,13 +224,19 @@ tools:
     - eza
     - fd-find
     - presenterm
+    - resvg
+    - ripgrep
     - starship
     - tealdeer
+    - tokei
     - yazi-fm
     - zoxide
   npm:
     - "@playwright/cli"
+    - "@slidev/cli"
+    - lighthouse
     - opencode-ai
+    - repomix
     - skills
 fonts:
   nerd:
@@ -247,33 +252,47 @@ dotfiles:
       - gnupg
       - opencode
       - starship
-      - vscode
       - wezterm
       - yazi
     linux:
       - bash
+      - vscode-linux
     macos:
+      - vscode-macos
       - zsh
 integrations:
+  skills:
+    - addyosmani/web-quality-skills@accessibility
+    - addyosmani/web-quality-skills@web-quality-audit
+    - anthropics/skills@pdf
+    - astral-sh/claude-code-plugins@uv
+    - exa-labs/agent-skills@exa-search
+    - jeffallan/claude-skills@prompt-engineer
+    - mattpocock/skills@writing-for-agents
+    - microsoft/playwright-cli@playwright-cli
+    - multica-ai/andrej-karpathy-skills@karpathy-guidelines
+    - pbakaus/impeccable@impeccable
+    - slidevjs/slidev@slidev
+    - vercel-labs/agent-skills@web-design-guidelines
+    - vercel-labs/skills@find-skills
+    - yamadashy/repomix@repomix-explorer
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc
       - charliermarsh.ruff
       - christian-kohler.path-intellisense
       - eamodio.gitlens
-      - ecmel.vscode-html-css
-      - foxundermoon.shell-format
+      - esbenp.prettier-vscode
       - golang.go
       - llvm-vs-code-extensions.vscode-clangd
+      - mathematic.vscode-pdf
       - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
-      - prettier.prettier-vscode
       - redhat.vscode-yaml
       - rust-lang.rust-analyzer
       - streetsidesoftware.code-spell-checker
       - timonwong.shellcheck
-      - wayou.vscode-todo-highlight
       - yzhang.markdown-all-in-one
   linux:
     docker:

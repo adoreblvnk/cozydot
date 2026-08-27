@@ -2,14 +2,14 @@
 
 use crate::{
     config::{
-        AptArch, BinaryFormat, Config, Dotfiles, Enablement, Gnome, LinuxDesktop, LinuxIntegrations, MacosDesktop,
-        Theme, ToolUpdates, Tools, select_distro_uri, select_repo_codename,
+        AptArch, BinaryFormat, Config, Dotfiles, Enablement, Gnome, Integrations, LinuxDesktop, LinuxIntegrations,
+        MacosDesktop, Theme, ToolUpdates, Tools, select_distro_uri, select_repo_codename,
     },
     operations::{
         desktop::{self, fonts, gnome, macos as macos_defaults},
         dotfiles,
         host::{self, macos as macos_host, users},
-        integrations::{docker, vscode},
+        integrations::{docker, skills, vscode},
         packages::{
             apt::{
                 self,
@@ -174,7 +174,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.linux) {
         run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
     }
-    apply_vscode_extensions(&config.integrations.vscode.extensions)?;
+    apply_integrations(&config.integrations)?;
     linux_integrations(&config.integrations.linux)?;
     linux_desktop(theme, desktop_config)?;
     Ok(())
@@ -206,7 +206,7 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
     if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos) {
         run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
     }
-    apply_vscode_extensions(&config.integrations.vscode.extensions)?;
+    apply_integrations(&config.integrations)?;
     if theme.is_some() || desktop_config.is_some_and(MacosDesktop::has_intent) {
         run("Writing", "macOS defaults", || macos_defaults::write_defaults(theme, desktop_config))?;
     }
@@ -335,8 +335,12 @@ fn linux_integrations(integrations: &LinuxIntegrations) -> Result<()> {
     Ok(())
 }
 
-fn apply_vscode_extensions(extensions: &[String]) -> Result<()> {
-    if !extensions.is_empty() {
+fn apply_integrations(integrations: &Integrations) -> Result<()> {
+    if !integrations.skills.is_empty() {
+        run("Installing", "agent skills", || skills::install(&integrations.skills))?;
+    }
+    if !integrations.vscode.extensions.is_empty() {
+        let extensions = &integrations.vscode.extensions;
         run("Installing", "Visual Studio Code extensions", || vscode::install_extensions(extensions))?;
     }
     Ok(())

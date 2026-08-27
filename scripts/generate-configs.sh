@@ -18,6 +18,26 @@ error() { printf 'error: %s\n' "$1" >&2; exit 1; }
 
 cleanup() { [ -z "$TEMP" ] || rm -rf "$TEMP"; }
 
+# install mikefarah/yq when absent; existing installs & CI runners are left alone
+ensure_yq() {
+  if command -v yq >/dev/null 2>&1; then
+    return
+  fi
+  status "Installing yq"
+
+  case "$(uname -m)" in
+    x86_64) YQ_ARCH=amd64 ;;
+    aarch64 | arm64) YQ_ARCH=arm64 ;;
+    *) error "unsupported architecture for yq: $(uname -m)" ;;
+  esac
+
+  curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$YQ_ARCH.tar.gz" -o "$TEMP/yq.tar.gz"
+  mkdir -p "${HOME}/.local/bin"
+  # archive holds ./yq_linux_<arch> beside its man page; extract all & install the binary
+  tar -xzf "$TEMP/yq.tar.gz" -C "$TEMP"
+  install -m 0755 "$TEMP/yq_linux_$YQ_ARCH" "${HOME}/.local/bin/yq"
+}
+
 generate_cli() {
   yq '
     del(
@@ -34,7 +54,9 @@ generate_cli() {
     .packages.linux.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .dotfiles.packages.all -= ["opencode", "vscode", "wezterm"] |
+    .dotfiles.packages.all -= ["opencode", "wezterm"] |
+    .dotfiles.packages.linux -= ["vscode-linux"] |
+    .dotfiles.packages.macos -= ["vscode-macos"] |
     .packages.macos.homebrew.casks = ["git-credential-manager"]
   ' "$BASE"
 }
@@ -51,6 +73,7 @@ generate_vm() {
     )) |
     .tools.node = "latest" |
     .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
+    .dotfiles.packages.macos -= ["vscode-macos"] |
     .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
     .packages.macos.homebrew.casks = [
       "bitwarden",
@@ -73,6 +96,7 @@ main() {
 
   TEMP=$(mktemp -d)
   trap cleanup 0 # remove temp dir on exit
+  ensure_yq
   generate_cli >"$TEMP/cli.yaml"
   generate_vm >"$TEMP/vm.yaml"
 
