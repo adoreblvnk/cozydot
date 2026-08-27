@@ -130,6 +130,7 @@ integrations:
     - multica-ai/andrej-karpathy-skills@karpathy-guidelines
     - pbakaus/impeccable@impeccable
     - slidevjs/slidev@slidev
+    - upstash/context7@find-docs
     - vercel-labs/agent-skills@web-design-guidelines
     - vercel-labs/skills@find-skills
     - yamadashy/repomix@repomix-explorer
