@@ -3,15 +3,10 @@
   "plugin": [],
   "provider": {},
   "mcp": {
-    "a11y-accessibility": {
-      "type": "local",
-      "command": ["npx", "-y", "a11y-mcp-server"],
-      "enabled": false
-    },
     "citra": {
       "type": "local",
       "command": ["npx", "@sylphx/citra"],
-      "enabled": false
+      "enabled": true
     },
     "context7": {
       "type": "remote",
@@ -22,7 +17,7 @@
     "searchcode": {
       "type": "remote",
       "url": "https://api.searchcode.com/v1/mcp",
-      "enabled": false
+      "enabled": true
     }
   }
 }

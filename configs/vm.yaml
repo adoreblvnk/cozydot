@@ -129,8 +129,11 @@ dotfiles:
       - zsh
 integrations:
   skills:
+    - addyosmani/web-quality-skills@accessibility
+    - addyosmani/web-quality-skills@web-quality-audit
     - anthropics/skills@pdf
     - astral-sh/claude-code-plugins@uv
+    - exa-labs/agent-skills@exa-search
     - jeffallan/claude-skills@prompt-engineer
     - mattpocock/skills@writing-for-agents
     - microsoft/playwright-cli@playwright-cli
@@ -139,6 +142,7 @@ integrations:
     - slidevjs/slidev@slidev
     - vercel-labs/agent-skills@web-design-guidelines
     - vercel-labs/skills@find-skills
+    - yamadashy/repomix@repomix-explorer
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc
