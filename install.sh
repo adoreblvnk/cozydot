@@ -28,7 +28,7 @@ error() { printf '%berror:%b %s\n' "$ERROR" "$RESET" "$1" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-Install Cozydot
+Install cozydot
 
 Usage: $PROG [OPTIONS]
 

@@ -62,7 +62,7 @@ impl Init {
         let relative = PathBuf::from(record.path.as_ref());
         let dest = self.root.join(&relative);
         let old_hash = self.managed.get(&relative);
-        // overwrite only when the current file still matches Cozydot's last recorded hash
+        // overwrite only when the current file still matches cozydot's last recorded hash
         let write = match fs::symlink_metadata(&dest) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => true,
             Err(error) => return Err(error.into()),

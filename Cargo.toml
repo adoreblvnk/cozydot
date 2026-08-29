@@ -1,8 +1,8 @@
 [package]
 name = "cozydot"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
-description = "Declarative Linux and macOS post-install, update, and dotfile manager"
+description = "Declarative system setup & dotfile manager for Linux & macOS"
 license = "MIT"
 repository = "https://github.com/adoreblvnk/cozydot"
 publish = false

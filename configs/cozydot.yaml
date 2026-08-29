@@ -168,6 +168,13 @@ packages:
           assets:
             x86_64: ^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$
             aarch64: ^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$
+      - name: recordly
+        format: appimage
+        source:
+          provider: github
+          repo: webadderallorg/Recordly
+          assets:
+            x86_64: ^Recordly-linux-x64\.AppImage$
       - name: zen-browser
         format: appimage
         source:
@@ -214,10 +221,11 @@ packages:
         - visual-studio-code
         - wezterm
         - zen
+        - https://raw.githubusercontent.com/webadderallorg/Recordly/main/recordly.rb
 tools:
   rust: stable
   node: lts
-  python: "3.13"
+  python: "3.14"
   go: latest
   cargo:
     - bat
@@ -234,8 +242,8 @@ tools:
     - yazi-fm
     - zoxide
   npm:
-    - "@playwright/cli"
     - "@slidev/cli"
+    - firecrawl-cli
     - lighthouse
     - opencode-ai
     - skills
@@ -267,7 +275,7 @@ integrations:
     - addyosmani/web-quality-skills@web-quality-audit
     - anthropics/skills@pdf
     - astral-sh/claude-code-plugins@uv
-    - exa-labs/agent-skills@exa-search
+    - firecrawl/cli@firecrawl
     - jeffallan/claude-skills@prompt-engineer
     - mattpocock/skills@writing-for-agents
     - microsoft/playwright-cli@playwright-cli

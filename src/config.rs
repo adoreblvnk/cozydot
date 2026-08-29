@@ -1,4 +1,4 @@
-//! Define & validate Cozydot config.
+//! Define & validate cozydot config.
 
 use crate::platform::{Arch, DesktopKind, Distro, Family, Platform, PlatformIdentity};
 use anyhow::{Context, Result, bail, ensure};

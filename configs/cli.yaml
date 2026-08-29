@@ -81,7 +81,7 @@ packages:
 tools:
   rust: stable
   node: lts
-  python: "3.13"
+  python: "3.14"
   go: latest
   cargo:
     - bat
@@ -123,7 +123,7 @@ integrations:
     - addyosmani/web-quality-skills@web-quality-audit
     - anthropics/skills@pdf
     - astral-sh/claude-code-plugins@uv
-    - exa-labs/agent-skills@exa-search
+    - firecrawl/cli@firecrawl
     - jeffallan/claude-skills@prompt-engineer
     - mattpocock/skills@writing-for-agents
     - microsoft/playwright-cli@playwright-cli
