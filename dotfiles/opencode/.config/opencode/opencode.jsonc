@@ -6,7 +6,7 @@
     "citra": {
       "type": "local",
       "command": ["npx", "@sylphx/citra"],
-      "enabled": true
+      "enabled": false
     },
     "searchcode": {
       "type": "remote",

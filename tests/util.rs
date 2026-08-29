@@ -67,7 +67,7 @@ impl TestEnv {
         self.temp.path().join("state")
     }
 
-    /// Cozydot command isolated from the host: HOME & XDG dirs inside the sandbox
+    /// cozydot command isolated from the host: HOME & XDG dirs inside the sandbox
     pub fn cozydot(&self) -> Command {
         let mut command = Command::cargo_bin("cozydot").unwrap();
         command

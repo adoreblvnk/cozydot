@@ -11,6 +11,11 @@
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 - Study how established products solve the problem before designing a solution. Adopt their proven patterns and conventions rather than inventing an approach from scratch.
 
+## Skills Protocol
+<!-- https://agentskills.io/client-implementation/adding-skills-support#behavioral-instructions -->
+- The skills in `<available_skills` provide specialized instructions for specific tasks.
+- When a task matches a skill's description, call the `skill` / `skill_view` tool with the skill's name to load its full instructions.
+
 ## Project conventions
 
-- When adapting official documentation or an established implementation, preserve its structure and line order where practical. Make the smallest project-required diff, keep local terminology, cite the source, and explain only non-obvious deviations.
+- When adapting official documentation or an established implementation, preserve its structure and line order where practical. Make the smallest project-required diff, keep local terminology, cite the source, and explain non-obvious deviations.

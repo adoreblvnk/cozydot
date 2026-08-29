@@ -15,7 +15,7 @@ mod style;
 mod workflow;
 
 #[derive(Debug, Parser)]
-#[command(name = "cozydot", version, about = "Declarative Linux and macOS post-install, update, and dotfile manager")]
+#[command(name = "cozydot", version, about = "Declarative system setup & dotfile manager for Linux & macOS")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -35,7 +35,7 @@ enum Command {
     Apply,
     /// Apply configured dotfiles.
     Dotfiles {
-        /// Back up conflicts before replacing them with Cozydot links.
+        /// Back up conflicts before replacing them with cozydot links.
         #[arg(short = 'r', long)]
         replace: bool,
     },
@@ -76,7 +76,7 @@ fn main() {
             return Ok(());
         };
         match command {
-            Command::Init { preset } => println!("Initialized Cozydot at {}", init::init(preset)?.display()),
+            Command::Init { preset } => println!("Initialized cozydot at {}", init::init(preset)?.display()),
             Command::Check => {
                 let host = ActiveHost::load()?;
                 println!("Validated {}", host.config_dir.join("cozydot.yaml").display());

@@ -25,7 +25,7 @@ pub fn install() -> Result<()> {
         let path = installer.as_os_str();
         host::curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
         let install_dir = install_dir.as_os_str();
-        // skip installer shell edits because Cozydot owns the profile snippet
+        // skip installer shell edits because cozydot owns the profile snippet
         host::run("fnm install", "bash", [path, "--install-dir".as_ref(), install_dir, "--skip-shell".as_ref()])?;
         ensure!(is_regular_executable(&fnm_path), "fnm installer did not publish executable {}", fnm_path.display());
     }
