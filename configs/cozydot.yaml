@@ -136,14 +136,6 @@ packages:
       - org.shotcut.Shotcut
       - org.telegram.desktop
     binaries:
-      - name: drawio
-        format: deb
-        source:
-          provider: github
-          repo: jgraph/drawio-desktop
-          assets:
-            x86_64: ^drawio-amd64-.*\.deb$
-            aarch64: ^drawio-arm64-.*\.deb$
       - name: fastfetch
         format: deb
         source:
@@ -225,7 +217,7 @@ packages:
 tools:
   rust: stable
   node: lts
-  python: "3.14"
+  python: "3"
   go: latest
   cargo:
     - bat
@@ -340,7 +332,7 @@ desktop:
 updates:
   packages:
     linux:
-      apt: full-upgrade
+      apt: upgrade
       flatpak: true
     macos:
       homebrew:
@@ -353,4 +345,4 @@ updates:
     go: true
     cargo: true
     npm: true
-  fonts: true
+  fonts: false

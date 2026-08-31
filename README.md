@@ -1,4 +1,5 @@
 <div align="center"> <!-- use align as CSS is not allowed on GitHub markdown https://github.com/orgs/community/discussions/22728 -->
+  <img src="assets/logo.png" alt="" width="100" />
   <h1>cozydot</h1> <!-- Project Name -->
   <p> <!-- Description -->
     Declarative system setup & dotfile manager for Linux & macOS
@@ -39,7 +40,7 @@ cozydot is built around 2 core principles:
 ### Why cozydot
 
 - **Sane defaults out of the box:** `cozydot init` provisions ready-to-use presets (`cozydot`, `cli`, `vm`) with terminal tools, Nerd Fonts, themes, & shell configurations.
-- **Idempotent apply:** `cozydot apply` ensures the desired setup without duplication. Can be run repeatedly with no side effects.
+- **Idempotent apply:** `cozydot apply` ensures the desired setup without duplication. Repeated runs have no side effects.
 - **Full lifecycle updates:** `cozydot update` keeps system packages, Flatpaks, Homebrew, language toolchains, & fonts up to date.
 - **Dry-run safety:** `cozydot check` validates active config against host platform constraints before any changes are made.
 

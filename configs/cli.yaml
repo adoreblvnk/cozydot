@@ -5,6 +5,7 @@ system:
   ubuntu:
     unattended_upgrades: disabled
     snapd: disabled
+    restricted_extras: true
   macos:
     validate_sudo_access: true
     xcode:
@@ -18,8 +19,10 @@ packages:
         - build-essential
         - cmake
         - default-jdk
+        - ffmpeg
         - fzf
         - git
+        - imagemagick
         - jq
         - openssh-server
         - pandoc
@@ -38,6 +41,7 @@ packages:
             - main
           packages:
             - gh
+    flatpak: []
     binaries:
       - name: fastfetch
         format: deb
@@ -81,7 +85,7 @@ packages:
 tools:
   rust: stable
   node: lts
-  python: "3.14"
+  python: "3"
   go: latest
   cargo:
     - bat
@@ -98,7 +102,11 @@ tools:
     - yazi-fm
     - zoxide
   npm:
+    - "@slidev/cli"
+    - firecrawl-cli
+    - lighthouse
     - opencode-ai
+    - skills
 fonts:
   nerd:
     - GeistMono
@@ -111,6 +119,7 @@ dotfiles:
       - fastfetch
       - git
       - gnupg
+      - opencode
       - starship
       - yazi
     linux:
@@ -140,7 +149,8 @@ integrations:
 updates:
   packages:
     linux:
-      apt: full-upgrade
+      apt: upgrade
+      flatpak: false
     macos:
       homebrew:
         formulae: true
@@ -152,4 +162,4 @@ updates:
     go: true
     cargo: true
     npm: true
-  fonts: true
+  fonts: false

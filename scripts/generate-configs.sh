@@ -40,47 +40,43 @@ ensure_yq() {
 
 generate_cli() {
   yq '
-    del(
-      .system.ubuntu.restricted_extras,
-      .packages.linux.flatpak,
-      .desktop,
-      .updates.packages.linux.flatpak
-    ) |
-    .integrations.linux = {} |
-    .packages.linux.apt.install -= ["ffmpeg", "imagemagick", "vlc"] |
+    .packages.linux.apt.install -= ["vlc"] |
     .packages.linux.apt.repos |= map(select(.name == "github-cli")) |
-    .tools.npm = ["opencode-ai"] |
-    .integrations.vscode.extensions = [] |
+    .packages.linux.flatpak = [] |
     .packages.linux.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .dotfiles.packages.all -= ["opencode", "wezterm"] |
+    .packages.macos.homebrew.casks = ["git-credential-manager"] |
+    .dotfiles.packages.all -= ["wezterm"] |
     .dotfiles.packages.linux -= ["vscode-linux"] |
     .dotfiles.packages.macos -= ["vscode-macos"] |
-    .packages.macos.homebrew.casks = ["git-credential-manager"]
+    .integrations.vscode.extensions = [] |
+    .integrations.linux = {} |
+    del(.desktop) |
+    .updates.packages.linux.flatpak = false
   ' "$BASE"
 }
 
 generate_vm() {
   yq '
-    .integrations.linux = {} |
     .packages.linux.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
     .packages.linux.flatpak = ["com.bitwarden.desktop"] |
-    .tools.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
-    .tools.npm = ["opencode-ai"] |
     .packages.linux.binaries |= map(select(
       .name == "fastfetch" or .name == "git-credential-manager"
     )) |
-    .tools.node = "latest" |
-    .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
-    .dotfiles.packages.macos -= ["vscode-macos"] |
-    .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
     .packages.macos.homebrew.casks = [
       "bitwarden",
       "git-credential-manager",
       "visual-studio-code",
       "wezterm"
-    ]
+    ] |
+    .tools.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
+    .tools.npm = ["opencode-ai"] |
+    .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
+    .dotfiles.packages.macos -= ["vscode-macos"] |
+    .integrations.skills = [] |
+    .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
+    .integrations.linux = {}
   ' "$BASE"
 }
 

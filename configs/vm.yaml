@@ -99,8 +99,8 @@ packages:
         - wezterm
 tools:
   rust: stable
-  node: latest
-  python: "3.14"
+  node: lts
+  python: "3"
   go: latest
   cargo:
     - bat
@@ -128,22 +128,7 @@ dotfiles:
     macos:
       - zsh
 integrations:
-  skills:
-    - addyosmani/web-quality-skills@accessibility
-    - addyosmani/web-quality-skills@web-quality-audit
-    - anthropics/skills@pdf
-    - astral-sh/claude-code-plugins@uv
-    - firecrawl/cli@firecrawl
-    - jeffallan/claude-skills@prompt-engineer
-    - mattpocock/skills@writing-for-agents
-    - microsoft/playwright-cli@playwright-cli
-    - multica-ai/andrej-karpathy-skills@karpathy-guidelines
-    - pbakaus/impeccable@impeccable
-    - slidevjs/slidev@slidev
-    - upstash/context7@find-docs
-    - vercel-labs/agent-skills@web-design-guidelines
-    - vercel-labs/skills@find-skills
-    - yamadashy/repomix@repomix-explorer
+  skills: []
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc
@@ -176,7 +161,7 @@ desktop:
 updates:
   packages:
     linux:
-      apt: full-upgrade
+      apt: upgrade
       flatpak: true
     macos:
       homebrew:
@@ -189,4 +174,4 @@ updates:
     go: true
     cargo: true
     npm: true
-  fonts: true
+  fonts: false
