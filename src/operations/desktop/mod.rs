@@ -1,8 +1,5 @@
 use anyhow::{Result, bail, ensure};
-use std::{
-    fs::{self, File},
-    io::Write,
-};
+use std::{fs, io::Write};
 
 use super::host::{self, stdout_line};
 use crate::config::Theme;
@@ -44,7 +41,7 @@ fn set_xdg_terminal(executable: &str) -> Result<()> {
     writeln!(temp, "{entry}")?;
     temp.as_file_mut().sync_all()?;
     temp.persist(config_home.join("xdg-terminals.list"))?;
-    File::open(config_home)?.sync_all()?;
+    fs::File::open(config_home)?.sync_all()?;
 
     let output = host::run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
     if stdout_line(&output.stdout, "xdg-terminal-exec --print-id")? != entry.as_str() {

@@ -205,15 +205,13 @@ packages:
         - obs
         - obsidian
         - orbstack
-        - qbittorrent
         - qlmarkdown
         - shotcut
         - syntax-highlight
         - telegram
         - visual-studio-code
-        - wezterm
+        - wezterm@nightly
         - zen
-        - https://raw.githubusercontent.com/webadderallorg/Recordly/main/recordly.rb
 tools:
   rust: stable
   node: lts

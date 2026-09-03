@@ -1,16 +1,11 @@
-use std::{
-    ffi::{OsStr, OsString},
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-    process::{Command, Output},
-};
+use std::{ffi::OsStr, ffi::OsString, fs, os::unix::fs::PermissionsExt, path::Path, process::Command, process::Output};
 
 use anyhow::{Context, Result, bail, ensure};
 
 pub(crate) mod macos;
 pub(crate) mod privileged_file;
 pub(crate) mod shell;
+pub(crate) mod sudo;
 pub(crate) mod systemd;
 pub(crate) mod users;
 
@@ -62,8 +57,8 @@ where
     run(label, "curl", curl_args)
 }
 
-pub(crate) fn home() -> Result<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")
+pub(crate) fn home() -> Result<std::path::PathBuf> {
+    std::env::var_os("HOME").map(std::path::PathBuf::from).context("HOME is not set")
 }
 
 pub(crate) fn has_executable_on_path(name: &str) -> bool {

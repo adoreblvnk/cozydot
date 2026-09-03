@@ -17,7 +17,8 @@ pub(crate) fn install(packages: &[String]) -> Result<()> {
     if missing.is_empty() {
         return Ok(());
     }
-    let mut args = vec!["exec", "--using=default", "--", "npm", "install", "--global", "--"];
+    let mut args = vec!["exec", "--using=default", "--"];
+    args.extend(["npm", "install", "--global", "--dangerously-allow-all-scripts", "--"]);
     args.extend(missing);
     host::run("npm package install", &fnm, args)?;
     Ok(())
@@ -25,6 +26,7 @@ pub(crate) fn install(packages: &[String]) -> Result<()> {
 
 pub(crate) fn update() -> Result<()> {
     let Some(fnm) = fnm::find_executable()? else { return Ok(()) };
-    host::run("npm package update", &fnm, ["exec", "--using=default", "--", "npm", "update", "--global"])?;
+    let args = ["exec", "--using=default", "--", "npm", "update", "--global", "--dangerously-allow-all-scripts"];
+    host::run("npm package update", &fnm, args)?;
     Ok(())
 }

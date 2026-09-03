@@ -1,11 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
-use std::{
-    ffi::OsStr,
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf};
 
 use super::host;
 
@@ -31,7 +25,7 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
     if !replace {
         // simulate first so conflicts fail before Stow mutates the home directory
         let mut check_args = args.clone();
-        check_args.extend([OsStr::new("--simulate"), OsStr::new("--")]);
+        check_args.push(OsStr::new("--simulate"));
         check_args.extend(packages.iter().map(OsStr::new));
         host::run("stow package check", "stow", check_args)?;
     }
@@ -57,7 +51,6 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
         }
         fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
     }
-    args.push(OsStr::new("--"));
     args.extend(packages.iter().map(OsStr::new));
     host::run("stow package install", "stow", args)?;
     Ok(())
@@ -114,8 +107,8 @@ fn backup_conflicts(home: &Path, conflicts: &[(String, PathBuf)]) -> Result<()> 
     }
     let state_home = crate::paths::state_home()?;
     let timestamp_context = "dotfiles backup timestamp is before the Unix epoch";
-    let now = SystemTime::now();
-    let elapsed = now.duration_since(UNIX_EPOCH).context(timestamp_context)?;
+    let now = std::time::SystemTime::now();
+    let elapsed = now.duration_since(std::time::UNIX_EPOCH).context(timestamp_context)?;
     let timestamp = elapsed.as_nanos();
     let backup_root = state_home.join("cozydot/dotfile-backups").join(format!("{timestamp}-{}", std::process::id()));
     for (package, conflict) in conflicts {
