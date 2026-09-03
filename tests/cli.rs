@@ -290,7 +290,7 @@ exit 0
         ),
     );
 
-    let output = StdCommand::new("bash")
+    let output = StdCommand::new("sh")
         .arg(env!("CARGO_MANIFEST_DIR").to_owned() + "/install.sh")
         .args(["-v", "1"])
         .env("PATH", env.mocked_path())
@@ -339,7 +339,7 @@ exit 1
     );
     env.mock("sha256sum", "#!/bin/sh\nexit 1\n");
 
-    let output = StdCommand::new("bash")
+    let output = StdCommand::new("sh")
         .arg(env!("CARGO_MANIFEST_DIR").to_owned() + "/install.sh")
         .args(["-v", "1"])
         .env("PATH", env.mocked_path())

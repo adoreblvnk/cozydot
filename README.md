@@ -19,7 +19,6 @@
   - [Supported platforms](#supported-platforms)
 - [Demo](#demo)
 - [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
   - [Installation](#installation)
   - [Execution](#execution)
   - [Uninstall](#uninstall)
@@ -53,16 +52,12 @@ cozydot is built around 2 core principles:
 
 ## Getting Started
 
-### Prerequisites
-
-- Standard utilities: `curl`, `bash`
-
 ### Installation
 
 Install the latest pre-compiled binary:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh | bash
+```sh
+curl -fsSL https://raw.githubusercontent.com/adoreblvnk/cozydot/master/install.sh | sh
 ```
 
 To build & install from source:
@@ -70,7 +65,7 @@ To build & install from source:
 ```bash
 git clone https://github.com/adoreblvnk/cozydot.git
 cd cozydot
-cargo install --path . --locked
+cargo install --path . --root ~/.local --locked
 ```
 
 ### Execution
@@ -79,7 +74,7 @@ cargo install --path . --locked
 # initialize config & bundled dotfiles
 cozydot init
 # edit active config
-$EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/cozydot/cozydot.yaml"
+$EDITOR ~/.config/cozydot/cozydot.yaml
 # optional: validate config for host
 cozydot check
 # apply config to host
@@ -91,8 +86,9 @@ cozydot update
 ### Uninstall
 
 ```bash
-# remove cozydot binary
+# remove cozydot binary & config
 rm ~/.local/bin/cozydot
+rm -rf ~/.config/cozydot
 ```
 
 ## Usage
@@ -107,7 +103,7 @@ rm ~/.local/bin/cozydot
 - `cozydot apply` \
   Applies active config to the host. Installs missing packages, configures toolchains, links dotfiles, installs extensions, & sets desktop preferences. Installed software & unmanaged packages remain untouched.
 - `cozydot dotfiles [-r | --replace]` \
-  Symlinks configured dotfile packages with GNU Stow. Simulates transactions to detect conflicts before making changes. Use `-r` / `--replace` to back up conflicting files to `${XDG_STATE_HOME:-$HOME/.local/state}/cozydot/dotfile-backups` before linking.
+  Symlinks configured dotfile packages with GNU Stow. Simulates transactions to detect conflicts before making changes. Use `-r` / `--replace` to back up conflicting files to `~/.local/state/cozydot/dotfile-backups` before linking.
 - `cozydot update` \
   Executes enabled update policies: APT (`upgrade` / `full-upgrade`), Flatpak, Homebrew formulae & casks, Rustup toolchains, `fnm` Node.js versions, `uv` Python versions, Go toolchains, Cargo crates, global npm packages, & Nerd Fonts.
 

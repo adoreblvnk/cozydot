@@ -22,15 +22,16 @@ end
 
 -- Window
 -- https://wezterm.org/config/appearance.html
-config.initial_cols = 176 -- default 80
-config.initial_rows = 44 -- default 24
+config.initial_cols = 192 -- default 80
+config.initial_rows = 48 -- default 24
 config.window_padding = { left = 8, right = 8, top = 8, bottom = 8 } -- default 0
 config.window_background_opacity = 0.80 -- default 1.0
 config.window_decorations = "RESIZE" -- default "TITLE | RESIZE"
 config.adjust_window_size_when_changing_font_size = false -- default true
 
 -- Appearance
-local font = 'AtkynsonMono'
+config.font_size = 16.0
+local font = 'GeistMono'
 local font_patterns = {
   wezterm.home_dir .. '/Library/Fonts/*' .. font .. '*.*',
   '/Library/Fonts/*' .. font .. '*.*',

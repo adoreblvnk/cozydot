@@ -8,16 +8,9 @@ use crate::{
     operations::{
         desktop::{self, fonts, gnome, macos as macos_defaults},
         dotfiles,
-        host::{self, macos as macos_host, users},
+        host::{self, macos as macos_host, sudo, users},
         integrations::{docker, skills, vscode},
-        packages::{
-            apt::{
-                self,
-                repo::{self, AptRepo},
-            },
-            binary::{self, appimaged},
-            cargo, flatpak, homebrew, npm, snapd,
-        },
+        packages::{apt, binary, cargo, flatpak, homebrew, npm, snapd},
         toolchains::{fnm, go, rustup, uv},
     },
     platform::{Arch, Distro, Platform, PlatformIdentity},
@@ -58,6 +51,7 @@ pub fn update(config: &Config, platform: &Platform) -> Result<()> {
 }
 
 fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
+    run("Validating", "Linux sudo access", sudo::validate_access)?;
     let PlatformIdentity::Linux { distro, .. } = platform.identity else { unreachable!() };
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref());
@@ -81,7 +75,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             } else {
                 repo.suite.clone()
             };
-            let apt_repo = AptRepo::new(
+            let apt_repo = apt::repo::AptRepo::new(
                 repo.name.clone(),
                 repo.key_url.clone(),
                 source_uri.to_owned(),
@@ -120,7 +114,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         if config.system.debian.as_ref().is_some_and(|debian| debian.sudo_group) {
             run("Configuring", "sudo group membership", users::ensure_in_sudo_group)?;
         }
-        run("Enabling", "Debian APT components", repo::debian_components::add)?;
+        run("Enabling", "Debian APT components", apt::repo::debian_components::add)?;
     }
     if let (Distro::Ubuntu, Some(ubuntu)) = (distro, &config.system.ubuntu) {
         if let Some(state) = ubuntu.unattended_upgrades {
@@ -141,7 +135,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     // add repositories before changing packages supplied by them
     if !repos.is_empty() {
         for (name, apt_repo) in repos {
-            run("Adding", &format!("{name} APT repository"), || repo::add(&apt_repo))?;
+            run("Adding", &format!("{name} APT repository"), || apt::repo::add(&apt_repo))?;
         }
         run("Updating", "APT package metadata", apt::update)?;
     }
@@ -161,7 +155,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
-        run("Installing", "appimaged", || appimaged::install(platform.arch))?;
+        run("Installing", "appimaged", || binary::appimaged::install(platform.arch))?;
         for (package, source) in appimages {
             let subject = format!("{} binary package", package.name);
             run("Installing", &subject, || binary::install(package, platform.arch, source))?;
@@ -181,6 +175,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 }
 
 fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> {
+    run("Validating", "macOS sudo access", sudo::validate_access)?;
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
     let homebrew = &config.packages.macos.homebrew;
@@ -190,9 +185,6 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
         formulae.push("stow".into());
     }
 
-    if config.system.macos.validate_sudo_access {
-        run("Validating", "macOS sudo access", macos_host::validate_sudo_access)?;
-    }
     if config.system.macos.xcode.command_line_tools {
         run("Installing", "Command Line Tools for Xcode", macos_host::install_command_line_tools)?;
     }
@@ -240,6 +232,7 @@ fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
 }
 
 fn linux_update(config: &Config, arch: Arch) -> Result<()> {
+    run("Validating", "Linux sudo access", sudo::validate_access)?;
     let updates = &config.updates.packages.linux;
     let flatpak = updates.flatpak;
     let mut apt_prereqs = APT_PREREQS.into_iter().map(str::to_owned).collect::<Vec<_>>();
@@ -264,6 +257,7 @@ fn linux_update(config: &Config, arch: Arch) -> Result<()> {
 }
 
 fn macos_update(config: &Config, arch: Arch) -> Result<()> {
+    run("Validating", "macOS sudo access", sudo::validate_access)?;
     let homebrew = &config.updates.packages.macos.homebrew;
     let formulae = homebrew.formulae;
     let casks = homebrew.casks;

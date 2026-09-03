@@ -21,18 +21,38 @@ pub(crate) fn install_packages(formulae: &[String], casks: &[String]) -> Result<
     let brew = find_executable()?.context(HOMEBREW_UNAVAILABLE)?;
     let install_args = ["HOMEBREW_NO_INSTALL_UPGRADE=1", brew.as_str(), "install"];
     // keep upgrades in the explicit update workflow
-    if !formulae.is_empty() {
+    let missing_formulae = missing_packages(&brew, "--formula", formulae)?;
+    if !missing_formulae.is_empty() {
         let mut args = install_args.to_vec();
-        args.extend(formulae.iter().map(String::as_str));
+        args.extend(missing_formulae);
         host::run("Homebrew formula install", "/usr/bin/env", args)?;
     }
-    if !casks.is_empty() {
+    let missing_casks = missing_packages(&brew, "--cask", casks)?;
+    if !missing_casks.is_empty() {
         let mut args = install_args.to_vec();
         args.push("--cask");
-        args.extend(casks.iter().map(String::as_str));
+        args.push("--adopt");
+        args.extend(missing_casks);
         host::run("Homebrew cask install", "/usr/bin/env", args)?;
     }
     Ok(())
+}
+
+fn missing_packages<'a>(brew: &str, flag: &str, packages: &'a [String]) -> Result<Vec<&'a str>> {
+    if packages.is_empty() {
+        return Ok(Vec::new());
+    }
+    let output = host::run("Homebrew installed package query", brew, ["list", flag])?;
+    let stdout = std::str::from_utf8(&output.stdout).context("Homebrew list returned non-UTF-8 output")?;
+    let installed: Vec<&str> = stdout.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let mut missing = Vec::new();
+    for package in packages {
+        let name = package.as_str();
+        if !installed.iter().any(|inst| *inst == name || name.ends_with(&format!("/{inst}"))) {
+            missing.push(name);
+        }
+    }
+    Ok(missing)
 }
 
 pub(crate) fn executable_path(formula: &str, executable: &str) -> Result<String> {
