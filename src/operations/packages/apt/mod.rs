@@ -35,6 +35,24 @@ pub(crate) fn set_unattended_upgrades(enabled: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn any_missing(packages: &[String]) -> Result<bool> {
+    for package in packages {
+        if !is_installed(package)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn any_installed(packages: &[String]) -> Result<bool> {
+    for package in packages {
+        if is_installed(package)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub fn install(packages: &[String]) -> Result<()> {
     // + explicitly selects installation when apt-get resolves mixed package actions
     let packages = packages.iter().map(|package| format!("{package}+"));

@@ -123,13 +123,17 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         if let Some(state) = ubuntu.snapd {
             run("Configuring", "snapd", || snapd::set_enabled(state == Enablement::Enabled))?;
         }
-        if ubuntu.restricted_extras {
+        if ubuntu.restricted_extras && apt::any_missing(&["ubuntu-restricted-extras".into()])? {
             run("Installing", "ubuntu-restricted-extras", || apt::install(&["ubuntu-restricted-extras".into()]))?;
         }
     }
-    run("Updating", "APT package metadata", apt::update)?;
-    run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
-    if let Some(apt) = config.packages.linux.apt.as_ref().filter(|apt| !apt.install.is_empty()) {
+    if apt::any_missing(&apt_prereqs)? {
+        run("Updating", "APT package metadata", apt::update)?;
+        run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
+    }
+    if let Some(apt) = &config.packages.linux.apt
+        && apt::any_missing(&apt.install)?
+    {
         run("Installing", "configured APT packages", || apt::install(&apt.install))?;
     }
     // add repositories before changing packages supplied by them
@@ -139,10 +143,10 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         }
         run("Updating", "APT package metadata", apt::update)?;
     }
-    if !repo_conflicts.is_empty() {
+    if apt::any_installed(&repo_conflicts)? {
         run("Removing", "conflicting APT packages", || apt::purge(&repo_conflicts))?;
     }
-    if !repo_packages.is_empty() {
+    if apt::any_missing(&repo_packages)? {
         run("Installing", "APT repository packages", || apt::install(&repo_packages))?;
     }
     if let Some(refs) = flatpak_refs {
@@ -150,19 +154,23 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         run("Installing", "Flatpak apps", || flatpak::install(refs))?;
     }
     for (package, source) in deb_binaries {
-        let subject = format!("{} binary package", package.name);
-        run("Installing", &subject, || binary::install(package, platform.arch, source))?;
+        if !binary::is_installed(package)? {
+            let subject = format!("{} binary package", package.name);
+            run("Installing", &subject, || binary::install(package, platform.arch, source))?;
+        }
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
         run("Installing", "appimaged", || binary::appimaged::install(platform.arch))?;
         for (package, source) in appimages {
-            let subject = format!("{} binary package", package.name);
-            run("Installing", &subject, || binary::install(package, platform.arch, source))?;
+            if !binary::is_installed(package)? {
+                let subject = format!("{} binary package", package.name);
+                run("Installing", &subject, || binary::install(package, platform.arch, source))?;
+            }
         }
     }
     apply_tools(&config.tools, platform.arch)?;
-    if !config.fonts.nerd.is_empty() {
+    if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
     if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.linux) {
@@ -175,7 +183,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 }
 
 fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> {
-    run("Validating", "macOS sudo access", sudo::validate_access)?;
+    if config.system.macos.validate_sudo_access {
+        run("Validating", "macOS sudo access", sudo::validate_access)?;
+    }
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
     let homebrew = &config.packages.macos.homebrew;
@@ -185,14 +195,18 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
         formulae.push("stow".into());
     }
 
-    if config.system.macos.xcode.command_line_tools {
-        run("Installing", "Command Line Tools for Xcode", macos_host::install_command_line_tools)?;
+    if config.system.macos.xcode.command_line_tools && !macos_host::is_cli_tools_installed() {
+        run("Installing", "Command Line Tools for Xcode", macos_host::install_cli_tools)?;
     }
     // install Homebrew and Stow before applying package-backed user configuration
-    run("Installing", "Homebrew", homebrew::install)?;
-    run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &homebrew.casks))?;
+    if !homebrew::is_installed()? {
+        run("Installing", "Homebrew", homebrew::install)?;
+    }
+    if homebrew::any_missing(&formulae, &homebrew.casks)? {
+        run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &homebrew.casks))?;
+    }
     apply_tools(&config.tools, arch)?;
-    if !config.fonts.nerd.is_empty() {
+    if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
     if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos) {
@@ -207,25 +221,41 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
 
 fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
     if let Some(selector) = tools.rust.as_deref() {
-        run("Installing", "Rust toolchain", || rustup::install(selector))?;
-        run("Installing", "cargo-binstall", cargo::install_binstall)?;
-        run("Installing", "cargo-update", || cargo::install_crates(&["cargo-update".to_owned()]))?;
+        if !rustup::is_installed()? {
+            run("Installing", "Rust toolchain", || rustup::install(selector))?;
+        }
+        if !cargo::is_binstall_installed()? {
+            run("Installing", "cargo-binstall", cargo::install_binstall)?;
+        }
+        if !cargo::is_update_installed()? {
+            run("Installing", "cargo-update", || cargo::install_crates(&["cargo-update".to_owned()]))?;
+        }
     }
     if let Some(selector) = tools.node.as_deref() {
-        run("Installing", "fnm", fnm::install)?;
-        run("Installing", "Node.js", || fnm::install_version(selector))?;
+        if !fnm::is_installed()? {
+            run("Installing", "fnm", fnm::install)?;
+        }
+        if !fnm::is_version_installed(selector)? {
+            run("Installing", "Node.js", || fnm::install_version(selector))?;
+        }
     }
     if let Some(selector) = &tools.python {
-        run("Installing", "uv", uv::install)?;
-        run("Installing", "Python", || uv::install_py(selector))?;
+        if !uv::is_installed()? {
+            run("Installing", "uv", uv::install)?;
+        }
+        if !uv::is_python_installed(selector)? {
+            run("Installing", "Python", || uv::install_py(selector))?;
+        }
     }
-    if let Some(selector) = tools.go.as_deref() {
+    if let Some(selector) = tools.go.as_deref()
+        && !go::is_installed(selector, arch)?
+    {
         run("Installing", "Go toolchain", || go::install_toolchain(selector, arch))?;
     }
-    if !tools.cargo.is_empty() {
+    if cargo::any_missing(&tools.cargo)? {
         run("Installing", "Cargo crates", || cargo::install_crates(&tools.cargo))?;
     }
-    if !tools.npm.is_empty() {
+    if npm::any_missing(&tools.npm)? {
         run("Installing", "npm packages", || npm::install(&tools.npm))?;
     }
     Ok(())
@@ -245,7 +275,9 @@ fn linux_update(config: &Config, arch: Arch) -> Result<()> {
     if let Some(policy) = updates.apt {
         run("Upgrading", "APT packages", || apt::upgrade(policy))?;
     }
-    run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
+    if apt::any_missing(&apt_prereqs)? {
+        run("Installing", "APT prerequisites", || apt::install(&apt_prereqs))?;
+    }
     if flatpak {
         run("Updating", "Flatpak apps", flatpak::update)?;
     }
@@ -257,17 +289,21 @@ fn linux_update(config: &Config, arch: Arch) -> Result<()> {
 }
 
 fn macos_update(config: &Config, arch: Arch) -> Result<()> {
-    run("Validating", "macOS sudo access", sudo::validate_access)?;
+    if config.system.macos.validate_sudo_access {
+        run("Validating", "macOS sudo access", sudo::validate_access)?;
+    }
     let homebrew = &config.updates.packages.macos.homebrew;
     let formulae = homebrew.formulae;
     let casks = homebrew.casks;
 
-    run("Installing", "Homebrew", homebrew::install)?;
+    if !homebrew::is_installed()? {
+        run("Installing", "Homebrew", homebrew::install)?;
+    }
     if formulae || casks {
         run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(formulae, casks))?;
     }
     // npm-only updates still need fnm to enter the managed default Node environment
-    if config.updates.tools.npm && !config.updates.tools.node {
+    if config.updates.tools.npm && !config.updates.tools.node && !fnm::is_installed()? {
         run("Installing", "fnm", fnm::install)?;
     }
     update_tools(&config.tools, &config.updates.tools, arch)?;
@@ -280,24 +316,33 @@ fn macos_update(config: &Config, arch: Arch) -> Result<()> {
 fn update_tools(tools: &Tools, updates: &ToolUpdates, arch: Arch) -> Result<()> {
     // moving updates use conventional selectors when the config has no installation pin
     if updates.rust {
-        run("Installing", "Rust toolchain", || rustup::install(tools.rust.as_deref().unwrap_or("stable")))?;
-        run("Updating", "Rust toolchains", rustup::update_toolchains)?;
+        if !rustup::is_installed()? {
+            run("Installing", "Rust toolchain", || rustup::install(tools.rust.as_deref().unwrap_or("stable")))?;
+        } else {
+            run("Updating", "Rust toolchains", rustup::update_toolchains)?;
+        }
     }
     if updates.node {
-        run("Installing", "fnm", fnm::install)?;
-        run("Installing", "Node.js", || fnm::install_version(tools.node.as_deref().unwrap_or("latest")))?;
+        if !fnm::is_installed()? {
+            run("Installing", "fnm", fnm::install)?;
+            run("Installing", "Node.js", || fnm::install_version(tools.node.as_deref().unwrap_or("latest")))?;
+        } else {
+            run("Updating", "Node.js", || fnm::install_version(tools.node.as_deref().unwrap_or("latest")))?;
+        }
     }
     if updates.python {
-        run("Installing", "uv", uv::install)?;
+        if !uv::is_installed()? {
+            run("Installing", "uv", uv::install)?;
+        }
         run("Upgrading", "Python", uv::upgrade_py)?;
     }
-    if updates.go {
+    if updates.go && !go::is_installed(tools.go.as_deref().unwrap_or("latest"), arch)? {
         run("Updating", "Go toolchain", || go::update_toolchain(tools.go.as_deref().unwrap_or("latest"), arch))?;
     }
-    if updates.cargo {
+    if updates.cargo && cargo::is_update_installed()? {
         run("Updating", "Cargo crates", cargo::update_crates)?;
     }
-    if updates.npm {
+    if updates.npm && fnm::is_installed()? {
         run("Updating", "npm packages", npm::update)?;
     }
     Ok(())
@@ -333,7 +378,7 @@ fn apply_integrations(integrations: &Integrations) -> Result<()> {
     if !integrations.skills.is_empty() {
         run("Installing", "agent skills", || skills::install(&integrations.skills))?;
     }
-    if !integrations.vscode.extensions.is_empty() {
+    if vscode::any_missing(&integrations.vscode.extensions)? {
         let extensions = &integrations.vscode.extensions;
         run("Installing", "Visual Studio Code extensions", || vscode::install_extensions(extensions))?;
     }

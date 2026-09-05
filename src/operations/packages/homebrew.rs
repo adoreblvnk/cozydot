@@ -1,19 +1,33 @@
 use crate::operations::host::{self, temp_path};
 use anyhow::{Context, Result};
-use std::ffi::OsStr;
 
 const HOMEBREW_UNAVAILABLE: &str =
     "Homebrew is unavailable after install; expected brew on PATH or /opt/homebrew/bin/brew";
 
-pub(crate) fn install() -> Result<()> {
-    if find_executable()?.is_some() {
-        return Ok(());
+pub(crate) fn is_installed() -> Result<bool> {
+    Ok(find_executable()?.is_some())
+}
+
+pub(crate) fn any_missing(formulae: &[String], casks: &[String]) -> Result<bool> {
+    if formulae.is_empty() && casks.is_empty() {
+        return Ok(false);
     }
+    let Some(brew) = find_executable()? else { return Ok(true) };
+    let missing_formulae = missing_packages(&brew, "--formula", formulae)?;
+    if !missing_formulae.is_empty() {
+        return Ok(true);
+    }
+    let missing_casks = missing_packages(&brew, "--cask", casks)?;
+    Ok(!missing_casks.is_empty())
+}
+
+pub(crate) fn install() -> Result<()> {
     let script = temp_path("homebrew-install", "")?;
+    let path = script.to_str().context("Homebrew installer path is not UTF-8")?;
+    let args = ["--proto", "=https", "--output", path];
     let url = "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh";
-    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), script.as_os_str()];
     host::curl("Homebrew installer download", url, args)?;
-    host::run("Homebrew install", "/bin/bash", [script.as_os_str()])?;
+    host::run("Homebrew install", "/bin/bash", [path])?;
     Ok(())
 }
 
@@ -58,9 +72,9 @@ fn missing_packages<'a>(brew: &str, flag: &str, packages: &'a [String]) -> Resul
 pub(crate) fn executable_path(formula: &str, executable: &str) -> Result<String> {
     let brew = find_executable()?.context(HOMEBREW_UNAVAILABLE)?;
     let output = host::run("Homebrew formula prefix", &brew, ["--prefix", formula])?;
-    let prefix = std::str::from_utf8(&output.stdout)?.trim();
-    let program = std::path::Path::new(prefix).join("bin").join(executable);
-    program.to_str().map(str::to_owned).context("Homebrew executable path is not UTF-8")
+    let prefix = host::stdout_line(&output.stdout, "Homebrew formula prefix")?;
+    let path = std::path::Path::new(prefix).join("bin").join(executable);
+    host::path_program(&path, "Homebrew executable path")
 }
 
 pub(crate) fn update_and_upgrade(formulae: bool, casks: bool) -> Result<()> {

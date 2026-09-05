@@ -31,24 +31,20 @@ pub(crate) fn select_source(package: &BinaryPackage, arch: Arch) -> Option<Selec
     }
 }
 
+pub(crate) fn is_installed(package: &BinaryPackage) -> Result<bool> {
+    Ok(match package.format {
+        BinaryFormat::Deb => host::has_executable_on_path(&package.name),
+        BinaryFormat::AppImage => host::is_regular_executable(&appimage_path(&host::home()?, package)),
+    })
+}
+
 pub(crate) fn install(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) -> Result<()> {
-    let home = host::home()?;
-    if is_installed(&home, package) {
-        return Ok(());
-    }
     let url = resolve_url(package, arch, source)?;
     match package.format {
         BinaryFormat::Deb => install_deb(package, &url),
         BinaryFormat::AppImage => {
-            appimage::install_appimage("download binary package", &url, &appimage_path(&home, package))
+            appimage::install_appimage("download binary package", &url, &appimage_path(&host::home()?, package))
         }
-    }
-}
-
-fn is_installed(home: &std::path::Path, package: &BinaryPackage) -> bool {
-    match package.format {
-        BinaryFormat::Deb => host::has_executable_on_path(&package.name),
-        BinaryFormat::AppImage => host::is_regular_executable(&appimage_path(home, package)),
     }
 }
 
@@ -84,19 +80,9 @@ fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, arch: Arch
 
 fn install_deb(package: &BinaryPackage, url: &str) -> Result<()> {
     let temp = temp_path(&package.name, ".deb")?;
-    host::curl("download binary package", url, ["--output".as_ref(), temp.as_os_str()])?;
-    host::run(
-        "Deb package install",
-        "sudo",
-        [
-            "DEBIAN_FRONTEND=noninteractive".as_ref(),
-            "apt-get".as_ref(),
-            "install".as_ref(),
-            "-y".as_ref(),
-            "-qq".as_ref(),
-            "--".as_ref(),
-            temp.as_os_str(),
-        ],
-    )?;
+    let temp_path = temp.to_str().context("deb package temp path is not UTF-8")?;
+    host::curl("download binary package", url, ["--output", temp_path])?;
+    let args = ["DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-qq", "--", temp_path];
+    host::run("Deb package install", "sudo", args)?;
     Ok(())
 }

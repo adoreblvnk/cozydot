@@ -12,6 +12,26 @@ if [ -d "$FNM_PATH" ]; then
 fi"#;
 const FNM_ZSH_INIT: &str = r#"eval "$(fnm env --use-on-cd --shell zsh)""#;
 
+pub fn is_installed() -> Result<bool> {
+    Ok(find_executable()?.is_some())
+}
+
+pub(crate) fn is_version_installed(selector: &str) -> Result<bool> {
+    let Some(fnm) = find_executable()? else { return Ok(false) };
+    let output = host::output(&fnm, ["current"])?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let stdout = std::str::from_utf8(&output.stdout).unwrap_or("").trim();
+    if stdout.is_empty() || stdout == "none" {
+        return Ok(false);
+    }
+    if selector == "lts" || selector == "latest" {
+        return Ok(true);
+    }
+    Ok(stdout == selector || stdout.trim_start_matches('v') == selector)
+}
+
 pub fn install() -> Result<()> {
     if cfg!(target_os = "macos") {
         homebrew::install_packages(&["fnm".to_owned()], &[])?;
@@ -20,15 +40,13 @@ pub fn install() -> Result<()> {
 
     let install_dir = host::home()?.join(".local/share/fnm");
     let fnm_path = install_dir.join("fnm");
-    if !is_regular_executable(&fnm_path) {
-        let installer = temp_path("fnm-install", "")?;
-        let path = installer.as_os_str();
-        host::curl("fnm installer download", "https://fnm.vercel.app/install", ["--output".as_ref(), path])?;
-        let install_dir = install_dir.as_os_str();
-        // skip installer shell edits because cozydot owns the profile snippet
-        host::run("fnm install", "bash", [path, "--install-dir".as_ref(), install_dir, "--skip-shell".as_ref()])?;
-        ensure!(is_regular_executable(&fnm_path), "fnm installer did not publish executable {}", fnm_path.display());
-    }
+    let installer = temp_path("fnm-install", "")?;
+    let path = installer.to_str().context("fnm installer path is not UTF-8")?;
+    let install_path = install_dir.to_str().context("fnm install directory path is not UTF-8")?;
+    host::curl("fnm installer download", "https://fnm.vercel.app/install", ["--output", path])?;
+    // skip installer shell edits because cozydot owns the profile snippet
+    host::run("fnm install", "bash", [path, "--install-dir", install_path, "--skip-shell"])?;
+    ensure!(is_regular_executable(&fnm_path), "fnm installer did not publish executable {}", fnm_path.display());
     append_shell_rc(FNM_BASH_INIT)
 }
 
