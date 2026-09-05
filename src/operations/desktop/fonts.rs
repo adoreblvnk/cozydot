@@ -52,10 +52,10 @@ fn install(family: &str, destination: &Path) -> Result<()> {
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
     let args = ["--proto", "=https", "--output", archive_path];
     host::curl("Nerd Font archive download", &url, args)?;
-    let path = destination.to_str().context("font path is not UTF-8")?;
     // replace the whole family so files removed upstream cannot survive reinstall
-    host::run("Nerd Font destination replacement", "rm", ["-rf", path])?;
-    host::run("Nerd Font destination creation", "mkdir", ["-p", path])?;
+    let _ = fs::remove_dir_all(destination);
+    fs::create_dir_all(destination).context("create font destination directory")?;
+    let path = destination.to_str().context("font path is not UTF-8")?;
     host::run("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;
     Ok(())
 }

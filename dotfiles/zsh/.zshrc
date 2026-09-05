@@ -20,6 +20,9 @@ _comp_options+=(globdots) # include hidden files
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' # case insensitive completion
 zstyle ':completion:*' list-colors ''
 
+# force GPG to use pinentry (console) to prompt for passwords instead of a window as per `man gpg-agent`
+export GPG_TTY=$(tty)
+
 # Toolchains
 FNM_PATH=~/.local/share/fnm
 if [[ -d "$FNM_PATH" ]]; then
