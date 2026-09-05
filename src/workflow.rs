@@ -45,9 +45,14 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     host::home()?;
     match platform.identity {
-        PlatformIdentity::Macos => macos_update(config, platform.arch),
-        PlatformIdentity::Linux { .. } => linux_update(config, platform.arch),
+        PlatformIdentity::Macos => macos_update(config)?,
+        PlatformIdentity::Linux { .. } => linux_update(config)?,
     }
+    update_tools(&config.tools, &config.updates.tools, platform.arch)?;
+    if config.updates.fonts && !config.fonts.nerd.is_empty() {
+        run("Updating", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, true))?;
+    }
+    Ok(())
 }
 
 fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
@@ -153,20 +158,21 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         run("Adding", "Flathub remote", flatpak::add_flathub_remote)?;
         run("Installing", "Flatpak apps", || flatpak::install(refs))?;
     }
-    for (package, source) in deb_binaries {
+    let install_binary = |package, source| -> Result<()> {
         if !binary::is_installed(package)? {
             let subject = format!("{} binary package", package.name);
             run("Installing", &subject, || binary::install(package, platform.arch, source))?;
         }
+        Ok(())
+    };
+    for (package, source) in deb_binaries {
+        install_binary(package, source)?;
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
         run("Installing", "appimaged", || binary::appimaged::install(platform.arch))?;
         for (package, source) in appimages {
-            if !binary::is_installed(package)? {
-                let subject = format!("{} binary package", package.name);
-                run("Installing", &subject, || binary::install(package, platform.arch, source))?;
-            }
+            install_binary(package, source)?;
         }
     }
     apply_tools(&config.tools, platform.arch)?;
@@ -261,7 +267,7 @@ fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
     Ok(())
 }
 
-fn linux_update(config: &Config, arch: Arch) -> Result<()> {
+fn linux_update(config: &Config) -> Result<()> {
     run("Validating", "Linux sudo access", sudo::validate_access)?;
     let updates = &config.updates.packages.linux;
     let flatpak = updates.flatpak;
@@ -281,14 +287,10 @@ fn linux_update(config: &Config, arch: Arch) -> Result<()> {
     if flatpak {
         run("Updating", "Flatpak apps", flatpak::update)?;
     }
-    update_tools(&config.tools, &config.updates.tools, arch)?;
-    if config.updates.fonts && !config.fonts.nerd.is_empty() {
-        run("Updating", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, true))?;
-    }
     Ok(())
 }
 
-fn macos_update(config: &Config, arch: Arch) -> Result<()> {
+fn macos_update(config: &Config) -> Result<()> {
     if config.system.macos.validate_sudo_access {
         run("Validating", "macOS sudo access", sudo::validate_access)?;
     }
@@ -305,10 +307,6 @@ fn macos_update(config: &Config, arch: Arch) -> Result<()> {
     // npm-only updates still need fnm to enter the managed default Node environment
     if config.updates.tools.npm && !config.updates.tools.node && !fnm::is_installed()? {
         run("Installing", "fnm", fnm::install)?;
-    }
-    update_tools(&config.tools, &config.updates.tools, arch)?;
-    if config.updates.fonts && !config.fonts.nerd.is_empty() {
-        run("Updating", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, true))?;
     }
     Ok(())
 }
