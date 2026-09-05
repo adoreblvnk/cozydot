@@ -2,9 +2,8 @@
 name: md-to-pdf
 description: Convert Markdown documents to PDF using md-to-pdf and CSS.
 version: 1.8.0
-author: adoreblvnk, Hermes Agent
+author: adoreblvnk
 license: MIT
-platforms: [linux, macos, windows]
 metadata:
   tags: [markdown, pdf, md-to-pdf, styling, css, export, google-docs]
 ---
