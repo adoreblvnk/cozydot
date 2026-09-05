@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, fs, io::Write, path::Path};
+use std::{fs, io::Write, path::Path};
 
 use anyhow::{Context, Result};
 
@@ -13,55 +13,28 @@ pub(crate) fn write_atomic(destination: &Path, contents: &[u8], label: &str) -> 
     drop(file);
     let parent = destination.parent().context("atomic-write destination has no parent")?;
     let file_name = destination.file_name().context("atomic-write destination has no filename")?.to_string_lossy();
-    let nonce = local.file_name().context("atomic-write staging file has no filename")?.to_string_lossy();
+    let nonce = local.file_name().unwrap_or_default().to_string_lossy();
     let staged = parent.join(format!(".{file_name}.{nonce}.tmp"));
-    let parent_arg = parent.as_os_str();
-    let local_arg = local.as_os_str();
-    let staged_arg = staged.as_os_str();
-    let destination_arg = destination.as_os_str();
-    run(
-        label,
-        "sudo",
-        [
-            OsStr::new("install"),
-            OsStr::new("-d"),
-            OsStr::new("-o"),
-            OsStr::new("root"),
-            OsStr::new("-g"),
-            OsStr::new("root"),
-            OsStr::new("-m"),
-            OsStr::new("0755"),
-            OsStr::new("--"),
-            parent_arg,
-        ],
-    )?;
+    let parent_path = parent.to_str().context("atomic-write parent is not UTF-8")?;
+    let local_path = local.to_str().context("atomic-write staging file path is not UTF-8")?;
+    let staged_path = staged.to_str().context("atomic-write staged path is not UTF-8")?;
+    let destination_path = destination.to_str().context("atomic-write destination is not UTF-8")?;
+
+    let install_d = ["install", "-d", "-o", "root", "-g", "root", "-m", "0755", "--", parent_path];
+    run(label, "sudo", install_d)?;
     // stage beside target for atomic rename, then sync file & parent
     let result = (|| {
-        run(
-            label,
-            "sudo",
-            [
-                OsStr::new("install"),
-                OsStr::new("-o"),
-                OsStr::new("root"),
-                OsStr::new("-g"),
-                OsStr::new("root"),
-                OsStr::new("-m"),
-                OsStr::new("0644"),
-                OsStr::new("--"),
-                local_arg,
-                staged_arg,
-            ],
-        )?;
-        run(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), staged_arg])?;
-        run(label, "sudo", [OsStr::new("test"), OsStr::new("!"), OsStr::new("-d"), destination_arg])?;
-        run(label, "sudo", [OsStr::new("mv"), OsStr::new("-fT"), OsStr::new("--"), staged_arg, destination_arg])?;
-        run(label, "sudo", [OsStr::new("sync"), OsStr::new("--"), parent_arg])?;
+        let install_file = ["install", "-o", "root", "-g", "root", "-m", "0644", "--", local_path, staged_path];
+        run(label, "sudo", install_file)?;
+        run(label, "sudo", ["sync", "--", staged_path])?;
+        run(label, "sudo", ["test", "!", "-d", destination_path])?;
+        run(label, "sudo", ["mv", "-fT", "--", staged_path, destination_path])?;
+        run(label, "sudo", ["sync", "--", parent_path])?;
         Ok(())
     })();
     if result.is_err() {
         // preserve the original failure; stale staging cleanup is best effort
-        let _ = output("sudo", [OsStr::new("rm"), OsStr::new("-f"), OsStr::new("--"), staged_arg]);
+        let _ = output("sudo", ["rm", "-f", "--", staged_path]);
     }
     result
 }

@@ -73,7 +73,7 @@ fn install_extension(uuid: &str) -> Result<()> {
     let endpoint = format!("https://extensions.gnome.org/extension-info/?uuid={uuid}");
     let metadata = host::curl("GNOME extension metadata", &endpoint, std::iter::empty::<&str>())?;
     let shell = host::run("GNOME extension shell version", "gnome-shell", ["--version"])?;
-    let shell_version = shell_version(std::str::from_utf8(&shell.stdout).context("GNOME Shell version is not UTF-8")?)?;
+    let shell_version = shell_version(host::stdout_line(&shell.stdout, "gnome-shell --version")?)?;
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
     let archive = temp_path("gnome-extension", ".zip")?;

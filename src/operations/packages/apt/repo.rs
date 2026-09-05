@@ -50,21 +50,19 @@ pub(crate) fn add(repo: &AptRepo) -> Result<()> {
 
 fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
     let downloaded = temp_path("repo-key-download", "")?;
-    host::curl("repo key download", url, ["--tlsv1.2", "--output", &downloaded.to_string_lossy()])?;
+    let downloaded_path = downloaded.to_str().context("downloaded repo key path is not UTF-8")?;
+    host::curl("repo key download", url, ["--tlsv1.2", "--output", downloaded_path])?;
 
     let downloaded_bytes = fs::read(&downloaded).context("read downloaded repo key")?;
 
     let binary_keyring = temp_path("repo-key-binary", ".gpg")?;
-
-    let key = binary_keyring.to_string_lossy();
-    let input = downloaded.to_string_lossy();
-    let args = ["--no-options", "--batch", "--yes", "--output", key.as_ref(), "--dearmor", input.as_ref()];
+    let key_path = binary_keyring.to_str().context("binary keyring path is not UTF-8")?;
+    let args = ["--no-options", "--batch", "--yes", "--output", key_path, "--dearmor", downloaded_path];
     host::run("repo key conversion", "gpg", args)?;
 
     // parsing proves download contains a public key; configured URL remains identity trust boundary
-    let key = binary_keyring.to_string_lossy();
     let no_default = "--no-default-keyring";
-    let args = ["--no-options", "--batch", no_default, "--keyring", key.as_ref(), "--with-colons", "--list-keys"];
+    let args = ["--no-options", "--batch", no_default, "--keyring", key_path, "--with-colons", "--list-keys"];
     let key_list = host::run("repo key validation", "gpg", args)?;
     let mut lines = key_list.stdout.split(|byte| *byte == b'\n');
     let public_key = lines.any(|line| line.strip_prefix(b"pub:").is_some_and(|fields| !fields.is_empty()));
@@ -76,7 +74,7 @@ fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
 pub(crate) mod debian_components {
     use crate::operations::host::{self, privileged_file};
     use anyhow::{Context, Result, bail, ensure};
-    use std::{ffi::OsStr, path::Path};
+    use std::path::Path;
 
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
     const ONE_LINE_SOURCE: &str = "/etc/apt/sources.list";
@@ -131,7 +129,7 @@ pub(crate) mod debian_components {
     }
 
     fn read(path: &str) -> Result<Vec<u8>> {
-        Ok(host::run("Debian APT source read", "sudo", [OsStr::new("cat"), OsStr::new(path)])?.stdout)
+        Ok(host::run("Debian APT source read", "sudo", ["cat", path])?.stdout)
     }
 
     fn add_deb822_components(text: &str) -> String {
