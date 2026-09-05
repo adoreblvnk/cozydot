@@ -1,7 +1,21 @@
 use anyhow::{Context, Result, bail};
-use std::{ffi::OsStr, fs, path::Path};
+use std::{fs, path::Path};
 
 use super::super::host::{self, temp_path};
+
+pub(crate) fn any_missing(families: &[String]) -> Result<bool> {
+    if families.is_empty() {
+        return Ok(false);
+    }
+    let parent = host::home()?.join(if cfg!(target_os = "macos") { "Library/Fonts" } else { ".local/share/fonts" });
+    for family in families {
+        match fs::symlink_metadata(parent.join(family)) {
+            Ok(metadata) if metadata.is_dir() => {}
+            _ => return Ok(true),
+        }
+    }
+    Ok(false)
+}
 
 pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
     let parent = host::home()?.join(if cfg!(target_os = "macos") { "Library/Fonts" } else { ".local/share/fonts" });
@@ -27,18 +41,18 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
     }
     // macOS discovers user fonts directly while Linux requires a fontconfig refresh
     if changed && !cfg!(target_os = "macos") {
-        host::run("Nerd Font cache refresh", "fc-cache", [OsStr::new("--force"), parent.as_os_str()])?;
+        host::run("Nerd Font cache refresh", "fc-cache", ["--force", parent.to_str().unwrap_or_default()])?;
     }
     Ok(())
 }
 
 fn install(family: &str, destination: &Path) -> Result<()> {
     let archive = temp_path("nerd-font", ".tar.xz")?;
+    let archive_path = archive.to_str().context("font archive path is not UTF-8")?;
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
-    let args: [&OsStr; 4] = ["--proto".as_ref(), "=https".as_ref(), "--output".as_ref(), archive.as_os_str()];
+    let args = ["--proto", "=https", "--output", archive_path];
     host::curl("Nerd Font archive download", &url, args)?;
     let path = destination.to_str().context("font path is not UTF-8")?;
-    let archive_path = archive.to_str().context("font archive path is not UTF-8")?;
     // replace the whole family so files removed upstream cannot survive reinstall
     host::run("Nerd Font destination replacement", "rm", ["-rf", path])?;
     host::run("Nerd Font destination creation", "mkdir", ["-p", path])?;

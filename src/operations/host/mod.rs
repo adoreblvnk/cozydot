@@ -28,10 +28,16 @@ where
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stderr = stderr.trim();
-        if stderr.is_empty() {
-            bail!("{label}: {program} failed ({})", output.status);
+        if !stderr.is_empty() {
+            bail!("{label}: {program} failed ({})\n--- stderr\n{stderr}", output.status);
         }
-        bail!("{label}: {program} failed ({})\n--- stderr\n{stderr}", output.status);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = stdout.trim();
+        if !stdout.is_empty() {
+            // some tools (eg dpkg & brew) report failure diagnostics on stdout rather than stderr
+            bail!("{label}: {program} failed ({})\n--- stdout\n{stdout}", output.status);
+        }
+        bail!("{label}: {program} failed ({})", output.status);
     }
     Ok(output)
 }

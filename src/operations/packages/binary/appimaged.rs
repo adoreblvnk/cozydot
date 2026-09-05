@@ -15,23 +15,18 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
 
         let home = host::home()?;
         let service = home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service");
-        host::run("remove conflicting appimaged service", "rm", ["-f".as_ref(), service.as_os_str()])?;
+        let service_path = service.to_str().context("appimagelauncher service path is not UTF-8")?;
+        host::run("remove conflicting appimaged service", "rm", ["-f", service_path])?;
         host::run("reload user services", "systemctl", ["--user", "daemon-reload"])?;
         let cache = home.join(".local/share/applications");
+        let cache_path = cache.to_str().context("applications cache directory is not UTF-8")?;
         // pass the cache path as $1 so the shell never parses user-controlled path contents
-        host::run(
-            "clear AppImage cache",
-            "sh",
-            ["-c".as_ref(), r#"rm -f -- "$1"/appimage*"#.as_ref(), "sh".as_ref(), cache.as_os_str()],
-        )?;
+        host::run("clear AppImage cache", "sh", ["-c", r#"rm -f -- "$1"/appimage*"#, "sh", cache_path])?;
 
         let destination = home.join("Applications/appimaged.AppImage");
         super::appimage::install_appimage("download appimaged", &resolve_asset_url(arch)?, &destination)?;
-        host::run(
-            "launch appimaged",
-            destination.to_str().with_context(|| format!("appimaged path is not UTF-8: {}", destination.display()))?,
-            std::iter::empty::<&str>(),
-        )?;
+        let appimaged = host::path_program(&destination, "appimaged path")?;
+        host::run("launch appimaged", &appimaged, std::iter::empty::<&str>())?;
     }
 
     Ok(())

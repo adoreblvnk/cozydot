@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
-use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf};
 
 use super::host;
 
@@ -21,12 +21,14 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
 
     host::require_cli("GNU Stow", "stow").context("dotfiles require GNU Stow")?;
     let home = host::home()?;
-    let mut args = vec![OsStr::new("--dir"), stow_dir.as_os_str(), OsStr::new("--target"), home.as_os_str()];
+    let stow_path = stow_dir.to_str().context("stow directory path is not UTF-8")?;
+    let home_path = home.to_str().context("home directory path is not UTF-8")?;
+    let mut args = vec!["--dir", stow_path, "--target", home_path];
     if !replace {
         // simulate first so conflicts fail before Stow mutates the home directory
         let mut check_args = args.clone();
-        check_args.push(OsStr::new("--simulate"));
-        check_args.extend(packages.iter().map(OsStr::new));
+        check_args.push("--simulate");
+        check_args.extend(packages.iter().map(String::as_str));
         host::run("stow package check", "stow", check_args)?;
     }
 
@@ -51,7 +53,7 @@ pub(crate) fn apply(stow_dir: &Path, packages: &[String], replace: bool) -> Resu
         }
         fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).context("secure GnuPG home")?;
     }
-    args.extend(packages.iter().map(OsStr::new));
+    args.extend(packages.iter().map(String::as_str));
     host::run("stow package install", "stow", args)?;
     Ok(())
 }

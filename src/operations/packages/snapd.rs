@@ -23,19 +23,10 @@ pub(crate) fn set_enabled(enabled: bool) -> Result<()> {
         }
     }
     apt::purge(&["snapd".into()])?;
-    host::run(
-        "snap data removal",
-        "sudo",
-        [
-            "rm".as_ref(),
-            "-rf".as_ref(),
-            "--".as_ref(),
-            host::home()?.join("snap").as_os_str(),
-            "/snap".as_ref(),
-            "/var/snap".as_ref(),
-            "/var/lib/snapd".as_ref(),
-        ],
-    )?;
+    let snap_home = host::home()?.join("snap");
+    let snap_path = snap_home.to_str().context("user snap directory path is not UTF-8")?;
+    let args = ["rm", "-rf", "--", snap_path, "/snap", "/var/snap", "/var/lib/snapd"];
+    host::run("snap data removal", "sudo", args)?;
     let pin = b"Package: snapd\nPin: release a=*\nPin-Priority: -10\n";
     write_atomic(Path::new(NO_SNAP_PIN), pin, "no-snap APT pin write")?;
     Ok(())

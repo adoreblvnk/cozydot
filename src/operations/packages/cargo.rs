@@ -3,17 +3,33 @@ use regex::Regex;
 
 use super::super::host::{self, is_executable, path_program};
 
+pub(crate) fn is_binstall_installed() -> Result<bool> {
+    if cfg!(target_os = "macos") {
+        return Ok(super::homebrew::executable_path("cargo-binstall", "cargo-binstall").is_ok());
+    }
+    Ok(is_executable(&host::home()?.join(".cargo/bin/cargo-binstall")))
+}
+
+pub(crate) fn is_update_installed() -> Result<bool> {
+    Ok(is_executable(&host::home()?.join(".cargo/bin/cargo-install-update")))
+}
+
+pub(crate) fn any_missing(crates: &[String]) -> Result<bool> {
+    if crates.is_empty() {
+        return Ok(false);
+    }
+    let cargo = path_program(&host::home()?.join(".cargo/bin/cargo"), "managed Cargo executable path")?;
+    let output = host::run("Cargo installed package query", &cargo, ["install", "--list"])?;
+    let installed = installed_crates(&output.stdout)?;
+    Ok(crates.iter().any(|c| !installed.contains(c)))
+}
+
 pub(crate) fn install_binstall() -> Result<()> {
     if cfg!(target_os = "macos") {
         return super::homebrew::install_packages(&["cargo-binstall".to_owned()], &[]);
     }
-    let cargo_home = host::home()?.join(".cargo");
-    if is_executable(&cargo_home.join("bin/cargo-binstall")) {
-        return Ok(());
-    }
-    let cargo = cargo_home.join("bin/cargo");
-    let program = cargo.to_str().with_context(|| format!("Cargo executable path is not UTF-8: {}", cargo.display()))?;
-    host::run("cargo-binstall install", program, ["install", "cargo-binstall", "--locked"])?;
+    let cargo = path_program(&host::home()?.join(".cargo/bin/cargo"), "managed Cargo executable path")?;
+    host::run("cargo-binstall install", &cargo, ["install", "cargo-binstall", "--locked"])?;
     Ok(())
 }
 
