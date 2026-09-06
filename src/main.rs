@@ -11,6 +11,7 @@ mod init;
 mod operations;
 mod paths;
 mod platform;
+mod spinner;
 mod style;
 mod workflow;
 

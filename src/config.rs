@@ -115,8 +115,6 @@ pub struct UbuntuSystem {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacosSystem {
-    #[serde(default)]
-    pub validate_sudo_access: bool,
     pub xcode: Xcode,
 }
 
@@ -314,6 +312,8 @@ impl BinaryPackage {
     }
 }
 
+pub type ArchMap = BTreeMap<Arch, String>;
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum BinarySource {
@@ -324,32 +324,15 @@ pub enum BinarySource {
 impl BinarySource {
     fn validate(&self, path: &str) -> Result<()> {
         match self {
-            Self::GitHub { assets, .. } => assets.validate(&format!("{path}.assets"), "asset pattern"),
-            Self::Url { urls } => urls.validate(&format!("{path}.urls"), "URL"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ArchMap {
-    pub x86_64: Option<String>,
-    pub aarch64: Option<String>,
-}
-
-impl ArchMap {
-    fn validate(&self, path: &str, kind: &str) -> Result<()> {
-        if self.x86_64.is_none() && self.aarch64.is_none() {
-            bail!("{path}: must contain at least one canonical architecture {kind}");
+            Self::GitHub { assets, .. } => ensure!(
+                !assets.is_empty(),
+                "{path}.assets: must contain at least one canonical architecture asset pattern"
+            ),
+            Self::Url { urls } => {
+                ensure!(!urls.is_empty(), "{path}.urls: must contain at least one canonical architecture URL")
+            }
         }
         Ok(())
-    }
-
-    pub fn get(&self, arch: Arch) -> Option<&str> {
-        match arch {
-            Arch::X86_64 => self.x86_64.as_deref(),
-            Arch::Aarch64 => self.aarch64.as_deref(),
-        }
     }
 }
 

@@ -239,7 +239,8 @@ fn sync_dir(path: &Path) -> Result<()> {
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
+    // format each byte as 2-digit zero-padded lowercase hex without external hex crate
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 fn hash_file(path: &Path) -> Result<String> {
     Ok(hash_bytes(&fs::read(path)?))

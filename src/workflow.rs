@@ -14,9 +14,9 @@ use crate::{
         toolchains::{fnm, go, rustup, uv},
     },
     platform::{Arch, Distro, Platform, PlatformIdentity},
-    style::STATUS,
+    spinner,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 const APT_PREREQS: [&str; 8] =
@@ -25,7 +25,7 @@ const APT_PREREQS: [&str; 8] =
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     host::home()?;
     match platform.identity {
-        PlatformIdentity::Macos => macos_apply(config, platform.arch, dotfiles_root),
+        PlatformIdentity::Macos => macos_apply(config, platform, dotfiles_root),
         PlatformIdentity::Linux { .. } => linux_apply(config, platform, dotfiles_root),
     }
 }
@@ -56,7 +56,7 @@ pub fn update(config: &Config, platform: &Platform) -> Result<()> {
 }
 
 fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
-    run("Validating", "Linux sudo access", sudo::validate_access)?;
+    sudo::validate_access("Linux sudo access")?;
     let PlatformIdentity::Linux { distro, .. } = platform.identity else { unreachable!() };
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.linux.as_ref());
@@ -179,19 +179,15 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
-    if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.linux) {
-        run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
-    }
+    dotfiles(config, platform, dotfiles_root, false)?;
     apply_integrations(&config.integrations)?;
     linux_integrations(&config.integrations.linux)?;
     linux_desktop(theme, desktop_config)?;
     Ok(())
 }
 
-fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> {
-    if config.system.macos.validate_sudo_access {
-        run("Validating", "macOS sudo access", sudo::validate_access)?;
-    }
+fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
+    sudo::validate_access("macOS sudo access")?;
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
     let homebrew = &config.packages.macos.homebrew;
@@ -211,13 +207,11 @@ fn macos_apply(config: &Config, arch: Arch, dotfiles_root: &Path) -> Result<()> 
     if homebrew::any_missing(&formulae, &homebrew.casks)? {
         run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &homebrew.casks))?;
     }
-    apply_tools(&config.tools, arch)?;
+    apply_tools(&config.tools, platform.arch)?;
     if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
-    if let Some(packages) = dotfile_packages(&config.dotfiles, &config.dotfiles.packages.macos) {
-        run("Applying", "dotfiles", || dotfiles::apply(dotfiles_root, &packages, config.dotfiles.replace))?;
-    }
+    dotfiles(config, platform, dotfiles_root, false)?;
     apply_integrations(&config.integrations)?;
     if theme.is_some() || desktop_config.is_some_and(MacosDesktop::has_intent) {
         run("Writing", "macOS defaults", || macos_defaults::write_defaults(theme, desktop_config))?;
@@ -268,7 +262,7 @@ fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
 }
 
 fn linux_update(config: &Config) -> Result<()> {
-    run("Validating", "Linux sudo access", sudo::validate_access)?;
+    sudo::validate_access("Linux sudo access")?;
     let updates = &config.updates.packages.linux;
     let flatpak = updates.flatpak;
     let mut apt_prereqs = APT_PREREQS.into_iter().map(str::to_owned).collect::<Vec<_>>();
@@ -291,9 +285,7 @@ fn linux_update(config: &Config) -> Result<()> {
 }
 
 fn macos_update(config: &Config) -> Result<()> {
-    if config.system.macos.validate_sudo_access {
-        run("Validating", "macOS sudo access", sudo::validate_access)?;
-    }
+    sudo::validate_access("macOS sudo access")?;
     let homebrew = &config.updates.packages.macos.homebrew;
     let formulae = homebrew.formulae;
     let casks = homebrew.casks;
@@ -401,28 +393,25 @@ fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result
             run("Setting", "idle dimming", || desktop::set_idle_dim(enabled))?;
         }
     }
+    let mut relogin_required = false;
     if !gnome.extensions.is_empty() {
-        run_with_outcome("Applying", "GNOME extensions", || gnome::apply_extensions(&gnome.extensions))?;
+        relogin_required |= run("Applying", "GNOME extensions", || gnome::apply_extensions(&gnome.extensions))?
+            == gnome::Outcome::LoginRequired;
     }
     if gnome.dash_to_dock {
-        run_with_outcome("Installing", "Dash to Dock", gnome::apply_dash_to_dock)?;
+        relogin_required |=
+            run("Installing", "Dash to Dock", gnome::apply_dash_to_dock)? == gnome::Outcome::LoginRequired;
     }
     if gnome.rounded_window_corners {
-        run_with_outcome("Installing", "Rounded Window Corners", gnome::apply_rounded_window_corners)?;
+        relogin_required |= run("Installing", "Rounded Window Corners", gnome::apply_rounded_window_corners)?
+            == gnome::Outcome::LoginRequired;
+    }
+    if relogin_required {
+        eprintln!("note: log out and back in to finish activating GNOME extensions");
     }
     Ok(())
 }
 
-fn run(status: &str, subject: &str, operation: impl FnOnce() -> Result<()>) -> Result<()> {
-    anstream::eprintln!("{STATUS}{status:>12}{STATUS:#} {subject}");
-    operation().with_context(|| format!("{} {subject}", status.to_lowercase()))
-}
-
-fn run_with_outcome(status: &str, subject: &str, operation: impl FnOnce() -> Result<gnome::Outcome>) -> Result<()> {
-    anstream::eprintln!("{STATUS}{status:>12}{STATUS:#} {subject}");
-    let action = status.to_lowercase();
-    if operation().with_context(|| format!("{action} {subject}"))? == gnome::Outcome::LoginRequired {
-        eprintln!("note: log out and back in to finish {action} {subject}");
-    }
-    Ok(())
+fn run<T>(status: &'static str, subject: &str, operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    spinner::run(status, subject, operation)
 }
