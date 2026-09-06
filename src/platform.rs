@@ -16,11 +16,13 @@ impl Platform {
         let uname = rustix::system::uname();
         let arch = uname.machine().to_str().context("uname machine architecture is not UTF-8")?;
         ensure!(!arch.is_empty(), "uname returned an empty machine architecture");
+        let arch = Arch::normalize(arch)?;
         if cfg!(target_os = "macos") {
-            let arch = match arch {
-                "aarch64" | "arm64" => Arch::Aarch64,
-                _ => bail!("unsupported macOS architecture {arch:?}; only Apple Silicon (arm64) is supported"),
-            };
+            ensure!(
+                arch == Arch::Aarch64,
+                "unsupported macOS architecture {:?}; only Apple Silicon (arm64) is supported",
+                arch.as_str()
+            );
             return Ok(Self {
                 identity: PlatformIdentity::Macos,
                 distro_codename: String::new(),
@@ -33,9 +35,9 @@ impl Platform {
         Self::from_os_release(&os, &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(), arch)
     }
 
-    fn from_os_release(os: &OsRelease, desktop: &str, arch: &str) -> Result<Self> {
+    fn from_os_release(os: &OsRelease, desktop: &str, arch: Arch) -> Result<Self> {
         let distro = Distro::from_os_release(os.id())?;
-        let family = distro.family(os.get_value("ID_LIKE"))?;
+        let family = distro.family(os.id_like())?;
         let distro_codename = os.version_codename().unwrap_or_default().to_owned();
         // derivatives use their base distro codename for family repositories
         let base_codename = match family {
@@ -54,13 +56,12 @@ impl Platform {
             distro_codename,
             base_codename,
             desktop: DesktopKind::from_environment(desktop),
-            arch: Arch::normalize(arch)?,
+            arch,
         })
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum Distro {
     Ubuntu,
     LinuxMint,
@@ -79,19 +80,19 @@ impl Distro {
         }
     }
 
-    fn family(self, id_like: Option<&str>) -> Result<Family> {
+    fn family<'a>(self, id_like: Option<impl Iterator<Item = &'a str>>) -> Result<Family> {
         match self {
             Self::Ubuntu | Self::Pop => Ok(Family::Ubuntu),
             Self::Debian => Ok(Family::Debian),
             Self::LinuxMint => {
-                let id_like = id_like.unwrap_or_default();
-                let ubuntu = id_like.split_ascii_whitespace().any(|family| family == "ubuntu");
-                let debian = id_like.split_ascii_whitespace().any(|family| family == "debian");
+                let id_likes = id_like.into_iter().flatten().collect::<Vec<_>>();
                 // regular Mint lists Ubuntu & Debian; LMDE lists Debian only
-                match (ubuntu, debian) {
-                    (true, _) => Ok(Family::Ubuntu),
-                    (false, true) => Ok(Family::Debian),
-                    _ => bail!("unsupported linuxmint base family in ID_LIKE {id_like:?}; expected ubuntu or debian"),
+                if id_likes.contains(&"ubuntu") {
+                    Ok(Family::Ubuntu)
+                } else if id_likes.contains(&"debian") {
+                    Ok(Family::Debian)
+                } else {
+                    bail!("unsupported linuxmint base family in ID_LIKE {id_likes:?}; expected ubuntu or debian");
                 }
             }
         }
@@ -110,8 +111,7 @@ pub enum PlatformIdentity {
     Linux { distro: Distro, family: Family },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DesktopKind {
     None,
     Gnome,
@@ -131,7 +131,8 @@ impl DesktopKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Arch {
     X86_64,
     Aarch64,

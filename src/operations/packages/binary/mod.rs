@@ -25,9 +25,9 @@ pub(crate) enum SelectedSource<'a> {
 pub(crate) fn select_source(package: &BinaryPackage, arch: Arch) -> Option<SelectedSource<'_>> {
     match &package.source {
         BinarySource::GitHub { repo, assets } => {
-            assets.get(arch).map(|asset_pattern| SelectedSource::GitHub { repo, asset_pattern })
+            assets.get(&arch).map(|pattern| SelectedSource::GitHub { repo, asset_pattern: pattern.as_str() })
         }
-        BinarySource::Url { urls } => urls.get(arch).map(SelectedSource::Url),
+        BinarySource::Url { urls } => urls.get(&arch).map(|url| SelectedSource::Url(url.as_str())),
     }
 }
 

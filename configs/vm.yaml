@@ -7,7 +7,6 @@ system:
     snapd: disabled
     restricted_extras: true
   macos:
-    validate_sudo_access: true
     xcode:
       command_line_tools: true
 packages:
@@ -85,7 +84,6 @@ packages:
         - openjdk
         - pandoc
         - pass
-        - pinentry-mac
         - sevenzip
         - shfmt
         - vim

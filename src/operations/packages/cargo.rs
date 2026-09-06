@@ -59,11 +59,10 @@ pub(crate) fn install_crates(crates: &[String]) -> Result<()> {
 }
 
 pub(crate) fn update_crates() -> Result<()> {
-    let cargo_home = host::home()?.join(".cargo");
-    if !is_executable(&cargo_home.join("bin/cargo-install-update")) {
+    if !is_update_installed()? {
         return Ok(());
     }
-    let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
+    let cargo = path_program(&host::home()?.join(".cargo/bin/cargo"), "managed Cargo executable path")?;
     host::run("Cargo crate update", &cargo, ["install-update", "-a"])?;
     Ok(())
 }

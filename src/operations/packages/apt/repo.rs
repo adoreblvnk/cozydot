@@ -1,7 +1,11 @@
 use crate::operations::host::{self, privileged_file, temp_path};
 use crate::platform::Arch;
 use anyhow::{Context, Result, ensure};
-use std::{ffi::OsStr, fs, path::PathBuf};
+use std::{
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+};
 
 const SOURCES_DIR: &str = "/etc/apt/sources.list.d";
 
@@ -72,9 +76,7 @@ fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
 }
 
 pub(crate) mod debian_components {
-    use crate::operations::host::{self, privileged_file};
-    use anyhow::{Context, Result, bail, ensure};
-    use std::path::Path;
+    use super::*;
 
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
     const ONE_LINE_SOURCE: &str = "/etc/apt/sources.list";
@@ -82,54 +84,40 @@ pub(crate) mod debian_components {
 
     pub(crate) fn add() -> Result<()> {
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
-            host::run("Debian APT source directory symlink check", "sudo", ["test", "!", "-L", directory])?;
+            let metadata = fs::symlink_metadata(directory).with_context(|| format!("read {directory} metadata"))?;
+            ensure!(!metadata.is_symlink() && metadata.is_dir(), "APT directory must be a real directory: {directory}");
         }
 
         // edit only Debian's canonical source path and leave third-party source files untouched
-        reject_symlink(DEB822_SOURCE)?;
-        // prefer deb822 when present; otherwise update the legacy one-line source
-        let deb822 = probe_regular(DEB822_SOURCE)?;
-        if !deb822 {
-            host::run("Debian APT deb822 source absence check", "sudo", ["test", "!", "-e", DEB822_SOURCE])?;
-        }
-        let source = if deb822 { DEB822_SOURCE } else { ONE_LINE_SOURCE };
-        if !deb822 {
-            reject_symlink(source)?;
-            ensure!(probe_regular(source)?, "Debian APT source file does not exist: {source}");
-        }
+        let check_file = |path: &str| -> Result<Option<bool>> {
+            match fs::symlink_metadata(path) {
+                Ok(meta) => {
+                    ensure!(!meta.is_symlink(), "Debian APT source path is a symlink: {path}");
+                    ensure!(meta.is_file(), "Debian APT source path is not a regular file: {path}");
+                    Ok(Some(true))
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(err) => Err(err).with_context(|| format!("stat {path}")),
+            }
+        };
 
-        let original = read(source)?;
-        let text = std::str::from_utf8(&original).context("Debian APT source is not UTF-8")?;
-        let replacement = if deb822 { add_deb822_components(text) } else { add_one_line_components(text) };
-        if replacement.as_bytes() == original {
+        let deb822 = check_file(DEB822_SOURCE)?.is_some();
+        let source = if deb822 {
+            DEB822_SOURCE
+        } else {
+            ensure!(check_file(ONE_LINE_SOURCE)?.is_some(), "Debian APT source file does not exist: {ONE_LINE_SOURCE}");
+            ONE_LINE_SOURCE
+        };
+
+        let original = fs::read_to_string(source).with_context(|| format!("read {source}"))?;
+        let replacement = if deb822 { add_deb822_components(&original) } else { add_one_line_components(&original) };
+        if replacement == original {
             return Ok(());
         }
         // catch changes since first read before replacing file; this isn't a lock
-        ensure!(read(source)? == original, "Debian APT source changed concurrently before write");
+        ensure!(fs::read_to_string(source)? == original, "Debian APT source changed concurrently before write");
         privileged_file::write_atomic(Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
         Ok(())
-    }
-
-    fn reject_symlink(path: &str) -> Result<()> {
-        let output = host::output("sudo", ["test", "-L", path])?;
-        match output.status.code() {
-            Some(0) => bail!("Debian APT source path is a symlink: {path}"),
-            Some(1) => Ok(()),
-            _ => bail!("Debian APT source symlink check failed for {path}"),
-        }
-    }
-
-    fn probe_regular(path: &str) -> Result<bool> {
-        let output = host::output("sudo", ["test", "-f", path])?;
-        match output.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => bail!("Debian APT source regular-file check failed for {path}"),
-        }
-    }
-
-    fn read(path: &str) -> Result<Vec<u8>> {
-        Ok(host::run("Debian APT source read", "sudo", ["cat", path])?.stdout)
     }
 
     fn add_deb822_components(text: &str) -> String {

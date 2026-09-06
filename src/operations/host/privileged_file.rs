@@ -1,16 +1,14 @@
-use std::{fs, io::Write, path::Path};
+use std::{io::Write, path::Path};
 
 use anyhow::{Context, Result};
 
 use super::*;
 
 pub(crate) fn write_atomic(destination: &Path, contents: &[u8], label: &str) -> Result<()> {
-    let local = temp_path("privileged-write", "")?;
-    let context = "open local atomic-write staging file";
-    let mut file = fs::OpenOptions::new().write(true).truncate(true).open(&local).context(context)?;
+    let mut file = tempfile::Builder::new().prefix("privileged-write").tempfile().context("create staging file")?;
     file.write_all(contents).context("write local atomic-write staging file")?;
-    file.sync_all().context("sync local atomic-write staging file")?;
-    drop(file);
+    file.as_file().sync_all().context("sync local atomic-write staging file")?;
+    let local = file.into_temp_path();
     let parent = destination.parent().context("atomic-write destination has no parent")?;
     let file_name = destination.file_name().context("atomic-write destination has no filename")?.to_string_lossy();
     let nonce = local.file_name().unwrap_or_default().to_string_lossy();

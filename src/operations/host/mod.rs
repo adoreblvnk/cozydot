@@ -63,9 +63,7 @@ where
     run(label, "curl", curl_args)
 }
 
-pub(crate) fn home() -> Result<std::path::PathBuf> {
-    std::env::var_os("HOME").map(std::path::PathBuf::from).context("HOME is not set")
-}
+pub(crate) use crate::paths::home;
 
 pub(crate) fn has_executable_on_path(name: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
