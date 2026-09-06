@@ -158,20 +158,21 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         run("Adding", "Flathub remote", flatpak::add_flathub_remote)?;
         run("Installing", "Flatpak apps", || flatpak::install(refs))?;
     }
-    for (package, source) in deb_binaries {
+    let install_binary = |package, source| -> Result<()> {
         if !binary::is_installed(package)? {
             let subject = format!("{} binary package", package.name);
             run("Installing", &subject, || binary::install(package, platform.arch, source))?;
         }
+        Ok(())
+    };
+    for (package, source) in deb_binaries {
+        install_binary(package, source)?;
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
         run("Installing", "appimaged", || binary::appimaged::install(platform.arch))?;
         for (package, source) in appimages {
-            if !binary::is_installed(package)? {
-                let subject = format!("{} binary package", package.name);
-                run("Installing", &subject, || binary::install(package, platform.arch, source))?;
-            }
+            install_binary(package, source)?;
         }
     }
     apply_tools(&config.tools, platform.arch)?;

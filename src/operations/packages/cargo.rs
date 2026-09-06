@@ -15,13 +15,7 @@ pub(crate) fn is_update_installed() -> Result<bool> {
 }
 
 pub(crate) fn any_missing(crates: &[String]) -> Result<bool> {
-    if crates.is_empty() {
-        return Ok(false);
-    }
-    let cargo = path_program(&host::home()?.join(".cargo/bin/cargo"), "managed Cargo executable path")?;
-    let output = host::run("Cargo installed package query", &cargo, ["install", "--list"])?;
-    let installed = installed_crates(&output.stdout)?;
-    Ok(crates.iter().any(|c| !installed.contains(c)))
+    Ok(!missing_crates(crates)?.is_empty())
 }
 
 pub(crate) fn install_binstall() -> Result<()> {
@@ -34,19 +28,11 @@ pub(crate) fn install_binstall() -> Result<()> {
 }
 
 pub(crate) fn install_crates(crates: &[String]) -> Result<()> {
-    let cargo_home = host::home()?.join(".cargo");
-    let cargo = path_program(&cargo_home.join("bin/cargo"), "managed Cargo executable path")?;
-    let output = host::run("Cargo installed package query", &cargo, ["install", "--list"])?;
-    let installed = installed_crates(&output.stdout)?;
-    let mut missing = Vec::new();
-    for name in crates {
-        if !installed.contains(name) {
-            missing.push(name.as_str());
-        }
-    }
+    let missing = missing_crates(crates)?;
     if missing.is_empty() {
         return Ok(());
     }
+    let cargo_home = host::home()?.join(".cargo");
     let binstall = if cfg!(target_os = "macos") {
         super::homebrew::executable_path("cargo-binstall", "cargo-binstall")?
     } else {
@@ -56,6 +42,16 @@ pub(crate) fn install_crates(crates: &[String]) -> Result<()> {
     args.extend(missing);
     host::run("cargo-binstall install", &binstall, args)?;
     Ok(())
+}
+
+fn missing_crates(crates: &[String]) -> Result<Vec<&str>> {
+    if crates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cargo = path_program(&host::home()?.join(".cargo/bin/cargo"), "managed Cargo executable path")?;
+    let output = host::run("Cargo installed package query", &cargo, ["install", "--list"])?;
+    let installed = installed_crates(&output.stdout)?;
+    Ok(crates.iter().filter_map(|c| (!installed.contains(c)).then_some(c.as_str())).collect())
 }
 
 pub(crate) fn update_crates() -> Result<()> {

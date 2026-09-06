@@ -66,29 +66,29 @@ fn collect_conflicts(
 ) -> Result<()> {
     let source_metadata =
         fs::symlink_metadata(source).with_context(|| format!("read dotfiles source metadata {}", source.display()))?;
-    if source_metadata.file_type().is_dir() {
-        match fs::symlink_metadata(&target) {
-            Ok(metadata) if metadata.file_type().is_dir() => {
-                let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
-                entries.sort_by_key(std::fs::DirEntry::file_name);
-                for entry in entries {
-                    collect_conflicts(&entry.path(), target.join(entry.file_name()), package, conflicts)?;
-                }
-            }
-            Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).context("read dotfile destination metadata"),
+    if source_metadata.file_type().is_dir()
+        && let Ok(metadata) = fs::symlink_metadata(&target)
+        && metadata.file_type().is_dir()
+    {
+        let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in entries {
+            collect_conflicts(&entry.path(), target.join(entry.file_name()), package, conflicts)?;
         }
-    } else if source_metadata.file_type().is_file() || source_metadata.file_type().is_symlink() {
-        match fs::symlink_metadata(&target) {
-            Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).context("read dotfile destination metadata"),
-        }
-    } else {
-        bail!("unsupported dotfiles source type at {}", source.display());
+        return Ok(());
+    }
+    ensure!(
+        source_metadata.file_type().is_dir()
+            || source_metadata.file_type().is_file()
+            || source_metadata.file_type().is_symlink(),
+        "unsupported dotfiles source type at {}",
+        source.display()
+    );
+    match fs::symlink_metadata(&target) {
+        Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("read dotfile destination metadata"),
     }
     Ok(())
 }

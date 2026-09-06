@@ -3,10 +3,7 @@ use anyhow::{Context, Result};
 use crate::operations::{host, toolchains::fnm};
 
 pub(crate) fn any_missing(packages: &[String]) -> Result<bool> {
-    if packages.is_empty() {
-        return Ok(false);
-    }
-    let Some(fnm) = fnm::find_executable()? else { return Ok(true) };
+    let Some(fnm) = fnm::find_executable()? else { return Ok(!packages.is_empty()) };
     for package in packages {
         if !is_installed(&fnm, package)? {
             return Ok(true);
@@ -33,16 +30,17 @@ pub(crate) fn install(packages: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn is_installed(fnm: &str, package: &str) -> Result<bool> {
+    // split at the final @ so scoped names remain intact while versions/tags are ignored
+    let name = package.rsplit_once('@').map_or(package, |(name, _)| name);
+    let name = if name.is_empty() { package } else { name };
+    let args = ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name];
+    Ok(host::output(fnm, args)?.status.success())
+}
+
 pub(crate) fn update() -> Result<()> {
     let Some(fnm) = fnm::find_executable()? else { return Ok(()) };
     let args = ["exec", "--using=default", "--", "npm", "update", "--global", "--dangerously-allow-all-scripts"];
     host::run("npm package update", &fnm, args)?;
     Ok(())
-}
-
-fn is_installed(fnm: &str, package: &str) -> Result<bool> {
-    // split at the final @ so scoped names remain intact while versions/tags are ignored
-    let name = package.rsplit_once('@').map_or(package, |(name, _)| if name.is_empty() { package } else { name });
-    let args = ["exec", "--using=default", "--", "npm", "list", "--global", "--depth=0", "--", name];
-    Ok(host::output(fnm, args)?.status.success())
 }

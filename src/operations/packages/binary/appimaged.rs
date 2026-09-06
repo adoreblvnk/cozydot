@@ -1,3 +1,5 @@
+use std::fs;
+
 use super::github::Release;
 use crate::operations::{host, packages::apt};
 use crate::platform::Arch;
@@ -15,8 +17,7 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
 
         let home = host::home()?;
         let service = home.join(".config/systemd/user/default.target.wants/appimagelauncherd.service");
-        let service_path = service.to_str().context("appimagelauncher service path is not UTF-8")?;
-        host::run("remove conflicting appimaged service", "rm", ["-f", service_path])?;
+        let _ = fs::remove_file(&service);
         host::run("reload user services", "systemctl", ["--user", "daemon-reload"])?;
         let cache = home.join(".local/share/applications");
         let cache_path = cache.to_str().context("applications cache directory is not UTF-8")?;
