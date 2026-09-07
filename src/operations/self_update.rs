@@ -1,3 +1,4 @@
+use crate::style::STATUS;
 use anyhow::Result;
 
 pub(crate) fn self_update() -> Result<()> {
@@ -10,9 +11,9 @@ pub(crate) fn self_update() -> Result<()> {
         .build()?
         .update()?;
     if status.is_up_to_date() {
-        println!("cozydot is already up to date (v{})", status.version());
+        anstream::println!("{STATUS}✓{STATUS:#} cozydot is already up to date (v{})", status.version());
     } else {
-        println!("Updated cozydot to v{}", status.version());
+        anstream::println!("{STATUS}✓{STATUS:#} Updated cozydot to v{}", status.version());
     }
     Ok(())
 }
