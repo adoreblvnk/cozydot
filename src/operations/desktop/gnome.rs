@@ -3,10 +3,7 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::{
-    config::Gnome,
-    operations::host::{self, temp_path},
-};
+use crate::{config::Gnome, operations::host};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {
@@ -114,7 +111,7 @@ fn install_extension(uuid: &str) -> Result<()> {
     let shell_version = shell_version(host::stdout_line(&shell.stdout, "gnome-shell --version")?)?;
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
-    let archive = temp_path("gnome-extension", ".zip")?;
+    let archive = host::temp_path("gnome-extension", ".zip")?;
     // extension archive names omit @ although metadata UUIDs retain it
     let name = uuid.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
