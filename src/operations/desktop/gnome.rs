@@ -3,7 +3,7 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::operations::host::{self, temp_path};
+use crate::{config::Gnome, operations::host};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {
@@ -15,6 +15,41 @@ const DASH_TO_DOCK_UUID: &str = "dash-to-dock@micxgx.gmail.com";
 const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
 const ROUNDED_CORNERS_SETTINGS: &str =
     "/org/gnome/shell/extensions/rounded-window-corners-reborn/global-rounded-corner-settings";
+
+pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
+    if let Some(button_layout) = &gnome.button_layout {
+        super::gsettings_set("org.gnome.desktop.wm.preferences", "button-layout", &format!("'{button_layout}'"))?;
+    }
+    if let Some(files) = &gnome.files {
+        if let Some(hidden) = files.show_hidden_files {
+            let value = if hidden { "true" } else { "false" };
+            super::gsettings_set("org.gtk.gtk4.Settings.FileChooser", "show-hidden", value)?;
+        }
+        if let Some(folders_first) = files.sort_folders_first {
+            let value = if folders_first { "true" } else { "false" };
+            super::gsettings_set("org.gtk.gtk4.Settings.FileChooser", "sort-directories-first", value)?;
+        }
+    }
+    if let Some(idle) = &gnome.idle {
+        if let Some(timeout) = idle.timeout {
+            super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {}", timeout.seconds()))?;
+        }
+        if let Some(dim) = idle.dim {
+            let value = if dim { "true" } else { "false" };
+            super::gsettings_set("org.gnome.settings-daemon.plugins.power", "idle-dim", value)?;
+        }
+    }
+    if let Some(keyboard) = &gnome.keyboard {
+        let schema = "org.gnome.desktop.peripherals.keyboard";
+        if let Some(delay) = keyboard.delay {
+            super::gsettings_set(schema, "delay", &format!("uint32 {delay}"))?;
+        }
+        if let Some(interval) = keyboard.repeat_interval {
+            super::gsettings_set(schema, "repeat-interval", &format!("uint32 {interval}"))?;
+        }
+    }
+    Ok(())
+}
 
 pub(crate) fn apply_extensions(extensions: &[String]) -> Result<Outcome> {
     let mut outcome = Outcome::Completed;
@@ -76,7 +111,7 @@ fn install_extension(uuid: &str) -> Result<()> {
     let shell_version = shell_version(host::stdout_line(&shell.stdout, "gnome-shell --version")?)?;
     let metadata = std::str::from_utf8(&metadata.stdout).context("GNOME extension metadata is not UTF-8")?;
     let version = select_extension_version(metadata, shell_version)?;
-    let archive = temp_path("gnome-extension", ".zip")?;
+    let archive = host::temp_path("gnome-extension", ".zip")?;
     // extension archive names omit @ although metadata UUIDs retain it
     let name = uuid.replace('@', "");
     let url = format!("https://extensions.gnome.org/extension-data/{name}.v{version}.shell-extension.zip");
