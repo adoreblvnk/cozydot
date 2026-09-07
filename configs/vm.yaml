@@ -179,6 +179,7 @@ desktop:
     trackpad:
       tap_to_click: true
 updates:
+  cozydot: true
   packages:
     linux:
       apt: upgrade

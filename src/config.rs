@@ -653,6 +653,8 @@ pub struct Trackpad {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Updates {
+    #[serde(default)]
+    pub cozydot: bool,
     pub packages: PackageUpdates,
     pub tools: ToolUpdates,
     #[serde(default)]

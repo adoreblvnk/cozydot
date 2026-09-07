@@ -5,4 +5,7 @@ pub(crate) mod dotfiles;
 pub(crate) mod host;
 pub(crate) mod integrations;
 pub(crate) mod packages;
+pub(crate) mod self_update;
 pub(crate) mod toolchains;
+
+pub(crate) use self_update::self_update;

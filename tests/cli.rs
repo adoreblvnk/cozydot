@@ -17,7 +17,9 @@ fn cli_accepts_standard_flags() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Usage:"))
-        .stdout(predicate::str::contains("self-update"));
+        .stdout(predicate::str::contains("update"));
+
+    cozydot().args(["update", "--help"]).assert().success().stdout(predicate::str::contains("--self"));
 
     cozydot().arg("--version").assert().success().stdout(predicate::str::contains("cozydot"));
 

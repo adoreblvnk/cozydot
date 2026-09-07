@@ -145,6 +145,7 @@ integrations:
     extensions: []
   linux: {}
 updates:
+  cozydot: true
   packages:
     linux:
       apt: upgrade

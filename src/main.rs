@@ -41,9 +41,11 @@ enum Command {
         replace: bool,
     },
     /// Update configured software.
-    Update,
-    /// Update cozydot binary to latest release.
-    SelfUpdate,
+    Update {
+        /// Update only the cozydot binary.
+        #[arg(long = "self")]
+        self_only: bool,
+    },
 }
 
 struct ActiveHost {
@@ -92,11 +94,11 @@ fn main() {
                 let host = ActiveHost::load()?;
                 workflow::dotfiles(&host.config, &host.platform, &host.config_dir.join("dotfiles"), replace)?;
             }
-            Command::Update => {
+            Command::Update { self_only: true } => operations::self_update()?,
+            Command::Update { self_only: false } => {
                 let host = ActiveHost::load()?;
                 workflow::update(&host.config, &host.platform)?;
             }
-            Command::SelfUpdate => self_update()?,
         }
         Ok(())
     })();
@@ -109,21 +111,4 @@ fn main() {
         }
         std::process::exit(1);
     }
-}
-
-fn self_update() -> Result<()> {
-    let status = self_update::backends::github::Update::configure()
-        .repo_owner("adoreblvnk")
-        .repo_name("cozydot")
-        .bin_name("cozydot")
-        .show_download_progress(true)
-        .current_version(env!("CARGO_PKG_VERSION"))
-        .build()?
-        .update()?;
-    if status.is_up_to_date() {
-        println!("cozydot is already up to date (v{})", status.version());
-    } else {
-        println!("Updated cozydot to v{}", status.version());
-    }
-    Ok(())
 }

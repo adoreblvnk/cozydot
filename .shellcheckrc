@@ -1,6 +1,0 @@
-# Can't follow non-constant source. Use a directive to specify location
-disable=SC1090
-# Expressions don't expand in single quotes, use double quotes for that.
-disable=SC2016
-# Declare and assign separately to avoid masking return values
-disable=SC2155

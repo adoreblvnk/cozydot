@@ -11,6 +11,7 @@ use crate::{
         host::{self, macos as macos_host, sudo, users},
         integrations::{docker, skills, vscode},
         packages::{apt, binary, cargo, flatpak, homebrew, npm, snapd},
+        self_update,
         toolchains::{fnm, go, rustup, uv},
     },
     platform::{Arch, Distro, Platform, PlatformIdentity},
@@ -44,6 +45,9 @@ pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool
 
 pub fn update(config: &Config, platform: &Platform) -> Result<()> {
     host::home()?;
+    if config.updates.cozydot {
+        self_update()?;
+    }
     match platform.identity {
         PlatformIdentity::Macos => macos_update(config)?,
         PlatformIdentity::Linux { .. } => linux_update(config)?,
