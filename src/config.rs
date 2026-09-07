@@ -3,7 +3,7 @@
 use crate::platform::{Arch, DesktopKind, Distro, Family, Platform, PlatformIdentity};
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
-use serde::{Deserialize, Deserializer, de};
+use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -41,8 +41,8 @@ impl Config {
 
         // tools
         if let Some(go) = self.tools.go.as_deref() {
-            let valid = Regex::new(r"^(latest|[0-9]+\.[0-9]+\.[0-9]+)$")?.is_match(go);
-            ensure!(valid, "tools.go: expected `latest` or an exact version such as `1.24.6`");
+            let is_semver = semver::Version::parse(go).is_ok_and(|v| v.pre.is_empty() && v.build.is_empty());
+            ensure!(go == "latest" || is_semver, "tools.go: expected `latest` or an exact version such as `1.24.6`");
         }
         ensure!(self.tools.cargo.is_empty() || self.tools.rust.is_some(), "tools.cargo: requires tools.rust");
         ensure!(self.tools.npm.is_empty() || self.tools.node.is_some(), "tools.npm: requires tools.node");
@@ -470,6 +470,14 @@ impl LinuxDesktop {
                 "desktop.linux.gnome.terminal: {terminal:?} must start alphanumeric and contain only alphanumerics or `._+-`"
             );
         }
+        if let Some(timeout) = self.gnome.as_ref().and_then(|g| g.idle.as_ref()).and_then(|i| i.timeout.as_deref()) {
+            let duration = humantime::parse_duration(timeout).context("desktop.linux.gnome.idle.timeout")?;
+            ensure!(duration.subsec_nanos() == 0, "desktop.linux.gnome.idle.timeout: must resolve to whole seconds");
+            ensure!(
+                u32::try_from(duration.as_secs()).is_ok(),
+                "desktop.linux.gnome.idle.timeout: exceeds uint32 range"
+            );
+        }
         Ok(())
     }
 
@@ -481,34 +489,8 @@ impl LinuxDesktop {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Idle {
-    pub timeout: Option<IdleDuration>,
+    pub timeout: Option<String>,
     pub dim: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IdleDuration(u32);
-
-impl IdleDuration {
-    pub fn seconds(self) -> u32 {
-        self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for IdleDuration {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        let duration = humantime::parse_duration(&value).map_err(de::Error::custom)?;
-        // GNOME stores idle-delay as uint32 seconds
-        if duration.subsec_nanos() != 0 {
-            return Err(de::Error::custom("duration must resolve to a whole number of seconds"));
-        }
-        let seconds = u32::try_from(duration.as_secs());
-        let seconds = seconds.map_err(|_| de::Error::custom("duration exceeds the supported uint32 seconds range"))?;
-        Ok(Self(seconds))
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

@@ -16,7 +16,7 @@ where
 {
     let mut command = Command::new(program);
     command.args(args);
-    command.output().with_context(|| format!("start command {}", display(&command)))
+    command.output().with_context(|| format!("start command {command:?}"))
 }
 
 pub(crate) fn run<I, S>(label: &str, program: &str, args: I) -> Result<Output>
@@ -69,12 +69,7 @@ pub(crate) fn has_executable_on_path(name: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
     };
-    for directory in std::env::split_paths(&path) {
-        if is_executable(&directory.join(name)) {
-            return true;
-        }
-    }
-    false
+    std::env::split_paths(&path).any(|dir| is_executable(&dir.join(name)))
 }
 
 pub(crate) fn temp_path(stem: &str, suffix: &str) -> Result<tempfile::TempPath> {
@@ -110,12 +105,4 @@ pub(crate) fn stdout_line<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str>
     let record = output.strip_suffix('\n').unwrap_or(output);
     ensure!(!record.is_empty() && !record.contains('\n'), "{command} returned malformed record output");
     Ok(record)
-}
-
-fn display(command: &Command) -> String {
-    let mut parts = vec![command.get_program().to_string_lossy()];
-    for arg in command.get_args() {
-        parts.push(arg.to_string_lossy());
-    }
-    parts.join(" ")
 }

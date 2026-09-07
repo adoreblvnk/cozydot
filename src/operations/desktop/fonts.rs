@@ -41,21 +41,19 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
     }
     // macOS discovers user fonts directly while Linux requires a fontconfig refresh
     if changed && !cfg!(target_os = "macos") {
-        host::run("Nerd Font cache refresh", "fc-cache", ["--force", parent.to_str().unwrap_or_default()])?;
+        host::run("Nerd Font cache refresh", "fc-cache", ["--force", &parent.to_string_lossy()])?;
     }
     Ok(())
 }
 
 fn install(family: &str, destination: &Path) -> Result<()> {
     let archive = temp_path("nerd-font", ".tar.xz")?;
-    let archive_path = archive.to_str().context("font archive path is not UTF-8")?;
+    let archive_path = archive.to_string_lossy();
     let url = format!("https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{family}.tar.xz");
-    let args = ["--proto", "=https", "--output", archive_path];
-    host::curl("Nerd Font archive download", &url, args)?;
+    host::curl("Nerd Font archive download", &url, ["--proto", "=https", "--output", &archive_path])?;
     // replace the whole family so files removed upstream cannot survive reinstall
     let _ = fs::remove_dir_all(destination);
     fs::create_dir_all(destination).context("create font destination directory")?;
-    let path = destination.to_str().context("font path is not UTF-8")?;
-    host::run("Nerd Font archive extraction", "tar", ["-xJf", archive_path, "-C", path])?;
+    host::run("Nerd Font archive extraction", "tar", ["-xJf", &archive_path, "-C", &destination.to_string_lossy()])?;
     Ok(())
 }

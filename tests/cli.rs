@@ -12,7 +12,12 @@ fn cli_accepts_standard_flags() {
     let env = TestEnv::new();
     let cozydot = || env.cozydot();
 
-    cozydot().arg("--help").assert().success().stdout(predicate::str::contains("Usage:"));
+    cozydot()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Usage:"))
+        .stdout(predicate::str::contains("self-update"));
 
     cozydot().arg("--version").assert().success().stdout(predicate::str::contains("cozydot"));
 
