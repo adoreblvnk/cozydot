@@ -43,11 +43,12 @@ pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
         }
     }
     if let Some(keyboard) = &gnome.keyboard {
+        let schema = "org.gnome.desktop.peripherals.keyboard";
         if let Some(delay) = keyboard.delay {
-            super::gsettings_set("org.gnome.desktop.peripherals.keyboard", "delay", &format!("uint32 {delay}"))?;
+            super::gsettings_set(schema, "delay", &format!("uint32 {delay}"))?;
         }
         if let Some(interval) = keyboard.repeat_interval {
-            super::gsettings_set("org.gnome.desktop.peripherals.keyboard", "repeat-interval", &format!("uint32 {interval}"))?;
+            super::gsettings_set(schema, "repeat-interval", &format!("uint32 {interval}"))?;
         }
     }
     Ok(())
