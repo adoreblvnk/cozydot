@@ -66,7 +66,7 @@ fn resolve_url(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) 
     }
 }
 
-fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, arch: Arch) -> Result<String> {
+pub(super) fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, arch: Arch) -> Result<String> {
     let release: Release = serde_json::from_slice(input).context("parse GitHub release JSON")?;
     let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
     let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();

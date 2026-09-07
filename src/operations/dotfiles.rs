@@ -85,22 +85,14 @@ fn collect_conflicts(
         source.display()
     );
     match fs::symlink_metadata(&target) {
-        Ok(_) if !resolves_to(&target, source) => conflicts.push((package.to_owned(), target)),
+        Ok(_) if !same_file::is_same_file(&target, source).unwrap_or(false) => {
+            conflicts.push((package.to_owned(), target))
+        }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("read dotfile destination metadata"),
     }
     Ok(())
-}
-
-fn resolves_to(target: &Path, source: &Path) -> bool {
-    let Ok(target) = fs::canonicalize(target) else {
-        return false;
-    };
-    let Ok(source) = fs::canonicalize(source) else {
-        return false;
-    };
-    target == source
 }
 
 fn backup_conflicts(home: &Path, conflicts: &[(String, PathBuf)]) -> Result<()> {

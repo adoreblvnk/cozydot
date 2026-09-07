@@ -1,9 +1,8 @@
 use std::fs;
 
-use super::github::Release;
 use crate::operations::{host, packages::apt};
 use crate::platform::Arch;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
 
@@ -35,17 +34,8 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
 
 fn resolve_asset_url(arch: Arch) -> Result<String> {
     let output = host::curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
-    let release: Release = serde_json::from_slice(&output.stdout).context("parse appimaged release JSON")?;
-    let suffix = match arch {
-        Arch::X86_64 => "-x86_64.AppImage",
-        Arch::Aarch64 => "-aarch64.AppImage",
-    };
-    for asset in release.assets {
-        if asset.name.starts_with("appimaged-") && asset.name.ends_with(suffix) {
-            return Ok(asset.browser_download_url);
-        }
-    }
-    bail!("appimaged release has no asset for {}", arch.as_str())
+    let pattern = format!(r"^appimaged-.*-{}\.AppImage$", arch.as_str());
+    super::select_asset_url(&output.stdout, &pattern, "appimaged", arch)
 }
 
 fn ensure_fuse() -> Result<()> {

@@ -31,8 +31,9 @@ pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
         }
     }
     if let Some(idle) = &gnome.idle {
-        if let Some(timeout) = idle.timeout {
-            super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {}", timeout.seconds()))?;
+        if let Some(timeout) = idle.timeout.as_deref() {
+            let seconds = humantime::parse_duration(timeout)?.as_secs();
+            super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))?;
         }
         if let Some(dim) = idle.dim {
             let value = if dim { "true" } else { "false" };

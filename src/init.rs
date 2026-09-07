@@ -112,12 +112,9 @@ impl Init {
             Ok(_) => true,
         };
         if package_exists {
-            let mut files = Vec::new();
-            if !collect_regular_files(&dest, &self.root, &mut files)? {
+            let Some(files) = collect_regular_files(&dest, &self.root)? else {
                 return Ok(());
-            }
-            // match manifest order because filesystem traversal order is unspecified
-            files.sort();
+            };
             if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
                 return Ok(());
             }
@@ -176,21 +173,21 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect_regular_files(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) -> Result<bool> {
-    for entry in fs::read_dir(dir)? {
+fn collect_regular_files(dir: &Path, root: &Path) -> Result<Option<Vec<PathBuf>>> {
+    let mut files = Vec::new();
+    for entry in walkdir::WalkDir::new(dir).min_depth(1).follow_links(false) {
         let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            if !collect_regular_files(&entry.path(), root, files)? {
-                return Ok(false);
-            }
-        } else if file_type.is_file() {
-            files.push(entry.path().strip_prefix(root)?.to_path_buf());
-        } else {
-            return Ok(false);
+        if entry.file_type().is_dir() {
+            continue;
         }
+        if !entry.file_type().is_file() {
+            return Ok(None);
+        }
+        files.push(entry.path().strip_prefix(root)?.to_path_buf());
     }
-    Ok(true)
+    // match manifest order because filesystem traversal order is unspecified
+    files.sort();
+    Ok(Some(files))
 }
 
 fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
