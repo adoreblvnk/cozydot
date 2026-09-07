@@ -44,12 +44,8 @@ impl Config {
             let valid = Regex::new(r"^(latest|[0-9]+\.[0-9]+\.[0-9]+)$")?.is_match(go);
             ensure!(valid, "tools.go: expected `latest` or an exact version such as `1.24.6`");
         }
-        if !self.tools.cargo.is_empty() && self.tools.rust.is_none() {
-            bail!("tools.cargo: requires tools.rust");
-        }
-        if !self.tools.npm.is_empty() && self.tools.node.is_none() {
-            bail!("tools.npm: requires tools.node");
-        }
+        ensure!(self.tools.cargo.is_empty() || self.tools.rust.is_some(), "tools.cargo: requires tools.rust");
+        ensure!(self.tools.npm.is_empty() || self.tools.node.is_some(), "tools.npm: requires tools.node");
 
         // fonts
         validate_definition_names(&self.fonts.nerd, "fonts.nerd")?;
@@ -469,10 +465,10 @@ impl LinuxDesktop {
     fn validate(&self) -> Result<()> {
         if let Some(terminal) = self.gnome.as_ref().and_then(|gnome| gnome.terminal.as_ref()) {
             let valid = Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")?.is_match(terminal);
-            if !valid {
-                let path = "desktop.linux.gnome.terminal";
-                bail!("{path}: {terminal:?} must start alphanumeric and contain only alphanumerics or `._+-`");
-            }
+            ensure!(
+                valid,
+                "desktop.linux.gnome.terminal: {terminal:?} must start alphanumeric and contain only alphanumerics or `._+-`"
+            );
         }
         Ok(())
     }
@@ -482,7 +478,7 @@ impl LinuxDesktop {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Idle {
     pub timeout: Option<IdleDuration>,
@@ -515,74 +511,160 @@ impl<'de> Deserialize<'de> for IdleDuration {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Gnome {
-    pub terminal: Option<String>,
-    pub idle: Option<Idle>,
-    #[serde(default)]
-    pub extensions: Vec<String>,
+    /// Window titlebar button layout
+    pub button_layout: Option<String>,
     #[serde(default)]
     pub dash_to_dock: bool,
     #[serde(default)]
+    pub extensions: Vec<String>,
+    pub files: Option<GnomeFiles>,
+    pub idle: Option<Idle>,
+    pub keyboard: Option<GnomeKeyboard>,
+    #[serde(default)]
     pub rounded_window_corners: bool,
+    pub terminal: Option<String>,
 }
 
 impl Gnome {
     pub(crate) fn has_intent(&self) -> bool {
-        self.terminal.is_some()
-            || self.idle.as_ref().is_some_and(|idle| idle.timeout.is_some() || idle.dim.is_some())
-            || !self.extensions.is_empty()
+        self.button_layout.is_some()
             || self.dash_to_dock
+            || !self.extensions.is_empty()
+            || self.files.is_some()
+            || self.idle.is_some()
+            || self.keyboard.is_some()
             || self.rounded_window_corners
+            || self.terminal.is_some()
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GnomeFiles {
+    /// Show hidden files in Files & GTK file dialogs
+    pub show_hidden_files: Option<bool>,
+    /// Keep directories on top when sorting files
+    pub sort_folders_first: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GnomeKeyboard {
+    /// Delay until repeat in milliseconds
+    pub delay: Option<u32>,
+    /// Key repeat interval in milliseconds
+    pub repeat_interval: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacosDesktop {
+    pub dialogs: Option<Dialogs>,
     pub dock: Option<Dock>,
     pub finder: Option<Finder>,
     pub keyboard: Option<Keyboard>,
+    pub screenshots: Option<Screenshots>,
     pub trackpad: Option<Trackpad>,
 }
 
 impl MacosDesktop {
     pub(crate) fn has_intent(&self) -> bool {
-        let dock = self.dock.as_ref().is_some_and(|d| d.autohide.is_some() || d.show_recent_applications.is_some());
-        let finder = self.finder.as_ref();
-        let finder = finder.is_some_and(|f| f.show_filename_extensions.is_some() || f.show_hidden_files.is_some());
-        let keyboard = self.keyboard.as_ref();
-        let keyboard = keyboard.is_some_and(|k| k.key_repeat.is_some() || k.initial_key_repeat.is_some());
-        let trackpad = self.trackpad.as_ref().is_some_and(|trackpad| trackpad.tap_to_click.is_some());
-        dock || finder || keyboard || trackpad
+        self.dialogs.as_ref().is_some_and(|d| d != &Dialogs::default())
+            || self.dock.as_ref().is_some_and(|d| d != &Dock::default())
+            || self.finder.as_ref().is_some_and(|f| f != &Finder::default())
+            || self.keyboard.as_ref().is_some_and(|k| k != &Keyboard::default())
+            || self.screenshots.as_ref().is_some_and(|s| s != &Screenshots::default())
+            || self.trackpad.as_ref().is_some_and(|t| t != &Trackpad::default())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dialogs {
+    /// Expand save panel by default
+    pub expand_save_panel: Option<bool>,
+    /// Save new documents to iCloud by default rather than disk
+    pub save_to_cloud: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dock {
+    /// Automatically hide & show Dock
     pub autohide: Option<bool>,
+    /// Automatically rearrange Spaces based on recent use
+    pub mru_spaces: Option<bool>,
+    /// Show recent applications in Dock
     pub show_recent_applications: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Finder {
+    /// Create .DS_Store files on network & USB volumes
+    pub ds_store_on_external: Option<bool>,
+    /// Default search scope: SCcf = current folder / SCev = this Mac / FXml = previous scope
+    pub search_scope: Option<SearchScope>,
+    /// Show all filename extensions
     pub show_filename_extensions: Option<bool>,
+    /// Show hidden files in Finder
     pub show_hidden_files: Option<bool>,
+    /// Show path bar at bottom of Finder windows
+    pub show_path_bar: Option<bool>,
+    /// Show status bar with item count & available space
+    pub show_status_bar: Option<bool>,
+    /// Keep folders on top when sorting by name
+    pub sort_folders_first: Option<bool>,
+    /// Warning prompt before changing file extension
+    pub warn_on_extension_change: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum SearchScope {
+    SCcf,
+    SCev,
+    FXml,
+}
+
+impl SearchScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SCcf => "SCcf",
+            Self::SCev => "SCev",
+            Self::FXml => "FXml",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Keyboard {
-    pub key_repeat: Option<i32>,
+    /// Smart substitutions: quotes, dashes, period, caps & spelling
+    pub auto_substitutions: Option<bool>,
+    /// Keyboard navigation to move focus between controls with Tab
+    pub keyboard_navigation: Option<bool>,
+    /// Delay until repeat in ticks (1 tick = 15ms)
     pub initial_key_repeat: Option<i32>,
+    /// Key repeat rate in ticks (1 tick = 15ms)
+    pub key_repeat: Option<i32>,
+    /// Press & hold for accent menu instead of key repeat
+    pub press_and_hold: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Screenshots {
+    /// Directory where screenshots & screen recordings are saved
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Trackpad {
+    /// Tap trackpad to click
     pub tap_to_click: Option<bool>,
 }
 
@@ -658,8 +740,6 @@ fn validate_definition_names(values: &[String], path: &str) -> Result<()> {
 
 fn validate_definition_name(value: &str, path: &str) -> Result<()> {
     let valid = Regex::new(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")?.is_match(value);
-    if !valid {
-        bail!("{path}: {value:?} must start/end alphanumeric and contain only alphanumerics or `._-`");
-    }
+    ensure!(valid, "{path}: {value:?} must start/end alphanumeric and contain only alphanumerics or `._-`");
     Ok(())
 }

@@ -304,25 +304,47 @@ desktop:
   theme: dark
   linux:
     gnome:
-      terminal: wezterm
-      idle:
-        timeout: 15m
-        dim: false
+      button_layout: ":minimize,maximize,close" # default: ":close"
+      dash_to_dock: true
       extensions:
         - blur-my-shell@aunetx
         - netspeedsimplified@prateekmedia.extension
-      dash_to_dock: true
+      files:
+        show_hidden_files: true
+        sort_folders_first: true
+      idle:
+        timeout: 15m
+        dim: false
+      keyboard:
+        delay: 200 # default: 500
+        repeat_interval: 30 # default: 30
       rounded_window_corners: true
+      terminal: wezterm # default: gnome-terminal
   macos:
+    dialogs:
+      expand_save_panel: true
+      save_to_cloud: false
     dock:
       autohide: true
+      mru_spaces: false
       show_recent_applications: false
     finder:
+      ds_store_on_external: false
+      search_scope: SCcf # default: SCev
       show_filename_extensions: true
       show_hidden_files: true
+      show_path_bar: true
+      show_status_bar: true
+      sort_folders_first: true
+      warn_on_extension_change: false
     keyboard:
-      key_repeat: 2 # macOS default: 6
-      initial_key_repeat: 15 # macOS default: 25
+      auto_substitutions: false
+      initial_key_repeat: 15 # default: 25
+      key_repeat: 2 # default: 6
+      keyboard_navigation: true
+      press_and_hold: false
+    screenshots:
+      location: ~/Pictures/Screenshots # default: ~/Desktop
     trackpad:
       tap_to_click: true
 updates:

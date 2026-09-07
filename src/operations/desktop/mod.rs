@@ -76,15 +76,7 @@ fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn set_idle_delay(seconds: u32) -> Result<()> {
-    gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))
-}
-
-pub(crate) fn set_idle_dim(enabled: bool) -> Result<()> {
-    gsettings_set("org.gnome.settings-daemon.plugins.power", "idle-dim", if enabled { "true" } else { "false" })
-}
-
-fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> {
+pub(crate) fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> {
     host::run("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }
