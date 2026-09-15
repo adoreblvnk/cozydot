@@ -6,6 +6,7 @@ pub(crate) fn self_update() -> Result<()> {
         .repo_owner("adoreblvnk")
         .repo_name("cozydot")
         .bin_name("cozydot")
+        .unattended()
         .show_download_progress(true)
         .current_version(env!("CARGO_PKG_VERSION"))
         .build()?
