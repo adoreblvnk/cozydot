@@ -24,7 +24,6 @@ packages:
         - imagemagick
         - jq
         - openssh-server
-        - pandoc
         - pass
         - pinentry-tty
         - shfmt
@@ -82,7 +81,6 @@ packages:
         - imagemagick
         - jq
         - openjdk
-        - pandoc
         - pass
         - sevenzip
         - shfmt

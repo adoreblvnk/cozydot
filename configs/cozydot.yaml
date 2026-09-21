@@ -24,7 +24,6 @@ packages:
         - imagemagick
         - jq
         - openssh-server
-        - pandoc
         - pass
         - pinentry-tty
         - shfmt
@@ -128,7 +127,6 @@ packages:
       - com.bitwarden.desktop
       - com.discordapp.Discord
       - com.obsproject.Studio
-      - io.bassi.Amberol
       - net.sapples.LiveCaptions
       - org.gimp.GIMP
       - org.qbittorrent.qBittorrent
@@ -186,7 +184,6 @@ packages:
         - imagemagick
         - jq
         - openjdk
-        - pandoc
         - pass
         - sevenzip
         - shfmt
@@ -197,16 +194,13 @@ packages:
       casks:
         - bitwarden
         - discord
-        - drawio
         - git-credential-manager
         - helium-browser
         - obs
         - obsidian
         - orbstack
-        - qlmarkdown
         - shotcut
         - syntax-highlight
-        - telegram
         - visual-studio-code
         - wezterm@nightly
         - zen
@@ -232,7 +226,6 @@ tools:
   npm:
     - "@slidev/cli"
     - firecrawl-cli
-    - lighthouse
     - opencode-ai
     - skills
 fonts:
@@ -262,7 +255,6 @@ integrations:
     - addyosmani/web-quality-skills@accessibility
     - addyosmani/web-quality-skills@web-quality-audit
     - adoreblvnk/cozydot@md-to-pdf
-    - anthropics/skills@pdf
     - astral-sh/claude-code-plugins@uv
     - firecrawl/cli@firecrawl
     - mattpocock/skills@writing-for-agents
@@ -278,13 +270,11 @@ integrations:
     extensions:
       - catppuccin.catppuccin-vsc
       - charliermarsh.ruff
-      - christian-kohler.path-intellisense
       - eamodio.gitlens
       - esbenp.prettier-vscode
       - golang.go
       - llvm-vs-code-extensions.vscode-clangd
       - mathematic.vscode-pdf
-      - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
       - redhat.vscode-yaml
