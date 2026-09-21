@@ -143,7 +143,6 @@ desktop:
         sort_folders_first: true
       idle:
         timeout: 15m
-        dim: false
       keyboard:
         delay: 200 # default: 500
         repeat_interval: 30 # default: 30

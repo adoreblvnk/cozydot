@@ -35,10 +35,6 @@ pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
             let seconds = humantime::parse_duration(timeout)?.as_secs();
             super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))?;
         }
-        if let Some(dim) = idle.dim {
-            let value = if dim { "true" } else { "false" };
-            super::gsettings_set("org.gnome.settings-daemon.plugins.power", "idle-dim", value)?;
-        }
     }
     if let Some(keyboard) = &gnome.keyboard {
         let schema = "org.gnome.desktop.peripherals.keyboard";
