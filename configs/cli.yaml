@@ -24,7 +24,6 @@ packages:
         - imagemagick
         - jq
         - openssh-server
-        - pandoc
         - pass
         - pinentry-tty
         - shfmt
@@ -70,7 +69,6 @@ packages:
         - imagemagick
         - jq
         - openjdk
-        - pandoc
         - pass
         - sevenzip
         - shfmt
@@ -102,7 +100,6 @@ tools:
   npm:
     - "@slidev/cli"
     - firecrawl-cli
-    - lighthouse
     - opencode-ai
     - skills
 fonts:
@@ -129,9 +126,7 @@ integrations:
     - addyosmani/web-quality-skills@accessibility
     - addyosmani/web-quality-skills@web-quality-audit
     - adoreblvnk/cozydot@md-to-pdf
-    - anthropics/skills@pdf
     - astral-sh/claude-code-plugins@uv
-    - docling-project/docling@docling
     - firecrawl/cli@firecrawl
     - mattpocock/skills@writing-for-agents
     - microsoft/playwright-cli@playwright-cli
@@ -140,6 +135,7 @@ integrations:
     - slidevjs/slidev@slidev
     - upstash/context7@find-docs
     - vercel-labs/skills@find-skills
+    - xberg-io/xberg@xberg
     - yamadashy/repomix@repomix-explorer
   vscode:
     extensions: []

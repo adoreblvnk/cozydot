@@ -24,7 +24,6 @@ packages:
         - imagemagick
         - jq
         - openssh-server
-        - pandoc
         - pass
         - pinentry-tty
         - shfmt
@@ -128,7 +127,6 @@ packages:
       - com.bitwarden.desktop
       - com.discordapp.Discord
       - com.obsproject.Studio
-      - io.bassi.Amberol
       - net.sapples.LiveCaptions
       - org.gimp.GIMP
       - org.qbittorrent.qBittorrent
@@ -186,7 +184,6 @@ packages:
         - imagemagick
         - jq
         - openjdk
-        - pandoc
         - pass
         - sevenzip
         - shfmt
@@ -197,16 +194,13 @@ packages:
       casks:
         - bitwarden
         - discord
-        - drawio
         - git-credential-manager
         - helium-browser
         - obs
         - obsidian
         - orbstack
-        - qlmarkdown
         - shotcut
         - syntax-highlight
-        - telegram
         - visual-studio-code
         - wezterm@nightly
         - zen
@@ -232,7 +226,6 @@ tools:
   npm:
     - "@slidev/cli"
     - firecrawl-cli
-    - lighthouse
     - opencode-ai
     - skills
 fonts:
@@ -262,9 +255,7 @@ integrations:
     - addyosmani/web-quality-skills@accessibility
     - addyosmani/web-quality-skills@web-quality-audit
     - adoreblvnk/cozydot@md-to-pdf
-    - anthropics/skills@pdf
     - astral-sh/claude-code-plugins@uv
-    - docling-project/docling@docling
     - firecrawl/cli@firecrawl
     - mattpocock/skills@writing-for-agents
     - microsoft/playwright-cli@playwright-cli
@@ -273,18 +264,17 @@ integrations:
     - slidevjs/slidev@slidev
     - upstash/context7@find-docs
     - vercel-labs/skills@find-skills
+    - xberg-io/xberg@xberg
     - yamadashy/repomix@repomix-explorer
   vscode:
     extensions:
       - catppuccin.catppuccin-vsc
       - charliermarsh.ruff
-      - christian-kohler.path-intellisense
       - eamodio.gitlens
       - esbenp.prettier-vscode
       - golang.go
       - llvm-vs-code-extensions.vscode-clangd
       - mathematic.vscode-pdf
-      - ms-python.debugpy
       - ms-python.python
       - ms-python.vscode-pylance
       - redhat.vscode-yaml
@@ -314,7 +304,6 @@ desktop:
         sort_folders_first: true
       idle:
         timeout: 15m
-        dim: false
       keyboard:
         delay: 200 # default: 500
         repeat_interval: 30 # default: 30

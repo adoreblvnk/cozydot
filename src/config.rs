@@ -490,7 +490,6 @@ impl LinuxDesktop {
 #[serde(deny_unknown_fields)]
 pub struct Idle {
     pub timeout: Option<String>,
-    pub dim: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

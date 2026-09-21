@@ -34,8 +34,9 @@ if [[ -d "$FNM_PATH" ]]; then
 fi
 
 # uv
+# sanitize apostrophes https://github.com/clap-rs/clap/issues/1596
 if command -v uv &>/dev/null; then eval "$(uv generate-shell-completion zsh)"; fi
-if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion zsh)"; fi
+if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion zsh | sed "s/Don't/Dont/g")"; fi
 
 # Aliases
 alias c=clear
