@@ -30,11 +30,9 @@ pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
             super::gsettings_set("org.gtk.gtk4.Settings.FileChooser", "sort-directories-first", value)?;
         }
     }
-    if let Some(idle) = &gnome.idle {
-        if let Some(timeout) = idle.timeout.as_deref() {
-            let seconds = humantime::parse_duration(timeout)?.as_secs();
-            super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))?;
-        }
+    if let Some(Some(timeout)) = gnome.idle.as_ref().map(|i| i.timeout.as_deref()) {
+        let seconds = humantime::parse_duration(timeout)?.as_secs();
+        super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))?;
     }
     if let Some(keyboard) = &gnome.keyboard {
         let schema = "org.gnome.desktop.peripherals.keyboard";
