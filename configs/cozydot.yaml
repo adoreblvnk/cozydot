@@ -213,13 +213,14 @@ tools:
     - bat
     - bottom
     - du-dust
-    - eza
-    - fd-find
+    - eza     # ls alternative
+    - fd-find # find alternative
+    - panache # markdown formatter
     - presenterm
     - resvg
     - ripgrep
     - starship
-    - tealdeer
+    - tlrc
     - tokei
     - yazi-fm
     - zoxide
@@ -227,6 +228,8 @@ tools:
     - "@slidev/cli"
     - firecrawl-cli
     - opencode-ai
+    - oxfmt   # JS formatter
+    - oxlint  # JS linter
     - skills
 fonts:
   nerd:
@@ -270,13 +273,13 @@ integrations:
     extensions:
       - catppuccin.catppuccin-vsc
       - charliermarsh.ruff
-      - eamodio.gitlens
-      - esbenp.prettier-vscode
       - golang.go
+      - jolars.panache
       - llvm-vs-code-extensions.vscode-clangd
       - mathematic.vscode-pdf
       - ms-python.python
       - ms-python.vscode-pylance
+      - oxc.oxc-vscode
       - redhat.vscode-yaml
       - rust-lang.rust-analyzer
       - streetsidesoftware.code-spell-checker
@@ -305,10 +308,10 @@ desktop:
       idle:
         timeout: 15m
       keyboard:
-        delay: 200 # default: 500
-        repeat_interval: 30 # default: 30
+        delay: 200                     # default: 500
+        repeat_interval: 30            # default: 30
       rounded_window_corners: true
-      terminal: wezterm # default: gnome-terminal
+      terminal: wezterm                # default: gnome-terminal
   macos:
     dialogs:
       expand_save_panel: true
@@ -319,7 +322,7 @@ desktop:
       show_recent_applications: false
     finder:
       ds_store_on_external: false
-      search_scope: SCcf # default: SCev
+      search_scope: SCcf               # default: SCev
       show_filename_extensions: true
       show_hidden_files: true
       show_path_bar: true
@@ -328,8 +331,8 @@ desktop:
       warn_on_extension_change: false
     keyboard:
       auto_substitutions: false
-      initial_key_repeat: 15 # default: 25
-      key_repeat: 2 # default: 6
+      initial_key_repeat: 15           # default: 25
+      key_repeat: 2                    # default: 6
       keyboard_navigation: true
       press_and_hold: false
     screenshots:
