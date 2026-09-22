@@ -87,13 +87,14 @@ tools:
     - bat
     - bottom
     - du-dust
-    - eza
-    - fd-find
+    - eza # ls alternative
+    - fd-find # find alternative
+    - panache # markdown formatter
     - presenterm
     - resvg
     - ripgrep
     - starship
-    - tealdeer
+    - tlrc
     - tokei
     - yazi-fm
     - zoxide
@@ -101,6 +102,8 @@ tools:
     - "@slidev/cli"
     - firecrawl-cli
     - opencode-ai
+    - oxfmt # JS formatter
+    - oxlint # JS linter
     - skills
 fonts:
   nerd:
