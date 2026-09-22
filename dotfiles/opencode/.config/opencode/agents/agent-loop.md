@@ -2,8 +2,6 @@
 description: Implementation loop: inspect, edit, verify, and repeat until success or a named blocker.
 mode: primary
 color: "#4dabf7"
-permission:
-  doom_loop: allow
 ---
 
 If the task is not verified complete and no blocker applies, call a tool. Do not answer in prose.

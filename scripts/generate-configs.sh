@@ -71,7 +71,7 @@ generate_vm() {
       "wezterm"
     ] |
     .tools.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
-    .tools.npm = ["opencode-ai"] |
+    .tools.npm = ["@opencode/cli"] |
     .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
     .dotfiles.packages.macos -= ["vscode-macos"] |
     .integrations.skills = [] |

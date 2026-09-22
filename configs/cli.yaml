@@ -99,9 +99,9 @@ tools:
     - yazi-fm
     - zoxide
   npm:
+    - "@opencode/cli"
     - "@slidev/cli"
     - firecrawl-cli
-    - opencode-ai
     - oxfmt # JS formatter
     - oxlint # JS linter
     - skills
@@ -117,6 +117,7 @@ dotfiles:
       - fastfetch
       - git
       - gnupg
+      - npm
       - opencode
       - starship
       - yazi

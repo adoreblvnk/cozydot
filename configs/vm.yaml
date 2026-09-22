@@ -104,7 +104,7 @@ tools:
     - starship
     - tealdeer
   npm:
-    - opencode-ai
+    - '@opencode/cli'
 fonts:
   nerd:
     - GeistMono
@@ -116,6 +116,7 @@ dotfiles:
       - fastfetch
       - git
       - gnupg
+      - npm
       - starship
       - wezterm
     linux:

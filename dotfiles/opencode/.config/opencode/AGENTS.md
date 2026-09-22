@@ -14,7 +14,7 @@
 ## Skills Protocol
 <!-- https://agentskills.io/client-implementation/adding-skills-support#behavioral-instructions -->
 - The skills in `<available_skills` provide specialized instructions for specific tasks.
-- When a task matches a skill's description, call the `skill` / `skill_view` tool with the skill's name to load its full instructions.
+- When a task matches a skill's description, call the `skill` tool with the skill's name to load its full instructions.
 
 ## Project conventions
 

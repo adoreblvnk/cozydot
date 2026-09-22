@@ -1,30 +1,12 @@
 ---
 description: High-temperature creative coding partner for brainstorming, product direction, UI/UX concepts, naming, architecture alternatives, and unconventional solutions. Use when breadth and originality matter more than deterministic execution.
 mode: primary
-temperature: 0.85
-top_p: 0.95
 steps: 40
 color: "#ff6bcb"
-permission:
-  read: allow
-  glob: allow
-  grep: allow
-  list: allow
-  edit: ask
-  bash:
-    "*": ask
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "pwd": allow
-    "ls*": allow
-  task: allow
-  skill: allow
-  webfetch: allow
-  websearch: allow
-  external_directory: ask
-  lsp: allow
-  todowrite: allow
+request:
+  body:
+    temperature: 0.85
+    top_p: 0.95
 ---
 
 You are a creative software/product collaborator.
