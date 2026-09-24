@@ -172,6 +172,14 @@ packages:
           assets:
             x86_64: ^zen-x86_6[0-9]\.AppImage$
             aarch64: ^zen-aarch6[0-9]\.AppImage$
+      - name: omp
+        format: executable
+        source:
+          provider: github
+          repo: can1357/oh-my-pi
+          assets:
+            x86_64: ^omp-linux-x64$
+            aarch64: ^omp-linux-arm64$
   macos:
     homebrew:
       formulae:
@@ -193,6 +201,7 @@ packages:
         - zsh-syntax-highlighting
       casks:
         - bitwarden
+        - can1357/tap/omp
         - discord
         - git-credential-manager
         - helium-browser

@@ -104,11 +104,13 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
+    let mut executables = Vec::new();
     for package in &config.packages.linux.binaries {
         let Some(source) = binary::select_source(package, platform.arch) else { continue };
         match package.format {
             BinaryFormat::Deb => deb_binaries.push((package, source)),
             BinaryFormat::AppImage => appimages.push((package, source)),
+            BinaryFormat::Executable => executables.push((package, source)),
         }
     }
     if theme.is_some() || desktop_config.is_some_and(LinuxDesktop::has_intent) {
@@ -170,6 +172,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         Ok(())
     };
     for (package, source) in deb_binaries {
+        install_binary(package, source)?;
+    }
+    for (package, source) in executables {
         install_binary(package, source)?;
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals

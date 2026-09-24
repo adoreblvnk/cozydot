@@ -290,6 +290,7 @@ pub fn select_repo_codename(key: DistroKey, platform: &Platform) -> &str {
 pub enum BinaryFormat {
     Deb,
     AppImage,
+    Executable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
