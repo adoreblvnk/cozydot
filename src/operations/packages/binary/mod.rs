@@ -11,6 +11,7 @@ use self::github::Release;
 
 mod appimage;
 pub(crate) mod appimaged;
+mod executable;
 mod github;
 
 const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
@@ -34,7 +35,8 @@ pub(crate) fn select_source(package: &BinaryPackage, arch: Arch) -> Option<Selec
 pub(crate) fn is_installed(package: &BinaryPackage) -> Result<bool> {
     Ok(match package.format {
         BinaryFormat::Deb => host::has_executable_on_path(&package.name),
-        BinaryFormat::AppImage => host::is_regular_executable(&appimage_path(&host::home()?, package)),
+        BinaryFormat::AppImage => host::is_regular_executable(&appimage_path(package)?),
+        BinaryFormat::Executable => host::is_regular_executable(&executable::path(package)?),
     })
 }
 
@@ -42,14 +44,13 @@ pub(crate) fn install(package: &BinaryPackage, arch: Arch, source: SelectedSourc
     let url = resolve_url(package, arch, source)?;
     match package.format {
         BinaryFormat::Deb => install_deb(package, &url),
-        BinaryFormat::AppImage => {
-            appimage::install_appimage("download binary package", &url, &appimage_path(&host::home()?, package))
-        }
+        BinaryFormat::AppImage => appimage::install_appimage("download binary package", &url, &appimage_path(package)?),
+        BinaryFormat::Executable => executable::install("download executable", &url, &executable::path(package)?),
     }
 }
 
-fn appimage_path(home: &std::path::Path, package: &BinaryPackage) -> PathBuf {
-    home.join("Applications").join(format!("{}.AppImage", package.name))
+fn appimage_path(package: &BinaryPackage) -> Result<PathBuf> {
+    Ok(host::home()?.join("Applications").join(format!("{}.AppImage", package.name)))
 }
 
 fn resolve_url(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) -> Result<String> {
