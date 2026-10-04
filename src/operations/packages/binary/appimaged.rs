@@ -2,9 +2,22 @@ use std::fs;
 
 use crate::operations::{host, packages::apt};
 use crate::platform::Arch;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use regex::Regex;
+use serde::Deserialize;
 
 const RELEASE_API: &str = "https://api.github.com/repos/probonopd/go-appimage/releases/tags/continuous";
+
+#[derive(Deserialize)]
+struct Release {
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    browser_download_url: String,
+}
 
 pub(crate) fn install(arch: Arch) -> Result<()> {
     ensure_fuse()?;
@@ -34,8 +47,14 @@ pub(crate) fn install(arch: Arch) -> Result<()> {
 
 fn resolve_asset_url(arch: Arch) -> Result<String> {
     let output = host::curl("resolve appimaged release", RELEASE_API, std::iter::empty::<&str>())?;
+    let release: Release = serde_json::from_slice(&output.stdout).context("parse GitHub release JSON")?;
     let pattern = format!(r"^appimaged-.*-{}\.AppImage$", arch.as_str());
-    super::select_asset_url(&output.stdout, &pattern, "appimaged", arch)
+    let regex = Regex::new(&pattern).context("compile appimaged asset regex")?;
+    let matches = release.assets.iter().filter(|asset| regex.is_match(&asset.name)).collect::<Vec<_>>();
+    if matches.len() != 1 {
+        bail!("appimaged asset pattern matched {} assets for {}", matches.len(), arch.as_str());
+    }
+    Ok(matches[0].browser_download_url.clone())
 }
 
 fn ensure_fuse() -> Result<()> {

@@ -293,42 +293,21 @@ pub enum BinaryFormat {
     Executable,
 }
 
+pub type ArchMap = BTreeMap<Arch, String>;
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BinaryPackage {
     pub name: String,
     pub format: BinaryFormat,
-    pub source: BinarySource,
+    pub urls: ArchMap,
 }
 
 impl BinaryPackage {
     fn validate(&self, index: usize) -> Result<()> {
         let path = format!("packages.linux.binaries[{index}]");
         validate_definition_name(&self.name, &format!("{path}.name"))?;
-        self.source.validate(&format!("{path}.source"))
-    }
-}
-
-pub type ArchMap = BTreeMap<Arch, String>;
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
-pub enum BinarySource {
-    GitHub { repo: String, assets: ArchMap },
-    Url { urls: ArchMap },
-}
-
-impl BinarySource {
-    fn validate(&self, path: &str) -> Result<()> {
-        match self {
-            Self::GitHub { assets, .. } => ensure!(
-                !assets.is_empty(),
-                "{path}.assets: must contain at least one canonical architecture asset pattern"
-            ),
-            Self::Url { urls } => {
-                ensure!(!urls.is_empty(), "{path}.urls: must contain at least one canonical architecture URL")
-            }
-        }
+        ensure!(!self.urls.is_empty(), "{path}.urls: must contain at least one canonical architecture URL");
         Ok(())
     }
 }
