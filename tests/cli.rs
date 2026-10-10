@@ -217,9 +217,8 @@ exit 0
     );
 
     let config = MINIMAL_CONFIG.replace(
-        "packages:\n  linux: {}",
-        r#"packages:
-  linux:
+        "  linux: {}",
+        r#"  linux:
     apt:
       install:
         - hello
