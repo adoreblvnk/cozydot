@@ -10,42 +10,46 @@ system:
     xcode:
       command_line_tools: true
 packages:
+  homebrew:
+    - bat
+    - bottom
+    - cmake
+    - dust
+    - eza
+    - fastfetch
+    - fd
+    - ffmpeg
+    - fzf
+    - gh
+    - git
+    - imagemagick
+    - jq
+    - openjdk
+    - panache
+    - pass
+    - presenterm
+    - resvg
+    - ripgrep
+    - sevenzip
+    - shfmt
+    - starship
+    - tlrc
+    - tokei
+    - vim
+    - yazi
+    - yq
+    - zoxide
   linux:
     apt:
       install:
-        - 7zip
         - bash-completion
         - build-essential
-        - cmake
-        - default-jdk
-        - ffmpeg
-        - fzf
         - git
-        - imagemagick
-        - jq
         - openssh-server
-        - pass
         - pinentry-tty
-        - shfmt
-        - vim
-      repos:
-        - name: github-cli
-          key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
-          key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-          uris:
-            default: https://cli.github.com/packages
-          suite: stable
-          components:
-            - main
-          packages:
-            - gh
+      repos: []
     flatpak: []
     binaries:
-      - name: fastfetch
-        format: deb
-        urls:
-          x86_64: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb
-          aarch64: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-aarch64.deb
       - name: git-credential-manager
         format: deb
         urls:
@@ -54,20 +58,6 @@ packages:
   macos:
     homebrew:
       formulae:
-        - cmake
-        - fastfetch
-        - ffmpeg
-        - fzf
-        - gh
-        - git
-        - imagemagick
-        - jq
-        - openjdk
-        - pass
-        - sevenzip
-        - shfmt
-        - vim
-        - yq
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
@@ -77,21 +67,6 @@ tools:
   node: lts
   python: "3"
   go: latest
-  cargo:
-    - bat
-    - bottom
-    - du-dust
-    - eza # ls alternative
-    - fd-find # find alternative
-    - panache # markdown formatter
-    - presenterm
-    - resvg
-    - ripgrep
-    - starship
-    - tlrc
-    - tokei
-    - yazi-fm
-    - zoxide
   npm:
     - "@opencode/cli"
     - "@slidev/cli"
@@ -141,18 +116,14 @@ integrations:
 updates:
   cozydot: true
   packages:
+    homebrew: true
     linux:
       apt: upgrade
       flatpak: false
-    macos:
-      homebrew:
-        formulae: true
-        casks: true
   tools:
     rust: true
     node: true
     python: true
     go: true
-    cargo: true
     npm: true
   fonts: false

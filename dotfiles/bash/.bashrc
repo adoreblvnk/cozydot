@@ -48,6 +48,11 @@ export GPG_TTY=$(tty)
 # WSL: add Win user folder as env var
 if [[ -n $WSL_DISTRO_NAME ]]; then export WIN="/mnt/c/Users/$USER"; fi
 
+# Homebrew
+if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
 # Toolchains
 FNM_PATH=~/.local/share/fnm
 if [ -d "$FNM_PATH" ]; then

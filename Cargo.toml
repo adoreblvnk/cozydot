@@ -33,3 +33,9 @@ yaml_serde = "0.10.7"
 [dev-dependencies]
 assert_cmd = "2"
 predicates = { version = "3", default-features = false }
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+debug = 0
