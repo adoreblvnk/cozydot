@@ -13,6 +13,7 @@ packages:
   homebrew:
     - bat
     - bottom
+    - can1357/tap/omp
     - cmake
     - dust
     - eza
@@ -164,11 +165,6 @@ packages:
         urls:
           x86_64: https://github.com/zen-browser/desktop/releases/latest/download/zen-x86_64.AppImage
           aarch64: https://github.com/zen-browser/desktop/releases/latest/download/zen-aarch64.AppImage
-      - name: omp
-        format: executable
-        urls:
-          x86_64: https://github.com/can1357/oh-my-pi/releases/latest/download/omp-linux-x64
-          aarch64: https://github.com/can1357/oh-my-pi/releases/latest/download/omp-linux-arm64
   macos:
     homebrew:
       formulae:
@@ -176,7 +172,6 @@ packages:
         - zsh-syntax-highlighting
       casks:
         - bitwarden
-        - can1357/tap/omp
         - discord
         - git-credential-manager
         - helium-browser

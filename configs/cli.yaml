@@ -13,6 +13,7 @@ packages:
   homebrew:
     - bat
     - bottom
+    - can1357/tap/omp
     - cmake
     - dust
     - eza
