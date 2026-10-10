@@ -106,11 +106,11 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     let mut appimages = Vec::new();
     let mut executables = Vec::new();
     for package in &config.packages.linux.binaries {
-        let Some(source) = binary::select_source(package, platform.arch) else { continue };
+        let Some(url) = package.urls.get(&platform.arch) else { continue };
         match package.format {
-            BinaryFormat::Deb => deb_binaries.push((package, source)),
-            BinaryFormat::AppImage => appimages.push((package, source)),
-            BinaryFormat::Executable => executables.push((package, source)),
+            BinaryFormat::Deb => deb_binaries.push((package, url.as_str())),
+            BinaryFormat::AppImage => appimages.push((package, url.as_str())),
+            BinaryFormat::Executable => executables.push((package, url.as_str())),
         }
     }
     if theme.is_some() || desktop_config.is_some_and(LinuxDesktop::has_intent) {
@@ -164,24 +164,24 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         run("Adding", "Flathub remote", flatpak::add_flathub_remote)?;
         run("Installing", "Flatpak apps", || flatpak::install(refs))?;
     }
-    let install_binary = |package, source| -> Result<()> {
+    let install_binary = |package, url| -> Result<()> {
         if !binary::is_installed(package)? {
             let subject = format!("{} binary package", package.name);
-            run("Installing", &subject, || binary::install(package, platform.arch, source))?;
+            run("Installing", &subject, || binary::install(package, url))?;
         }
         Ok(())
     };
-    for (package, source) in deb_binaries {
-        install_binary(package, source)?;
+    for (package, url) in deb_binaries {
+        install_binary(package, url)?;
     }
-    for (package, source) in executables {
-        install_binary(package, source)?;
+    for (package, url) in executables {
+        install_binary(package, url)?;
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
         run("Installing", "appimaged", || binary::appimaged::install(platform.arch))?;
-        for (package, source) in appimages {
-            install_binary(package, source)?;
+        for (package, url) in appimages {
+            install_binary(package, url)?;
         }
     }
     apply_tools(&config.tools, platform.arch)?;

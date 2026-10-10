@@ -1,36 +1,11 @@
+use crate::config::{BinaryFormat, BinaryPackage};
 use crate::operations::host::{self, temp_path};
-use crate::{
-    config::{BinaryFormat, BinaryPackage, BinarySource},
-    platform::Arch,
-};
-use anyhow::{Context, Result, bail};
-use regex::Regex;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
-
-use self::github::Release;
 
 mod appimage;
 pub(crate) mod appimaged;
 mod executable;
-mod github;
-
-const GITHUB_ACCEPT: &str = "Accept: application/vnd.github+json";
-const GITHUB_API_VERSION: &str = "X-GitHub-Api-Version: 2022-11-28";
-const USER_AGENT: &str = concat!("User-Agent: cozydot/", env!("CARGO_PKG_VERSION"));
-
-pub(crate) enum SelectedSource<'a> {
-    GitHub { repo: &'a str, asset_pattern: &'a str },
-    Url(&'a str),
-}
-
-pub(crate) fn select_source(package: &BinaryPackage, arch: Arch) -> Option<SelectedSource<'_>> {
-    match &package.source {
-        BinarySource::GitHub { repo, assets } => {
-            assets.get(&arch).map(|pattern| SelectedSource::GitHub { repo, asset_pattern: pattern.as_str() })
-        }
-        BinarySource::Url { urls } => urls.get(&arch).map(|url| SelectedSource::Url(url.as_str())),
-    }
-}
 
 pub(crate) fn is_installed(package: &BinaryPackage) -> Result<bool> {
     Ok(match package.format {
@@ -40,43 +15,16 @@ pub(crate) fn is_installed(package: &BinaryPackage) -> Result<bool> {
     })
 }
 
-pub(crate) fn install(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) -> Result<()> {
-    let url = resolve_url(package, arch, source)?;
+pub(crate) fn install(package: &BinaryPackage, url: &str) -> Result<()> {
     match package.format {
-        BinaryFormat::Deb => install_deb(package, &url),
-        BinaryFormat::AppImage => appimage::install_appimage("download binary package", &url, &appimage_path(package)?),
-        BinaryFormat::Executable => executable::install("download executable", &url, &executable::path(package)?),
+        BinaryFormat::Deb => install_deb(package, url),
+        BinaryFormat::AppImage => appimage::install_appimage("download binary package", url, &appimage_path(package)?),
+        BinaryFormat::Executable => executable::install("download executable", url, &executable::path(package)?),
     }
 }
 
 fn appimage_path(package: &BinaryPackage) -> Result<PathBuf> {
     Ok(host::home()?.join("Applications").join(format!("{}.AppImage", package.name)))
-}
-
-fn resolve_url(package: &BinaryPackage, arch: Arch, source: SelectedSource<'_>) -> Result<String> {
-    match source {
-        SelectedSource::Url(url) => Ok(url.to_owned()),
-        SelectedSource::GitHub { repo, asset_pattern } => {
-            let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
-            let accept = GITHUB_ACCEPT;
-            let version = GITHUB_API_VERSION;
-            let args = ["--proto", "=https", "--header", accept, "--header", version, "--header", USER_AGENT];
-            let output = host::curl("resolve binary package release", &endpoint, args)?;
-            select_asset_url(&output.stdout, asset_pattern, &package.name, arch)
-        }
-    }
-}
-
-pub(super) fn select_asset_url(input: &[u8], asset_pattern: &str, package: &str, arch: Arch) -> Result<String> {
-    let release: Release = serde_json::from_slice(input).context("parse GitHub release JSON")?;
-    let pattern = Regex::new(asset_pattern).context("compile binary asset regex")?;
-    let matches = release.assets.iter().filter(|asset| pattern.is_match(&asset.name)).collect::<Vec<_>>();
-    // reject ambiguous matches instead of depending on GitHub asset order
-    if matches.len() != 1 {
-        let arch = arch.as_str();
-        bail!("binary package {:?} ({}) asset pattern matched {} assets", package, arch, matches.len());
-    }
-    Ok(matches[0].browser_download_url.clone())
 }
 
 fn install_deb(package: &BinaryPackage, url: &str) -> Result<()> {

@@ -135,51 +135,33 @@ packages:
     binaries:
       - name: fastfetch
         format: deb
-        source:
-          provider: github
-          repo: fastfetch-cli/fastfetch
-          assets:
-            x86_64: ^fastfetch-linux-amd64\.deb$
-            aarch64: ^fastfetch-linux-aarch64\.deb$
+        urls:
+          x86_64: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb
+          aarch64: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-aarch64.deb
       - name: git-credential-manager
         format: deb
-        source:
-          provider: github
-          repo: git-ecosystem/git-credential-manager
-          assets:
-            x86_64: ^gcm-linux-x64-.*\.deb$
-            aarch64: ^gcm-linux-arm64-.*\.deb$
+        urls:
+          x86_64: https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-linux-x64-2.9.1.deb
+          aarch64: https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-linux-arm64-2.9.1.deb
       - name: obsidian
         format: appimage
-        source:
-          provider: github
-          repo: obsidianmd/obsidian-releases
-          assets:
-            x86_64: ^Obsidian-[0-9]+(?:\.[0-9]+)+\.AppImage$
-            aarch64: ^Obsidian-[0-9]+(?:\.[0-9]+)+-arm64\.AppImage$
+        urls:
+          x86_64: https://github.com/obsidianmd/obsidian-releases/releases/download/v1.13.7/Obsidian-1.13.7.AppImage
+          aarch64: https://github.com/obsidianmd/obsidian-releases/releases/download/v1.13.7/Obsidian-1.13.7-arm64.AppImage
       - name: recordly
         format: appimage
-        source:
-          provider: github
-          repo: webadderallorg/Recordly
-          assets:
-            x86_64: ^Recordly-linux-x64\.AppImage$
+        urls:
+          x86_64: https://github.com/webadderallorg/Recordly/releases/latest/download/Recordly-linux-x64.AppImage
       - name: zen-browser
         format: appimage
-        source:
-          provider: github
-          repo: zen-browser/desktop
-          assets:
-            x86_64: ^zen-x86_6[0-9]\.AppImage$
-            aarch64: ^zen-aarch6[0-9]\.AppImage$
+        urls:
+          x86_64: https://github.com/zen-browser/desktop/releases/latest/download/zen-x86_64.AppImage
+          aarch64: https://github.com/zen-browser/desktop/releases/latest/download/zen-aarch64.AppImage
       - name: omp
         format: executable
-        source:
-          provider: github
-          repo: can1357/oh-my-pi
-          assets:
-            x86_64: ^omp-linux-x64$
-            aarch64: ^omp-linux-arm64$
+        urls:
+          x86_64: https://github.com/can1357/oh-my-pi/releases/latest/download/omp-linux-x64
+          aarch64: https://github.com/can1357/oh-my-pi/releases/latest/download/omp-linux-arm64
   macos:
     homebrew:
       formulae:
