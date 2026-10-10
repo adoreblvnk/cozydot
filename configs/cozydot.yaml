@@ -25,6 +25,9 @@ packages:
     - imagemagick
     - jq
     - openjdk
+    - opencode
+    - oxfmt
+    - oxlint
     - panache
     - pass
     - presenterm
@@ -191,11 +194,8 @@ tools:
   python: "3"
   go: latest
   npm:
-    - "@opencode/cli"
     - "@slidev/cli"
     - firecrawl-cli
-    - oxfmt   # JS formatter
-    - oxlint  # JS linter
     - skills
 fonts:
   nerd:
@@ -209,7 +209,6 @@ dotfiles:
       - fastfetch
       - git
       - gnupg
-      - npm
       - opencode
       - starship
       - wezterm

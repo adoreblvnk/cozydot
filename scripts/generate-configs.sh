@@ -75,6 +75,7 @@ generate_vm() {
       "git",
       "imagemagick",
       "jq",
+      "opencode",
       "openjdk",
       "pass",
       "sevenzip",
@@ -90,7 +91,7 @@ generate_vm() {
       "visual-studio-code",
       "wezterm"
     ] |
-    .tools.npm = ["@opencode/cli"] |
+    .tools.npm = [] |
     .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
     .dotfiles.packages.macos -= ["vscode-macos"] |
     .integrations.skills = [] |

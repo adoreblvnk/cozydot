@@ -21,6 +21,7 @@ packages:
     - git
     - imagemagick
     - jq
+    - opencode
     - openjdk
     - pass
     - sevenzip
@@ -82,8 +83,7 @@ tools:
   node: lts
   python: "3"
   go: latest
-  npm:
-    - '@opencode/cli'
+  npm: []
 fonts:
   nerd:
     - GeistMono
@@ -95,7 +95,6 @@ dotfiles:
       - fastfetch
       - git
       - gnupg
-      - npm
       - starship
       - wezterm
     linux:
