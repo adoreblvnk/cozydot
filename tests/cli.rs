@@ -217,8 +217,10 @@ exit 0
     );
 
     let config = MINIMAL_CONFIG.replace(
-        "  linux: {}",
-        r#"  linux:
+        "packages:\n  homebrew: []\n  linux: {}",
+        r#"packages:
+  homebrew: []
+  linux:
     apt:
       install:
         - hello
