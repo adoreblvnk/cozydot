@@ -1,17 +1,13 @@
 use crate::config::BinaryPackage;
 use crate::operations::host;
 use anyhow::{Context, Result};
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-};
+use std::{fs, os::unix::fs::PermissionsExt, path};
 
-pub(super) fn path(package: &BinaryPackage) -> Result<PathBuf> {
+pub(super) fn path(package: &BinaryPackage) -> Result<path::PathBuf> {
     Ok(host::home()?.join(".local/bin").join(&package.name))
 }
 
-pub(super) fn install(label: &str, url: &str, destination: &Path) -> Result<()> {
+pub(super) fn install(label: &str, url: &str, destination: &path::Path) -> Result<()> {
     let parent = destination.parent();
     let parent = parent.with_context(|| format!("executable destination has no parent: {}", destination.display()))?;
     fs::create_dir_all(parent).context("create executable destination directory")?;
