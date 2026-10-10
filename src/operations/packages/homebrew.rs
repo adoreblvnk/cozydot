@@ -90,7 +90,7 @@ pub(crate) fn update_and_upgrade(formulae: bool, casks: bool) -> Result<()> {
 
 fn find_executable() -> Result<Option<String>> {
     // Apple Silicon & Linux install Homebrew outside default PATH in some non-login environments
-    for candidate in ["brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew", "/home/linuxbrew/.linuxbrew/bin/brew"] {
+    for candidate in ["brew", "/opt/homebrew/bin/brew", "/home/linuxbrew/.linuxbrew/bin/brew"] {
         if host::output(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {
             return Ok(Some(candidate.to_owned()));
         }
