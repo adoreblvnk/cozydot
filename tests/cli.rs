@@ -136,7 +136,7 @@ printf '%s\n' "$*" >> {}
     assert!(!mutations.exists(), "host was mutated despite an invalid config");
 }
 
-// macOS brew packages are ignored entirely when applying on a Linux host
+// macOS brew casks are ignored entirely when applying on a Linux host
 #[test]
 #[cfg(target_os = "linux")]
 fn apply_respects_platform_target_boundaries() {
@@ -156,15 +156,15 @@ exit 1
     );
 
     let config = MINIMAL_CONFIG.replace(
-        "formulae: []",
-        r#"formulae:
+        "casks: []",
+        r#"casks:
         - should-never-be-installed-on-linux"#,
     );
     env.write_config(&config);
 
     env.cozydot().arg("apply").assert().success();
 
-    assert!(!brew_calls.exists(), "macOS payload executed on a Linux host");
+    assert!(!brew_calls.exists(), "macOS cask executed on a Linux host");
 }
 
 // prereqs install, then repo key, then source list, then apt update, then repo package
@@ -217,8 +217,9 @@ exit 0
     );
 
     let config = MINIMAL_CONFIG.replace(
-        "packages:\n  linux: {}",
+        "packages:\n  homebrew: []\n  linux: {}",
         r#"packages:
+  homebrew: []
   linux:
     apt:
       install:

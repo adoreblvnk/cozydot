@@ -1,8 +1,7 @@
 use crate::operations::host::{self, temp_path};
 use anyhow::{Context, Result};
 
-const HOMEBREW_UNAVAILABLE: &str =
-    "Homebrew is unavailable after install; expected brew on PATH or /opt/homebrew/bin/brew";
+const HOMEBREW_UNAVAILABLE: &str = "Homebrew is unavailable after install; expected brew on PATH, /opt/homebrew/bin/brew or /home/linuxbrew/.linuxbrew/bin/brew";
 
 pub(crate) fn is_installed() -> Result<bool> {
     Ok(find_executable()?.is_some())
@@ -90,8 +89,8 @@ pub(crate) fn update_and_upgrade(formulae: bool, casks: bool) -> Result<()> {
 }
 
 fn find_executable() -> Result<Option<String>> {
-    // Apple Silicon installs Homebrew outside PATH in some non-login environments
-    for candidate in ["brew", "/opt/homebrew/bin/brew"] {
+    // Apple Silicon & Linux install Homebrew outside default PATH in some non-login environments
+    for candidate in ["brew", "/opt/homebrew/bin/brew", "/home/linuxbrew/.linuxbrew/bin/brew"] {
         if host::output(candidate, ["--version"]).is_ok_and(|output| output.status.success()) {
             return Ok(Some(candidate.to_owned()));
         }

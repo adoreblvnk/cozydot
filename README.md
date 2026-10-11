@@ -105,7 +105,7 @@ rm -rf ~/.config/cozydot
 - `cozydot dotfiles [-r | --replace]` \
   Symlinks configured dotfile packages with GNU Stow. Simulates transactions to detect conflicts before making changes. Use `-r` / `--replace` to back up conflicting files to `~/.local/state/cozydot/dotfile-backups` before linking.
 - `cozydot update` \
-  Executes enabled update policies: APT (`upgrade` / `full-upgrade`), Flatpak, Homebrew formulae & casks, Rustup toolchains, `fnm` Node.js versions, `uv` Python versions, Go toolchains, Cargo crates, global npm packages, & Nerd Fonts.
+  Executes enabled update policies: APT (`upgrade` / `full-upgrade`), Flatpak, Homebrew formulae & casks, Rustup toolchains, `fnm` Node.js versions, `uv` Python versions, Go toolchains, global npm packages, & Nerd Fonts.
 
 ### Configuration
 
@@ -114,7 +114,7 @@ rm -rf ~/.config/cozydot
 ```yaml
 system:       # OS settings (sudo group, unattended upgrades)
 packages:     # APT repos, Flatpaks, Homebrew formulae & casks, GitHub binaries
-tools:        # Rust, Node.js (fnm), Python (uv), Go, Cargo crates, npm
+tools:        # Rust, Node.js (fnm), Python (uv), Go, npm
 fonts:        # Nerd Font families
 dotfiles:     # Stow packages (all, linux, macos)
 integrations: # VS Code extensions, agent skills, Docker / VirtualBox
@@ -141,7 +141,6 @@ scripts/package-release.sh
 ## Roadmap
 
 - Update managed Deb & AppImage binaries from configured release sources.
-- Complete 1st-run Xcode Command Line Tools installation before continuing a macOS apply.
 - Add a dedicated command to list bundled presets.
 
 ## License <!-- omit in toc -->

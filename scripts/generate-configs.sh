@@ -41,10 +41,10 @@ ensure_yq() {
 generate_cli() {
   yq '
     .packages.linux.apt.install -= ["vlc"] |
-    .packages.linux.apt.repos |= map(select(.name == "github-cli")) |
+    .packages.linux.apt.repos = [] |
     .packages.linux.flatpak = [] |
     .packages.linux.binaries |= map(select(
-      .name == "fastfetch" or .name == "git-credential-manager"
+      .name == "git-credential-manager"
     )) |
     .packages.macos.homebrew.casks = ["git-credential-manager"] |
     .dotfiles.packages.all -= ["wezterm"] |
@@ -62,16 +62,36 @@ generate_vm() {
     .packages.linux.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
     .packages.linux.flatpak = ["com.bitwarden.desktop"] |
     .packages.linux.binaries |= map(select(
-      .name == "fastfetch" or .name == "git-credential-manager"
+      .name == "git-credential-manager"
     )) |
+    .packages.homebrew = [
+      "bat",
+      "cmake",
+      "fastfetch",
+      "fd",
+      "ffmpeg",
+      "fzf",
+      "gh",
+      "git",
+      "imagemagick",
+      "jq",
+      "opencode",
+      "openjdk",
+      "pass",
+      "sevenzip",
+      "shfmt",
+      "starship",
+      "tealdeer",
+      "vim",
+      "yq"
+    ] |
     .packages.macos.homebrew.casks = [
       "bitwarden",
       "git-credential-manager",
       "visual-studio-code",
       "wezterm"
     ] |
-    .tools.cargo = ["bat", "fd-find", "starship", "tealdeer"] |
-    .tools.npm = ["@opencode/cli"] |
+    .tools.npm = [] |
     .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
     .dotfiles.packages.macos -= ["vscode-macos"] |
     .integrations.skills = [] |

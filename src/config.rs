@@ -44,7 +44,6 @@ impl Config {
             let is_semver = semver::Version::parse(go).is_ok_and(|v| v.pre.is_empty() && v.build.is_empty());
             ensure!(go == "latest" || is_semver, "tools.go: expected `latest` or an exact version such as `1.24.6`");
         }
-        ensure!(self.tools.cargo.is_empty() || self.tools.rust.is_some(), "tools.cargo: requires tools.rust");
         ensure!(self.tools.npm.is_empty() || self.tools.node.is_some(), "tools.npm: requires tools.node");
 
         // fonts
@@ -124,6 +123,8 @@ pub struct Xcode {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Packages {
+    #[serde(default)]
+    pub homebrew: Vec<String>,
     pub linux: LinuxPackages,
     pub macos: MacosPackages,
 }
@@ -332,8 +333,6 @@ pub struct Tools {
     pub node: Option<String>,
     pub python: Option<String>,
     pub go: Option<String>,
-    #[serde(default)]
-    pub cargo: Vec<String>,
     #[serde(default)]
     pub npm: Vec<String>,
 }
@@ -643,8 +642,9 @@ pub struct Updates {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageUpdates {
+    #[serde(default)]
+    pub homebrew: bool,
     pub linux: LinuxUpdates,
-    pub macos: MacosUpdates,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -664,21 +664,6 @@ pub enum AptUpgrade {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MacosUpdates {
-    pub homebrew: HomebrewUpdates,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HomebrewUpdates {
-    #[serde(default)]
-    pub formulae: bool,
-    #[serde(default)]
-    pub casks: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ToolUpdates {
     #[serde(default)]
     pub rust: bool,
@@ -688,8 +673,6 @@ pub struct ToolUpdates {
     pub python: bool,
     #[serde(default)]
     pub go: bool,
-    #[serde(default)]
-    pub cargo: bool,
     #[serde(default)]
     pub npm: bool,
 }

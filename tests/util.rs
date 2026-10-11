@@ -9,6 +9,7 @@ system:
   macos:
     xcode: {}
 packages:
+  homebrew: []
   linux: {}
   macos:
     homebrew:
@@ -27,9 +28,8 @@ integrations:
   linux: {}
 updates:
   packages:
+    homebrew: false
     linux: {}
-    macos:
-      homebrew: {}
   tools: {}
   fonts: false
 "#;

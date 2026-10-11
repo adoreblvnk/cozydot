@@ -10,24 +10,34 @@ system:
     xcode:
       command_line_tools: true
 packages:
+  homebrew:
+    - bat
+    - cmake
+    - fastfetch
+    - fd
+    - ffmpeg
+    - fzf
+    - gh
+    - git
+    - imagemagick
+    - jq
+    - opencode
+    - openjdk
+    - pass
+    - sevenzip
+    - shfmt
+    - starship
+    - tealdeer
+    - vim
+    - yq
   linux:
     apt:
       install:
-        - 7zip
         - bash-completion
         - build-essential
-        - cmake
-        - default-jdk
-        - ffmpeg
-        - fzf
         - git
-        - imagemagick
-        - jq
         - openssh-server
-        - pass
         - pinentry-tty
-        - shfmt
-        - vim
         - vlc
       repos:
         - name: vscode
@@ -53,11 +63,6 @@ packages:
     flatpak:
       - com.bitwarden.desktop
     binaries:
-      - name: fastfetch
-        format: deb
-        urls:
-          x86_64: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb
-          aarch64: https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-aarch64.deb
       - name: git-credential-manager
         format: deb
         urls:
@@ -66,20 +71,6 @@ packages:
   macos:
     homebrew:
       formulae:
-        - cmake
-        - fastfetch
-        - ffmpeg
-        - fzf
-        - gh
-        - git
-        - imagemagick
-        - jq
-        - openjdk
-        - pass
-        - sevenzip
-        - shfmt
-        - vim
-        - yq
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
@@ -92,13 +83,7 @@ tools:
   node: lts
   python: "3"
   go: latest
-  cargo:
-    - bat
-    - fd-find
-    - starship
-    - tealdeer
-  npm:
-    - '@opencode/cli'
+  npm: []
 fonts:
   nerd:
     - GeistMono
@@ -110,7 +95,6 @@ dotfiles:
       - fastfetch
       - git
       - gnupg
-      - npm
       - starship
       - wezterm
     linux:
@@ -173,18 +157,14 @@ desktop:
 updates:
   cozydot: true
   packages:
+    homebrew: true
     linux:
       apt: upgrade
       flatpak: true
-    macos:
-      homebrew:
-        formulae: true
-        casks: true
   tools:
     rust: true
     node: true
     python: true
     go: true
-    cargo: true
     npm: true
   fonts: false

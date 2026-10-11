@@ -10,14 +10,14 @@ use crate::{
         dotfiles,
         host::{self, macos as macos_host, sudo, users},
         integrations::{docker, skills, vscode},
-        packages::{apt, binary, cargo, flatpak, homebrew, npm, snapd},
+        packages::{apt, binary, flatpak, homebrew, npm, snapd},
         self_update,
         toolchains::{fnm, go, rustup, uv},
     },
     platform::{Arch, Distro, Platform, PlatformIdentity},
     spinner,
 };
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
 
 const APT_PREREQS: [&str; 8] =
@@ -102,6 +102,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if flatpak_refs.is_some() {
         apt_prereqs.push("flatpak".into());
     }
+    if !config.packages.homebrew.is_empty() {
+        apt_prereqs.extend(["build-essential".into(), "procps".into(), "file".into(), "git".into()]);
+    }
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
     let mut executables = Vec::new();
@@ -184,6 +187,15 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             install_binary(package, url)?;
         }
     }
+    let formulae = &config.packages.homebrew;
+    if !formulae.is_empty() {
+        if !homebrew::is_installed()? {
+            run("Installing", "Homebrew", homebrew::install)?;
+        }
+        if homebrew::any_missing(formulae, &[])? {
+            run("Installing", "Homebrew packages", || homebrew::install_packages(formulae, &[]))?;
+        }
+    }
     apply_tools(&config.tools, platform.arch)?;
     if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
@@ -199,22 +211,26 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     sudo::validate_access("macOS sudo access")?;
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
-    let homebrew = &config.packages.macos.homebrew;
-    let mut formulae = homebrew.formulae.clone();
+    let macos_homebrew = &config.packages.macos.homebrew;
+    let mut formulae = config.packages.homebrew.clone();
+    formulae.extend_from_slice(&macos_homebrew.formulae);
     // dotfiles require Stow even when it is absent from configured formulae
     if !formulae.iter().any(|formula| formula == "stow") {
         formulae.push("stow".into());
     }
 
-    if config.system.macos.xcode.command_line_tools && !macos_host::is_cli_tools_installed() {
-        run("Installing", "Command Line Tools for Xcode", macos_host::install_cli_tools)?;
+    if config.system.macos.xcode.command_line_tools {
+        ensure!(
+            macos_host::is_cli_tools_installed(),
+            "Command Line Tools for Xcode are not installed; run `xcode-select --install` and re-run `cozydot apply`"
+        );
     }
     // install Homebrew and Stow before applying package-backed user configuration
     if !homebrew::is_installed()? {
         run("Installing", "Homebrew", homebrew::install)?;
     }
-    if homebrew::any_missing(&formulae, &homebrew.casks)? {
-        run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &homebrew.casks))?;
+    if homebrew::any_missing(&formulae, &macos_homebrew.casks)? {
+        run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &macos_homebrew.casks))?;
     }
     apply_tools(&config.tools, platform.arch)?;
     if fonts::any_missing(&config.fonts.nerd)? {
@@ -229,16 +245,10 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 }
 
 fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
-    if let Some(selector) = tools.rust.as_deref() {
-        if !rustup::is_installed()? {
-            run("Installing", "Rust toolchain", || rustup::install(selector))?;
-        }
-        if !cargo::is_binstall_installed()? {
-            run("Installing", "cargo-binstall", cargo::install_binstall)?;
-        }
-        if !cargo::is_update_installed()? {
-            run("Installing", "cargo-update", || cargo::install_crates(&["cargo-update".to_owned()]))?;
-        }
+    if let Some(selector) = tools.rust.as_deref()
+        && !rustup::is_installed()?
+    {
+        run("Installing", "Rust toolchain", || rustup::install(selector))?;
     }
     if let Some(selector) = tools.node.as_deref() {
         if !fnm::is_installed()? {
@@ -261,9 +271,6 @@ fn apply_tools(tools: &Tools, arch: Arch) -> Result<()> {
     {
         run("Installing", "Go toolchain", || go::install_toolchain(selector, arch))?;
     }
-    if cargo::any_missing(&tools.cargo)? {
-        run("Installing", "Cargo crates", || cargo::install_crates(&tools.cargo))?;
-    }
     if npm::any_missing(&tools.npm)? {
         run("Installing", "npm packages", || npm::install(&tools.npm))?;
     }
@@ -278,6 +285,9 @@ fn linux_update(config: &Config) -> Result<()> {
     if flatpak {
         apt_prereqs.push("flatpak".into());
     }
+    if config.updates.packages.homebrew && !config.packages.homebrew.is_empty() {
+        apt_prereqs.extend(["build-essential".into(), "procps".into(), "file".into(), "git".into()]);
+    }
 
     // refresh package metadata before upgrades and prerequisite reconciliation
     run("Updating", "APT package metadata", apt::update)?;
@@ -290,20 +300,22 @@ fn linux_update(config: &Config) -> Result<()> {
     if flatpak {
         run("Updating", "Flatpak apps", flatpak::update)?;
     }
+    if config.updates.packages.homebrew {
+        if !homebrew::is_installed()? {
+            run("Installing", "Homebrew", homebrew::install)?;
+        }
+        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(true, false))?;
+    }
     Ok(())
 }
 
 fn macos_update(config: &Config) -> Result<()> {
     sudo::validate_access("macOS sudo access")?;
-    let homebrew = &config.updates.packages.macos.homebrew;
-    let formulae = homebrew.formulae;
-    let casks = homebrew.casks;
-
-    if !homebrew::is_installed()? {
-        run("Installing", "Homebrew", homebrew::install)?;
-    }
-    if formulae || casks {
-        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(formulae, casks))?;
+    if config.updates.packages.homebrew {
+        if !homebrew::is_installed()? {
+            run("Installing", "Homebrew", homebrew::install)?;
+        }
+        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(true, true))?;
     }
     // npm-only updates still need fnm to enter the managed default Node environment
     if config.updates.tools.npm && !config.updates.tools.node && !fnm::is_installed()? {
@@ -337,9 +349,6 @@ fn update_tools(tools: &Tools, updates: &ToolUpdates, arch: Arch) -> Result<()> 
     }
     if updates.go && !go::is_installed(tools.go.as_deref().unwrap_or("latest"), arch)? {
         run("Updating", "Go toolchain", || go::update_toolchain(tools.go.as_deref().unwrap_or("latest"), arch))?;
-    }
-    if updates.cargo && cargo::is_update_installed()? {
-        run("Updating", "Cargo crates", cargo::update_crates)?;
     }
     if updates.npm && fnm::is_installed()? {
         run("Updating", "npm packages", npm::update)?;
