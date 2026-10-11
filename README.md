@@ -141,7 +141,6 @@ scripts/package-release.sh
 ## Roadmap
 
 - Update managed Deb & AppImage binaries from configured release sources.
-- Complete 1st-run Xcode Command Line Tools installation before continuing a macOS apply.
 - Add a dedicated command to list bundled presets.
 
 ## License <!-- omit in toc -->

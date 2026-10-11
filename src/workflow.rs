@@ -17,7 +17,7 @@ use crate::{
     platform::{Arch, Distro, Platform, PlatformIdentity},
     spinner,
 };
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
 
 const APT_PREREQS: [&str; 8] =
@@ -219,8 +219,11 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         formulae.push("stow".into());
     }
 
-    if config.system.macos.xcode.command_line_tools && !macos_host::is_cli_tools_installed() {
-        run("Installing", "Command Line Tools for Xcode", macos_host::install_cli_tools)?;
+    if config.system.macos.xcode.command_line_tools {
+        ensure!(
+            macos_host::is_cli_tools_installed(),
+            "Command Line Tools for Xcode are not installed; run `xcode-select --install` and re-run `cozydot apply`"
+        );
     }
     // install Homebrew and Stow before applying package-backed user configuration
     if !homebrew::is_installed()? {
