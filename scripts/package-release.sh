@@ -17,11 +17,6 @@ error() { printf 'error: %s\n' "$1" >&2; exit 1; }
 main() {
   [ "$#" -eq 0 ] || error "unexpected argument: $1"
 
-  # extract version from Cargo's package ID
-  PKGID=$(cargo pkgid -m "$ROOT/Cargo.toml")
-  VERSION=${PKGID##*[#@]}
-  [ "$VERSION" != "$PKGID" ] || error "unable to resolve Cargo package version"
-
   # map uname values to Rust targets
   case "$(uname -s):$(uname -m)" in
     Linux:x86_64) TARGET=x86_64-unknown-linux-gnu ;;
@@ -30,17 +25,15 @@ main() {
     *) error "unsupported platform: $(uname -s) $(uname -m)" ;;
   esac
 
-  ASSET="cozydot-v$VERSION-$TARGET"
+  ASSET="cozydot-$TARGET"
   mkdir -p "$ROOT/target"
 
   cargo build -r --target "$TARGET" --target-dir "$ROOT/target" -m "$ROOT/Cargo.toml" --locked
   cp -f "$ROOT/target/$TARGET/release/cozydot" "$ROOT/target/$ASSET"
   chmod 0755 "$ROOT/target/$ASSET"
-  if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$ROOT/target" && sha256sum "$ASSET" >"$ASSET.sha256")
-  else
-    (cd "$ROOT/target" && shasum -a 256 "$ASSET" >"$ASSET.sha256")
-  fi
+  SHACMD="sha256sum"
+  command -v sha256sum >/dev/null 2>&1 || SHACMD="shasum -a 256"
+  (cd "$ROOT/target" && $SHACMD "$ASSET" >"$ASSET.sha256")
   # print asset path for release workflows
   printf '%s\n' "$ROOT/target/$ASSET"
 }

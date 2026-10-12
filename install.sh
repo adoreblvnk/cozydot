@@ -81,29 +81,23 @@ main() {
     # trim longest prefix ending in /v to get version (eg .../releases/tag/v1.0.0 -> 1.0.0)
     VERSION=${URL##*/v}
     [ "$VERSION" != "$URL" ] || error "unable to parse version from release URL: $URL"
+  else
+    VERSION=${VERSION#v}
   fi
-
-  ASSET="cozydot-v$VERSION-$TARGET"
+  ASSET="cozydot-$TARGET"
   URL="$BASE_URL/download/v$VERSION"
   umask 077
   TEMP=$(mktemp -d "${TMPDIR:-/tmp}/cozydot-install.XXXXXX")
   trap cleanup 0 # remove temp dir on exit
 
   BIN="$TEMP/$ASSET"
-  curl -fsSL "$URL/$ASSET" -o "$BIN"
-  curl -fsSL "$URL/$ASSET.sha256" -o "$BIN.sha256"
-  if command -v sha256sum >/dev/null 2>&1; then
-    if ! (cd "$TEMP" && sha256sum -c "$ASSET.sha256") >/dev/null 2>&1; then
-      error "checksum verification failed"
-    fi
-  elif ! (cd "$TEMP" && shasum -a 256 -c "$ASSET.sha256") >/dev/null 2>&1; then
-    error "checksum verification failed"
+  if ! curl -fsSL "$URL/$ASSET" -o "$BIN" 2>/dev/null; then
+    error "unable to download cozydot release $VERSION from $URL/$ASSET"
   fi
-
-  # reject directories & symlinks before installation
-  if [ ! -f "$BIN" ] || [ -L "$BIN" ]; then
-    error "missing regular binary"
-  fi
+  curl -fsSL "$URL/$ASSET.sha256" -o "$BIN.sha256" 2>/dev/null
+  SHACMD="sha256sum"
+  command -v sha256sum >/dev/null 2>&1 || SHACMD="shasum -a 256"
+  (cd "$TEMP" && $SHACMD -c "$ASSET.sha256") >/dev/null 2>&1 || error "checksum verification failed"
 
   mkdir -p "$BIN_DIR"
   # stage binary in destination dir for atomic posix rename

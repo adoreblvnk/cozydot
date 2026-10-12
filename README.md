@@ -134,6 +134,8 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 # documentation
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+# bump version (patch, minor, or major)
+scripts/bump-version.sh [patch|minor|major]
 # build release binary & checksum
 scripts/package-release.sh
 ```
