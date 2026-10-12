@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::operations::{
-    host::{self, privileged_file::write_atomic, systemd},
+    host::{self, privileged_file::write_atomic},
     packages::apt,
 };
 
@@ -18,7 +18,7 @@ pub(crate) fn set_enabled(enabled: bool) -> Result<()> {
 
     remove_snaps()?;
     for unit in ["snapd.socket", "snapd.service", "snapd.seeded.service"] {
-        if systemd::is_enabled_or_active(unit)? {
+        if host::is_systemd_unit_enabled_or_active(unit)? {
             host::run("snapd service disablement", "sudo", ["systemctl", "disable", "--now", unit])?;
         }
     }

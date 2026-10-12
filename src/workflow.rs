@@ -6,16 +6,16 @@ use crate::{
         MacosDesktop, Theme, ToolUpdates, Tools, select_distro_uri, select_repo_codename,
     },
     operations::{
-        desktop::{self, fonts, gnome, macos as macos_defaults},
+        desktop::{fonts, gnome, macos as macos_defaults},
         dotfiles,
-        host::{self, macos as macos_host, sudo, users},
+        host::{self, sudo, users},
         integrations::{docker, skills, vscode},
         packages::{apt, binary, flatpak, homebrew, npm, snapd},
         self_update,
         toolchains::{fnm, go, rustup, uv},
     },
     platform::{Arch, Distro, Platform, PlatformIdentity},
-    spinner,
+    spinner::run,
 };
 use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
@@ -182,7 +182,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     // start appimaged before publishing AppImages so it can integrate new arrivals
     if !appimages.is_empty() {
-        run("Installing", "appimaged", || binary::appimaged::install(platform.arch))?;
+        run("Installing", "appimaged", || binary::appimage::install_daemon(platform.arch))?;
         for (package, url) in appimages {
             install_binary(package, url)?;
         }
@@ -221,7 +221,7 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
 
     if config.system.macos.xcode.command_line_tools {
         ensure!(
-            macos_host::is_cli_tools_installed(),
+            host::output("xcode-select", ["-p"]).is_ok_and(|output| output.status.success()),
             "Command Line Tools for Xcode are not installed; run `xcode-select --install` and re-run `cozydot apply`"
         );
     }
@@ -395,7 +395,7 @@ fn apply_integrations(integrations: &Integrations) -> Result<()> {
 
 fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result<()> {
     if let Some(theme) = theme {
-        run("Setting", "desktop color scheme", || desktop::set_color_scheme(theme))?;
+        run("Setting", "desktop color scheme", || gnome::set_color_scheme(theme))?;
     }
     let Some(gnome) = desktop.and_then(|desktop| desktop.gnome.as_ref()).filter(|gnome| gnome.has_intent()) else {
         return Ok(());
@@ -404,7 +404,7 @@ fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result
         run("Writing", "GNOME settings", || gnome::apply_settings(gnome))?;
     }
     if let Some(executable) = &gnome.terminal {
-        run("Setting", "default terminal", || desktop::set_terminal(executable))?;
+        run("Setting", "default terminal", || gnome::set_terminal(executable))?;
     }
     let mut relogin_required = false;
     if !gnome.extensions.is_empty() {
@@ -423,8 +423,4 @@ fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result
         eprintln!("note: log out and back in to finish activating GNOME extensions");
     }
     Ok(())
-}
-
-fn run<T>(status: &'static str, subject: &str, operation: impl FnOnce() -> Result<T>) -> Result<T> {
-    spinner::run(status, subject, operation)
 }

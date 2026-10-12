@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::config::AptUpgrade;
-use crate::operations::host::{self, privileged_file::write_atomic, systemd};
+use crate::operations::host::{self, privileged_file::write_atomic};
 
 pub(crate) mod repo;
 
@@ -26,7 +26,7 @@ pub(crate) fn set_unattended_upgrades(enabled: bool) -> Result<()> {
         host::run("unattended-upgrades service enablement", "sudo", args)?;
     } else {
         write_atomic(Path::new(AUTO_UPGRADES), contents, "unattended-upgrades periodic configuration")?;
-        if systemd::is_enabled_or_active("unattended-upgrades.service")? {
+        if host::is_systemd_unit_enabled_or_active("unattended-upgrades.service")? {
             let args = ["systemctl", "disable", "--now", "unattended-upgrades.service"];
             host::run("unattended-upgrades service disablement", "sudo", args)?;
         }

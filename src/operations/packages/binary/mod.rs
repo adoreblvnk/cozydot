@@ -3,8 +3,7 @@ use crate::operations::host::{self, temp_path};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-mod appimage;
-pub(crate) mod appimaged;
+pub(crate) mod appimage;
 mod executable;
 
 pub(crate) fn is_installed(package: &BinaryPackage) -> Result<bool> {

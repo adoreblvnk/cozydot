@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::*;
+use super::{require_cli, run, stdout_line};
 
 pub(crate) fn ensure_in_sudo_group() -> Result<()> {
     let username = get_effective_username()?;

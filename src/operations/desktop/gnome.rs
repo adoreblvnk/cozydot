@@ -1,9 +1,13 @@
+use std::{collections::HashMap, fs, io::Write};
+
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashMap;
 
-use crate::{config::Gnome, operations::host};
+use crate::{
+    config::{Gnome, Theme},
+    operations::host::{self, stdout_line},
+};
 
 #[derive(PartialEq)]
 pub(crate) enum Outcome {
@@ -11,6 +15,9 @@ pub(crate) enum Outcome {
     LoginRequired,
 }
 
+const GNOME_MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
+const GNOME_TERMINAL_SHORTCUT: &str =
+    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/cozydot-terminal/";
 const DASH_TO_DOCK_UUID: &str = "dash-to-dock@micxgx.gmail.com";
 const ROUNDED_CORNERS_UUID: &str = "rounded-window-corners@fxgn";
 const ROUNDED_CORNERS_SETTINGS: &str =
@@ -18,31 +25,100 @@ const ROUNDED_CORNERS_SETTINGS: &str =
 
 pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
     if let Some(button_layout) = &gnome.button_layout {
-        super::gsettings_set("org.gnome.desktop.wm.preferences", "button-layout", &format!("'{button_layout}'"))?;
+        gsettings_set("org.gnome.desktop.wm.preferences", "button-layout", &format!("'{button_layout}'"))?;
     }
     if let Some(files) = &gnome.files {
         if let Some(hidden) = files.show_hidden_files {
             let value = if hidden { "true" } else { "false" };
-            super::gsettings_set("org.gtk.gtk4.Settings.FileChooser", "show-hidden", value)?;
+            gsettings_set("org.gtk.gtk4.Settings.FileChooser", "show-hidden", value)?;
         }
         if let Some(folders_first) = files.sort_folders_first {
             let value = if folders_first { "true" } else { "false" };
-            super::gsettings_set("org.gtk.gtk4.Settings.FileChooser", "sort-directories-first", value)?;
+            gsettings_set("org.gtk.gtk4.Settings.FileChooser", "sort-directories-first", value)?;
         }
     }
     if let Some(Some(timeout)) = gnome.idle.as_ref().map(|i| i.timeout.as_deref()) {
         let seconds = humantime::parse_duration(timeout)?.as_secs();
-        super::gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))?;
+        gsettings_set("org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}"))?;
     }
     if let Some(keyboard) = &gnome.keyboard {
         let schema = "org.gnome.desktop.peripherals.keyboard";
         if let Some(delay) = keyboard.delay {
-            super::gsettings_set(schema, "delay", &format!("uint32 {delay}"))?;
+            gsettings_set(schema, "delay", &format!("uint32 {delay}"))?;
         }
         if let Some(interval) = keyboard.repeat_interval {
-            super::gsettings_set(schema, "repeat-interval", &format!("uint32 {interval}"))?;
+            gsettings_set(schema, "repeat-interval", &format!("uint32 {interval}"))?;
         }
     }
+    Ok(())
+}
+
+pub(crate) fn set_color_scheme(color_scheme: Theme) -> Result<()> {
+    gsettings_set(
+        "org.gnome.desktop.interface",
+        "color-scheme",
+        match color_scheme {
+            Theme::Light => "'prefer-light'",
+            Theme::Dark => "'prefer-dark'",
+        },
+    )
+}
+
+pub(crate) fn set_terminal(executable: &str) -> Result<()> {
+    ensure!(host::has_executable_on_path(executable), "desktop terminal executable {executable:?} is unavailable");
+    set_xdg_terminal(executable)?;
+    // Ubuntu provides this media key; upstream GNOME needs a custom binding
+    if !host::output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {
+        ensure_gnome_terminal_shortcut("xdg-terminal-exec")?;
+    }
+    Ok(())
+}
+
+fn set_xdg_terminal(executable: &str) -> Result<()> {
+    let config_home = crate::paths::config_home()?;
+    fs::create_dir_all(&config_home)?;
+    let entry = format!("{executable}.desktop");
+    let mut temp = tempfile::NamedTempFile::with_prefix_in(".xdg-terminals.", &config_home)?;
+    writeln!(temp, "{entry}")?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(config_home.join("xdg-terminals.list"))?;
+    fs::File::open(config_home)?.sync_all()?;
+
+    let output = host::run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
+    if stdout_line(&output.stdout, "xdg-terminal-exec --print-id")? != entry.as_str() {
+        bail!("xdg-terminal-exec did not select {entry:?}");
+    }
+    Ok(())
+}
+
+fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
+    let output = host::run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
+    let keybindings = stdout_line(&output.stdout, "gsettings get custom-keybindings")?;
+    let quoted_path = format!("'{GNOME_TERMINAL_SHORTCUT}'");
+    // gsettings renders an empty string array as [] or @as []
+    let updated = if keybindings.contains(&quoted_path) {
+        None
+    } else if matches!(keybindings, "[]" | "@as []") {
+        Some(format!("[{quoted_path}]"))
+    } else if let Some(existing) = keybindings.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
+        Some(format!("[{existing}, {quoted_path}]"))
+    } else {
+        bail!("gsettings get custom-keybindings returned malformed output");
+    };
+
+    let schema = format!("{GNOME_MEDIA_KEYS}.custom-keybinding:{GNOME_TERMINAL_SHORTCUT}");
+    // complete the binding before publishing its path to GNOME
+    gsettings_set(&schema, "name", "'Terminal'")?;
+    gsettings_set(&schema, "command", &format!("'{executable}'"))?;
+    gsettings_set(&schema, "binding", "'<Primary><Alt>T'")?;
+    if let Some(updated) = updated {
+        gsettings_set(GNOME_MEDIA_KEYS, "custom-keybindings", &updated)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> {
+    host::run("gsettings set", "gsettings", ["set", schema, key, value])?;
     Ok(())
 }
 

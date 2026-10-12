@@ -2,11 +2,9 @@ use std::{ffi::OsStr, ffi::OsString, fs, os::unix::fs::PermissionsExt, path::Pat
 
 use anyhow::{Context, Result, bail, ensure};
 
-pub(crate) mod macos;
 pub(crate) mod privileged_file;
 pub(crate) mod shell;
 pub(crate) mod sudo;
-pub(crate) mod systemd;
 pub(crate) mod users;
 
 pub(crate) fn output<I, S>(program: &str, args: I) -> Result<Output>
@@ -105,4 +103,11 @@ pub(crate) fn stdout_line<'a>(bytes: &'a [u8], command: &str) -> Result<&'a str>
     let record = output.strip_suffix('\n').unwrap_or(output);
     ensure!(!record.is_empty() && !record.contains('\n'), "{command} returned malformed record output");
     Ok(record)
+}
+
+pub(crate) fn is_systemd_unit_enabled_or_active(unit: &str) -> Result<bool> {
+    // disabled but still-running units must be stopped too
+    let enabled = output("systemctl", ["is-enabled", unit])?.status.success();
+    let active = output("systemctl", ["is-active", unit])?.status.success();
+    Ok(enabled || active)
 }

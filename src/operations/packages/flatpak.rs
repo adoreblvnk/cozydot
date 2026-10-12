@@ -1,4 +1,4 @@
-use super::super::host;
+use crate::operations::host;
 use anyhow::Result;
 
 const FLATHUB_NAME: &str = "flathub";

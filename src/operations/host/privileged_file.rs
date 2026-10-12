@@ -2,7 +2,7 @@ use std::{io::Write, path::Path};
 
 use anyhow::{Context, Result};
 
-use super::*;
+use super::{output, run};
 
 pub(crate) fn write_atomic(destination: &Path, contents: &[u8], label: &str) -> Result<()> {
     let mut file = tempfile::Builder::new().prefix("privileged-write").tempfile().context("create staging file")?;
