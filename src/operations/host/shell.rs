@@ -2,7 +2,7 @@ use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
 use anyhow::{Context, Result};
 
-use super::*;
+use super::home;
 
 pub(crate) fn append_profile(snippet: &str) -> Result<()> {
     let name = if cfg!(target_os = "macos") { ".zprofile" } else { ".profile" };
