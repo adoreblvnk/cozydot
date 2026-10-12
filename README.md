@@ -134,7 +134,7 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 # documentation
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
-# build release archive & checksum
+# build release binary & checksum
 scripts/package-release.sh
 ```
 

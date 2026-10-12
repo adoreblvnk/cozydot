@@ -83,15 +83,15 @@ main() {
     [ "$VERSION" != "$URL" ] || error "unable to parse version from release URL: $URL"
   fi
 
-  ASSET="cozydot-v$VERSION-$TARGET.tar.gz"
+  ASSET="cozydot-v$VERSION-$TARGET"
   URL="$BASE_URL/download/v$VERSION"
   umask 077
   TEMP=$(mktemp -d "${TMPDIR:-/tmp}/cozydot-install.XXXXXX")
   trap cleanup 0 # remove temp dir on exit
 
-  ARCHIVE="$TEMP/$ASSET"
-  curl -fsSL "$URL/$ASSET" -o "$ARCHIVE"
-  curl -fsSL "$URL/$ASSET.sha256" -o "$ARCHIVE.sha256"
+  BIN="$TEMP/$ASSET"
+  curl -fsSL "$URL/$ASSET" -o "$BIN"
+  curl -fsSL "$URL/$ASSET.sha256" -o "$BIN.sha256"
   if command -v sha256sum >/dev/null 2>&1; then
     if ! (cd "$TEMP" && sha256sum -c "$ASSET.sha256") >/dev/null 2>&1; then
       error "checksum verification failed"
@@ -100,16 +100,15 @@ main() {
     error "checksum verification failed"
   fi
 
-  tar -xzf "$ARCHIVE" -C "$TEMP" cozydot
   # reject directories & symlinks before installation
-  if [ ! -f "$TEMP/cozydot" ] || [ -L "$TEMP/cozydot" ]; then
+  if [ ! -f "$BIN" ] || [ -L "$BIN" ]; then
     error "missing regular binary"
   fi
 
   mkdir -p "$BIN_DIR"
   # stage binary in destination dir for atomic posix rename
   BIN_TMP=$(mktemp "$BIN_DIR/.cozydot.XXXXXX")
-  cp "$TEMP/cozydot" "$BIN_TMP"
+  cp "$BIN" "$BIN_TMP"
   chmod 0755 "$BIN_TMP"
   mv -f "$BIN_TMP" "$BIN_DIR/cozydot"
   BIN_TMP=""
