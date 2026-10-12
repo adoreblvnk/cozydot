@@ -111,6 +111,59 @@ esac
     assert_eq!(fs::read_to_string(backup).unwrap(), "user bashrc\n");
 }
 
+// dotfiles -u materializes leaf symlinks & unfolded directories into regular files
+#[test]
+fn dotfiles_unlink_materializes_symlinks_into_standalone_files() {
+    let env = TestEnv::new();
+    env.write_config(&MINIMAL_CONFIG.replace(
+        r#"    linux: []
+    macos: []"#,
+        r#"    linux:
+      - bash
+      - wezterm
+    macos:
+      - bash
+      - wezterm"#,
+    ));
+
+    // set up cozydot package files
+    let bash_src = env.root().join("cozydot/dotfiles/bash/.bashrc");
+    fs::create_dir_all(bash_src.parent().unwrap()).unwrap();
+    fs::write(&bash_src, "cozydot bashrc\n").unwrap();
+
+    let wezterm_dir = env.root().join("cozydot/dotfiles/wezterm/.config/wezterm");
+    fs::create_dir_all(&wezterm_dir).unwrap();
+    fs::write(wezterm_dir.join("wezterm.lua"), "return {}\n").unwrap();
+
+    // simulate stow symlinks in home
+    let bash_dest = env.home().join(".bashrc");
+    std::os::unix::fs::symlink(&bash_src, &bash_dest).unwrap();
+
+    let config_dir = env.home().join(".config");
+    fs::create_dir_all(&config_dir).unwrap();
+    let wezterm_dest = config_dir.join("wezterm");
+    std::os::unix::fs::symlink(&wezterm_dir, &wezterm_dest).unwrap();
+
+    // unlink converts symlinks to standalone copies
+    env.cozydot().args(["dotfiles", "-u"]).assert().success();
+
+    let bash_meta = fs::symlink_metadata(&bash_dest).unwrap();
+    assert!(bash_meta.file_type().is_file());
+    assert_eq!(fs::read_to_string(&bash_dest).unwrap(), "cozydot bashrc\n");
+
+    let wezterm_meta = fs::symlink_metadata(&wezterm_dest).unwrap();
+    assert!(wezterm_meta.file_type().is_dir());
+
+    let lua_dest = wezterm_dest.join("wezterm.lua");
+    let lua_meta = fs::symlink_metadata(&lua_dest).unwrap();
+    assert!(lua_meta.file_type().is_file());
+    assert_eq!(fs::read_to_string(&lua_dest).unwrap(), "return {}\n");
+
+    // -r and -u / --unmanage flags conflict
+    env.cozydot().args(["dotfiles", "-r", "-u"]).assert().failure();
+    env.cozydot().args(["dotfiles", "-r", "--unmanage"]).assert().failure();
+}
+
 // a schema error anywhere in the config means 0 commands reach the host
 #[test]
 #[cfg(target_os = "linux")]

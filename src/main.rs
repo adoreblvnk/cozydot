@@ -37,8 +37,11 @@ enum Command {
     /// Apply configured dotfiles.
     Dotfiles {
         /// Back up conflicts before replacing them with cozydot links.
-        #[arg(short = 'r', long)]
+        #[arg(short = 'r', long, conflicts_with = "unlink")]
         replace: bool,
+        /// Replace managed symlinks in $HOME with standalone copies of target files.
+        #[arg(short = 'u', long, visible_alias = "unmanage")]
+        unlink: bool,
     },
     /// Update configured software.
     Update {
@@ -90,9 +93,9 @@ fn main() {
                 let host = ActiveHost::load()?;
                 workflow::apply(&host.config, &host.platform, &host.config_dir.join("dotfiles"))?;
             }
-            Command::Dotfiles { replace } => {
+            Command::Dotfiles { replace, unlink } => {
                 let host = ActiveHost::load()?;
-                workflow::dotfiles(&host.config, &host.platform, &host.config_dir.join("dotfiles"), replace)?;
+                workflow::dotfiles(&host.config, &host.platform, &host.config_dir.join("dotfiles"), replace, unlink)?;
             }
             Command::Update { self_only: true } => operations::self_update()?,
             Command::Update { self_only: false } => {
