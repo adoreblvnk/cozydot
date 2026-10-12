@@ -139,9 +139,8 @@ fn materialize_tree(source: &Path, target: &Path, unfolded: bool) -> Result<()> 
     let source_meta =
         fs::symlink_metadata(source).with_context(|| format!("read dotfiles source metadata {}", source.display()))?;
     if source_meta.file_type().is_dir() {
-        let is_folded = fs::symlink_metadata(target).is_ok_and(|m| {
-            m.file_type().is_symlink() && same_file::is_same_file(target, source).unwrap_or(false)
-        });
+        let is_folded = fs::symlink_metadata(target)
+            .is_ok_and(|m| m.file_type().is_symlink() && same_file::is_same_file(target, source).unwrap_or(false));
         if is_folded {
             fs::remove_file(target)?;
         }
@@ -159,9 +158,8 @@ fn materialize_tree(source: &Path, target: &Path, unfolded: bool) -> Result<()> 
         return Ok(());
     }
     let should_materialize = unfolded
-        || fs::symlink_metadata(target).is_ok_and(|m| {
-            m.file_type().is_symlink() && same_file::is_same_file(target, source).unwrap_or(false)
-        });
+        || fs::symlink_metadata(target)
+            .is_ok_and(|m| m.file_type().is_symlink() && same_file::is_same_file(target, source).unwrap_or(false));
     if should_materialize {
         materialize_file(source, target)?;
     }
