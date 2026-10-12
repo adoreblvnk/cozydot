@@ -102,8 +102,8 @@ rm -rf ~/.config/cozydot
   Validates `cozydot.yaml` against schema constraints & detected platform capabilities without changing system state.
 - `cozydot apply` \
   Applies active config to the host. Installs missing packages, configures toolchains, links dotfiles, installs extensions, & sets desktop preferences. Installed software & unmanaged packages remain untouched.
-- `cozydot dotfiles [-r | --replace]` \
-  Symlinks configured dotfile packages with GNU Stow. Simulates transactions to detect conflicts before making changes. Use `-r` / `--replace` to back up conflicting files to `~/.local/state/cozydot/dotfile-backups` before linking.
+- `cozydot dotfiles [-r | --replace] [-u | --unlink | --unmanage]` \
+  Symlinks configured dotfile packages with GNU Stow. Simulates transactions to detect conflicts before making changes. Use `-r` / `--replace` to back up conflicting files to `~/.local/state/cozydot/dotfile-backups` before linking. Use `-u` / `--unlink` (or `--unmanage`) to replace managed symlinks in `$HOME` with standalone copies of target files.
 - `cozydot update` \
   Executes enabled update policies: APT (`upgrade` / `full-upgrade`), Flatpak, Homebrew formulae & casks, Rustup toolchains, `fnm` Node.js versions, `uv` Python versions, Go toolchains, global npm packages, & Nerd Fonts.
 

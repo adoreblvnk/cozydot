@@ -31,14 +31,18 @@ pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Resu
     }
 }
 
-pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool) -> Result<()> {
+pub fn dotfiles(config: &Config, platform: &Platform, root: &Path, replace: bool, unlink: bool) -> Result<()> {
     let platform_packages = match platform.identity {
         PlatformIdentity::Macos => &config.dotfiles.packages.macos,
         PlatformIdentity::Linux { .. } => &config.dotfiles.packages.linux,
     };
     if let Some(packages) = dotfile_packages(&config.dotfiles, platform_packages) {
         host::home()?;
-        run("Applying", "dotfiles", || dotfiles::apply(root, &packages, replace || config.dotfiles.replace))?;
+        if unlink {
+            run("Unlinking", "dotfiles", || dotfiles::unlink(root, &packages))?;
+        } else {
+            run("Applying", "dotfiles", || dotfiles::apply(root, &packages, replace || config.dotfiles.replace))?;
+        }
     }
     Ok(())
 }
@@ -200,7 +204,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
-    dotfiles(config, platform, dotfiles_root, false)?;
+    dotfiles(config, platform, dotfiles_root, false, false)?;
     apply_integrations(&config.integrations)?;
     linux_integrations(&config.integrations.linux)?;
     linux_desktop(theme, desktop_config)?;
@@ -236,7 +240,7 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if fonts::any_missing(&config.fonts.nerd)? {
         run("Installing", "Nerd Fonts", || fonts::apply(&config.fonts.nerd, false))?;
     }
-    dotfiles(config, platform, dotfiles_root, false)?;
+    dotfiles(config, platform, dotfiles_root, false, false)?;
     apply_integrations(&config.integrations)?;
     if theme.is_some() || desktop_config.is_some_and(MacosDesktop::has_intent) {
         run("Writing", "macOS defaults", || macos_defaults::write_defaults(theme, desktop_config))?;

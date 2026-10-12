@@ -117,3 +117,63 @@ fn backup_conflicts(home: &Path, conflicts: &[(String, PathBuf)]) -> Result<()> 
     }
     Ok(())
 }
+
+pub(crate) fn unlink(stow_dir: &Path, packages: &[String]) -> Result<()> {
+    let stow_dir =
+        fs::canonicalize(stow_dir).with_context(|| format!("canonicalize stow directory {}", stow_dir.display()))?;
+    if !fs::symlink_metadata(&stow_dir)?.file_type().is_dir() {
+        bail!("stow directory is not a directory: {}", stow_dir.display());
+    }
+    let home = host::home()?;
+    for package in packages {
+        let package_dir = stow_dir.join(package);
+        if fs::symlink_metadata(&package_dir).is_ok_and(|metadata| metadata.file_type().is_dir()) {
+            materialize_tree(&package_dir, &home, false)?;
+        }
+    }
+    Ok(())
+}
+
+// traverse package tree & unfold Stow directory symlinks or match leaf symlinks
+fn materialize_tree(source: &Path, target: &Path, unfolded: bool) -> Result<()> {
+    let source_meta =
+        fs::symlink_metadata(source).with_context(|| format!("read dotfiles source metadata {}", source.display()))?;
+    if source_meta.file_type().is_dir() {
+        let is_folded = fs::symlink_metadata(target).is_ok_and(|m| {
+            m.file_type().is_symlink() && same_file::is_same_file(target, source).unwrap_or(false)
+        });
+        if is_folded {
+            fs::remove_file(target)?;
+        }
+        if unfolded || is_folded {
+            fs::create_dir_all(target)?;
+            fs::set_permissions(target, source_meta.permissions())?;
+        }
+        if unfolded || is_folded || fs::symlink_metadata(target).is_ok_and(|m| m.file_type().is_dir()) {
+            let mut entries = fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
+            entries.sort_by_key(fs::DirEntry::file_name);
+            for entry in entries {
+                materialize_tree(&entry.path(), &target.join(entry.file_name()), unfolded || is_folded)?;
+            }
+        }
+        return Ok(());
+    }
+    let should_materialize = unfolded
+        || fs::symlink_metadata(target).is_ok_and(|m| {
+            m.file_type().is_symlink() && same_file::is_same_file(target, source).unwrap_or(false)
+        });
+    if should_materialize {
+        materialize_file(source, target)?;
+    }
+    Ok(())
+}
+
+// atomically replace symlink with standalone copy preserving mode via fs::copy
+fn materialize_file(source: &Path, target: &Path) -> Result<()> {
+    let parent = target.parent().context("dotfile target has no parent")?;
+    let temp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("create staging file beside {}", target.display()))?;
+    fs::copy(source, temp.path()).with_context(|| format!("copy dotfile to {}", target.display()))?;
+    temp.persist(target).with_context(|| format!("materialize dotfile at {}", target.display()))?;
+    Ok(())
+}
