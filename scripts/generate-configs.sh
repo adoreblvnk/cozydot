@@ -40,6 +40,7 @@ ensure_yq() {
 
 generate_cli() {
   yq '
+    .packages.homebrew.casks = [] |
     .packages.linux.apt.install -= ["vlc"] |
     .packages.linux.apt.repos = [] |
     .packages.linux.flatpak = [] |
@@ -60,11 +61,11 @@ generate_cli() {
 generate_vm() {
   yq '
     .packages.linux.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
-    .packages.linux.flatpak = ["com.bitwarden.desktop"] |
+    .packages.linux.flatpak = [] |
     .packages.linux.binaries |= map(select(
       .name == "git-credential-manager"
     )) |
-    .packages.homebrew = [
+    .packages.homebrew.formulae = [
       "bat",
       "cmake",
       "fastfetch",
@@ -85,8 +86,10 @@ generate_vm() {
       "vim",
       "yq"
     ] |
+    .packages.homebrew.casks = [
+      "bitwarden"
+    ] |
     .packages.macos.homebrew.casks = [
-      "bitwarden",
       "git-credential-manager",
       "visual-studio-code",
       "wezterm"

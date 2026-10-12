@@ -9,7 +9,9 @@ system:
   macos:
     xcode: {}
 packages:
-  homebrew: []
+  homebrew:
+    formulae: []
+    casks: []
   linux: {}
   macos:
     homebrew:

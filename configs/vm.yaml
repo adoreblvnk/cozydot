@@ -11,25 +11,28 @@ system:
       command_line_tools: true
 packages:
   homebrew:
-    - bat
-    - cmake
-    - fastfetch
-    - fd
-    - ffmpeg
-    - fzf
-    - gh
-    - git
-    - imagemagick
-    - jq
-    - opencode
-    - openjdk
-    - pass
-    - sevenzip
-    - shfmt
-    - starship
-    - tealdeer
-    - vim
-    - yq
+    formulae:
+      - bat
+      - cmake
+      - fastfetch
+      - fd
+      - ffmpeg
+      - fzf
+      - gh
+      - git
+      - imagemagick
+      - jq
+      - opencode
+      - openjdk
+      - pass
+      - sevenzip
+      - shfmt
+      - starship
+      - tealdeer
+      - vim
+      - yq
+    casks:
+      - bitwarden
   linux:
     apt:
       install:
@@ -60,8 +63,7 @@ packages:
             - "*"
           packages:
             - wezterm-nightly
-    flatpak:
-      - com.bitwarden.desktop
+    flatpak: []
     binaries:
       - name: git-credential-manager
         format: deb
@@ -74,7 +76,6 @@ packages:
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
-        - bitwarden
         - git-credential-manager
         - visual-studio-code
         - wezterm

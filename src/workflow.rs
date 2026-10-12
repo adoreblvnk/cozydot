@@ -98,7 +98,8 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if flatpak_refs.is_some() {
         apt_prereqs.push("flatpak".into());
     }
-    if !config.packages.homebrew.is_empty() {
+    let has_linux_homebrew = !config.packages.homebrew.is_empty() || !config.packages.linux.homebrew.is_empty();
+    if has_linux_homebrew {
         apt_prereqs.extend(["build-essential".into(), "procps".into(), "file".into(), "git".into()]);
     }
     let mut deb_binaries = Vec::new();
@@ -176,20 +177,23 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     for (package, url) in executables {
         install_binary(package, url)?;
     }
-    // start appimaged before publishing AppImages so it can integrate new arrivals
-    if !appimages.is_empty() {
+    let mut formulae = config.packages.homebrew.formulae.clone();
+    formulae.extend_from_slice(&config.packages.linux.homebrew.formulae);
+    let mut casks = config.packages.homebrew.casks.clone();
+    casks.extend_from_slice(&config.packages.linux.homebrew.casks);
+    // start appimaged so it integrates AppImage binary packages & Homebrew GUI casks in ~/Applications
+    if !appimages.is_empty() || !casks.is_empty() {
         run("Installing", "appimaged", || binary::appimage::install_daemon(platform.arch))?;
         for (package, url) in appimages {
             install_binary(package, url)?;
         }
     }
-    let formulae = &config.packages.homebrew;
-    if !formulae.is_empty() {
+    if !formulae.is_empty() || !casks.is_empty() {
         if !homebrew::is_installed()? {
             run("Installing", "Homebrew", homebrew::install)?;
         }
-        if homebrew::any_missing(formulae, &[])? {
-            run("Installing", "Homebrew packages", || homebrew::install_packages(formulae, &[]))?;
+        if homebrew::any_missing(&formulae, &casks)? {
+            run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &casks))?;
         }
     }
     apply_tools(&config.tools, platform.arch)?;
@@ -208,8 +212,10 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     let theme = config.desktop.as_ref().and_then(|desktop| desktop.theme);
     let desktop_config = config.desktop.as_ref().and_then(|desktop| desktop.macos.as_ref());
     let macos_homebrew = &config.packages.macos.homebrew;
-    let mut formulae = config.packages.homebrew.clone();
+    let mut formulae = config.packages.homebrew.formulae.clone();
     formulae.extend_from_slice(&macos_homebrew.formulae);
+    let mut casks = config.packages.homebrew.casks.clone();
+    casks.extend_from_slice(&macos_homebrew.casks);
     // dotfiles require Stow even when it is absent from configured formulae
     if !formulae.iter().any(|formula| formula == "stow") {
         formulae.push("stow".into());
@@ -225,8 +231,8 @@ fn macos_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     if !homebrew::is_installed()? {
         run("Installing", "Homebrew", homebrew::install)?;
     }
-    if homebrew::any_missing(&formulae, &macos_homebrew.casks)? {
-        run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &macos_homebrew.casks))?;
+    if homebrew::any_missing(&formulae, &casks)? {
+        run("Installing", "Homebrew packages", || homebrew::install_packages(&formulae, &casks))?;
     }
     apply_tools(&config.tools, platform.arch)?;
     if fonts::any_missing(&config.fonts.nerd)? {
@@ -281,7 +287,8 @@ fn linux_update(config: &Config) -> Result<()> {
     if flatpak {
         apt_prereqs.push("flatpak".into());
     }
-    if config.updates.packages.homebrew && !config.packages.homebrew.is_empty() {
+    let has_linux_homebrew = !config.packages.homebrew.is_empty() || !config.packages.linux.homebrew.is_empty();
+    if config.updates.packages.homebrew && has_linux_homebrew {
         apt_prereqs.extend(["build-essential".into(), "procps".into(), "file".into(), "git".into()]);
     }
 
@@ -300,7 +307,7 @@ fn linux_update(config: &Config) -> Result<()> {
         if !homebrew::is_installed()? {
             run("Installing", "Homebrew", homebrew::install)?;
         }
-        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(true, false))?;
+        run("Updating", "Homebrew packages", || homebrew::update_and_upgrade(true, true))?;
     }
     Ok(())
 }

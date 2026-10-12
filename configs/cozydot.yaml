@@ -11,38 +11,50 @@ system:
       command_line_tools: true
 packages:
   homebrew:
-    - bat
-    - bottom
-    - can1357/tap/omp
-    - cmake
-    - dust
-    - eza
-    - fastfetch
-    - fd
-    - ffmpeg
-    - fzf
-    - gh
-    - git
-    - imagemagick
-    - jq
-    - openjdk
-    - opencode
-    - oxfmt
-    - oxlint
-    - panache
-    - pass
-    - presenterm
-    - resvg
-    - ripgrep
-    - sevenzip
-    - shfmt
-    - starship
-    - tlrc
-    - tokei
-    - vim
-    - yazi
-    - yq
-    - zoxide
+    formulae:
+      - bat
+      - bottom
+      - can1357/tap/omp
+      - cmake
+      - dust
+      - eza
+      - fastfetch
+      - fd
+      - ffmpeg
+      - fzf
+      - gh
+      - git
+      - imagemagick
+      - jq
+      - openjdk
+      - opencode
+      - oxfmt
+      - oxlint
+      - panache
+      - pass
+      - presenterm
+      - resvg
+      - ripgrep
+      - sevenzip
+      - shfmt
+      - starship
+      - tlrc
+      - tokei
+      - vim
+      - yazi
+      - yq
+      - zoxide
+    casks:
+      - bitwarden
+      - gimp
+      - helium-browser
+      - librewolf
+      - obsidian
+      - onlyoffice
+      - qbittorrent
+      - recordly
+      - shotcut
+      - zen
   linux:
     apt:
       install:
@@ -77,48 +89,6 @@ packages:
             - containerd.io
             - docker-buildx-plugin
             - docker-compose-plugin
-        - name: helium
-          key_url: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
-          key_path: /usr/share/keyrings/helium.gpg
-          uris:
-            default: https://pkg.helium.computer/deb
-          suite: stable
-          components:
-            - main
-          arch:
-            - amd64
-            - arm64
-          packages:
-            - helium-bin
-        - name: librewolf
-          key_url: https://repo.librewolf.net/pubkey.gpg
-          key_path: /etc/apt/keyrings/librewolf.gpg
-          uris:
-            default: https://repo.librewolf.net
-          suite: librewolf
-          components:
-            - main
-          arch:
-            - amd64
-            - arm64
-          conflicts:
-            - firefox
-            - firefox-esr
-          packages:
-            - librewolf
-        - name: onlyoffice
-          key_url: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
-          key_path: /usr/share/keyrings/onlyoffice.gpg
-          uris:
-            default: https://download.onlyoffice.com/repo/debian
-          suite: squeeze
-          components:
-            - main
-          arch:
-            - amd64
-            - arm64
-          packages:
-            - onlyoffice-desktopeditors
         - name: virtualbox
           key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
           key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
@@ -153,13 +123,9 @@ packages:
           packages:
             - wezterm-nightly
     flatpak:
-      - com.bitwarden.desktop
       - com.discordapp.Discord
       - com.obsproject.Studio
       - net.sapples.LiveCaptions
-      - org.gimp.GIMP
-      - org.qbittorrent.qBittorrent
-      - org.shotcut.Shotcut
       - org.telegram.desktop
     binaries:
       - name: git-credential-manager
@@ -167,39 +133,19 @@ packages:
         urls:
           x86_64: https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-linux-x64-2.9.1.deb
           aarch64: https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-linux-arm64-2.9.1.deb
-      - name: obsidian
-        format: appimage
-        urls:
-          x86_64: https://github.com/obsidianmd/obsidian-releases/releases/download/v1.13.7/Obsidian-1.13.7.AppImage
-          aarch64: https://github.com/obsidianmd/obsidian-releases/releases/download/v1.13.7/Obsidian-1.13.7-arm64.AppImage
-      - name: recordly
-        format: appimage
-        urls:
-          x86_64: https://github.com/webadderallorg/Recordly/releases/latest/download/Recordly-linux-x64.AppImage
-      - name: zen-browser
-        format: appimage
-        urls:
-          x86_64: https://github.com/zen-browser/desktop/releases/latest/download/zen-x86_64.AppImage
-          aarch64: https://github.com/zen-browser/desktop/releases/latest/download/zen-aarch64.AppImage
   macos:
     homebrew:
       formulae:
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
-        - bitwarden
         - discord
         - git-credential-manager
-        - helium-browser
-        - librewolf
         - obs
-        - obsidian
         - orbstack
-        - shotcut
         - syntax-highlight
         - visual-studio-code
         - wezterm@nightly
-        - zen
 tools:
   rust: stable
   node: lts

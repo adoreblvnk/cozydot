@@ -11,38 +11,40 @@ system:
       command_line_tools: true
 packages:
   homebrew:
-    - bat
-    - bottom
-    - can1357/tap/omp
-    - cmake
-    - dust
-    - eza
-    - fastfetch
-    - fd
-    - ffmpeg
-    - fzf
-    - gh
-    - git
-    - imagemagick
-    - jq
-    - openjdk
-    - opencode
-    - oxfmt
-    - oxlint
-    - panache
-    - pass
-    - presenterm
-    - resvg
-    - ripgrep
-    - sevenzip
-    - shfmt
-    - starship
-    - tlrc
-    - tokei
-    - vim
-    - yazi
-    - yq
-    - zoxide
+    formulae:
+      - bat
+      - bottom
+      - can1357/tap/omp
+      - cmake
+      - dust
+      - eza
+      - fastfetch
+      - fd
+      - ffmpeg
+      - fzf
+      - gh
+      - git
+      - imagemagick
+      - jq
+      - openjdk
+      - opencode
+      - oxfmt
+      - oxlint
+      - panache
+      - pass
+      - presenterm
+      - resvg
+      - ripgrep
+      - sevenzip
+      - shfmt
+      - starship
+      - tlrc
+      - tokei
+      - vim
+      - yazi
+      - yq
+      - zoxide
+    casks: []
   linux:
     apt:
       install:

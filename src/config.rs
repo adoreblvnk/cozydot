@@ -124,7 +124,7 @@ pub struct Xcode {
 #[serde(deny_unknown_fields)]
 pub struct Packages {
     #[serde(default)]
-    pub homebrew: Vec<String>,
+    pub homebrew: Homebrew,
     pub linux: LinuxPackages,
     pub macos: MacosPackages,
 }
@@ -132,6 +132,8 @@ pub struct Packages {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinuxPackages {
+    #[serde(default)]
+    pub homebrew: Homebrew,
     pub apt: Option<AptPackages>,
     #[serde(default)]
     pub flatpak: Vec<String>,
@@ -319,11 +321,19 @@ pub struct MacosPackages {
     pub homebrew: Homebrew,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Homebrew {
+    #[serde(default)]
     pub formulae: Vec<String>,
+    #[serde(default)]
     pub casks: Vec<String>,
+}
+
+impl Homebrew {
+    pub fn is_empty(&self) -> bool {
+        self.formulae.is_empty() && self.casks.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
