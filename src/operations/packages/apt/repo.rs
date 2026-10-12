@@ -1,3 +1,4 @@
+use crate::config::AptRepoConfig;
 use crate::operations::host::{self, privileged_file, temp_path};
 use crate::platform::Arch;
 use anyhow::{Context, Result, ensure};
@@ -20,24 +21,27 @@ pub struct AptRepo {
 }
 
 impl AptRepo {
-    pub fn new(
-        name: String,
-        key_url: String,
-        source_uri: String,
-        arch: Arch,
-        suite: String,
-        components: Vec<String>,
-        key_path: PathBuf,
-    ) -> Self {
-        let source_list_path = PathBuf::from(format!("{SOURCES_DIR}/{name}.list"));
-        Self { key_url, source_uri, arch, suite, components, key_path, source_list_path }
+    pub fn new(config: &AptRepoConfig, source_uri: String, suite: String, arch: Arch) -> Self {
+        let source_list_path = PathBuf::from(format!("{SOURCES_DIR}/{}.sources", config.name));
+        Self {
+            key_url: config.key_url.clone(),
+            source_uri,
+            arch,
+            suite,
+            components: config.components.clone(),
+            key_path: PathBuf::from(&config.key_path),
+            source_list_path,
+        }
     }
-
     pub fn render_source(&self) -> String {
-        let arch = self.arch.debian();
-        let key_path = self.key_path.display();
-        let prefix = format!("deb [arch={arch} signed-by={key_path}] {} ", self.source_uri);
-        format!("{prefix}{} {}\n", self.suite, self.components.join(" "))
+        format!(
+            "Types: deb\nURIs: {}\nSuites: {}\nComponents: {}\nArchitectures: {}\nSigned-By: {}\n",
+            self.source_uri,
+            self.suite,
+            self.components.join(" "),
+            self.arch.debian(),
+            self.key_path.display(),
+        )
     }
 }
 
@@ -51,7 +55,6 @@ pub(crate) fn add(repo: &AptRepo) -> Result<()> {
     privileged_file::write_atomic(&repo.key_path, &key, "APT repo key write")?;
     privileged_file::write_atomic(&repo.source_list_path, &source, "APT repo source write")
 }
-
 fn processed_key(url: &str, preserve_armor: bool) -> Result<Vec<u8>> {
     let downloaded = temp_path("repo-key-download", "")?;
     let downloaded_path = downloaded.to_str().context("downloaded repo key path is not UTF-8")?;
@@ -79,7 +82,6 @@ pub(crate) mod debian_components {
     use super::*;
 
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
-    const ONE_LINE_SOURCE: &str = "/etc/apt/sources.list";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
     pub(crate) fn add() -> Result<()> {
@@ -88,35 +90,18 @@ pub(crate) mod debian_components {
             ensure!(!metadata.is_symlink() && metadata.is_dir(), "APT directory must be a real directory: {directory}");
         }
 
-        // edit only Debian's canonical source path and leave third-party source files untouched
-        let check_file = |path: &str| -> Result<Option<bool>> {
-            match fs::symlink_metadata(path) {
-                Ok(meta) => {
-                    ensure!(!meta.is_symlink(), "Debian APT source path is a symlink: {path}");
-                    ensure!(meta.is_file(), "Debian APT source path is not a regular file: {path}");
-                    Ok(Some(true))
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(err) => Err(err).with_context(|| format!("stat {path}")),
-            }
-        };
+        let metadata = fs::symlink_metadata(DEB822_SOURCE).with_context(|| format!("stat {DEB822_SOURCE}"))?;
+        ensure!(!metadata.is_symlink(), "Debian APT source path is a symlink: {DEB822_SOURCE}");
+        ensure!(metadata.is_file(), "Debian APT source path is not a regular file: {DEB822_SOURCE}");
 
-        let deb822 = check_file(DEB822_SOURCE)?.is_some();
-        let source = if deb822 {
-            DEB822_SOURCE
-        } else {
-            ensure!(check_file(ONE_LINE_SOURCE)?.is_some(), "Debian APT source file does not exist: {ONE_LINE_SOURCE}");
-            ONE_LINE_SOURCE
-        };
-
-        let original = fs::read_to_string(source).with_context(|| format!("read {source}"))?;
-        let replacement = if deb822 { add_deb822_components(&original) } else { add_one_line_components(&original) };
+        let original = fs::read_to_string(DEB822_SOURCE).with_context(|| format!("read {DEB822_SOURCE}"))?;
+        let replacement = add_deb822_components(&original);
         if replacement == original {
             return Ok(());
         }
         // catch changes since first read before replacing file; this isn't a lock
-        ensure!(fs::read_to_string(source)? == original, "Debian APT source changed concurrently before write");
-        privileged_file::write_atomic(Path::new(source), replacement.as_bytes(), "Debian APT component write")?;
+        ensure!(fs::read_to_string(DEB822_SOURCE)? == original, "Debian APT source changed concurrently before write");
+        privileged_file::write_atomic(Path::new(DEB822_SOURCE), replacement.as_bytes(), "Debian APT component write")?;
         Ok(())
     }
 
@@ -141,45 +126,6 @@ pub(crate) mod debian_components {
             replacement.push_str(&line);
         }
         replacement
-    }
-
-    fn add_one_line_components(text: &str) -> String {
-        let mut replacement = String::with_capacity(text.len());
-        for line in text.split_inclusive('\n') {
-            let body = line.strip_suffix('\n').unwrap_or(line);
-            // insert components before inline comments while preserving the original newline
-            let comment = body.find('#').unwrap_or(body.len());
-            let fields = body[..comment].trim().split_ascii_whitespace().collect::<Vec<_>>();
-            if fields.first() != Some(&"deb") {
-                replacement.push_str(line);
-                continue;
-            }
-            // repository options may precede the URI, so locate it instead of assuming a fixed field
-            let uri = fields.iter().position(|field| field.starts_with("http://") || field.starts_with("https://"));
-            let Some(uri) = uri else {
-                replacement.push_str(line);
-                continue;
-            };
-            if !debian_uri(fields[uri]) || fields.len() <= uri + 2 || !fields[uri + 2..].contains(&"main") {
-                replacement.push_str(line);
-                continue;
-            }
-            let line = append_missing(body, comment, &fields[uri + 2..], line.ends_with('\n'));
-            replacement.push_str(&line);
-        }
-        replacement
-    }
-
-    fn debian_uri(uri: &str) -> bool {
-        let supported = [
-            "http://deb.debian.org/debian",
-            "https://deb.debian.org/debian",
-            "http://deb.debian.org/debian-security",
-            "https://deb.debian.org/debian-security",
-            "http://security.debian.org/debian-security",
-            "https://security.debian.org/debian-security",
-        ];
-        supported.contains(&uri.trim_end_matches('/'))
     }
 
     fn append_missing(body: &str, end: usize, existing: &[&str], newline: bool) -> String {
