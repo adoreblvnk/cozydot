@@ -90,6 +90,22 @@ packages:
             - arm64
           packages:
             - helium-bin
+        - name: librewolf
+          key_url: https://repo.librewolf.net/pubkey.gpg
+          key_path: /etc/apt/keyrings/librewolf.gpg
+          uris:
+            default: https://repo.librewolf.net
+          suite: librewolf
+          components:
+            - main
+          arch:
+            - amd64
+            - arm64
+          conflicts:
+            - firefox
+            - firefox-esr
+          packages:
+            - librewolf
         - name: onlyoffice
           key_url: https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE
           key_path: /usr/share/keyrings/onlyoffice.gpg
@@ -175,6 +191,7 @@ packages:
         - discord
         - git-credential-manager
         - helium-browser
+        - librewolf
         - obs
         - obsidian
         - orbstack

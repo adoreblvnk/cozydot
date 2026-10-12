@@ -317,7 +317,7 @@ exit 0
             .unwrap_or_else(|| panic!("no call moved a file to {target:?} in {calls}"))
     };
     let key_write = destination("/etc/apt/keyrings/example.gpg");
-    let source_write = destination("/etc/apt/sources.list.d/example.list");
+    let source_write = destination("/etc/apt/sources.list.d/example.sources");
 
     assert!(key_write < source_write, "repo key must be installed before its source list: {calls}");
     assert!(position("apt-get install") < key_write, "prerequisites come before repositories: {calls}");

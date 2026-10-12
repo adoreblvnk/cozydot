@@ -18,7 +18,7 @@ use crate::{
     spinner::run,
 };
 use anyhow::{Result, ensure};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const APT_PREREQS: [&str; 8] =
     ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xdg-terminal-exec", "xz-utils"];
@@ -88,15 +88,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
             } else {
                 repo.suite.clone()
             };
-            let apt_repo = apt::repo::AptRepo::new(
-                repo.name.clone(),
-                repo.key_url.clone(),
-                source_uri.to_owned(),
-                platform.arch,
-                suite,
-                repo.components.clone(),
-                PathBuf::from(&repo.key_path),
-            );
+            let apt_repo = apt::repo::AptRepo::new(repo, source_uri.to_owned(), suite, platform.arch);
             repos.push((repo.name.as_str(), apt_repo));
             repo_conflicts.extend(repo.conflicts.iter().cloned());
             repo_packages.extend(repo.packages.iter().cloned());
