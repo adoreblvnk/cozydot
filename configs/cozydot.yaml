@@ -60,10 +60,14 @@ packages:
       install:
         - bash-completion
         - build-essential
+        - celluloid
         - git
+        - libvirt-daemon-system
         - openssh-server
         - pinentry-tty
-        - vlc
+        - qemu-system
+        - virt-manager
+        - wl-clipboard
       repos:
         - name: docker
           key_url: https://download.docker.com/linux/ubuntu/gpg
@@ -89,19 +93,6 @@ packages:
             - containerd.io
             - docker-buildx-plugin
             - docker-compose-plugin
-        - name: virtualbox
-          key_url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
-          key_path: /usr/share/keyrings/oracle-virtualbox-2016.asc
-          uris:
-            ubuntu: https://download.virtualbox.org/virtualbox/debian
-            debian: https://download.virtualbox.org/virtualbox/debian
-          suite: codename
-          components:
-            - contrib
-          arch:
-            - amd64
-          packages:
-            - virtualbox-7.1
         - name: vscode
           key_url: https://packages.microsoft.com/keys/microsoft.asc
           key_path: /etc/apt/keyrings/packages.microsoft.gpg
@@ -144,6 +135,8 @@ packages:
         - obs
         - orbstack
         - syntax-highlight
+        - telegram
+        - utm
         - visual-studio-code
         - wezterm@nightly
 tools:
@@ -215,7 +208,7 @@ integrations:
       logging:
         driver: local
         max_size: 10m
-    virtualbox:
+    libvirt:
       group: true
 desktop:
   theme: dark

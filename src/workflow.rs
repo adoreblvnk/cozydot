@@ -377,10 +377,8 @@ fn linux_integrations(integrations: &LinuxIntegrations) -> Result<()> {
             })?;
         }
     }
-    if integrations.virtualbox.as_ref().is_some_and(|virtualbox| virtualbox.group) {
-        run("Configuring", "VirtualBox group membership", || {
-            users::ensure_in_group("VirtualBox", "VBoxManage", "vboxusers")
-        })?;
+    if integrations.libvirt.as_ref().is_some_and(|libvirt| libvirt.group) {
+        run("Configuring", "libvirt group membership", || users::ensure_in_group("libvirt", "virsh", "libvirt"))?;
     }
     Ok(())
 }

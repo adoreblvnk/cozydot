@@ -41,7 +41,7 @@ ensure_yq() {
 generate_cli() {
   yq '
     .packages.homebrew.casks = [] |
-    .packages.linux.apt.install -= ["vlc"] |
+    .packages.linux.apt.install -= ["celluloid", "virt-manager"] |
     .packages.linux.apt.repos = [] |
     .packages.linux.flatpak = [] |
     .packages.linux.binaries |= map(select(

@@ -398,7 +398,7 @@ pub struct VsCode {
 #[serde(deny_unknown_fields)]
 pub struct LinuxIntegrations {
     pub docker: Option<Docker>,
-    pub virtualbox: Option<VirtualBox>,
+    pub libvirt: Option<Libvirt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -424,7 +424,7 @@ pub struct DockerLogging {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VirtualBox {
+pub struct Libvirt {
     #[serde(default)]
     pub group: bool,
 }

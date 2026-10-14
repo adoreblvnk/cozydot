@@ -38,10 +38,14 @@ packages:
       install:
         - bash-completion
         - build-essential
+        - celluloid
         - git
+        - libvirt-daemon-system
         - openssh-server
         - pinentry-tty
-        - vlc
+        - qemu-system
+        - virt-manager
+        - wl-clipboard
       repos:
         - name: vscode
           key_url: https://packages.microsoft.com/keys/microsoft.asc

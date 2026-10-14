@@ -117,7 +117,7 @@ packages:     # APT repos, Flatpaks, Homebrew formulae & casks, GitHub binaries
 tools:        # Rust, Node.js (fnm), Python (uv), Go, npm
 fonts:        # Nerd Font families
 dotfiles:     # Stow packages (all, linux, macos)
-integrations: # VS Code extensions, agent skills, Docker / VirtualBox
+integrations: # VS Code extensions, agent skills, Docker / libvirt
 desktop:      # Theme (dark/light), GNOME extensions, macOS defaults
 updates:      # Upgrade policies for each ecosystem
 ```
