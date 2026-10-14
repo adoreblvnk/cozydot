@@ -51,8 +51,11 @@ packages:
         - bash-completion
         - build-essential
         - git
+        - libvirt-daemon-system
         - openssh-server
         - pinentry-tty
+        - qemu-system
+        - wl-clipboard
       repos: []
     flatpak: []
     binaries:
