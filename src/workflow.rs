@@ -125,7 +125,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         if config.system.debian.as_ref().is_some_and(|debian| debian.sudo_group) {
             run("Configuring", "sudo group membership", users::ensure_in_sudo_group)?;
         }
-        run("Enabling", "Debian APT components", apt::repo::debian_components::add)?;
+        run("Enabling", "Debian APT components", || apt::repo::debian_components::add(&platform.distro_codename))?;
     }
     if let (Distro::Ubuntu, Some(ubuntu)) = (distro, &config.system.ubuntu) {
         if let Some(state) = ubuntu.unattended_upgrades {

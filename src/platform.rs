@@ -45,8 +45,8 @@ impl Platform {
             Family::Debian => os.get_value("DEBIAN_CODENAME"),
         };
         let base_codename = base_codename.unwrap_or(&distro_codename).to_owned();
-        if distro == Distro::Debian && !["bookworm", "trixie"].contains(&distro_codename.as_str()) {
-            bail!("unsupported Debian release {distro_codename:?}; supported releases are bookworm and trixie");
+        if distro == Distro::Debian && !["trixie", "forky"].contains(&distro_codename.as_str()) {
+            bail!("unsupported Debian release {distro_codename:?}; supported releases are trixie and newer");
         }
         if distro_codename.chars().any(char::is_control) || base_codename.chars().any(char::is_control) {
             bail!("detected distribution codenames must fit on one line and contain no control characters");

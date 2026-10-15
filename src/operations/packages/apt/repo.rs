@@ -82,12 +82,35 @@ pub(crate) mod debian_components {
     use super::*;
 
     const DEB822_SOURCE: &str = "/etc/apt/sources.list.d/debian.sources";
+    const LEGACY_SOURCE: &str = "/etc/apt/sources.list";
     const COMPONENTS: [&str; 3] = ["contrib", "non-free", "non-free-firmware"];
 
-    pub(crate) fn add() -> Result<()> {
+    pub(crate) fn add(codename: &str) -> Result<()> {
         for directory in ["/etc/apt", "/etc/apt/sources.list.d"] {
             let metadata = fs::symlink_metadata(directory).with_context(|| format!("read {directory} metadata"))?;
             ensure!(!metadata.is_symlink() && metadata.is_dir(), "APT directory must be a real directory: {directory}");
+        }
+
+        if !Path::new(DEB822_SOURCE).exists() && Path::new(LEGACY_SOURCE).exists() {
+            let content = format!(
+                "Types: deb\n\
+                 URIs: http://deb.debian.org/debian\n\
+                 Suites: {codename} {codename}-updates\n\
+                 Components: main contrib non-free non-free-firmware\n\
+                 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\n\
+                 Types: deb\n\
+                 URIs: http://security.debian.org/debian-security\n\
+                 Suites: {codename}-security\n\
+                 Components: main contrib non-free non-free-firmware\n\
+                 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n"
+            );
+            privileged_file::write_atomic(Path::new(DEB822_SOURCE), content.as_bytes(), "Debian APT deb822 migration")?;
+            privileged_file::write_atomic(
+                Path::new(LEGACY_SOURCE),
+                b"# Migrated to /etc/apt/sources.list.d/debian.sources by cozydot\n",
+                "Debian APT legacy source truncate",
+            )?;
+            return Ok(());
         }
 
         let metadata = fs::symlink_metadata(DEB822_SOURCE).with_context(|| format!("stat {DEB822_SOURCE}"))?;
