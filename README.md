@@ -45,7 +45,7 @@ cozydot is built around 2 core principles:
 
 ### Supported platforms
 
-- **Linux (`x86_64`, `aarch64`)**: Debian 12 (Bookworm), Debian 13 (Trixie), Ubuntu, Pop!_OS, & Linux Mint.
+- **Linux (`x86_64`, `aarch64`)**: Debian 13 (Trixie), Ubuntu, Pop!_OS, & Linux Mint.
 - **macOS (`aarch64`)**: Apple Silicon (`aarch64-apple-darwin`).
 
 ## Demo
