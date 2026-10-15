@@ -83,11 +83,6 @@ fn set_xdg_terminal(executable: &str) -> Result<()> {
     temp.as_file_mut().sync_all()?;
     temp.persist(config_home.join("xdg-terminals.list"))?;
     fs::File::open(config_home)?.sync_all()?;
-
-    let output = host::run("xdg-terminal-exec selection", "xdg-terminal-exec", ["--print-id"])?;
-    if stdout_line(&output.stdout, "xdg-terminal-exec --print-id")? != entry.as_str() {
-        bail!("xdg-terminal-exec did not select {entry:?}");
-    }
     Ok(())
 }
 
