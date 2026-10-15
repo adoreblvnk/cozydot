@@ -209,9 +209,8 @@ exit 1
     );
 
     let config = MINIMAL_CONFIG.replace(
-        "casks: []",
-        r#"casks:
-        - should-never-be-installed-on-linux"#,
+        "macos:\n    homebrew:\n      formulae: []\n      casks: []",
+        "macos:\n    homebrew:\n      formulae: []\n      casks:\n        - should-never-be-installed-on-linux",
     );
     env.write_config(&config);
 
