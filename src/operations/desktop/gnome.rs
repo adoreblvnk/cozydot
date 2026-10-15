@@ -77,7 +77,7 @@ pub(crate) fn set_terminal(executable: &str) -> Result<()> {
 fn set_xdg_terminal(executable: &str) -> Result<()> {
     let config_home = crate::paths::config_home()?;
     fs::create_dir_all(&config_home)?;
-    let entry = format!("{executable}.desktop");
+    let entry = resolve_desktop_id(executable);
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".xdg-terminals.", &config_home)?;
     writeln!(temp, "{entry}")?;
     temp.as_file_mut().sync_all()?;
@@ -89,6 +89,22 @@ fn set_xdg_terminal(executable: &str) -> Result<()> {
         bail!("xdg-terminal-exec did not select {entry:?}");
     }
     Ok(())
+}
+
+fn resolve_desktop_id(executable: &str) -> String {
+    let target = format!("{executable}.desktop");
+    for dir in ["/usr/share/applications", "/usr/local/share/applications"] {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name == target || name.ends_with(&format!(".{target}")) {
+                    return name.into_owned();
+                }
+            }
+        }
+    }
+    target
 }
 
 fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
