@@ -47,8 +47,6 @@ packages:
     casks:
       - bitwarden
       - gimp
-      - helium-browser
-      - librewolf
       - obsidian
       - onlyoffice
       - qbittorrent
@@ -93,6 +91,29 @@ packages:
             - containerd.io
             - docker-buildx-plugin
             - docker-compose-plugin
+        - name: helium
+          key_url: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
+          key_path: /usr/share/keyrings/helium.gpg
+          uris:
+            default: https://pkg.helium.computer/deb
+          suite: stable
+          components:
+            - main
+          packages:
+            - helium-bin
+        - name: librewolf
+          key_url: https://repo.librewolf.net/pubkey.gpg
+          key_path: /etc/apt/keyrings/librewolf.gpg
+          uris:
+            default: https://repo.librewolf.net
+          suite: librewolf
+          components:
+            - main
+          conflicts:
+            - firefox
+            - firefox-esr
+          packages:
+            - librewolf
         - name: vscode
           key_url: https://packages.microsoft.com/keys/microsoft.asc
           key_path: /etc/apt/keyrings/packages.microsoft.gpg
@@ -132,6 +153,8 @@ packages:
       casks:
         - discord
         - git-credential-manager
+        - helium-browser
+        - librewolf
         - obs
         - orbstack
         - syntax-highlight
