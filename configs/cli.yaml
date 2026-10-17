@@ -23,7 +23,6 @@ packages:
       - ffmpeg
       - fzf
       - gh
-      - git
       - imagemagick
       - jq
       - openjdk
@@ -49,8 +48,6 @@ packages:
     apt:
       install:
         - bash-completion
-        - build-essential
-        - git
         - libvirt-daemon-system
         - openssh-server
         - pinentry-tty

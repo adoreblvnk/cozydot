@@ -20,8 +20,18 @@ use crate::{
 use anyhow::{Result, ensure};
 use std::path::Path;
 
-const APT_PREREQS: [&str; 8] =
-    ["ca-certificates", "curl", "fontconfig", "gnupg", "stow", "unzip", "xdg-terminal-exec", "xz-utils"];
+const APT_PREREQS: [&str; 10] = [
+    "build-essential",
+    "ca-certificates",
+    "curl",
+    "fontconfig",
+    "git",
+    "gnupg",
+    "stow",
+    "unzip",
+    "xdg-terminal-exec",
+    "xz-utils",
+];
 
 pub fn apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Result<()> {
     host::home()?;
@@ -100,7 +110,7 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     }
     let has_linux_homebrew = !config.packages.homebrew.is_empty() || !config.packages.linux.homebrew.is_empty();
     if has_linux_homebrew {
-        apt_prereqs.extend(["build-essential".into(), "procps".into(), "file".into(), "git".into()]);
+        apt_prereqs.extend(["file".into(), "procps".into()]);
     }
     let mut deb_binaries = Vec::new();
     let mut appimages = Vec::new();
@@ -289,7 +299,7 @@ fn linux_update(config: &Config) -> Result<()> {
     }
     let has_linux_homebrew = !config.packages.homebrew.is_empty() || !config.packages.linux.homebrew.is_empty();
     if config.updates.packages.homebrew && has_linux_homebrew {
-        apt_prereqs.extend(["build-essential".into(), "procps".into(), "file".into(), "git".into()]);
+        apt_prereqs.extend(["file".into(), "procps".into()]);
     }
 
     // refresh package metadata before upgrades and prerequisite reconciliation

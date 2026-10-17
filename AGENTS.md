@@ -32,7 +32,6 @@
 - Write comments in code-reading order, e.g. `// sort snaps so snapd, bare & core are last`.
 - Prefer visually simple code over denser, more idiomatic code.
 
-## Collaboration
+## Notes
 
-- Treat questions, suggestions, reviews, and brainstorming as exploratory unless the user explicitly requests implementation.
-- Briefly challenge incorrect, risky, or needlessly complex implementation details and recommend the simplest sound alternative. After the user makes an informed explicit choice, follow it unless it conflicts with safety, repository constraints, or feasibility.
+we're using brew on linux >v7.0.0 which supports casks

@@ -19,7 +19,6 @@ packages:
       - ffmpeg
       - fzf
       - gh
-      - git
       - imagemagick
       - jq
       - opencode
@@ -37,9 +36,6 @@ packages:
     apt:
       install:
         - bash-completion
-        - build-essential
-        - celluloid
-        - git
         - libvirt-daemon-system
         - openssh-server
         - pinentry-tty

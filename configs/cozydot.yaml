@@ -23,7 +23,6 @@ packages:
       - ffmpeg
       - fzf
       - gh
-      - git
       - imagemagick
       - jq
       - openjdk
@@ -47,19 +46,16 @@ packages:
     casks:
       - bitwarden
       - gimp
+      - localsend
       - obsidian
       - onlyoffice
       - qbittorrent
       - recordly
       - shotcut
-      - zen
   linux:
     apt:
       install:
         - bash-completion
-        - build-essential
-        - celluloid
-        - git
         - libvirt-daemon-system
         - openssh-server
         - pinentry-tty

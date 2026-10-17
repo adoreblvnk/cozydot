@@ -22,7 +22,9 @@ pub(crate) fn install_extensions(extensions: &[String]) -> Result<()> {
     let code = code_executable();
     for extension in extensions {
         if let Err(error) = host::run("VS Code extension install", code, ["--install-extension", extension.as_str()]) {
-            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to install VS Code extension {extension}: {error}");
+            anstream::eprintln!(
+                "{WARNING}warning:{WARNING:#} failed to install VS Code extension {extension}: {error}"
+            );
         }
     }
     Ok(())

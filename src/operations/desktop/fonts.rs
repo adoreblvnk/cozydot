@@ -41,10 +41,11 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
         }
     }
     // macOS discovers user fonts directly while Linux requires a fontconfig refresh
-    if changed && !cfg!(target_os = "macos") {
-        if let Err(error) = host::run("Nerd Font cache refresh", "fc-cache", ["--force", &parent.to_string_lossy()]) {
-            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to refresh font cache: {error}");
-        }
+    if changed
+        && !cfg!(target_os = "macos")
+        && let Err(error) = host::run("Nerd Font cache refresh", "fc-cache", ["--force", &parent.to_string_lossy()])
+    {
+        anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to refresh font cache: {error}");
     }
     Ok(())
 }
