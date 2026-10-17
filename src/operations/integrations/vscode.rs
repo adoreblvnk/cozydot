@@ -1,12 +1,15 @@
 use anyhow::Result;
 
-use crate::operations::host;
+use crate::{operations::host, style::WARNING};
 
 pub(crate) fn any_missing(extensions: &[String]) -> Result<bool> {
     if extensions.is_empty() {
         return Ok(false);
     }
-    let output = host::output(code_executable(), ["--list-extensions"])?;
+    let Ok(output) = host::output(code_executable(), ["--list-extensions"]) else {
+        anstream::eprintln!("{WARNING}warning:{WARNING:#} VS Code CLI ('code') not found; skipping extensions");
+        return Ok(false);
+    };
     if !output.status.success() {
         return Ok(true);
     }
@@ -18,7 +21,9 @@ pub(crate) fn any_missing(extensions: &[String]) -> Result<bool> {
 pub(crate) fn install_extensions(extensions: &[String]) -> Result<()> {
     let code = code_executable();
     for extension in extensions {
-        host::run("VS Code extension install", code, ["--install-extension", extension.as_str()])?;
+        if let Err(error) = host::run("VS Code extension install", code, ["--install-extension", extension.as_str()]) {
+            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to install VS Code extension {extension}: {error}");
+        }
     }
     Ok(())
 }

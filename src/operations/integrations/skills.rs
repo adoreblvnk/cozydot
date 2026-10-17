@@ -1,6 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use crate::operations::{host, toolchains::fnm};
+use crate::{
+    operations::{host, toolchains::fnm},
+    style::WARNING,
+};
 
 pub(crate) fn install(entries: &[String]) -> Result<()> {
     let fnm = fnm::find_executable()?;
@@ -10,13 +13,17 @@ pub(crate) fn install(entries: &[String]) -> Result<()> {
     };
 
     let check_args = [prefix, &["--version"]].concat();
-    host::run("Skills CLI version check", program, check_args)
-        .context("Skills integration requires an existing usable skills CLI")?;
+    if let Err(error) = host::run("Skills CLI version check", program, check_args) {
+        anstream::eprintln!("{WARNING}warning:{WARNING:#} skills CLI is unavailable: {error}");
+        return Ok(());
+    }
 
     for entry in entries {
         // `skills add` parses owner/repo, repo@skill & URLs natively
         let args = [prefix, &["add", entry, "--global", "--agent", "universal", "--yes", "--full-depth"]].concat();
-        host::run(&format!("skill add {entry}"), program, args)?;
+        if let Err(error) = host::run(&format!("skill add {entry}"), program, args) {
+            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to install skill {entry}: {error}");
+        }
     }
     Ok(())
 }

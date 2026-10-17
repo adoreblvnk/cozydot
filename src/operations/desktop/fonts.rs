@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::{fs, path::Path};
 
 use super::super::host::{self, temp_path};
+use crate::style::WARNING;
 
 pub(crate) fn any_missing(families: &[String]) -> Result<bool> {
     if families.is_empty() {
@@ -41,7 +42,9 @@ pub(crate) fn apply(families: &[String], reinstall: bool) -> Result<()> {
     }
     // macOS discovers user fonts directly while Linux requires a fontconfig refresh
     if changed && !cfg!(target_os = "macos") {
-        host::run("Nerd Font cache refresh", "fc-cache", ["--force", &parent.to_string_lossy()])?;
+        if let Err(error) = host::run("Nerd Font cache refresh", "fc-cache", ["--force", &parent.to_string_lossy()]) {
+            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to refresh font cache: {error}");
+        }
     }
     Ok(())
 }
