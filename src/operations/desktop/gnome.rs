@@ -28,6 +28,10 @@ pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
     if let Some(button_layout) = &gnome.button_layout {
         gsettings_set("org.gnome.desktop.wm.preferences", "button-layout", &format!("'{button_layout}'"))?;
     }
+    if let Some(center_new_windows) = gnome.center_new_windows {
+        let value = if center_new_windows { "true" } else { "false" };
+        gsettings_set("org.gnome.mutter", "center-new-windows", value)?;
+    }
     if let Some(files) = &gnome.files {
         if let Some(hidden) = files.show_hidden_files {
             let value = if hidden { "true" } else { "false" };

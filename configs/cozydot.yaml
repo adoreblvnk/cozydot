@@ -30,10 +30,8 @@ packages:
       - oxfmt
       - oxlint
       - panache
-      - pass
       - presenterm
       - resvg
-      - ripgrep
       - sevenzip
       - shfmt
       - starship
@@ -56,7 +54,6 @@ packages:
     apt:
       install:
         - bash-completion
-        - libvirt-daemon-system
         - openssh-server
         - pinentry-tty
         - qemu-system
@@ -144,6 +141,7 @@ packages:
   macos:
     homebrew:
       formulae:
+        - pass
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
@@ -177,7 +175,6 @@ dotfiles:
       - bat
       - bottom
       - fastfetch
-      - git
       - gnupg
       - opencode
       - starship
@@ -185,8 +182,12 @@ dotfiles:
       - yazi
     linux:
       - bash
+      - git-linux
+      - librewolf-linux
       - vscode-linux
     macos:
+      - git-macos
+      - librewolf-macos
       - vscode-macos
       - zsh
 integrations:
@@ -234,6 +235,7 @@ desktop:
   linux:
     gnome:
       button_layout: ":minimize,maximize,close" # default: ":close"
+      center_new_windows: true                  # default: false
       dash_to_dock: true
       extensions:
         - blur-my-shell@aunetx
@@ -244,8 +246,8 @@ desktop:
       idle:
         timeout: 15m
       keyboard:
-        delay: 200                     # default: 500
-        repeat_interval: 30            # default: 30
+        delay: 150                     # default: 500
+        repeat_interval: 20            # default: 30
       rounded_window_corners: true
       terminal: wezterm                # default: gnome-terminal
   macos:

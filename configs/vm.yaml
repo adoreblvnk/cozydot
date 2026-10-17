@@ -36,7 +36,6 @@ packages:
     apt:
       install:
         - bash-completion
-        - libvirt-daemon-system
         - openssh-server
         - pinentry-tty
         - qemu-system
@@ -73,6 +72,7 @@ packages:
   macos:
     homebrew:
       formulae:
+        - pass
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
@@ -94,14 +94,17 @@ dotfiles:
     all:
       - bat
       - fastfetch
-      - git
       - gnupg
       - starship
       - wezterm
     linux:
       - bash
+      - git-linux
+      - librewolf-linux
       - vscode-linux
     macos:
+      - git-macos
+      - librewolf-macos
       - zsh
 integrations:
   skills: []
@@ -114,6 +117,7 @@ desktop:
   linux:
     gnome:
       button_layout: ":minimize,maximize,close" # default: ":close"
+      center_new_windows: true # default: false
       dash_to_dock: true
       extensions:
         - blur-my-shell@aunetx
@@ -124,8 +128,8 @@ desktop:
       idle:
         timeout: 15m
       keyboard:
-        delay: 200 # default: 500
-        repeat_interval: 30 # default: 30
+        delay: 150 # default: 500
+        repeat_interval: 20 # default: 30
       rounded_window_corners: true
       terminal: wezterm # default: gnome-terminal
   macos:

@@ -49,8 +49,8 @@ generate_cli() {
     )) |
     .packages.macos.homebrew.casks = ["git-credential-manager"] |
     .dotfiles.packages.all -= ["wezterm"] |
-    .dotfiles.packages.linux -= ["vscode-linux"] |
-    .dotfiles.packages.macos -= ["vscode-macos"] |
+    .dotfiles.packages.linux -= ["librewolf-linux", "vscode-linux"] |
+    .dotfiles.packages.macos -= ["librewolf-macos", "vscode-macos"] |
     .integrations.vscode.extensions = [] |
     .integrations.linux = {} |
     del(.desktop) |

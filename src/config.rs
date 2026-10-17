@@ -486,6 +486,8 @@ pub struct Idle {
 pub struct Gnome {
     /// Window titlebar button layout
     pub button_layout: Option<String>,
+    /// Place new windows in the center of the screen
+    pub center_new_windows: Option<bool>,
     #[serde(default)]
     pub dash_to_dock: bool,
     #[serde(default)]
@@ -501,6 +503,7 @@ pub struct Gnome {
 impl Gnome {
     pub(crate) fn has_intent(&self) -> bool {
         self.button_layout.is_some()
+            || self.center_new_windows.is_some()
             || self.dash_to_dock
             || !self.extensions.is_empty()
             || self.files.is_some()

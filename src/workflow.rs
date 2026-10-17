@@ -411,7 +411,12 @@ fn linux_desktop(theme: Option<Theme>, desktop: Option<&LinuxDesktop>) -> Result
     let Some(gnome) = desktop.and_then(|desktop| desktop.gnome.as_ref()).filter(|gnome| gnome.has_intent()) else {
         return Ok(());
     };
-    if gnome.button_layout.is_some() || gnome.files.is_some() || gnome.idle.is_some() || gnome.keyboard.is_some() {
+    if gnome.button_layout.is_some()
+        || gnome.center_new_windows.is_some()
+        || gnome.files.is_some()
+        || gnome.idle.is_some()
+        || gnome.keyboard.is_some()
+    {
         run("Writing", "GNOME settings", || gnome::apply_settings(gnome))?;
     }
     if let Some(executable) = &gnome.terminal {
