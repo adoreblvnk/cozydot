@@ -1,0 +1,23 @@
+[core]
+    autocrlf = input
+[credential]
+    helper = manager
+[credential "https://dev.azure.com"]
+    useHttpPath = true
+[gpg]
+    program = /opt/homebrew/bin/gpg
+[commit]
+    gpgsign = true
+[tag]
+    gpgsign = true
+[alias]
+    ll = log --pretty=format:'%C(yellow)%h%C(auto)%d %Creset%s %C(magenta)%cr' -n 10
+    lm = log --graph --pretty=format:'%C(yellow)%h %C(magenta)%ch%C(auto)%d %C(reset)%s %C(blue)<%an>'
+[include]
+    path = ~/.config/cozydot/gitconfig.local
+
+# ~/.config/cozydot/gitconfig.local
+# [user]
+#     name = <name>
+#     email = <email>
+#     signingkey = <key>

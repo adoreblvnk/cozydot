@@ -10,9 +10,12 @@
 
 # load env vars from ~/.config/cozydot/.env if exists
 if [ -r ~/.config/cozydot/.env ]; then
-  set -a
-  . ~/.config/cozydot/.env
-  set +a
+  set -a; . ~/.config/cozydot/.env; set +a
+fi
+
+# https://docs.brew.sh/Installation#post-installation-steps
+if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
 # set PATH so it includes user's private bin if it exists
@@ -21,19 +24,11 @@ if [ -d ~/bin ]; then PATH="$HOME/bin:$PATH"; fi
 # set PATH so it includes user's private bin if it exists
 if [ -d ~/.local/bin ]; then PATH="$HOME/.local/bin:$PATH"; fi
 
-# Git Credential Manager has no default credential store on Linux.
-export GCM_CREDENTIAL_STORE=gpg
-
 # Toolchains
 if [ -f ~/.cargo/env ]; then . ~/.cargo/env; fi
 
 # uv
 if [ -f ~/.local/bin/env ]; then . ~/.local/bin/env; fi
-
-if [ -d ~/.bun/bin ]; then
-  export BUN_INSTALL="$HOME/.bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-fi
 
 if [ -d /usr/local/go ]; then export PATH=$PATH:/usr/local/go/bin; fi
 

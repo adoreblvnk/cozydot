@@ -3,9 +3,7 @@
 
 # load env vars from ~/.config/cozydot/.env if exists
 if [[ -r ~/.config/cozydot/.env ]]; then
-  set -a
-  source ~/.config/cozydot/.env
-  set +a
+  set -a; source ~/.config/cozydot/.env; set +a
 fi
 
 # https://docs.brew.sh/Installation#post-installation-steps
@@ -26,10 +24,5 @@ if [[ -f ~/.cargo/env ]]; then source ~/.cargo/env; fi
 
 # uv
 if [[ -f ~/.local/bin/env ]]; then source ~/.local/bin/env; fi
-
-if [[ -d ~/.bun/bin ]]; then
-  export BUN_INSTALL="$HOME/.bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-fi
 
 if [[ -d /usr/local/go ]]; then export PATH="$PATH:/usr/local/go/bin"; fi

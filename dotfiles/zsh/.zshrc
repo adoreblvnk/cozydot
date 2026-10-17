@@ -42,7 +42,11 @@ if command -v uvx &>/dev/null; then eval "$(uvx --generate-shell-completion zsh 
 alias c=clear
 alias pip="python -m pip"
 
-if command -v bat &>/dev/null; then alias cat="bat -pp"; fi
+if command -v bat &>/dev/null; then
+  alias cat="bat -pp"
+  export MANPAGER="bat -plman"
+fi
+
 if ! command -v trash &>/dev/null && command -v gio &>/dev/null; then alias trash="gio trash"; fi
 
 # eza aliases
@@ -58,8 +62,6 @@ fi
 # uses OSC 7/133 sequences supported by most terminals & fails silently if wezterm is missing
 # source: https://github.com/wezterm/wezterm/blob/main/assets/shell-integration/wezterm.sh
 if [[ -f ~/.config/wezterm.sh ]]; then source ~/.config/wezterm.sh; fi
-
-if command -v bat &>/dev/null; then export MANPAGER="bat -plman"; fi
 
 # Set up fzf key bindings and fuzzy completion
 if command -v fzf &>/dev/null; then eval "$(fzf --zsh)"; fi

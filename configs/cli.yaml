@@ -30,10 +30,8 @@ packages:
       - oxfmt
       - oxlint
       - panache
-      - pass
       - presenterm
       - resvg
-      - ripgrep
       - sevenzip
       - shfmt
       - starship
@@ -48,7 +46,6 @@ packages:
     apt:
       install:
         - bash-completion
-        - libvirt-daemon-system
         - openssh-server
         - pinentry-tty
         - qemu-system
@@ -64,6 +61,7 @@ packages:
   macos:
     homebrew:
       formulae:
+        - pass
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
@@ -87,14 +85,15 @@ dotfiles:
       - bat
       - bottom
       - fastfetch
-      - git
       - gnupg
       - opencode
       - starship
       - yazi
     linux:
       - bash
+      - git-linux
     macos:
+      - git-macos
       - zsh
 integrations:
   skills:
