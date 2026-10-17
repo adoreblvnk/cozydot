@@ -7,6 +7,7 @@ use serde::Deserialize;
 use crate::{
     config::{Gnome, Theme},
     operations::host::{self, stdout_line},
+    style::WARNING,
 };
 
 #[derive(PartialEq)]
@@ -136,16 +137,25 @@ pub(crate) fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> 
 pub(crate) fn apply_extensions(extensions: &[String]) -> Result<Outcome> {
     let mut outcome = Outcome::Completed;
     for uuid in extensions {
-        if install_or_enable_extension(uuid)? == Outcome::LoginRequired {
-            outcome = Outcome::LoginRequired;
+        match install_or_enable_extension(uuid) {
+            Ok(Outcome::LoginRequired) => outcome = Outcome::LoginRequired,
+            Ok(Outcome::Completed) => {}
+            Err(error) => {
+                anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to apply GNOME extension {uuid}: {error}");
+            }
         }
     }
     Ok(outcome)
 }
 
 pub(crate) fn apply_dash_to_dock() -> Result<Outcome> {
-    if install_or_enable_extension(DASH_TO_DOCK_UUID)? == Outcome::LoginRequired {
-        return Ok(Outcome::LoginRequired);
+    match install_or_enable_extension(DASH_TO_DOCK_UUID) {
+        Ok(Outcome::LoginRequired) => return Ok(Outcome::LoginRequired),
+        Ok(Outcome::Completed) => {}
+        Err(error) => {
+            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to apply Dash to Dock: {error}");
+            return Ok(Outcome::Completed);
+        }
     }
     for (key, value) in [
         ("dock-position", "'BOTTOM'"),
@@ -159,17 +169,26 @@ pub(crate) fn apply_dash_to_dock() -> Result<Outcome> {
         ("click-action", "'minimize-or-previews'"),
     ] {
         let path = format!("/org/gnome/shell/extensions/dash-to-dock/{key}");
-        host::run("dconf write", "dconf", ["write", &path, value])?;
+        if let Err(error) = host::run("dconf write", "dconf", ["write", &path, value]) {
+            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to write Dash to Dock setting {key}: {error}");
+        }
     }
     Ok(Outcome::Completed)
 }
 
 pub(crate) fn apply_rounded_window_corners() -> Result<Outcome> {
-    if install_or_enable_extension(ROUNDED_CORNERS_UUID)? == Outcome::LoginRequired {
-        return Ok(Outcome::LoginRequired);
+    match install_or_enable_extension(ROUNDED_CORNERS_UUID) {
+        Ok(Outcome::LoginRequired) => return Ok(Outcome::LoginRequired),
+        Ok(Outcome::Completed) => {}
+        Err(error) => {
+            anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to apply Rounded Window Corners: {error}");
+            return Ok(Outcome::Completed);
+        }
     }
     let value = "{'padding': <{'left': uint32 1, 'right': 1, 'top': 1, 'bottom': 1}>, 'keepRoundedCorners': <{'maximized': false, 'fullscreen': false}>, 'borderRadius': <uint32 16>, 'smoothing': <0.5>, 'borderColor': <(0.5, 0.5, 0.5, 1.0)>, 'enabled': <true>}";
-    host::run("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value])?;
+    if let Err(error) = host::run("dconf write", "dconf", ["write", ROUNDED_CORNERS_SETTINGS, value]) {
+        anstream::eprintln!("{WARNING}warning:{WARNING:#} failed to write Rounded Window Corners settings: {error}");
+    }
     Ok(Outcome::Completed)
 }
 
