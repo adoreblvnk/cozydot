@@ -24,11 +24,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Initialize or synchronize config & bundled dotfiles.
+    /// Initialize config & bundled dotfiles.
     Init {
         /// Select a config preset.
         #[arg(long, value_enum, default_value = "cozydot")]
         preset: init::Preset,
+        /// Overwrite existing configuration and dotfiles.
+        #[arg(short, long)]
+        force: bool,
     },
     /// Validate active config.
     Check,
@@ -84,7 +87,9 @@ fn main() {
             return Ok(());
         };
         match command {
-            Command::Init { preset } => println!("Initialized cozydot at {}", init::init(preset)?.display()),
+            Command::Init { preset, force } => {
+                println!("Initialized cozydot at {}", init::init(preset, force)?.display())
+            }
             Command::Check => {
                 let host = ActiveHost::load()?;
                 println!("Validated {}", host.config_dir.join("cozydot.yaml").display());

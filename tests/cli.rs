@@ -41,34 +41,53 @@ fn cli_rejects_unversioned_or_legacy_configs() {
     env.cozydot().arg("check").assert().failure().stderr(predicate::str::contains("version"));
 }
 
-// 2nd init succeeds without overwriting a user-tuned cozydot.yaml
+// initial init scaffolds default config & bundled dotfiles
 #[test]
-fn init_scaffolds_default_config_idempotently() {
+fn init_scaffolds_default_config_and_dotfiles() {
     let env = TestEnv::new();
     let active_config = env.root().join("cozydot/cozydot.yaml");
-
-    env.cozydot().arg("init").assert().success();
-    assert!(active_config.exists());
-
-    fs::write(&active_config, "user tuned edit\n").unwrap();
-    env.cozydot().arg("init").assert().success();
-
-    assert_eq!(fs::read_to_string(&active_config).unwrap(), "user tuned edit\n");
-}
-
-// re-init skips dotfiles whose content no longer matches the .managed-files ledger
-#[test]
-fn init_preserves_user_edits_via_manifest_hashing() {
-    let env = TestEnv::new();
     let bashrc = env.root().join("cozydot/dotfiles/bash/.bashrc");
 
     env.cozydot().arg("init").assert().success();
+    assert!(active_config.exists());
+    assert!(bashrc.exists());
+    assert!(!env.root().join("cozydot/.managed-files").exists());
+}
+
+// 2nd init fails when config or dotfiles already exist unless --force is passed
+#[test]
+fn init_refuses_overwrite_without_force() {
+    let env = TestEnv::new();
+    let active_config = env.root().join("cozydot/cozydot.yaml");
+    let bashrc = env.root().join("cozydot/dotfiles/bash/.bashrc");
+
+    env.cozydot().arg("init").assert().success();
+    fs::write(&active_config, "user tuned edit\n").unwrap();
+
+    env.cozydot().arg("init").assert().failure().stderr(predicate::str::contains("already exist"));
+    assert_eq!(fs::read_to_string(&active_config).unwrap(), "user tuned edit\n");
+
+    // also refuses if cozydot.yaml is absent but dotfiles/ exists
+    fs::remove_file(&active_config).unwrap();
+    env.cozydot().arg("init").assert().failure().stderr(predicate::str::contains("already exist"));
+    assert!(bashrc.exists());
+}
+
+// --force overwrites existing config & dotfiles
+#[test]
+fn init_force_overwrites_existing_configuration() {
+    let env = TestEnv::new();
+    let active_config = env.root().join("cozydot/cozydot.yaml");
+    let bashrc = env.root().join("cozydot/dotfiles/bash/.bashrc");
+
+    env.cozydot().arg("init").assert().success();
+    fs::write(&active_config, "user tuned edit\n").unwrap();
     fs::write(&bashrc, "alias g=git\n").unwrap();
 
-    // simulated upgrade run skips a whole package once any manifest hash mismatches
-    env.cozydot().arg("init").assert().success();
+    env.cozydot().args(["init", "--force"]).assert().success();
 
-    assert_eq!(fs::read_to_string(&bashrc).unwrap(), "alias g=git\n");
+    assert_ne!(fs::read_to_string(&active_config).unwrap(), "user tuned edit\n");
+    assert_ne!(fs::read_to_string(&bashrc).unwrap(), "alias g=git\n");
 }
 
 // stow conflict aborts & leaves ~/.bashrc untouched; --replace backs it up first

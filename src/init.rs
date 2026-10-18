@@ -1,10 +1,7 @@
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use rust_embed::Embed;
-use sha2::{Digest, Sha256};
 use std::{
-    borrow::Cow,
-    collections::BTreeMap,
     fs::{self, File},
     io::{self, Write},
     os::unix::fs::PermissionsExt,
@@ -27,125 +24,38 @@ pub enum Preset {
     Vm,
 }
 
-/// Create `cozydot.yaml` & `dotfiles` dir without overwriting user-managed changes.
-pub fn init(preset: Preset) -> Result<PathBuf> {
+/// Create `cozydot.yaml` & `dotfiles` dir.
+pub fn init(preset: Preset, force: bool) -> Result<PathBuf> {
     let root = crate::paths::config_dir()?;
+    let config_path = root.join("cozydot.yaml");
+    let dotfiles_dir = root.join("dotfiles");
+    if (config_path.exists() || dotfiles_dir.exists()) && !force {
+        bail!("configuration or dotfiles already exist at {}; use --force to overwrite", root.display());
+    }
     ensure_directory_path(&root, Path::new(""))?;
-    let managed = read_manifest(&root.join(".managed-files"))?;
-    let mut init = Init { root, managed };
     let preset = match preset {
         Preset::Cozydot => COZYDOT_PRESET,
         Preset::Cli => CLI_PRESET,
         Preset::Vm => VM_PRESET,
     };
-    init.sync_config(preset)?;
-    init.sync_dotfiles()?;
-    // write ownership last so retries preserve files synced by partial runs
-    write_manifest(&init.root.join(".managed-files"), &init.managed)?;
-    Ok(init.root)
-}
-
-struct EmbeddedFile {
-    path: Cow<'static, str>,
-    bytes: Cow<'static, [u8]>,
-    mode: u32,
-}
-
-struct Init {
-    root: PathBuf,
-    managed: BTreeMap<PathBuf, String>,
-}
-
-impl Init {
-    fn sync_config(&mut self, preset: &'static [u8]) -> Result<()> {
-        let record = EmbeddedFile { path: Cow::Borrowed("cozydot.yaml"), bytes: Cow::Borrowed(preset), mode: 0o644 };
-        let relative = PathBuf::from(record.path.as_ref());
-        let dest = self.root.join(&relative);
-        let old_hash = self.managed.get(&relative);
-        // overwrite only when the current file still matches cozydot's last recorded hash
-        let write = match fs::symlink_metadata(&dest) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => true,
-            Err(error) => return Err(error.into()),
-            Ok(metadata) if !metadata.file_type().is_file() => false,
-            Ok(_) => old_hash.is_some_and(|hash| hash_file(&dest).is_ok_and(|current| &current == hash)),
-        };
-        if write {
-            write_file(&self.root, &record, &relative)?;
-            self.managed.insert(relative, hash_bytes(record.bytes.as_ref()));
-        }
-        Ok(())
+    write_file(&root, Path::new("cozydot.yaml"), preset, 0o644)?;
+    for path in Dotfiles::iter() {
+        let bytes = Dotfiles::get(path.as_ref()).with_context(|| format!("missing embedded file {path}"))?.data;
+        let mode = if bytes.starts_with(b"#!") { 0o755 } else { 0o644 };
+        write_file(&root, Path::new(path.as_ref()), bytes.as_ref(), mode)?;
     }
-
-    fn sync_dotfiles(&mut self) -> Result<()> {
-        let mut packages = BTreeMap::<PathBuf, Vec<EmbeddedFile>>::new();
-        for path in Dotfiles::iter() {
-            let bytes = Dotfiles::get(path.as_ref()).with_context(|| format!("missing embedded file {path}"))?.data;
-            let mode = if bytes.starts_with(b"#!") { 0o755 } else { 0o644 };
-            let record = EmbeddedFile { path, bytes, mode };
-            let package = Path::new(record.path.as_ref()).components().take(2).collect();
-            packages.entry(package).or_default().push(record);
-        }
-        for (package, records) in packages {
-            self.sync_dotfile_package(&package, &records)?;
-        }
-        Ok(())
-    }
-
-    fn sync_dotfile_package(&mut self, package: &Path, records: &[EmbeddedFile]) -> Result<()> {
-        // only sync packages with no unmanaged or modified files
-        let mut managed = Vec::new();
-        for (relative, hash) in &self.managed {
-            let Ok(suffix) = relative.strip_prefix(package) else {
-                continue;
-            };
-            if suffix.components().next().is_some() {
-                managed.push((relative, hash));
-            }
-        }
-        let dest = self.root.join(package);
-        let package_exists = match fs::symlink_metadata(&dest) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound && managed.is_empty() => false,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error.into()),
-            Ok(metadata) if !metadata.file_type().is_dir() => return Ok(()),
-            Ok(_) if managed.is_empty() => return Ok(()),
-            Ok(_) => true,
-        };
-        if package_exists {
-            let Some(files) = collect_regular_files(&dest, &self.root)? else {
-                return Ok(());
-            };
-            if !files.iter().eq(managed.iter().map(|(relative, _)| *relative)) {
-                return Ok(());
-            }
-            for (relative, hash) in managed {
-                let Ok(current) = hash_file(&self.root.join(relative)) else {
-                    return Ok(());
-                };
-                if &current != hash {
-                    return Ok(());
-                }
-            }
-        }
-
-        for record in records {
-            let relative = PathBuf::from(record.path.as_ref());
-            write_file(&self.root, record, &relative)?;
-            self.managed.insert(relative, hash_bytes(record.bytes.as_ref()));
-        }
-        Ok(())
-    }
+    Ok(root)
 }
 
-fn write_file(root: &Path, record: &EmbeddedFile, relative: &Path) -> Result<()> {
+fn write_file(root: &Path, relative: &Path, bytes: &[u8], mode: u32) -> Result<()> {
     ensure_directory_path(root, relative.parent().unwrap_or(Path::new("")))?;
     let dest = root.join(relative);
     let dest_parent = required_parent(&dest)?;
-    // write & sync beside the destination before publishing it with rename
+    // write & sync beside the destination before publishing with rename
     let mut temp = tempfile::NamedTempFile::with_prefix_in(".cozydot.", dest_parent)?;
-    temp.write_all(record.bytes.as_ref())?;
+    temp.write_all(bytes)?;
     temp.as_file_mut().sync_all()?;
-    temp.as_file_mut().set_permissions(fs::Permissions::from_mode(record.mode))?;
+    temp.as_file_mut().set_permissions(fs::Permissions::from_mode(mode))?;
     temp.persist(&dest)?;
     sync_dir(dest_parent)
 }
@@ -173,59 +83,6 @@ fn ensure_directory_path(root: &Path, relative: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect_regular_files(dir: &Path, root: &Path) -> Result<Option<Vec<PathBuf>>> {
-    let mut files = Vec::new();
-    for entry in walkdir::WalkDir::new(dir).min_depth(1).follow_links(false) {
-        let entry = entry?;
-        if entry.file_type().is_dir() {
-            continue;
-        }
-        if !entry.file_type().is_file() {
-            return Ok(None);
-        }
-        files.push(entry.path().strip_prefix(root)?.to_path_buf());
-    }
-    // match manifest order because filesystem traversal order is unspecified
-    files.sort();
-    Ok(Some(files))
-}
-
-fn read_manifest(path: &Path) -> Result<BTreeMap<PathBuf, String>> {
-    let mut result = BTreeMap::new();
-    let text = match fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(result),
-        Err(e) => return Err(e.into()),
-    };
-    for line in text.lines() {
-        let (hash, relative) = line.split_once('\t').context("malformed managed-files record")?;
-        let relative = PathBuf::from(relative);
-        ensure!(hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()), "invalid SHA-256 record");
-        // reject paths that could escape root or corrupt tab-separated records
-        if relative.as_os_str().is_empty()
-            || relative.components().any(|component| !matches!(component, Component::Normal(_)))
-            || relative.to_string_lossy().contains(['\t', '\n'])
-        {
-            bail!("unsafe managed path: {}", relative.display());
-        }
-        if result.insert(relative, hash.into()).is_some() {
-            bail!("duplicate managed-files record");
-        }
-    }
-    Ok(result)
-}
-
-fn write_manifest(path: &Path, managed: &BTreeMap<PathBuf, String>) -> Result<()> {
-    let parent = required_parent(path)?;
-    let mut temp = tempfile::NamedTempFile::with_prefix_in(".managed-files.", parent)?;
-    for (relative, hash) in managed {
-        writeln!(temp, "{}\t{}", hash, relative.display())?;
-    }
-    temp.as_file_mut().sync_all()?;
-    temp.persist(path)?;
-    sync_dir(parent)
-}
-
 fn required_parent(path: &Path) -> Result<&Path> {
     path.parent().with_context(|| format!("path has no parent: {}", path.display()))
 }
@@ -233,12 +90,4 @@ fn required_parent(path: &Path) -> Result<&Path> {
 fn sync_dir(path: &Path) -> Result<()> {
     File::open(path)?.sync_all()?;
     Ok(())
-}
-
-fn hash_bytes(bytes: &[u8]) -> String {
-    // format each byte as 2-digit zero-padded lowercase hex without external hex crate
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
-}
-fn hash_file(path: &Path) -> Result<String> {
-    Ok(hash_bytes(&fs::read(path)?))
 }

@@ -93,8 +93,8 @@ rm -rf ~/.config/cozydot
 
 ## Usage
 
-- `cozydot init [--preset <preset>]` \
-  Writes active config & bundled dotfiles under `~/.config/cozydot`. Bundled presets:
+- `cozydot init [--preset <preset>] [-f | --force]` \
+  Writes active config & bundled dotfiles under `~/.config/cozydot`. Refuses to overwrite an existing configuration unless `-f` / `--force` is provided. Bundled presets:
   - `cozydot` (default): full workstation (GUI apps, Flatpaks, fonts, desktop settings, dev tools)
   - `cli`: headless / server profile (terminal utilities, language toolchains, shell dotfiles)
   - `vm`: lightweight profile for virtual machines & test environments
