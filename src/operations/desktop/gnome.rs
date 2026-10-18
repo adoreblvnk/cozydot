@@ -59,21 +59,20 @@ pub(crate) fn apply_settings(gnome: &Gnome) -> Result<()> {
 }
 
 pub(crate) fn set_color_scheme(color_scheme: Theme) -> Result<()> {
-    gsettings_set(
-        "org.gnome.desktop.interface",
-        "color-scheme",
-        match color_scheme {
-            Theme::Light => "'prefer-light'",
-            Theme::Dark => "'prefer-dark'",
-        },
-    )
+    let value = match color_scheme {
+        Theme::Light => "'prefer-light'",
+        Theme::Dark => "'prefer-dark'",
+    };
+    gsettings_set("org.gnome.desktop.interface", "color-scheme", value)
 }
 
 pub(crate) fn set_terminal(executable: &str) -> Result<()> {
     ensure!(host::has_executable_on_path(executable), "desktop terminal executable {executable:?} is unavailable");
     set_xdg_terminal(executable)?;
     // Ubuntu provides this media key; upstream GNOME needs a custom binding
-    if !host::output("gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"]).is_ok_and(|output| output.status.success()) {
+    if !host::output("/usr/bin/gsettings", ["get", GNOME_MEDIA_KEYS, "terminal"])
+        .is_ok_and(|output| output.status.success())
+    {
         ensure_gnome_terminal_shortcut("xdg-terminal-exec")?;
     }
     Ok(())
@@ -108,7 +107,7 @@ fn resolve_desktop_id(executable: &str) -> String {
 }
 
 fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
-    let output = host::run("gsettings get", "gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
+    let output = host::run("gsettings get", "/usr/bin/gsettings", ["get", GNOME_MEDIA_KEYS, "custom-keybindings"])?;
     let keybindings = stdout_line(&output.stdout, "gsettings get custom-keybindings")?;
     let quoted_path = format!("'{GNOME_TERMINAL_SHORTCUT}'");
     // gsettings renders an empty string array as [] or @as []
@@ -134,7 +133,7 @@ fn ensure_gnome_terminal_shortcut(executable: &str) -> Result<()> {
 }
 
 pub(crate) fn gsettings_set(schema: &str, key: &str, value: &str) -> Result<()> {
-    host::run("gsettings set", "gsettings", ["set", schema, key, value])?;
+    host::run("gsettings set", "/usr/bin/gsettings", ["set", schema, key, value])?;
     Ok(())
 }
 
