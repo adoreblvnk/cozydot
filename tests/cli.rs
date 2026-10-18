@@ -54,18 +54,23 @@ fn init_scaffolds_default_config_and_dotfiles() {
     assert!(!env.root().join("cozydot/.managed-files").exists());
 }
 
-// 2nd init fails when config already exists unless --force is passed
+// 2nd init fails when config or dotfiles already exist unless --force is passed
 #[test]
 fn init_refuses_overwrite_without_force() {
     let env = TestEnv::new();
     let active_config = env.root().join("cozydot/cozydot.yaml");
+    let bashrc = env.root().join("cozydot/dotfiles/bash/.bashrc");
 
     env.cozydot().arg("init").assert().success();
     fs::write(&active_config, "user tuned edit\n").unwrap();
 
-    env.cozydot().arg("init").assert().failure().stderr(predicate::str::contains("already exists"));
-
+    env.cozydot().arg("init").assert().failure().stderr(predicate::str::contains("already exist"));
     assert_eq!(fs::read_to_string(&active_config).unwrap(), "user tuned edit\n");
+
+    // also refuses if cozydot.yaml is absent but dotfiles/ exists
+    fs::remove_file(&active_config).unwrap();
+    env.cozydot().arg("init").assert().failure().stderr(predicate::str::contains("already exist"));
+    assert!(bashrc.exists());
 }
 
 // --force overwrites existing config & dotfiles

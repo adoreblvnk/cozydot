@@ -28,8 +28,9 @@ pub enum Preset {
 pub fn init(preset: Preset, force: bool) -> Result<PathBuf> {
     let root = crate::paths::config_dir()?;
     let config_path = root.join("cozydot.yaml");
-    if config_path.exists() && !force {
-        bail!("configuration already exists at {}; use --force to overwrite", config_path.display());
+    let dotfiles_dir = root.join("dotfiles");
+    if (config_path.exists() || dotfiles_dir.exists()) && !force {
+        bail!("configuration or dotfiles already exist at {}; use --force to overwrite", root.display());
     }
     ensure_directory_path(&root, Path::new(""))?;
     let preset = match preset {
