@@ -41,7 +41,7 @@ ensure_yq() {
 generate_cli() {
   yq '
     .packages.homebrew.casks = [] |
-    .packages.linux.apt.install -= ["virt-manager"] |
+    .packages.linux.apt.install -= ["virt-manager", "qbittorrent"] |
     .packages.linux.apt.repos = [] |
     .packages.linux.flatpak = [] |
     .packages.linux.binaries |= map(select(
@@ -62,33 +62,29 @@ generate_vm() {
   yq '
     .packages.linux.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
     .packages.linux.flatpak = [] |
+    .packages.linux.apt.install -= ["qbittorrent"] |
     .packages.linux.binaries |= map(select(
-      .name == "git-credential-manager"
+      .name == "bitwarden" or .name == "git-credential-manager"
     )) |
     .packages.homebrew.formulae = [
       "bat",
       "cmake",
       "fastfetch",
       "fd",
-      "ffmpeg",
       "fzf",
       "gh",
-      "imagemagick",
       "jq",
       "opencode",
-      "openjdk",
       "pass",
       "sevenzip",
       "shfmt",
       "starship",
       "tealdeer",
-      "vim",
       "yq"
     ] |
-    .packages.homebrew.casks = [
-      "bitwarden"
-    ] |
+    .packages.homebrew.casks = [] |
     .packages.macos.homebrew.casks = [
+      "bitwarden",
       "git-credential-manager",
       "visual-studio-code",
       "wezterm"

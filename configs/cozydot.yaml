@@ -20,12 +20,9 @@ packages:
       - eza
       - fastfetch
       - fd
-      - ffmpeg
       - fzf
       - gh
-      - imagemagick
       - jq
-      - openjdk
       - opencode
       - oxfmt
       - oxlint
@@ -37,26 +34,28 @@ packages:
       - starship
       - tlrc
       - tokei
-      - vim
       - yazi
       - yq
       - zoxide
     casks:
-      - bitwarden
       - gimp
       - localsend
       - obsidian
       - onlyoffice
-      - qbittorrent
       - recordly
       - shotcut
   linux:
     apt:
       install:
         - bash-completion
+        - default-jdk
+        - ffmpeg
+        - imagemagick
         - openssh-server
         - pinentry-tty
+        - qbittorrent
         - qemu-system
+        - vim
         - virt-manager
         - wl-clipboard
       repos:
@@ -133,6 +132,10 @@ packages:
       - net.sapples.LiveCaptions
       - org.telegram.desktop
     binaries:
+      - name: bitwarden
+        format: deb
+        urls:
+          x86_64: https://github.com/bitwarden/clients/releases/download/desktop-v2026.10.0/Bitwarden-2026.10.0-amd64.deb
       - name: git-credential-manager
         format: deb
         urls:
@@ -141,16 +144,22 @@ packages:
   macos:
     homebrew:
       formulae:
+        - ffmpeg
+        - imagemagick
+        - openjdk
         - pass
+        - vim
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
+        - bitwarden
         - discord
         - git-credential-manager
         - helium-browser
         - librewolf
         - obs
         - orbstack
+        - qbittorrent
         - syntax-highlight
         - telegram
         - utm

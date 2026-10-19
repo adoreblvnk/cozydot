@@ -20,12 +20,9 @@ packages:
       - eza
       - fastfetch
       - fd
-      - ffmpeg
       - fzf
       - gh
-      - imagemagick
       - jq
-      - openjdk
       - opencode
       - oxfmt
       - oxlint
@@ -37,7 +34,6 @@ packages:
       - starship
       - tlrc
       - tokei
-      - vim
       - yazi
       - yq
       - zoxide
@@ -46,9 +42,13 @@ packages:
     apt:
       install:
         - bash-completion
+        - default-jdk
+        - ffmpeg
+        - imagemagick
         - openssh-server
         - pinentry-tty
         - qemu-system
+        - vim
         - wl-clipboard
       repos: []
     flatpak: []
@@ -61,7 +61,11 @@ packages:
   macos:
     homebrew:
       formulae:
+        - ffmpeg
+        - imagemagick
+        - openjdk
         - pass
+        - vim
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:

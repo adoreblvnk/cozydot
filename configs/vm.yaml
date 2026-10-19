@@ -16,29 +16,28 @@ packages:
       - cmake
       - fastfetch
       - fd
-      - ffmpeg
       - fzf
       - gh
-      - imagemagick
       - jq
       - opencode
-      - openjdk
       - pass
       - sevenzip
       - shfmt
       - starship
       - tealdeer
-      - vim
       - yq
-    casks:
-      - bitwarden
+    casks: []
   linux:
     apt:
       install:
         - bash-completion
+        - default-jdk
+        - ffmpeg
+        - imagemagick
         - openssh-server
         - pinentry-tty
         - qemu-system
+        - vim
         - virt-manager
         - wl-clipboard
       repos:
@@ -64,6 +63,10 @@ packages:
             - wezterm-nightly
     flatpak: []
     binaries:
+      - name: bitwarden
+        format: deb
+        urls:
+          x86_64: https://github.com/bitwarden/clients/releases/download/desktop-v2026.10.0/Bitwarden-2026.10.0-amd64.deb
       - name: git-credential-manager
         format: deb
         urls:
@@ -72,10 +75,15 @@ packages:
   macos:
     homebrew:
       formulae:
+        - ffmpeg
+        - imagemagick
+        - openjdk
         - pass
+        - vim
         - zsh-autosuggestions
         - zsh-syntax-highlighting
       casks:
+        - bitwarden
         - git-credential-manager
         - visual-studio-code
         - wezterm
