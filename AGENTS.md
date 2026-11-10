@@ -31,6 +31,7 @@
 - Prefer `&` / `/` over `and` / `or` in comments.
 - Write comments in code-reading order, e.g. `// sort snaps so snapd, bare & core are last`.
 - Prefer visually simple code over denser, more idiomatic code.
+- In structured configs (JSON, YAML, TOML), collapse lists & list items onto 1 line when under 80 characters, and key-value pairs when under 60 characters.
 
 ## Notes
 

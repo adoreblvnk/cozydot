@@ -1,14 +1,12 @@
 version: 1
 system:
-  debian:
-    sudo_group: true
+  debian: {sudo_group: true}
   ubuntu:
     unattended_upgrades: disabled
     snapd: disabled
     restricted_extras: true
   macos:
-    xcode:
-      command_line_tools: true
+    xcode: {command_line_tools: true}
 packages:
   homebrew:
     formulae:
@@ -47,13 +45,10 @@ packages:
         - name: wezterm
           key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
-          uris:
-            default: https://apt.fury.io/wez/
+          uris: {default: 'https://apt.fury.io/wez/'}
           suite: "*"
-          components:
-            - "*"
-          packages:
-            - wezterm-nightly
+          components: ["*"]
+          packages: [wezterm-nightly]
     flatpak: []
     binaries:
       - name: bitwarden
@@ -86,8 +81,7 @@ tools:
   go: latest
   npm: []
 fonts:
-  nerd:
-    - GeistMono
+  nerd: [GeistMono]
 dotfiles:
   replace: true
   packages:
@@ -98,14 +92,8 @@ dotfiles:
       - starship
       - wezterm
       - zed
-    linux:
-      - bash
-      - git-linux
-      - librewolf-linux
-    macos:
-      - git-macos
-      - librewolf-macos
-      - zsh
+    linux: [bash, git-linux, librewolf-linux]
+    macos: [git-macos, librewolf-macos, zsh]
 integrations:
   skills: []
   linux: {}
@@ -122,8 +110,7 @@ desktop:
       files:
         show_hidden_files: true
         sort_folders_first: true
-      idle:
-        timeout: 15m
+      idle: {timeout: 15m}
       keyboard:
         delay: 150 # default: 500
         repeat_interval: 20 # default: 30
@@ -154,8 +141,7 @@ desktop:
       press_and_hold: false
     screenshots:
       location: ~/Pictures/Screenshots # default: ~/Desktop
-    trackpad:
-      tap_to_click: true
+    trackpad: {tap_to_click: true}
 updates:
   cozydot: true
   packages:

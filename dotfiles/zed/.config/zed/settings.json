@@ -17,24 +17,15 @@
   "colorize_brackets": true,
   "auto_signature_help": true,
   "inlay_hints": {
-    "toggle_on_modifiers_press": {
-      "alt": true
-    }
+    "toggle_on_modifiers_press": { "alt": true }
   },
   "project_panel": {
     "dock": "left",
     "folder_indicator": "both"
   },
-  "outline_panel": {
-    "dock": "left"
-  },
-  "collaboration_panel": {
-    "button": false
-  },
-  "git_panel": {
-    "dock": "left",
-    "file_icons": true
-  },
+  "outline_panel": { "dock": "left" },
+  "collaboration_panel": { "button": false },
+  "git_panel": { "dock": "left", "file_icons": true },
   "show_call_status_icon": false,
   "tabs": {
     "git_status": true,
@@ -43,15 +34,8 @@
   },
   "format_on_save": "on",
   "soft_wrap": "editor_width",
-  "telemetry": {
-    "diagnostics": false,
-    "metrics": false
-  },
-  "git": {
-    "inline_blame": {
-      "delay_ms": 500
-    }
-  },
+  "telemetry": { "diagnostics": false, "metrics": false },
+  "git": { "inline_blame": { "delay_ms": 500 } },
   "auto_install_extensions": {
     "catppuccin": true,
     "oxc": true
@@ -59,38 +43,22 @@
   "languages": {
     "JavaScript": {
       "language_servers": ["oxlint", "..."],
-      "prettier": {
-        "allowed": false
-      },
+      "prettier": { "allowed": false },
       "formatter": [
-        {
-          "language_server": {
-            "name": "oxfmt"
-          }
-        },
-        {
-          "code_action": "source.fixAll.oxc"
-        }
+        { "language_server": { "name": "oxfmt" } },
+        { "code_action": "source.fixAll.oxc" }
       ]
     },
     "JSON": {
-      "prettier": {
-        "allowed": false
-      },
+      "prettier": { "allowed": false },
       "formatter": {
-        "language_server": {
-          "name": "oxfmt"
-        }
+        "language_server": { "name": "oxfmt" }
       }
     },
     "JSONC": {
-      "prettier": {
-        "allowed": false
-      },
+      "prettier": { "allowed": false },
       "formatter": {
-        "language_server": {
-          "name": "oxfmt"
-        }
+        "language_server": { "name": "oxfmt" }
       }
     },
     "Markdown": {
@@ -103,50 +71,28 @@
     },
     "TSX": {
       "language_servers": ["oxlint", "..."],
-      "prettier": {
-        "allowed": false
-      },
+      "prettier": { "allowed": false },
       "formatter": [
-        {
-          "language_server": {
-            "name": "oxfmt"
-          }
-        },
-        {
-          "code_action": "source.fixAll.oxc"
-        }
+        { "language_server": { "name": "oxfmt" } },
+        { "code_action": "source.fixAll.oxc" }
       ]
     },
     "TypeScript": {
       "language_servers": ["oxlint", "..."],
-      "prettier": {
-        "allowed": false
-      },
+      "prettier": { "allowed": false },
       "formatter": [
-        {
-          "language_server": {
-            "name": "oxfmt"
-          }
-        },
-        {
-          "code_action": "source.fixAll.oxc"
-        }
+        { "language_server": { "name": "oxfmt" } },
+        { "code_action": "source.fixAll.oxc" }
       ]
     },
     "YAML": {
-      "prettier": {
-        "allowed": false
-      },
+      "prettier": { "allowed": false },
       "formatter": {
-        "language_server": {
-          "name": "oxfmt"
-        }
+        "language_server": { "name": "oxfmt" }
       }
     }
   },
-  "session": {
-    "trust_all_worktrees": true
-  },
+  "session": { "trust_all_worktrees": true },
   "lsp": {
     "clangd": {
       "initialization_options": {
@@ -155,14 +101,8 @@
     },
     "rust-analyzer": {
       "initialization_options": {
-        "check": {
-          "command": "clippy"
-        },
-        "imports": {
-          "granularity": {
-            "group": "module"
-          }
-        }
+        "check": { "command": "clippy" },
+        "imports": { "granularity": { "group": "module" } }
       }
     }
   }

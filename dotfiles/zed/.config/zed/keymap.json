@@ -1,0 +1,10 @@
+// source: https://github.com/zed-industries/zed/blob/main/assets/keymaps/default.json
+[
+  {
+    "context": "Workspace",
+    "bindings": {
+      "ctrl-tab": "pane::ActivateNextItem",
+      "ctrl-shift-tab": "pane::ActivatePreviousItem"
+    }
+  }
+]

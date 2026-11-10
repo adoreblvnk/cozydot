@@ -1,14 +1,12 @@
 version: 1
 system:
-  debian:
-    sudo_group: true
+  debian: {sudo_group: true}
   ubuntu:
     unattended_upgrades: disabled
     snapd: disabled
     restricted_extras: true
   macos:
-    xcode:
-      command_line_tools: true
+    xcode: {command_line_tools: true}
 packages:
   homebrew:
     formulae:
@@ -37,14 +35,7 @@ packages:
       - yazi
       - yq
       - zoxide
-    casks:
-      - gimp
-      - localsend
-      - obsidian
-      - onlyoffice
-      - recordly
-      - shotcut
-      - zed
+    casks: [gimp, localsend, obsidian, onlyoffice, recordly, shotcut, zed]
   linux:
     apt:
       install:
@@ -67,8 +58,7 @@ packages:
             ubuntu: https://download.docker.com/linux/ubuntu
             debian: https://download.docker.com/linux/debian
           suite: codename
-          components:
-            - stable
+          components: [stable]
           conflicts:
             - docker.io
             - docker-compose
@@ -87,36 +77,27 @@ packages:
         - name: helium
           key_url: https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc
           key_path: /usr/share/keyrings/helium.gpg
-          uris:
-            default: https://pkg.helium.computer/deb
+          uris: {default: https://pkg.helium.computer/deb}
           suite: stable
-          components:
-            - main
+          components: [main]
           packages:
             - helium-bin
         - name: librewolf
           key_url: https://repo.librewolf.net/pubkey.gpg
           key_path: /etc/apt/keyrings/librewolf.gpg
-          uris:
-            default: https://repo.librewolf.net
+          uris: {default: https://repo.librewolf.net}
           suite: librewolf
-          components:
-            - main
-          conflicts:
-            - firefox
-            - firefox-esr
+          components: [main]
+          conflicts: [firefox, firefox-esr]
           packages:
             - librewolf
         - name: wezterm
           key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
-          uris:
-            default: https://apt.fury.io/wez/
+          uris: {default: https://apt.fury.io/wez/}
           suite: "*"
-          components:
-            - "*"
-          packages:
-            - wezterm-nightly
+          components: ["*"]
+          packages: [wezterm-nightly]
     flatpak:
       - com.discordapp.Discord
       - com.obsproject.Studio
@@ -160,13 +141,9 @@ tools:
   node: lts
   python: "3"
   go: latest
-  npm:
-    - "@slidev/cli"
-    - firecrawl-cli
-    - skills
+  npm: ["@slidev/cli", firecrawl-cli, skills]
 fonts:
-  nerd:
-    - GeistMono
+  nerd: [GeistMono]
 dotfiles:
   replace: true
   packages:
@@ -180,14 +157,8 @@ dotfiles:
       - wezterm
       - yazi
       - zed
-    linux:
-      - bash
-      - git-linux
-      - librewolf-linux
-    macos:
-      - git-macos
-      - librewolf-macos
-      - zsh
+    linux: [bash, git-linux, librewolf-linux]
+    macos: [git-macos, librewolf-macos, zsh]
 integrations:
   skills:
     - addyosmani/web-quality-skills@accessibility
@@ -210,8 +181,7 @@ integrations:
       logging:
         driver: local
         max_size: 10m
-    libvirt:
-      group: true
+    libvirt: {group: true}
 desktop:
   theme: dark
   linux:
@@ -225,8 +195,7 @@ desktop:
       files:
         show_hidden_files: true
         sort_folders_first: true
-      idle:
-        timeout: 15m
+      idle: {timeout: 15m}
       keyboard:
         delay: 150                     # default: 500
         repeat_interval: 20            # default: 30
@@ -257,8 +226,7 @@ desktop:
       press_and_hold: false
     screenshots:
       location: ~/Pictures/Screenshots # default: ~/Desktop
-    trackpad:
-      tap_to_click: true
+    trackpad: {tap_to_click: true}
 updates:
   cozydot: true
   packages:

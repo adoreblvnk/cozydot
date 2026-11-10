@@ -1,14 +1,12 @@
 version: 1
 system:
-  debian:
-    sudo_group: true
+  debian: {sudo_group: true}
   ubuntu:
     unattended_upgrades: disabled
     snapd: disabled
     restricted_extras: true
   macos:
-    xcode:
-      command_line_tools: true
+    xcode: {command_line_tools: true}
 packages:
   homebrew:
     formulae:
@@ -75,13 +73,9 @@ tools:
   node: lts
   python: "3"
   go: latest
-  npm:
-    - "@slidev/cli"
-    - firecrawl-cli
-    - skills
+  npm: ["@slidev/cli", firecrawl-cli, skills]
 fonts:
-  nerd:
-    - GeistMono
+  nerd: [GeistMono]
 dotfiles:
   replace: true
   packages:
@@ -93,12 +87,8 @@ dotfiles:
       - opencode
       - starship
       - yazi
-    linux:
-      - bash
-      - git-linux
-    macos:
-      - git-macos
-      - zsh
+    linux: [bash, git-linux]
+    macos: [git-macos, zsh]
 integrations:
   skills:
     - addyosmani/web-quality-skills@accessibility
