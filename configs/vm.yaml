@@ -41,16 +41,6 @@ packages:
         - virt-manager
         - wl-clipboard
       repos:
-        - name: vscode
-          key_url: https://packages.microsoft.com/keys/microsoft.asc
-          key_path: /etc/apt/keyrings/packages.microsoft.gpg
-          uris:
-            default: https://packages.microsoft.com/repos/code
-          suite: stable
-          components:
-            - main
-          packages:
-            - code
         - name: wezterm
           key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
@@ -85,7 +75,6 @@ packages:
       casks:
         - bitwarden
         - git-credential-manager
-        - visual-studio-code
         - wezterm
 tools:
   rust: stable
@@ -105,20 +94,17 @@ dotfiles:
       - gnupg
       - starship
       - wezterm
+      - zed
     linux:
       - bash
       - git-linux
       - librewolf-linux
-      - vscode-linux
     macos:
       - git-macos
       - librewolf-macos
       - zsh
 integrations:
   skills: []
-  vscode:
-    extensions:
-      - catppuccin.catppuccin-vsc
   linux: {}
 desktop:
   theme: dark

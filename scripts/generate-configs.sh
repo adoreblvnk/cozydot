@@ -48,10 +48,9 @@ generate_cli() {
       .name == "git-credential-manager"
     )) |
     .packages.macos.homebrew.casks = ["git-credential-manager"] |
-    .dotfiles.packages.all -= ["wezterm"] |
-    .dotfiles.packages.linux -= ["librewolf-linux", "vscode-linux"] |
-    .dotfiles.packages.macos -= ["librewolf-macos", "vscode-macos"] |
-    .integrations.vscode.extensions = [] |
+    .dotfiles.packages.all -= ["wezterm", "zed"] |
+    .dotfiles.packages.linux -= ["librewolf-linux"] |
+    .dotfiles.packages.macos -= ["librewolf-macos"] |
     .integrations.linux = {} |
     del(.desktop) |
     .updates.packages.linux.flatpak = false
@@ -60,7 +59,7 @@ generate_cli() {
 
 generate_vm() {
   yq '
-    .packages.linux.apt.repos |= map(select(.name == "vscode" or .name == "wezterm")) |
+    .packages.linux.apt.repos |= map(select(.name == "wezterm")) |
     .packages.linux.flatpak = [] |
     .packages.linux.apt.install -= ["qbittorrent"] |
     .packages.linux.binaries |= map(select(
@@ -86,14 +85,11 @@ generate_vm() {
     .packages.macos.homebrew.casks = [
       "bitwarden",
       "git-credential-manager",
-      "visual-studio-code",
       "wezterm"
     ] |
     .tools.npm = [] |
     .dotfiles.packages.all -= ["bottom", "opencode", "yazi"] |
-    .dotfiles.packages.macos -= ["vscode-macos"] |
     .integrations.skills = [] |
-    .integrations.vscode.extensions = ["catppuccin.catppuccin-vsc"] |
     .integrations.linux = {}
   ' "$BASE"
 }

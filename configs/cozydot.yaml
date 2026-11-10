@@ -44,6 +44,7 @@ packages:
       - onlyoffice
       - recordly
       - shotcut
+      - zed
   linux:
     apt:
       install:
@@ -106,16 +107,6 @@ packages:
             - firefox-esr
           packages:
             - librewolf
-        - name: vscode
-          key_url: https://packages.microsoft.com/keys/microsoft.asc
-          key_path: /etc/apt/keyrings/packages.microsoft.gpg
-          uris:
-            default: https://packages.microsoft.com/repos/code
-          suite: stable
-          components:
-            - main
-          packages:
-            - code
         - name: wezterm
           key_url: https://apt.fury.io/wez/gpg.key
           key_path: /usr/share/keyrings/wezterm-fury.asc
@@ -163,7 +154,6 @@ packages:
         - syntax-highlight
         - telegram
         - utm
-        - visual-studio-code
         - wezterm@nightly
 tools:
   rust: stable
@@ -189,15 +179,14 @@ dotfiles:
       - starship
       - wezterm
       - yazi
+      - zed
     linux:
       - bash
       - git-linux
       - librewolf-linux
-      - vscode-linux
     macos:
       - git-macos
       - librewolf-macos
-      - vscode-macos
       - zsh
 integrations:
   skills:
@@ -215,22 +204,6 @@ integrations:
     - vercel-labs/skills@find-skills
     - xberg-io/xberg@xberg
     - yamadashy/repomix@repomix-explorer
-  vscode:
-    extensions:
-      - catppuccin.catppuccin-vsc
-      - charliermarsh.ruff
-      - golang.go
-      - jolars.panache
-      - llvm-vs-code-extensions.vscode-clangd
-      - mathematic.vscode-pdf
-      - ms-python.python
-      - ms-python.vscode-pylance
-      - oxc.oxc-vscode
-      - redhat.vscode-yaml
-      - rust-lang.rust-analyzer
-      - streetsidesoftware.code-spell-checker
-      - timonwong.shellcheck
-      - yzhang.markdown-all-in-one
   linux:
     docker:
       group: true

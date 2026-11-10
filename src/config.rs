@@ -292,7 +292,6 @@ pub fn select_repo_codename(key: DistroKey, platform: &Platform) -> &str {
 #[serde(rename_all = "lowercase")]
 pub enum BinaryFormat {
     Deb,
-    AppImage,
     Executable,
 }
 
@@ -381,17 +380,10 @@ pub struct DotfilePackages {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Integrations {
-    pub vscode: VsCode,
     /// `skills` CLI sources such as `owner/repo@skill`
     #[serde(default)]
     pub skills: Vec<String>,
     pub linux: LinuxIntegrations,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VsCode {
-    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

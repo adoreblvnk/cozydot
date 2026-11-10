@@ -1,0 +1,147 @@
+// source: https://github.com/zed-industries/zed/blob/main/assets/settings/default.json
+{
+  "icon_theme": {
+    "mode": "light",
+    "light": "Zed (Default)",
+    "dark": "Zed (Default)"
+  },
+  "ui_font_size": 16,
+  "buffer_font_size": 15,
+  "theme": {
+    "mode": "light",
+    "light": "Catppuccin Latte",
+    "dark": "Catppuccin Mocha"
+  },
+  // modifications
+  "buffer_font_family": "GeistMono Nerd Font",
+  "colorize_brackets": true,
+  "auto_signature_help": true,
+  "inlay_hints": {
+    "toggle_on_modifiers_press": {
+      "alt": true
+    }
+  },
+  "project_panel": {
+    "dock": "left",
+    "folder_indicator": "both"
+  },
+  "outline_panel": {
+    "dock": "left"
+  },
+  "collaboration_panel": {
+    "button": false
+  },
+  "git_panel": {
+    "dock": "left",
+    "file_icons": true
+  },
+  "show_call_status_icon": false,
+  "tabs": {
+    "git_status": true,
+    "file_icons": true,
+    "show_diagnostics": "all"
+  },
+  "format_on_save": "on",
+  "soft_wrap": "editor_width",
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  },
+  "git": {
+    "inline_blame": {
+      "delay_ms": 500
+    }
+  },
+  "auto_install_extensions": {
+    "catppuccin": true
+  },
+  "languages": {
+    "JavaScript": {
+      "language_servers": ["oxlint", "..."],
+      "formatter": {
+        "external": {
+          "command": "oxfmt",
+          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "JSON": {
+      "formatter": {
+        "external": {
+          "command": "oxfmt",
+          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "JSONC": {
+      "formatter": {
+        "external": {
+          "command": "oxfmt",
+          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "Markdown": {
+      "formatter": {
+        "external": {
+          "command": "panache",
+          "arguments": ["--stdin-filename", "{buffer_path}", "format"]
+        }
+      }
+    },
+    "TSX": {
+      "language_servers": ["oxlint", "..."],
+      "formatter": {
+        "external": {
+          "command": "oxfmt",
+          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "TypeScript": {
+      "language_servers": ["oxlint", "..."],
+      "formatter": {
+        "external": {
+          "command": "oxfmt",
+          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "YAML": {
+      "formatter": {
+        "external": {
+          "command": "oxfmt",
+          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    }
+  },
+  "session": {
+    "trust_all_worktrees": true
+  },
+  "lsp": {
+    "clangd": {
+      "initialization_options": {
+        "fallbackFlags": ["-std=c++20"]
+      }
+    },
+    "oxlint": {
+      "binary": {
+        "path": "oxlint",
+        "arguments": ["--lsp"]
+      }
+    },
+    "rust-analyzer": {
+      "initialization_options": {
+        "check": {
+          "command": "clippy"
+        },
+        "imports": {
+          "granularity": {
+            "group": "module"
+          }
+        }
+      }
+    }
+  }
+}

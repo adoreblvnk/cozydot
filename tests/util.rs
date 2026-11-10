@@ -25,8 +25,6 @@ dotfiles:
     linux: []
     macos: []
 integrations:
-  vscode:
-    extensions: []
   linux: {}
 updates:
   packages:

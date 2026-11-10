@@ -22,7 +22,7 @@ struct Asset {
     browser_download_url: String,
 }
 
-pub(super) fn install_appimage(label: &str, url: &str, destination: &Path) -> Result<()> {
+fn install_appimage(label: &str, url: &str, destination: &Path) -> Result<()> {
     let parent = destination.parent();
     let parent = parent.with_context(|| format!("AppImage destination has no parent: {}", destination.display()))?;
     fs::create_dir_all(parent).context("create AppImage destination directory")?;

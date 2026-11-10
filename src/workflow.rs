@@ -9,7 +9,7 @@ use crate::{
         desktop::{fonts, gnome, macos as macos_defaults},
         dotfiles,
         host::{self, sudo, users},
-        integrations::{docker, skills, vscode},
+        integrations::{docker, skills},
         packages::{apt, binary, flatpak, homebrew, npm, snapd},
         self_update,
         toolchains::{fnm, go, rustup, uv},
@@ -113,13 +113,11 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
         apt_prereqs.extend(["file".into(), "procps".into()]);
     }
     let mut deb_binaries = Vec::new();
-    let mut appimages = Vec::new();
     let mut executables = Vec::new();
     for package in &config.packages.linux.binaries {
         let Some(url) = package.urls.get(&platform.arch) else { continue };
         match package.format {
             BinaryFormat::Deb => deb_binaries.push((package, url.as_str())),
-            BinaryFormat::AppImage => appimages.push((package, url.as_str())),
             BinaryFormat::Executable => executables.push((package, url.as_str())),
         }
     }
@@ -191,12 +189,9 @@ fn linux_apply(config: &Config, platform: &Platform, dotfiles_root: &Path) -> Re
     formulae.extend_from_slice(&config.packages.linux.homebrew.formulae);
     let mut casks = config.packages.homebrew.casks.clone();
     casks.extend_from_slice(&config.packages.linux.homebrew.casks);
-    // start appimaged so it integrates AppImage binary packages & Homebrew GUI casks in ~/Applications
-    if !appimages.is_empty() || !casks.is_empty() {
+    // start appimaged so it integrates Homebrew GUI casks in ~/Applications
+    if !casks.is_empty() {
         run("Installing", "appimaged", || binary::appimage::install_daemon(platform.arch))?;
-        for (package, url) in appimages {
-            install_binary(package, url)?;
-        }
     }
     if !formulae.is_empty() || !casks.is_empty() {
         if !homebrew::is_installed()? {
@@ -396,10 +391,6 @@ fn linux_integrations(integrations: &LinuxIntegrations) -> Result<()> {
 fn apply_integrations(integrations: &Integrations) -> Result<()> {
     if !integrations.skills.is_empty() {
         run("Installing", "agent skills", || skills::install(&integrations.skills))?;
-    }
-    if vscode::any_missing(&integrations.vscode.extensions)? {
-        let extensions = &integrations.vscode.extensions;
-        run("Installing", "Visual Studio Code extensions", || vscode::install_extensions(extensions))?;
     }
     Ok(())
 }
