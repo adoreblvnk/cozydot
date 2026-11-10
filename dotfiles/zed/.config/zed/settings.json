@@ -1,14 +1,14 @@
 // source: https://github.com/zed-industries/zed/blob/main/assets/settings/default.json
 {
   "icon_theme": {
-    "mode": "light",
+    "mode": "system",
     "light": "Zed (Default)",
     "dark": "Zed (Default)"
   },
   "ui_font_size": 16,
   "buffer_font_size": 15,
   "theme": {
-    "mode": "light",
+    "mode": "dark",
     "light": "Catppuccin Latte",
     "dark": "Catppuccin Mocha"
   },
@@ -53,31 +53,43 @@
     }
   },
   "auto_install_extensions": {
-    "catppuccin": true
+    "catppuccin": true,
+    "oxc": true
   },
   "languages": {
     "JavaScript": {
       "language_servers": ["oxlint", "..."],
-      "formatter": {
-        "external": {
-          "command": "oxfmt",
-          "arguments": ["--stdin-filepath", "{buffer_path}"]
+      "prettier": {
+        "allowed": false
+      },
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
         }
-      }
+      ]
     },
     "JSON": {
+      "prettier": {
+        "allowed": false
+      },
       "formatter": {
-        "external": {
-          "command": "oxfmt",
-          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        "language_server": {
+          "name": "oxfmt"
         }
       }
     },
     "JSONC": {
+      "prettier": {
+        "allowed": false
+      },
       "formatter": {
-        "external": {
-          "command": "oxfmt",
-          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        "language_server": {
+          "name": "oxfmt"
         }
       }
     },
@@ -91,27 +103,43 @@
     },
     "TSX": {
       "language_servers": ["oxlint", "..."],
-      "formatter": {
-        "external": {
-          "command": "oxfmt",
-          "arguments": ["--stdin-filepath", "{buffer_path}"]
+      "prettier": {
+        "allowed": false
+      },
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
         }
-      }
+      ]
     },
     "TypeScript": {
       "language_servers": ["oxlint", "..."],
-      "formatter": {
-        "external": {
-          "command": "oxfmt",
-          "arguments": ["--stdin-filepath", "{buffer_path}"]
+      "prettier": {
+        "allowed": false
+      },
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
         }
-      }
+      ]
     },
     "YAML": {
+      "prettier": {
+        "allowed": false
+      },
       "formatter": {
-        "external": {
-          "command": "oxfmt",
-          "arguments": ["--stdin-filepath", "{buffer_path}"]
+        "language_server": {
+          "name": "oxfmt"
         }
       }
     }
@@ -123,12 +151,6 @@
     "clangd": {
       "initialization_options": {
         "fallbackFlags": ["-std=c++20"]
-      }
-    },
-    "oxlint": {
-      "binary": {
-        "path": "oxlint",
-        "arguments": ["--lsp"]
       }
     },
     "rust-analyzer": {

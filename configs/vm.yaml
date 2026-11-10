@@ -20,6 +20,9 @@ packages:
       - gh
       - jq
       - opencode
+      - oxfmt
+      - oxlint
+      - panache
       - pass
       - sevenzip
       - shfmt
